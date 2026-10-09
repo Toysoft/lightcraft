@@ -1,24 +1,24 @@
 //! End-to-end render benchmark (min of N runs, robust to a loaded machine):
-//! `cargo run --release -p lightcraft-engine --example render_bench -- corpus/raw/arw-sony-a7m3-compressed.arw`
+//! `cargo run --release -p eidos-engine --example render_bench -- corpus/raw/arw-sony-a7m3-compressed.arw`
 //! (`N=9` runs per scenario, `RAYON_NUM_THREADS=1` for algorithmic comparisons,
-//! `LIGHTCRAFT_PROFILE=1` for per-stage timings).
+//! `EIDOS_PROFILE=1` for per-stage timings).
 //!
 //! Without a file argument a procedural 6000×4000 source is used. Scenarios: a ~2.5 MP loupe render
 //! of the 2560 px preview (cold, and with a warm stage cache while a slider is dragged), a draft,
 //! and a full-size render + JPEG encode (export); `ONLY=batch` with several files times a full-size
 //! export of each (decode + render + encode). Prints minimum wall-clock and minimum process CPU
 //! time: on a shared machine the CPU time shows the work done, wall-clock also the wait for cores.
-//! Each scenario runs on the CPU pipeline and, when a GPU adapter exists, on `lightcraft-gpu`
-//! (second column; `LIGHTCRAFT_GPU=0` for the CPU only).
+//! Each scenario runs on the CPU pipeline and, when a GPU adapter exists, on `eidos-gpu`
+//! (second column; `EIDOS_GPU=0` for the CPU only).
 use std::sync::Arc;
 use std::time::Instant;
 
-use lightcraft_develop::DevelopSettings;
-use lightcraft_engine::export::{ExportOptions, encode_image};
-use lightcraft_engine::media::develop;
-use lightcraft_pipeline::{Quality, RenderRequest, SourceInfo, StageCache};
-use lightcraft_raster::Rgb32f;
-use lightcraft_raster::resample::{Filter, fit};
+use eidos_develop::DevelopSettings;
+use eidos_engine::export::{ExportOptions, encode_image};
+use eidos_engine::media::develop;
+use eidos_pipeline::{Quality, RenderRequest, SourceInfo, StageCache};
+use eidos_raster::Rgb32f;
+use eidos_raster::resample::{Filter, fit};
 
 /// Process CPU time in ms (all threads). The only `unsafe` is this libc clock read, in a dev-only example.
 #[allow(unsafe_code)]
@@ -71,7 +71,7 @@ fn typical() -> DevelopSettings {
 }
 
 /// Max and mean |Δ| (8-bit, RGB) between two renders.
-fn diff(a: &lightcraft_raster::Rgba8, b: &lightcraft_raster::Rgba8) -> (u8, f64) {
+fn diff(a: &eidos_raster::Rgba8, b: &eidos_raster::Rgba8) -> (u8, f64) {
     let (mut max, mut sum) = (0u8, 0u64);
     for (p, q) in a.data.iter().zip(&b.data) {
         for c in 0..3 {
@@ -93,35 +93,35 @@ fn main() {
         for path in &args {
             let bytes = std::fs::read(path).expect("read");
             println!("{path}");
-            let mut raw = lightcraft_raw::decode(&bytes).expect("decode");
+            let mut raw = eidos_raw::decode(&bytes).expect("decode");
             // as the loader does: lens corrections are applied by the pipeline, not in the raw develop
             raw.opcodes.list3.retain(|op| !op.is_lens_correction());
             println!("  {}×{} cpp {} cfa {:?}", raw.width, raw.height, raw.cpp, raw.cfa.as_ref().map(|c| c.name()));
-            println!("  {:<36} {}", "raw decode:", best(n, || drop(lightcraft_raw::decode(&bytes).expect("decode"))));
+            println!("  {:<36} {}", "raw decode:", best(n, || drop(eidos_raw::decode(&bytes).expect("decode"))));
             println!("  {:<36} {}", "normalize:", best(n, || drop(raw.normalized().expect("norm"))));
             let norm = raw.normalized().expect("norm");
-            println!("  {:<36} {}", "demosaic AHD:", best(n, || drop(lightcraft_raw::demosaic(&norm, lightcraft_raw::Method::Ahd))));
-            if let Some(k) = lightcraft_engine::files::bin_factor(&raw, 2560) {
+            println!("  {:<36} {}", "demosaic AHD:", best(n, || drop(eidos_raw::demosaic(&norm, eidos_raw::Method::Ahd))));
+            if let Some(k) = eidos_engine::files::bin_factor(&raw, 2560) {
                 println!("  {:<36} {}", format!("binned ×{k} (2560 preview):"), best(n, || drop(raw.develop_binned(k, 0.99))));
                 let img = raw.develop_binned(k, 0.99).expect("bin").expect("binnable");
-                let t = lightcraft_raw::color::camera_transform(&raw, lightcraft_raw::color::as_shot_white_xy(&raw));
+                let t = eidos_raw::color::camera_transform(&raw, eidos_raw::color::as_shot_white_xy(&raw));
                 println!(
                     "  {:<36} {}",
                     "highlight reconstruct (binned):",
                     best(n, || {
                         let mut i = img.clone();
-                        lightcraft_raw::highlight::reconstruct(&mut i, t.wb, 0.99);
+                        eidos_raw::highlight::reconstruct(&mut i, t.wb, 0.99);
                     })
                 );
                 println!("  {:<36} {}", "clone (binned):", best(n, || drop(img.clone())));
                 println!("  {:<36} {}", "fit 2560 (binned):", best(n, || drop(fit(&img, 2560, 2560, Filter::Box))));
             }
-            println!("  {:<36} {}", "embedded preview (2560):", best(n, || drop(lightcraft_engine::files::load_embedded_preview(&bytes, 2560))));
+            println!("  {:<36} {}", "embedded preview (2560):", best(n, || drop(eidos_engine::files::load_embedded_preview(&bytes, 2560))));
             for edge in [512usize, 2560, usize::MAX] {
                 println!(
                     "  {:<36} {}",
                     format!("load_bytes({edge}):"),
-                    best(n, || drop(lightcraft_engine::files::load_bytes(&bytes, edge).expect("load")))
+                    best(n, || drop(eidos_engine::files::load_bytes(&bytes, edge).expect("load")))
                 );
             }
         }
@@ -131,7 +131,7 @@ fn main() {
         Some(path) => {
             let bytes = std::fs::read(path).expect("read");
             let t = Instant::now();
-            let r = lightcraft_engine::files::load_bytes(&bytes, usize::MAX).expect("decode");
+            let r = eidos_engine::files::load_bytes(&bytes, usize::MAX).expect("decode");
             println!("decode full: {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
             r
         }
@@ -145,10 +145,10 @@ fn main() {
     };
     let full = Arc::new(full);
     println!("source {}×{} ({:.1} MP), {n} runs each", full.width, full.height, (full.width * full.height) as f64 / 1e6);
-    // GPU column: `LIGHTCRAFT_GPU=0` (or no adapter) prints only the CPU column.
+    // GPU column: `EIDOS_GPU=0` (or no adapter) prints only the CPU column.
     let t = Instant::now();
-    let gpu = lightcraft_engine::gpu::available();
-    match lightcraft_engine::gpu::adapter_name().filter(|_| gpu) {
+    let gpu = eidos_engine::gpu::available();
+    match eidos_engine::gpu::adapter_name().filter(|_| gpu) {
         Some(a) => println!("gpu: {a} (device + kernels: {:.0} ms)", t.elapsed().as_secs_f64() * 1e3),
         None => println!("gpu: none"),
     }
@@ -248,20 +248,20 @@ fn main() {
     }
     if run("batch") && args.len() > 1 {
         // full-size JPEG export of all the files given (decode + render + encode)
-        use lightcraft_engine::export::export_photo;
-        let mut session = lightcraft_engine::Session::new().with_fs();
+        use eidos_engine::export::export_photo;
+        let mut session = eidos_engine::Session::new().with_fs();
         let r = session.execute("library.import", &serde_json::json!({"paths": args})).expect("import");
-        let ids: Vec<_> = r["imported"].as_array().expect("ids").iter().filter_map(|v| v.as_u64()).map(lightcraft_engine::catalog::PhotoId).collect();
+        let ids: Vec<_> = r["imported"].as_array().expect("ids").iter().filter_map(|v| v.as_u64()).map(eidos_engine::catalog::PhotoId).collect();
         let items: Vec<_> = ids.iter().enumerate().map(|(i, id)| (*id, i + 1)).collect();
         let o = ExportOptions::default();
         row(&format!("batch export of {} files (decode+render+JPEG):", items.len()), &mut |g| {
-            lightcraft_engine::gpu::set_enabled(g);
+            eidos_engine::gpu::set_enabled(g);
             for &(id, seq) in &items {
                 drop(export_photo(&mut session, id, &o, seq).expect("export"));
                 session.media.forget(id); // as in a batch: every original is decoded once
             }
         });
-        lightcraft_engine::gpu::set_enabled(true);
+        eidos_engine::gpu::set_enabled(true);
         return;
     }
     if run("export") {

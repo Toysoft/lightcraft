@@ -20,7 +20,7 @@ fn initialize_negotiates_version() {
     let mut s = server();
     let r = rpc(&mut s, 1, "initialize", json!({"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}));
     assert_eq!(r["result"]["protocolVersion"], "2025-03-26");
-    assert_eq!(r["result"]["serverInfo"]["name"], "lightcraft");
+    assert_eq!(r["result"]["serverInfo"]["name"], "eidos");
     assert!(r["result"]["capabilities"]["tools"].is_object());
     let r = rpc(&mut s, 2, "initialize", json!({"protocolVersion": "1999-01-01"}));
     assert_eq!(r["result"]["protocolVersion"], PROTOCOL_VERSION);
@@ -75,12 +75,12 @@ fn tools_list_has_helpers_and_every_command() {
 /// The `import` helper passes the copy options through: a folder template files the copy.
 #[test]
 fn import_tool_copies_with_a_folder_template() {
-    let base = std::env::temp_dir().join(format!("lc-mcp-import-tpl-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("eidos-mcp-import-tpl-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let (src, dest) = (base.join("card"), base.join("out"));
     std::fs::create_dir_all(&src).unwrap();
-    let img = lightcraft_raster::Rgba8 { width: 8, height: 8, data: vec![[20, 3, 9, 255]; 64] };
-    let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+    let img = eidos_raster::Rgba8 { width: 8, height: 8, data: vec![[20, 3, 9, 255]; 64] };
+    let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
     std::fs::write(src.join("a.png"), png).unwrap();
     let mut b = Headless::demo();
     b.session.clock = Box::new(|| "2026-01-14T05:58:48".to_string());
@@ -96,11 +96,11 @@ fn import_tool_copies_with_a_folder_template() {
 /// a photo's original.
 #[test]
 fn path_writes_never_replace_an_original() {
-    let base = std::env::temp_dir().join(format!("lc-mcp-guard-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("eidos-mcp-guard-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
-    let img = lightcraft_raster::Rgba8 { width: 8, height: 8, data: vec![[90, 30, 9, 255]; 64] };
-    let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+    let img = eidos_raster::Rgba8 { width: 8, height: 8, data: vec![[90, 30, 9, 255]; 64] };
+    let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
     let orig = base.join("a.png");
     std::fs::write(&orig, &png).unwrap();
     let mut b = Headless::demo();
@@ -121,7 +121,7 @@ fn path_writes_never_replace_an_original() {
 }
 
 /// Issue #181: a misspelled or unreadable `app.export` param is an error through the headless
-/// backend (what `lightcraft-cli run` and the MCP `export` tool use), not a silent default.
+/// backend (what `eidos-cli run` and the MCP `export` tool use), not a silent default.
 #[test]
 fn export_refuses_unknown_params_and_bad_values() {
     let mut b = Headless::demo();
@@ -142,12 +142,12 @@ fn export_refuses_unknown_params_and_bad_values() {
 /// The `import` helper moves: renamed into the folder template, the source removed.
 #[test]
 fn import_tool_moves_with_a_folder_template() {
-    let base = std::env::temp_dir().join(format!("lc-mcp-import-move-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("eidos-mcp-import-move-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let (src, dest) = (base.join("card"), base.join("out"));
     std::fs::create_dir_all(&src).unwrap();
-    let img = lightcraft_raster::Rgba8 { width: 8, height: 8, data: vec![[21, 3, 9, 255]; 64] };
-    let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+    let img = eidos_raster::Rgba8 { width: 8, height: 8, data: vec![[21, 3, 9, 255]; 64] };
+    let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
     std::fs::write(src.join("sample.png"), png).unwrap();
     let mut b = Headless::demo();
     b.session.clock = Box::new(|| "2026-01-14T05:58:48".to_string());
@@ -222,7 +222,7 @@ fn resources() {
         let text = r["result"]["contents"][0]["text"].as_str().unwrap_or_else(|| panic!("{uri}: {r}"));
         serde_json::from_str::<Value>(text).unwrap();
     }
-    assert_eq!(rpc(&mut s, 99, "resources/read", json!({"uri": "lightcraft://nope"}))["error"]["code"], -32002);
+    assert_eq!(rpc(&mut s, 99, "resources/read", json!({"uri": "eidos://nope"}))["error"]["code"], -32002);
 }
 
 /// `select_photos` with an id that is not in the library is a tool error, and the photo that was

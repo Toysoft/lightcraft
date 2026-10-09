@@ -1,21 +1,26 @@
 //! Built-in presets and profiles (all values are our own; no third-party preset content), and
-//! preset files: our `.lcpreset` JSON (import + export, groups preserved) and XMP presets
+//! preset files: our `.eidospreset` JSON (import + export, groups preserved), upstream
+//! `.lcpreset` files (import only), and XMP presets
 //! (`crs:` fields, read only — see [`crate::crs`]).
 
 use std::path::Path;
 
-use lightcraft_develop::Preset;
+use eidos_develop::Preset;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::Session;
 
-/// File extension of LightCraft preset files.
-pub const LCPRESET_EXT: &str = "lcpreset";
-/// The `format` tag of a `.lcpreset` file.
-pub const LCPRESET_FORMAT: &str = "lightcraft.preset";
+/// File extension of exported Eidos preset files.
+pub const EIDOSPRESET_EXT: &str = "eidospreset";
+/// File extension of upstream LightCraft preset files, still read on import.
+pub const LEGACY_LCPRESET_EXT: &str = "lcpreset";
+/// The `format` tag of an `.eidospreset` file.
+pub const EIDOSPRESET_FORMAT: &str = "eidos.preset";
+/// `format` tag of upstream `.lcpreset` files, still read on import.
+pub const LEGACY_LCPRESET_FORMAT: &str = "lightcraft.preset";
 
-/// A `.lcpreset` file: one or more presets with their groups.
+/// A `.eidospreset` file: one or more presets with their groups.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PresetFile {
     pub format: String,
@@ -37,27 +42,27 @@ pub fn slug(s: &str) -> String {
     if out.is_empty() { "preset".into() } else { out }
 }
 
-/// Serialise presets as a `.lcpreset` file (favourite/built-in flags are not exported).
-pub fn to_lcpreset(presets: &[Preset]) -> String {
+/// Serialise presets as an `.eidospreset` file (favourite/built-in flags are not exported).
+pub fn to_eidospreset(presets: &[Preset]) -> String {
     let presets = presets.iter().map(|p| Preset { favorite: false, builtin: false, ..p.clone() }).collect();
-    serde_json::to_string_pretty(&PresetFile { format: LCPRESET_FORMAT.into(), version: 1, presets }).unwrap_or_default()
+    serde_json::to_string_pretty(&PresetFile { format: EIDOSPRESET_FORMAT.into(), version: 1, presets }).unwrap_or_default()
 }
 
-/// Read a preset file by name: `.lcpreset` (a [`PresetFile`], a bare preset object or an array of
-/// presets) or `.xmp` (a `crs:` preset).
+/// Read a preset file by name: `.eidospreset` or legacy `.lcpreset` (a [`PresetFile`], a bare
+/// preset object or an array of presets) or `.xmp` (a `crs:` preset).
 pub fn parse_preset_file(name: &str, bytes: &[u8]) -> Result<Vec<Preset>, String> {
     let stem = Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Preset".into());
     let ext = Path::new(name).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     let text = String::from_utf8_lossy(bytes);
     let text = text.trim_start_matches('\u{feff}');
-    if ext == "xmp" || (ext != LCPRESET_EXT && text.trim_start().starts_with('<')) {
+    if ext == "xmp" || (ext != EIDOSPRESET_EXT && ext != LEGACY_LCPRESET_EXT && text.trim_start().starts_with('<')) {
         return crate::crs::preset_from_xmp(text, &stem).map(|p| vec![p]).ok_or_else(|| "no develop settings in this XMP file".into());
     }
     let v: Value = serde_json::from_str(text).map_err(|e| format!("not a preset file: {e}"))?;
     let list = match &v {
         Value::Object(o) if o.contains_key("presets") => {
             let f: PresetFile = serde_json::from_value(v.clone()).map_err(|e| e.to_string())?;
-            if f.format != LCPRESET_FORMAT {
+            if f.format != EIDOSPRESET_FORMAT && f.format != LEGACY_LCPRESET_FORMAT {
                 return Err(format!("unknown preset format `{}`", f.format));
             }
             f.presets
@@ -84,11 +89,11 @@ pub fn parse_preset_file(name: &str, bytes: &[u8]) -> Result<Vec<Preset>, String
 }
 
 /// Expand files/folders (recursively, bounded: see [`crate::walk`]) into preset files
-/// (`.lcpreset`, `.xmp`).
+/// (`.eidospreset`, legacy `.lcpreset`, `.xmp`).
 pub fn expand_preset_paths(paths: &[String]) -> Vec<String> {
     let preset_file = |p: &Path| {
         let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-        ext == LCPRESET_EXT || ["xmp", "lrtemplate", "zip", "lmp", "mplumpack"].contains(&ext.as_str())
+        ext == EIDOSPRESET_EXT || ext == LEGACY_LCPRESET_EXT || ["xmp", "lrtemplate", "zip", "lmp", "mplumpack"].contains(&ext.as_str())
     };
     let mut out = Vec::new();
     for p in paths {
@@ -112,7 +117,9 @@ impl Session {
             if self.presets.iter().any(|q| q.name == p.name && q.group == p.group && q.settings == p.settings) {
                 continue;
             }
-            if p.id.trim().is_empty() || p.id.starts_with("lc.") || self.presets.iter().any(|q| q.id == p.id) {
+            // Imported files must never keep a built-in-namespace id (ours or upstream's):
+            // both would collide with built-ins instead of becoming `user.*` ids.
+            if p.id.trim().is_empty() || p.id.starts_with("eidos.") || p.id.starts_with("lc.") || self.presets.iter().any(|q| q.id == p.id) {
                 let base = format!("user.{}", slug(&format!("{}-{}", p.group, p.name)));
                 let mut id = base.clone();
                 let mut n = 2;
@@ -131,7 +138,7 @@ impl Session {
 }
 
 fn p(group: &str, id: &str, name: &str, settings: serde_json::Value) -> Preset {
-    Preset { id: format!("lc.{id}"), name: name.into(), group: group.into(), settings, favorite: false, builtin: true }
+    Preset { id: format!("eidos.{id}"), name: name.into(), group: group.into(), settings, favorite: false, builtin: true }
 }
 
 pub fn builtin() -> Vec<Preset> {
@@ -396,28 +403,28 @@ pub struct ProfileInfo {
 
 /// Our base profiles (rendering looks). Implemented in the pipeline.
 pub const PROFILES: &[ProfileInfo] = &[
-    ProfileInfo { id: "lc.color", name: "Color", group: "Basic" },
-    ProfileInfo { id: "lc.neutral", name: "Neutral", group: "Basic" },
-    ProfileInfo { id: "lc.vivid", name: "Vivid", group: "Basic" },
-    ProfileInfo { id: "lc.landscape", name: "Landscape", group: "Basic" },
-    ProfileInfo { id: "lc.portrait", name: "Portrait", group: "Basic" },
-    ProfileInfo { id: "lc.mono", name: "Monochrome", group: "Basic" },
-    ProfileInfo { id: "lc.film.warm-print", name: "Warm Print", group: "Film" },
-    ProfileInfo { id: "lc.film.cool-fade", name: "Cool Fade", group: "Film" },
-    ProfileInfo { id: "lc.film.golden-hour", name: "Golden Hour", group: "Film" },
-    ProfileInfo { id: "lc.film.faded-slide", name: "Faded Slide", group: "Film" },
-    ProfileInfo { id: "lc.cine.teal-amber", name: "Teal & Amber", group: "Cinematic" },
-    ProfileInfo { id: "lc.cine.night-blue", name: "Night Blue", group: "Cinematic" },
-    ProfileInfo { id: "lc.cine.desert-heat", name: "Desert Heat", group: "Cinematic" },
-    ProfileInfo { id: "lc.cine.neon-dusk", name: "Neon Dusk", group: "Cinematic" },
-    ProfileInfo { id: "lc.muted.matte-soft", name: "Matte Soft", group: "Muted" },
-    ProfileInfo { id: "lc.muted.bleached", name: "Bleached", group: "Muted" },
-    ProfileInfo { id: "lc.muted.pastel-haze", name: "Pastel Haze", group: "Muted" },
-    ProfileInfo { id: "lc.muted.quiet-green", name: "Quiet Green", group: "Muted" },
-    ProfileInfo { id: "lc.bw.mono-rich", name: "Mono Rich", group: "B&W" },
-    ProfileInfo { id: "lc.bw.red-filter", name: "Mono Red Filter", group: "B&W" },
-    ProfileInfo { id: "lc.bw.soft", name: "Mono Soft", group: "B&W" },
-    ProfileInfo { id: "lc.bw.sepia", name: "Sepia Tone", group: "B&W" },
+    ProfileInfo { id: "eidos.color", name: "Color", group: "Basic" },
+    ProfileInfo { id: "eidos.neutral", name: "Neutral", group: "Basic" },
+    ProfileInfo { id: "eidos.vivid", name: "Vivid", group: "Basic" },
+    ProfileInfo { id: "eidos.landscape", name: "Landscape", group: "Basic" },
+    ProfileInfo { id: "eidos.portrait", name: "Portrait", group: "Basic" },
+    ProfileInfo { id: "eidos.mono", name: "Monochrome", group: "Basic" },
+    ProfileInfo { id: "eidos.film.warm-print", name: "Warm Print", group: "Film" },
+    ProfileInfo { id: "eidos.film.cool-fade", name: "Cool Fade", group: "Film" },
+    ProfileInfo { id: "eidos.film.golden-hour", name: "Golden Hour", group: "Film" },
+    ProfileInfo { id: "eidos.film.faded-slide", name: "Faded Slide", group: "Film" },
+    ProfileInfo { id: "eidos.cine.teal-amber", name: "Teal & Amber", group: "Cinematic" },
+    ProfileInfo { id: "eidos.cine.night-blue", name: "Night Blue", group: "Cinematic" },
+    ProfileInfo { id: "eidos.cine.desert-heat", name: "Desert Heat", group: "Cinematic" },
+    ProfileInfo { id: "eidos.cine.neon-dusk", name: "Neon Dusk", group: "Cinematic" },
+    ProfileInfo { id: "eidos.muted.matte-soft", name: "Matte Soft", group: "Muted" },
+    ProfileInfo { id: "eidos.muted.bleached", name: "Bleached", group: "Muted" },
+    ProfileInfo { id: "eidos.muted.pastel-haze", name: "Pastel Haze", group: "Muted" },
+    ProfileInfo { id: "eidos.muted.quiet-green", name: "Quiet Green", group: "Muted" },
+    ProfileInfo { id: "eidos.bw.mono-rich", name: "Mono Rich", group: "B&W" },
+    ProfileInfo { id: "eidos.bw.red-filter", name: "Mono Red Filter", group: "B&W" },
+    ProfileInfo { id: "eidos.bw.soft", name: "Mono Soft", group: "B&W" },
+    ProfileInfo { id: "eidos.bw.sepia", name: "Sepia Tone", group: "B&W" },
 ];
 
 /// Profile groups in menu/browser order.
@@ -497,7 +504,7 @@ mod tests {
 
     #[test]
     fn builtin_presets_parse_and_apply() {
-        let base = lightcraft_develop::DevelopSettings::default();
+        let base = eidos_develop::DevelopSettings::default();
         let mut ids = std::collections::HashSet::new();
         for pr in builtin() {
             assert!(ids.insert(pr.id.clone()));
@@ -512,7 +519,7 @@ mod tests {
         let mut ids = std::collections::HashSet::new();
         for p in PROFILES {
             assert!(ids.insert(p.id), "{}", p.id);
-            assert!(p.id == "lc.color" || looks.contains(&p.id), "{} has no look", p.id);
+            assert!(p.id == "eidos.color" || looks.contains(&p.id), "{} has no look", p.id);
         }
         assert!(PROFILES.len() >= 22);
         assert_eq!(profile_groups(), ["Basic", "Film", "Cinematic", "Muted", "B&W"]);
@@ -525,9 +532,9 @@ mod tests {
         s.execute("develop.set", &json!({"control": "light.exposure", "value": 0.4})).unwrap();
         let before = s.develop_of(id).unwrap();
         let plain = s.render_now(id, 96, 96).unwrap().image;
-        s.execute("develop.profile", &json!({"id": "lc.cine.teal-amber", "amount": 150})).unwrap();
+        s.execute("develop.profile", &json!({"id": "eidos.cine.teal-amber", "amount": 150})).unwrap();
         let after = s.develop_of(id).unwrap();
-        assert_eq!((after.profile.id.as_str(), after.profile.amount), ("lc.cine.teal-amber", 150.0));
+        assert_eq!((after.profile.id.as_str(), after.profile.amount), ("eidos.cine.teal-amber", 150.0));
         let mut same = (*after).clone();
         same.profile = before.profile.clone();
         assert_eq!(same, *before, "only the profile changed");
@@ -543,14 +550,14 @@ mod tests {
     }
 
     fn dir(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("lc-presets-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("eidos-presets-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
     }
 
     #[test]
-    fn lcpreset_export_import_roundtrip_keeps_groups() {
+    fn eidospreset_export_import_roundtrip_keeps_groups() {
         let d = dir("rt");
         let mut s = Session::with_demo();
         s.execute("develop.set", &json!({"control": "light.exposure", "value": 0.6})).unwrap();
@@ -562,9 +569,9 @@ mod tests {
         let path = d.join("mine");
         let r = s.execute("preset.export", &json!({"path": path.to_string_lossy()})).unwrap();
         assert_eq!(r["count"], 2);
-        let file = d.join("mine.lcpreset");
+        let file = d.join("mine.eidospreset");
         assert!(file.is_file());
-        let one = d.join("travel.lcpreset");
+        let one = d.join("travel.eidospreset");
         s.execute("preset.export", &json!({"path": one.to_string_lossy(), "group": "Travel"})).unwrap();
         assert!(s.execute("preset.export", &json!({"path": one.to_string_lossy(), "group": "Nope"})).is_err());
 
@@ -590,9 +597,9 @@ mod tests {
         let builtin = builtin().remove(0);
         let mut clash = builtin.clone();
         clash.settings = json!({"light": {"exposure": 1.0}});
-        std::fs::write(d.join("a.lcpreset"), serde_json::to_string(&clash).unwrap()).unwrap();
-        std::fs::write(d.join("b.lcpreset"), "{not json").unwrap();
-        std::fs::write(d.join("c.lcpreset"), r#"{"format": "other", "version": 1, "presets": []}"#).unwrap();
+        std::fs::write(d.join("a.eidospreset"), serde_json::to_string(&clash).unwrap()).unwrap();
+        std::fs::write(d.join("b.eidospreset"), "{not json").unwrap();
+        std::fs::write(d.join("c.eidospreset"), r#"{"format": "other", "version": 1, "presets": []}"#).unwrap();
         std::fs::write(d.join("notes.txt"), "ignored inside folders").unwrap();
         let mut s = Session::new();
         let r = s.execute("preset.import", &json!({"paths": [d.to_string_lossy()]})).unwrap();
@@ -622,6 +629,28 @@ mod tests {
         s.execute("preset.apply", &json!({"id": id})).unwrap();
         let dv = s.develop_of(s.active().unwrap()).unwrap();
         assert_eq!((dv.light.exposure, dv.light.shadows, dv.grain.amount), (0.3, 20.0, 12.0));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn legacy_lightcraft_preset_files_still_import() {
+        let d = dir("legacy");
+        // An upstream `.lcpreset` file: old extension, old format tag, old builtin-namespace id.
+        let legacy = r#"{"format": "lightcraft.preset", "version": 1, "presets": [
+            {"id": "lc.golden-hour", "name": "Golden Hour", "group": "Film",
+             "settings": {"light": {"exposure": 0.5}}, "favorite": false, "builtin": true}]}"#;
+        std::fs::write(d.join("old.lcpreset"), legacy).unwrap();
+        let mut s = Session::new();
+        let r = s.execute("preset.import", &json!({"paths": [d.to_string_lossy()]})).unwrap();
+        assert_eq!(r["failed"].as_array().unwrap().len(), 0, "{r}");
+        let imported = &r["imported"][0];
+        assert_eq!(imported["name"], "Golden Hour");
+        let id = imported["id"].as_str().unwrap();
+        assert!(id.starts_with("user."), "legacy builtin-namespace ids are reissued, {id}");
+        // ...while exports use the new extension and format tag.
+        let keep: Vec<Preset> = s.presets.iter().filter(|p| !p.builtin).cloned().collect();
+        let out = to_eidospreset(&keep);
+        assert!(out.contains(r#""format": "eidos.preset""#), "{out}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

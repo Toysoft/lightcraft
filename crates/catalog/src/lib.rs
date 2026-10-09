@@ -1,4 +1,4 @@
-//! The LightCraft library (catalog).
+//! The Eidos library (catalog).
 //!
 //! State changes only through [`Op`]s. [`Catalog::apply`] returns the inverse op, which gives:
 //! - **persistence**: ops are appended to a log (JSON lines) and replayed on load after the last
@@ -30,10 +30,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub use dates::{DateRun, GroupBy};
+use eidos_develop::DevelopSettings;
 pub use folders::FolderNode;
 pub use journal::{Journal, LoadReport, PersistStats, SnapshotPolicy, SnapshotTiming};
 pub use keywords::KeywordNode;
-use lightcraft_develop::DevelopSettings;
 pub use local::{DEFAULT_FORGET_DAYS, ForgetPlan, folder_of};
 pub use lock::{LibraryLock, LockError, LockOwner};
 pub use model::*;
@@ -56,9 +56,9 @@ pub enum CatalogError {
     Corrupt(String),
     #[error("catalog storage: {0}")]
     Io(String),
-    /// The library was written by a newer LightCraft (a newer catalog format, or a change this
+    /// The library was written by a newer Eidos (a newer catalog format, or a change this
     /// version doesn't know). Nothing was read into the session and nothing was modified.
-    #[error("this library was written by a newer version of LightCraft ({0}); update LightCraft to open it. The library was left unchanged.")]
+    #[error("this library was written by a newer version of Eidos ({0}); update Eidos to open it. The library was left unchanged.")]
     Newer(String),
 }
 

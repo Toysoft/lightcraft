@@ -2,19 +2,19 @@
 
 use std::time::Duration;
 
-use lightcraft_develop::MaskShape;
+use eidos_develop::MaskShape;
 use serde_json::json;
 
 use crate::headless::Headless;
 use crate::state::RightPanel;
-use crate::{LightcraftApp, Services};
+use crate::{EidosApp, Services};
 
 const T: Duration = Duration::from_secs(20);
 const SETTLE: Duration = Duration::from_secs(120);
 
 fn detail(panel: &str) -> Headless {
     let services = Services { png: None, ..Default::default() };
-    let app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
+    let app = EidosApp::new(eidos_engine::Session::with_demo(), services);
     let mut h = Headless::new(app, [1200.0, 800.0], 1.0);
     let r = h.request("ui.set", json!({"view": "detail"}), T);
     assert_eq!(r["ok"], true, "{r}");
@@ -34,14 +34,14 @@ fn pointer(h: &mut Headless, events: serde_json::Value) {
     assert_eq!(r["ok"], true, "{r}");
 }
 
-fn develop(h: &Headless) -> lightcraft_develop::DevelopSettings {
+fn develop(h: &Headless) -> eidos_develop::DevelopSettings {
     let id = h.app.session.active().expect("active photo");
     (*h.app.session.develop_of(id).unwrap_or_default()).clone()
 }
 
 #[test]
 fn mask_overlay_keys_and_pins() {
-    use lightcraft_pipeline::{MaskView, Overlay};
+    use eidos_pipeline::{MaskView, Overlay};
     let mut h = detail("panel.masking");
     assert_eq!(h.app.ui.right, RightPanel::Masking);
     exec(&mut h, "mask.add", json!({"kind": "radial", "center": [0.3, 0.4], "rx": 0.1, "ry": 0.1}));
@@ -282,7 +282,7 @@ fn smart_album_rule_editor_creates_and_edits() {
     let r = h.request("ui.dialog.confirm", json!({}), T);
     assert_eq!(r["ok"], true, "{r}");
     let a = h.app.session.catalog.albums().find(|a| a.name == "Keepers").expect("album").clone();
-    let n = h.app.session.catalog.photos().filter(|p| !p.deleted && p.rating >= 3 && p.flag != lightcraft_catalog::Flag::Reject).count();
+    let n = h.app.session.catalog.photos().filter(|p| !p.deleted && p.rating >= 3 && p.flag != eidos_catalog::Flag::Reject).count();
     assert_eq!(h.app.session.catalog.album_count(a.id), n);
     // edit: back to one rule
     exec(&mut h, "dialog.smartAlbum", json!({"id": a.id.0}));
@@ -310,7 +310,7 @@ fn g_toggles_grids_and_shift_g_starts_guided_upright() {
     assert_eq!(h.app.ui.view, crate::state::ViewMode::PhotoGrid);
     key(&mut h, true);
     assert_eq!((h.app.ui.view, h.app.ui.right, h.app.ui.tool.as_str()), (crate::state::ViewMode::Detail, RightPanel::Crop, "guidedUpright"));
-    assert_eq!(develop(&h).geometry.upright, lightcraft_develop::Upright::Guided);
+    assert_eq!(develop(&h).geometry.upright, eidos_develop::Upright::Guided);
     h.settle(SETTLE);
 }
 
@@ -360,7 +360,7 @@ fn b_adds_to_quick_collection_in_the_grid_and_brushes_in_edit() {
 
 #[test]
 fn local_folder_tree_expands_and_browses() {
-    let base = std::env::temp_dir().join(format!("lc-ui-tree-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("eidos-ui-tree-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(base.join("Trip/Day 1")).unwrap();
     std::fs::create_dir_all(base.join(".hidden")).unwrap();
@@ -422,7 +422,7 @@ fn slideshow_advances_pauses_and_ends() {
 #[test]
 fn geometry_slider_drag_marks_the_grid() {
     let mut h = detail("panel.crop");
-    let spec = lightcraft_develop::controls::find("geometry.vertical").unwrap();
+    let spec = eidos_develop::controls::find("geometry.vertical").unwrap();
     let start = crate::widgets::SliderOut { value: None, drag_started: true, drag_stopped: false, reset: false };
     crate::panels::edit::apply_slider_out(&mut h.app, spec, start, |_, _| Ok(serde_json::Value::Null));
     assert_eq!(h.app.ui.dragging_control.as_deref(), Some("geometry.vertical"));
@@ -435,7 +435,7 @@ fn geometry_slider_drag_marks_the_grid() {
 
 #[test]
 fn edit_in_external_editor_opens_the_copy() {
-    let dir = std::env::temp_dir().join(format!("lc-ui-ext-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-ui-ext-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let opened: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> = Default::default();
@@ -448,7 +448,7 @@ fn edit_in_external_editor_opens_the_copy() {
         })),
         ..Default::default()
     };
-    let app = LightcraftApp::new(lightcraft_engine::Session::with_demo().with_fs(), services);
+    let app = EidosApp::new(eidos_engine::Session::with_demo().with_fs(), services);
     let mut h = Headless::new(app, [1200.0, 800.0], 1.0);
     h.app.ui.settings.external_editor = "PhotoCraft".into();
     let r = h.request("engine.execute", json!({"command": "photo.editInExternal", "params": {"dir": dir.to_string_lossy()}}), T);
@@ -478,12 +478,12 @@ fn second_window_shows_the_active_photo() {
 }
 
 /// Frame time of the photo grid on a 100k-photo library (ignored:
-/// `cargo test --release -p lightcraft-ui-egui -- --ignored grid_frame_100k --nocapture`).
+/// `cargo test --release -p eidos-ui-egui -- --ignored grid_frame_100k --nocapture`).
 #[test]
 #[ignore]
 fn grid_frame_100k() {
-    use lightcraft_catalog::{Op, Photo, PhotoId, Source};
-    let mut session = lightcraft_engine::Session::new();
+    use eidos_catalog::{Op, Photo, PhotoId, Source};
+    let mut session = eidos_engine::Session::new();
     let ops = (0..100_000u64)
         .map(|i| {
             let mut p = Photo::new(
@@ -501,7 +501,7 @@ fn grid_frame_100k() {
         })
         .collect();
     session.commit("Add", Op::Batch { ops }).unwrap();
-    let app = LightcraftApp::new(session, Services { png: None, ..Default::default() });
+    let app = EidosApp::new(session, Services { png: None, ..Default::default() });
     let mut h = Headless::new(app, [1600.0, 1000.0], 1.0);
     h.app.ui.view = crate::state::ViewMode::PhotoGrid;
     h.app.ui.left_panel = true;
@@ -629,9 +629,9 @@ fn soft_proofing_flags_out_of_gamut_colours_and_makes_proof_copies() {
 #[test]
 fn ai_masks_without_the_model_offer_the_download() {
     use crate::state::Dialog;
-    use lightcraft_engine::segment::Segmenter;
+    use eidos_engine::segment::Segmenter;
     let mut h = detail("panel.masking");
-    let dir = std::env::temp_dir().join(format!("lc-ui-no-sam3-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-ui-no-sam3-{}", std::process::id()));
     h.app.session.segmenter.dir = Some(dir.clone());
     h.app.session.segmenter.mirrors_file = Some(dir.join("none.txt"));
     let t = std::time::Instant::now();
@@ -667,7 +667,7 @@ fn ai_masks_without_the_model_offer_the_download() {
         assert_eq!(r["ok"], false, "{r}");
         let r = h.request("ui.dialog.confirm", json!({}), T);
         assert_eq!(r["ok"], false, "{r}");
-        assert!(r["error"].as_str().unwrap_or_default().contains("LIGHTCRAFT_SAM3_MIRRORS"), "{r}");
+        assert!(r["error"].as_str().unwrap_or_default().contains("EIDOS_SAM3_MIRRORS"), "{r}");
         assert!(matches!(h.app.ui.dialog, Some(Dialog::SamModel { .. })), "stays open");
     } else {
         // with a mirror: Download starts it in the background (here it fails: nothing listens)
@@ -687,7 +687,7 @@ fn ai_masks_without_the_model_offer_the_download() {
     assert_eq!(h.app.ui.describe, None);
     // a click command from an agent gets the not-installed error at once, and the app offers the model
     let e = h.app.run("mask.add", json!({"kind": "prompt", "text": "sky"})).unwrap_err();
-    assert!(e.starts_with(lightcraft_engine::segment::NOT_INSTALLED), "{e}");
+    assert!(e.starts_with(eidos_engine::segment::NOT_INSTALLED), "{e}");
     assert!(develop(&h).masks.is_empty());
     assert!(t.elapsed() < SETTLE, "{:?}", t.elapsed());
 }

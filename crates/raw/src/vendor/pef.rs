@@ -19,9 +19,9 @@ use super::{black_from_columns, white_from_data};
 
 use crate::tiffraw::{Packing, read_image_in};
 use crate::{BlackLevel, Cfa, ColorData, Mode, OpcodeLists, RawData, RawError, RawFormat, RawImage, Rect, Result};
-use lightcraft_geom::Orientation;
-use lightcraft_tiff::image::chunk_bytes;
-use lightcraft_tiff::{ByteOrder, Tiff, makernote, tags as t};
+use eidos_geom::Orientation;
+use eidos_tiff::image::chunk_bytes;
+use eidos_tiff::{ByteOrder, Tiff, makernote, tags as t};
 
 const CROP_ORIGIN: u16 = 0x0038;
 const CROP_SIZE: u16 = 0x0039;
@@ -253,7 +253,7 @@ pub(crate) fn decode(bytes: &[u8], mode: Mode) -> Result<RawImage> {
         [(v[0] / g) as f32, 1.0, (v[3] / g) as f32]
     });
     let white = white_from_data(samples, bits);
-    let mut metadata = lightcraft_meta::from_tiff(&tiff);
+    let mut metadata = eidos_meta::from_tiff(&tiff);
     metadata.width = Some(active.width as u32);
     metadata.height = Some(active.height as u32);
     let img = RawImage {

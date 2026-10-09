@@ -1,4 +1,4 @@
-//! RAW decoding for LightCraft.
+//! RAW decoding for Eidos.
 //!
 //! - [`probe`] recognises raw containers; [`decode`] turns a file into a [`RawImage`] (sensor data + everything
 //!   needed to render it: CFA, black/white levels, active area, default crop, orientation, DNG colour tags,
@@ -38,15 +38,15 @@ mod vendor;
 
 pub use demosaic::{Method, demosaic};
 pub use dngwrite::{DngCompression, DngWriteOptions, write_dng};
-pub use lightcraft_color::Mat3;
-pub use lightcraft_geom::Orientation;
-pub use lightcraft_meta::Metadata;
-pub use lightcraft_raster::Rgb32f;
+pub use eidos_color::Mat3;
+pub use eidos_geom::Orientation;
+pub use eidos_meta::Metadata;
+pub use eidos_raster::Rgb32f;
 pub use opcodes::{Opcode, OpcodeLists};
 pub use preview::{PreviewColorSpace, embedded_preview, embedded_preview_color_space};
 
-use lightcraft_color::Xy;
-use lightcraft_tiff::{Tiff, TiffError};
+use eidos_color::Xy;
+use eidos_tiff::{Tiff, TiffError};
 use serde::{Deserialize, Serialize};
 
 /// Upper bound on decoded samples (guards allocations driven by header values).
@@ -123,18 +123,18 @@ pub fn probe(bytes: &[u8]) -> Option<RawFormat> {
         return Some(RawFormat::Cr2);
     }
     let (_, _) = Tiff::sniff(bytes)?;
-    let opts = lightcraft_tiff::ParseOptions { max_ifds: 256, ..Default::default() };
+    let opts = eidos_tiff::ParseOptions { max_ifds: 256, ..Default::default() };
     let t = Tiff::parse_with(bytes, &opts).ok()?;
     let ifd0 = t.ifds.first()?;
-    if ifd0.contains(lightcraft_tiff::tags::DNG_VERSION) {
+    if ifd0.contains(eidos_tiff::tags::DNG_VERSION) {
         return Some(RawFormat::Dng);
     }
-    let make = t.find(lightcraft_tiff::tags::MAKE).and_then(|e| e.value.as_str()).unwrap_or_default().to_ascii_uppercase();
+    let make = t.find(eidos_tiff::tags::MAKE).and_then(|e| e.value.as_str()).unwrap_or_default().to_ascii_uppercase();
     let has_cfa = t.all_ifds().iter().any(|i| {
-        i.u16(lightcraft_tiff::tags::PHOTOMETRIC) == Some(lightcraft_tiff::tags::photometric::CFA)
-            || i.u16(lightcraft_tiff::tags::COMPRESSION).is_some_and(|c| c == 34713 || c == 32767 || c == 32769 || c == 32770)
+        i.u16(eidos_tiff::tags::PHOTOMETRIC) == Some(eidos_tiff::tags::photometric::CFA)
+            || i.u16(eidos_tiff::tags::COMPRESSION).is_some_and(|c| c == 34713 || c == 32767 || c == 32769 || c == 32770)
     });
-    if make.starts_with("CANON") && t.ifds.len() >= 4 && t.ifds[3].u16(lightcraft_tiff::tags::COMPRESSION) == Some(6) {
+    if make.starts_with("CANON") && t.ifds.len() >= 4 && t.ifds[3].u16(eidos_tiff::tags::COMPRESSION) == Some(6) {
         return Some(RawFormat::Cr2);
     }
     if make.starts_with("NIKON") {

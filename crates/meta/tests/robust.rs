@@ -1,4 +1,4 @@
-use lightcraft_meta::{MergeRules, Metadata, extract, merge_xmp, parse_iptc, parse_xmp, read_exif, write_xmp};
+use eidos_meta::{MergeRules, Metadata, extract, merge_xmp, parse_iptc, parse_xmp, read_exif, write_xmp};
 use proptest::prelude::*;
 
 proptest! {
@@ -30,11 +30,11 @@ proptest! {
         s.push_str(&junk);
         s.extend(base.chars().skip(cut));
         let fresh = write_xmp(&Metadata { rating: Some(rating), ..Default::default() }, Some("{\"x\":1}"));
-        let rules = MergeRules { owned: &["xmp:Rating", "dc:title", "lc:*"], owned_if_present: &[] };
+        let rules = MergeRules { owned: &["xmp:Rating", "dc:title", "eid:*"], owned_if_present: &[] };
         if let Ok(out) = merge_xmp(&s, &fresh, rules) {
             let d = parse_xmp(&out).unwrap();
             prop_assert_eq!(d.metadata.rating, Some(rating));
-            prop_assert_eq!(d.lc_settings.as_deref(), Some("{\"x\":1}"));
+            prop_assert_eq!(d.eid_settings.as_deref(), Some("{\"x\":1}"));
         }
     }
 
@@ -48,6 +48,6 @@ proptest! {
         prop_assert_eq!(d.metadata.title, Some(title.clone()));
         prop_assert_eq!(d.metadata.keywords, kw);
         prop_assert_eq!(d.metadata.rating, Some(rating));
-        prop_assert_eq!(d.lc_settings, Some(title));
+        prop_assert_eq!(d.eid_settings, Some(title));
     }
 }

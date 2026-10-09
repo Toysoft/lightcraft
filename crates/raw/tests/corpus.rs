@@ -1,16 +1,16 @@
 //! Corpus test over `corpus/raw/**` (git-ignored CC0 samples from raw.pixls.us, fetched with
-//! `cargo xtask corpus --download`; `LIGHTCRAFT_CORPUS` overrides the corpus root). Skips cleanly when absent.
+//! `cargo xtask corpus --download`; `EIDOS_CORPUS` overrides the corpus root). Skips cleanly when absent.
 //!
 //! Every file must be recognised, carry an embedded JPEG preview (optional for DNG, older Panasonic RAW and HEVC-preview CR3), and either decode to a valid image or report
 //! `Unsupported` for one of the variants we know we don't decode yet. Prints decode times
-//! (`cargo test -p lightcraft-raw --release --test corpus -- --nocapture`).
+//! (`cargo test -p eidos-raw --release --test corpus -- --nocapture`).
 
-use lightcraft_raw::{RawError, RawFormat, decode, embedded_preview, probe, probe_info};
+use eidos_raw::{RawError, RawFormat, decode, embedded_preview, probe, probe_info};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 fn corpus_root() -> PathBuf {
-    std::env::var_os("LIGHTCRAFT_CORPUS").map(PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"))
+    std::env::var_os("EIDOS_CORPUS").map(PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"))
 }
 
 /// Variants known not to decode yet (see the crate docs): matched against the lower-case file name.
@@ -46,8 +46,8 @@ fn corpus_raw_decodes() {
             assert!(p.starts_with(&[0xff, 0xd8]) && p.ends_with(&[0xff, 0xd9]), "{name}: preview is not a JPEG");
         } else {
             let hevc_preview = fmt == RawFormat::Cr3
-                && lightcraft_meta::cr3::parse_cr3(&bytes)
-                    .is_some_and(|c| c.tracks.iter().any(|t| t.kind == lightcraft_meta::cr3::Cr3TrackKind::Other(*b"HEVC") && t.data.is_some()));
+                && eidos_meta::cr3::parse_cr3(&bytes)
+                    .is_some_and(|c| c.tracks.iter().any(|t| t.kind == eidos_meta::cr3::Cr3TrackKind::Other(*b"HEVC") && t.data.is_some()));
             assert!(fmt == RawFormat::Dng || name.starts_with("raw-panasonic-") || hevc_preview, "{name}: no embedded preview");
         }
         let preview_kb = preview.as_ref().map_or(0, |p| p.len() / 1024);
@@ -92,8 +92,8 @@ fn corpus_raw_decodes() {
 }
 
 /// Green-channel means of 32×32 blocks.
-fn block_means(img: &lightcraft_raw::RawImage) -> Vec<f64> {
-    let lightcraft_raw::RawData::U16(d) = &img.data else { panic!("float data") };
+fn block_means(img: &eidos_raw::RawImage) -> Vec<f64> {
+    let eidos_raw::RawData::U16(d) = &img.data else { panic!("float data") };
     let (w, h, b) = (img.width, img.height, 32);
     let mut out = Vec::new();
     for by in 0..h / b {
@@ -123,8 +123,8 @@ fn correlation(a: &[f64], b: &[f64]) -> f64 {
 /// Which diagonal of each 2×2 cell (anchored at raw pixel (0, 0)) holds the green sites: the two greens of a Bayer
 /// cell see nearly the same light, so their mean absolute difference is far smaller than across the other diagonal.
 /// Returns `true` when green sits at (0, 0)/(1, 1) (GBRG/GRBG), `false` for (1, 0)/(0, 1) (RGGB/BGGR).
-fn green_on_main_diagonal(img: &lightcraft_raw::RawImage) -> bool {
-    let lightcraft_raw::RawData::U16(d) = &img.data else { panic!("float data") };
+fn green_on_main_diagonal(img: &eidos_raw::RawImage) -> bool {
+    let eidos_raw::RawData::U16(d) = &img.data else { panic!("float data") };
     let (w, a) = (img.width, img.active_area);
     let (mut main, mut anti) = (0f64, 0f64);
     for y in ((a.y + 2) & !1..a.y + a.height - 2).step_by(2) {
@@ -233,7 +233,7 @@ fn corpus_nef_12_bit_black_level_matches_14_bit() {
     let (a, b) = (decode(&a).unwrap(), decode(&b).unwrap());
     assert_eq!((a.bits, b.bits), (12, 14));
     assert!((a.black.values[0] - 100.0).abs() < 1.0 && (b.black.values[0] - 400.0).abs() < 1.0, "{:?} {:?}", a.black, b.black);
-    let normalized = |img: &lightcraft_raw::RawImage| {
+    let normalized = |img: &eidos_raw::RawImage| {
         let (black, white) = (img.black.values[0] as f64, img.white[0] as f64);
         block_means(img).into_iter().map(|v| (v - black) / (white - black)).collect::<Vec<_>>()
     };
@@ -272,7 +272,7 @@ fn corpus_adobe_dngs_carry_profile_looks() {
             assert!(hsm.hue_divisions > 1 && hsm.sat_divisions > 1, "{name}");
             assert!(look.look_table.is_some(), "{name}: no look table");
             // a profile applied to a mid grey keeps it (close to) neutral
-            let t = lightcraft_raw::profile::ProfileTables::new(look, 0.5).unwrap();
+            let t = eidos_raw::profile::ProfileTables::new(look, 0.5).unwrap();
             let g = t.apply([0.18; 3], 1.0);
             assert!(g.iter().all(|v| (v - g[0]).abs() < 0.01 * g[0].max(0.01)), "{name}: grey → {g:?}");
         }
@@ -340,8 +340,8 @@ fn jpeg_cells(jpeg: &[u8], gw: usize, gh: usize) -> Vec<[f64; 3]> {
 
 /// Black-subtracted means of the four sites of the 2×2 cells (anchored at sample (0, 0)) of the active area,
 /// reduced to `gw × gh` cells.
-fn raw_sites(img: &lightcraft_raw::RawImage, gw: usize, gh: usize) -> Vec<[f64; 4]> {
-    let lightcraft_raw::RawData::U16(d) = &img.data else { panic!("float data") };
+fn raw_sites(img: &eidos_raw::RawImage, gw: usize, gh: usize) -> Vec<[f64; 4]> {
+    let eidos_raw::RawData::U16(d) = &img.data else { panic!("float data") };
     let (w, a, black) = (img.width, img.active_area, img.black.mean() as f64);
     let (x0, y0) = ((a.x + 1) & !1, (a.y + 1) & !1);
     let (cw, ch) = ((a.x + a.width - x0) / 2, (a.y + a.height - y0) / 2);
@@ -426,7 +426,7 @@ fn corpus_panasonic_encodings() {
         assert_eq!((img.crop.width, img.crop.height), (cw, ch), "{name}: crop");
         let layout = img.cfa.clone().unwrap_or_else(|| panic!("{name}: no CFA"));
         assert_eq!(layout.name(), cfa, "{name}: CFA layout");
-        let lightcraft_raw::RawData::U16(d) = &img.data else { panic!("float data") };
+        let eidos_raw::RawData::U16(d) = &img.data else { panic!("float data") };
         let a = img.active_area;
         let zeros =
             (a.y..a.y + a.height).map(|y| d[y * img.width + a.x..y * img.width + a.x + a.width].iter().filter(|&&v| v == 0).count()).sum::<usize>();
@@ -444,7 +444,7 @@ fn corpus_panasonic_encodings() {
         let green: Vec<f64> = sites.iter().map(|s| (0..4).filter(|&i| layout.pattern[i] == 1).map(|i| s[i]).sum::<f64>()).collect();
         let jg: Vec<f64> = jpeg.iter().map(|j| j[1]).collect();
         let rho = correlation(&ranks(&green), &ranks(&jg));
-        let agree = |l: &str| chroma_agreement(&sites, &jpeg, &lightcraft_raw::Cfa::bayer(l).unwrap().pattern);
+        let agree = |l: &str| chroma_agreement(&sites, &jpeg, &eidos_raw::Cfa::bayer(l).unwrap().pattern);
         let best_other = ["RGGB", "GRBG", "GBRG", "BGGR"].into_iter().filter(|l| *l != cfa).map(agree).fold(f64::MIN, f64::max);
         let own = agree(cfa);
         eprintln!(
@@ -476,7 +476,7 @@ fn corpus_orf_cfa_patterns() {
         let jpeg = embedded_preview(&bytes).unwrap_or_else(|| panic!("{name}: no embedded preview"));
         let (gw, gh) = (24, 18);
         let (sites, jpeg) = (raw_sites(&img, gw, gh), jpeg_cells(&jpeg, gw, gh));
-        let agree = |l: &str| chroma_agreement(&sites, &jpeg, &lightcraft_raw::Cfa::bayer(l).unwrap().pattern);
+        let agree = |l: &str| chroma_agreement(&sites, &jpeg, &eidos_raw::Cfa::bayer(l).unwrap().pattern);
         let best_other = ["RGGB", "GRBG", "GBRG", "BGGR"].into_iter().filter(|l| *l != cfa).map(agree).fold(f64::MIN, f64::max);
         let own = agree(cfa);
         let a = img.active_area;
@@ -524,7 +524,7 @@ fn corpus_fujifilm_compressed_samples() {
         assert_eq!(actual_sha, checksum, "{name}: corpus file differs from its pinned identity");
         let img = decode(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!((img.width, img.height), (width, height), "{name}");
-        let lightcraft_raw::RawData::U16(data) = img.data else { panic!("{name}: float data") };
+        let eidos_raw::RawData::U16(data) = img.data else { panic!("{name}: float data") };
         let actual = data
             .iter()
             .enumerate()

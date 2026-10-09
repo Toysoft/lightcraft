@@ -2,8 +2,8 @@
 //! last view state and the preview cache.
 //!
 //! ```text
-//! LightCraft Library/
-//!   catalog.snap   catalog.log      (lightcraft-catalog journal)
+//! Eidos Library/
+//!   catalog.snap   catalog.log      (eidos-catalog journal)
 //!   presets.json   view.json        (user presets + favourites; last source/sort/selection)
 //!   prefs.json     (library preferences: XMP sidecars, import defaults, cache size, last export)
 //!   thumbs/        (rendered thumbnail cache, safe to delete)
@@ -18,28 +18,34 @@
 //! [`EngineError::NotSaved`]: its change stays applied in memory and queued, and every later save
 //! retries the queue ([`Session::unsaved`] reports it meanwhile), so nothing is lost once the
 //! disk is writable again. The log is compacted into a snapshot when it
-//! grows (see [`lightcraft_catalog::SnapshotPolicy`]; written by a worker thread on native, see
-//! [`lightcraft_catalog::journal`]) and on [`Session::close_library`].
+//! grows (see [`eidos_catalog::SnapshotPolicy`]; written by a worker thread on native, see
+//! [`eidos_catalog::journal`]) and on [`Session::close_library`].
 
 use std::path::{Path, PathBuf};
 
-use lightcraft_catalog::{FsStore, Journal, LibraryLock, LoadReport, Store};
-use lightcraft_develop::Preset;
+use eidos_catalog::{FsStore, Journal, LibraryLock, LoadReport, Store};
+use eidos_develop::Preset;
 use serde::{Deserialize, Serialize};
 
 use crate::{EngineError, LibrarySource, Result, Selection, Session};
 
 /// Library directory name inside the user's Pictures folder.
-pub const DEFAULT_NAME: &str = "LightCraft Library";
+pub const DEFAULT_NAME: &str = "Eidos Library";
 
-/// The default library location: `$LIGHTCRAFT_LIBRARY` if set, else `~/Pictures/LightCraft Library`
-/// (`%USERPROFILE%\Pictures\LightCraft Library` on Windows).
+/// The default library location: `$EIDOS_LIBRARY` if set, else `~/Pictures/Eidos Library`
+/// (`%USERPROFILE%\Pictures\Eidos Library` on Windows). Eidos never looks for, opens, or
+/// migrates upstream LightCraft libraries: the two products share no library state.
 pub fn default_dir() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("LIGHTCRAFT_LIBRARY").filter(|p| !p.is_empty()) {
+    if let Some(p) = std::env::var_os("EIDOS_LIBRARY").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
     }
     let home = if cfg!(windows) { std::env::var_os("USERPROFILE") } else { std::env::var_os("HOME") }?;
-    Some(PathBuf::from(home).join("Pictures").join(DEFAULT_NAME))
+    Some(default_dir_from(&PathBuf::from(home).join("Pictures")))
+}
+
+/// The default library inside `pictures`, without reading the environment (see [`default_dir`]).
+pub(crate) fn default_dir_from(pictures: &Path) -> PathBuf {
+    pictures.join(DEFAULT_NAME)
 }
 
 pub struct Library {
@@ -61,7 +67,7 @@ pub struct Library {
     /// When the frame loop may retry a failed append ([`Session::persist_if_dirty`] backs off).
     retry_at: Option<web_time::Instant>,
     /// What forgetting untouched Local records did when the library opened.
-    pub forgot_local: Option<lightcraft_catalog::ForgetPlan>,
+    pub forgot_local: Option<eidos_catalog::ForgetPlan>,
     presets_written: String,
     view_written: Vec<u8>,
     /// Settings files that were unreadable or damaged when the library opened (`library.info` →
@@ -106,7 +112,7 @@ struct ViewFile {
     library_folder: Option<String>,
     // No filter: a library opens unfiltered. A date, keyword or person left over from the last session
     // would silently hide photos, with only a small badge to say so.
-    sort: lightcraft_catalog::Sort,
+    sort: eidos_catalog::Sort,
     selection: Selection,
 }
 
@@ -191,11 +197,11 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// This program, for the lock owner note ("LightCraft", "lightcraft-cli").
+/// This program, for the lock owner note ("Eidos", "eidos-cli").
 fn program_name() -> String {
     let exe = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()));
     match exe.as_deref() {
-        Some("lightcraft") | None => "LightCraft".into(),
+        Some("eidos") | None => "Eidos".into(),
         Some(other) => other.to_string(),
     }
 }
@@ -220,7 +226,7 @@ impl SettingsLoad {
                 log::error!("library: {name}: {e}");
                 self.blocked.push(name);
                 self.warnings.push(format!(
-                    "{name} couldn't be read ({e}). LightCraft uses the defaults for now and won't overwrite the file; reopen the library to try again."
+                    "{name} couldn't be read ({e}). Eidos uses the defaults for now and won't overwrite the file; reopen the library to try again."
                 ));
                 return None;
             }
@@ -237,7 +243,7 @@ impl SettingsLoad {
             Err(w) => {
                 self.blocked.push(name);
                 self.warnings.push(format!(
-                    "{name} is damaged ({err}) and couldn't be set aside ({w}). LightCraft uses the defaults and won't overwrite the file."
+                    "{name} is damaged ({err}) and couldn't be set aside ({w}). Eidos uses the defaults and won't overwrite the file."
                 ));
             }
         }
@@ -249,7 +255,7 @@ impl Session {
     /// Open (or create) the library at `dir` into this session, replacing its catalog. With
     /// `seed_demo`, a newly created library starts with the procedural demo photos.
     ///
-    /// The library is locked for this session ([`lightcraft_catalog::lock`]): if another process
+    /// The library is locked for this session ([`eidos_catalog::lock`]): if another process
     /// has it open, this fails with [`EngineError::LibraryInUse`] and nothing is read or changed.
     /// Reopening the library this session already has open keeps its lock.
     pub fn open_library(&mut self, dir: impl AsRef<Path>, seed_demo: bool) -> Result<&LoadReport> {
@@ -333,7 +339,7 @@ impl Session {
         self.recent_keywords = prefs.recent_keywords;
         self.import_defaults = prefs.import;
         self.cache_mb = prefs.cache_mb;
-        self.forget_local_days = prefs.forget_local_days.unwrap_or(lightcraft_catalog::DEFAULT_FORGET_DAYS);
+        self.forget_local_days = prefs.forget_local_days.unwrap_or(eidos_catalog::DEFAULT_FORGET_DAYS);
         self.smart_previews_dir = prefs.smart_previews_dir.filter(|_| on_disk).map(PathBuf::from);
         if let Some(d) = &self.smart_previews_dir {
             self.media.smart_dir = Some(d.clone());
@@ -359,8 +365,8 @@ impl Session {
             self.library_folder = v.library_folder.filter(|f| !f.trim().is_empty());
             if self.source == LibrarySource::LibraryFolder {
                 // a folder that is gone (or none): everything, not an empty grid
-                let f = lightcraft_catalog::Filter { library_folder: self.library_folder.clone(), ..Default::default() };
-                let any = self.library_folder.is_some() && !self.catalog.query(&f, &lightcraft_catalog::Sort::default()).is_empty();
+                let f = eidos_catalog::Filter { library_folder: self.library_folder.clone(), ..Default::default() };
+                let any = self.library_folder.is_some() && !self.catalog.query(&f, &eidos_catalog::Sort::default()).is_empty();
                 if !any {
                     self.source = LibrarySource::All;
                     self.library_folder = None;
@@ -638,7 +644,7 @@ impl Session {
 fn unlocked_warning(lock: Option<&LibraryLock>) -> Option<String> {
     lock.filter(|l| !l.held()).map(|_| {
         "This library could not be locked (its catalog.lock file can't be locked where it is stored, e.g. on some network \
-         shares), so it is open without protection against a second program: use it in one LightCraft app or command at \
+         shares), so it is open without protection against a second program: use it in one Eidos app or command at \
          a time, or changes made in one of them can be lost."
             .to_string()
     })

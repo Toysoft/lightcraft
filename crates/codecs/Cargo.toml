@@ -1,17 +1,17 @@
 [package]
-name = "lightcraft-codecs"
+name = "eidos-codecs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LightCraft standard image codecs: sniffing, decode to linear light, ICC, encoders (L1)"
+description = "Eidos standard image codecs: sniffing, decode to linear light, ICC, encoders (L1)"
 
 [lints]
 workspace = true
 
 [dependencies]
-lightcraft-geom = { workspace = true }
-lightcraft-color = { workspace = true }
-lightcraft-raster = { workspace = true }
+eidos-geom = { workspace = true }
+eidos-color = { workspace = true }
+eidos-raster = { workspace = true }
 serde = { workspace = true }
 bytemuck = { workspace = true }
 thiserror = { workspace = true }
@@ -32,7 +32,7 @@ ravif = { workspace = true, optional = true }
 
 [features]
 default = ["parallel", "jxl", "avif"]
-parallel = ["dep:rayon", "lightcraft-raster/parallel", "jpeg-decoder/rayon"]
+parallel = ["dep:rayon", "eidos-raster/parallel", "jpeg-decoder/rayon"]
 jxl = ["dep:jxl-oxide"]
 ## AVIF encoding via ravif/rav1e (pure Rust, BSD). Native targets only; a no-op on wasm32.
 avif = ["dep:ravif"]

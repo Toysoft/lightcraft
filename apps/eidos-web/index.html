@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Eidos</title>
+  <link rel="icon" href="data:,">
+  <meta name="description" content="Eidos: open-source photo library and raw developer, running in your browser (WASM).">
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1c1c1c; }
+    canvas#eidos_canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #eidos_loading {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #b8b8b8; font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; pointer-events: none;
+    }
+    #eidos_status { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <canvas id="eidos_canvas"></canvas>
+  <div id="eidos_loading">Loading Eidos…</div>
+  <div id="eidos_status" aria-live="polite"></div>
+  <script type="module">
+    import init, { start, command } from "./eidos_web.js";
+    (async () => {
+      // Compile once; the render workers (worker.js) instantiate the same compiled module.
+      const module = await WebAssembly.compileStreaming(fetch("./eidos_web_bg.wasm"));
+      globalThis.eidosModule = module;
+      await init({ module_or_path: module });
+      // automation: `await eidos.command("library.info", "{}")` → JSON text
+      globalThis.eidos = { command };
+      start();
+    })().catch((e) => {
+      console.error(e);
+      const el = document.getElementById("eidos_loading");
+      if (el) el.textContent = "Eidos failed to load: " + e;
+    });
+  </script>
+</body>
+</html>

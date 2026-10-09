@@ -1,7 +1,7 @@
 //! AI masks: Object (clicks) and Describe (text) selections computed with SAM 3
-//! (`lightcraft-segment`, cargo feature `sam`; the desktop app enables it).
+//! (`eidos-segment`, cargo feature `sam`; the desktop app enables it).
 //!
-//! **Nothing requires the model.** It is not part of LightCraft (SAM License); the user
+//! **Nothing requires the model.** It is not part of Eidos (SAM License); the user
 //! downloads it when they first use an AI mask and agree to (`segment.model.download`), or
 //! puts the files in the model folder themselves. Without it, AI mask requests fail with a
 //! clear "not installed" error; renders, exports and every other feature never touch it
@@ -22,9 +22,9 @@ mod worker;
 
 use std::path::PathBuf;
 
-use lightcraft_catalog::PhotoId;
-use lightcraft_develop::{MaskShape, SegMask};
-use lightcraft_geom::Point;
+use eidos_catalog::PhotoId;
+use eidos_develop::{MaskShape, SegMask};
+use eidos_geom::Point;
 
 use crate::Session;
 
@@ -32,7 +32,7 @@ use crate::Session;
 pub const INPUT_EDGE: usize = 1008;
 /// Download size of the model (`model.safetensors`; the tokenizer files add ~2 MB).
 pub const MODEL_BYTES: u64 = 3_439_938_512;
-/// The model's licence (not LightCraft's): shown before downloading.
+/// The model's licence (not Eidos's): shown before downloading.
 pub const LICENSE_NAME: &str = "SAM License (Meta)";
 pub const LICENSE_URL: &str = "https://github.com/facebookresearch/sam3/blob/main/LICENSE";
 /// How errors about a missing model start (the UI offers the download on it).
@@ -161,7 +161,7 @@ impl Segmenter {
     pub fn installed(&self) -> bool {
         #[cfg(feature = "sam")]
         if let Some(dir) = &self.dir {
-            return lightcraft_segment::is_model_dir(dir);
+            return eidos_segment::is_model_dir(dir);
         }
         false
     }
@@ -218,8 +218,8 @@ impl Segmenter {
     pub fn mirrors(&self) -> Vec<String> {
         #[cfg(feature = "sam")]
         {
-            let env = std::env::var(lightcraft_segment::fetch::MIRRORS_ENV).ok();
-            lightcraft_segment::fetch::mirrors(env.as_deref(), self.mirrors_file.as_deref())
+            let env = std::env::var(eidos_segment::fetch::MIRRORS_ENV).ok();
+            eidos_segment::fetch::mirrors(env.as_deref(), self.mirrors_file.as_deref())
         }
         #[cfg(not(feature = "sam"))]
         Vec::new()
@@ -240,7 +240,7 @@ impl Segmenter {
             return Err(format!("{NOT_INSTALLED} yet: it is downloading ({pct} %)."));
         }
         Err(format!(
-            "{NOT_INSTALLED}. Download it (about {:.1} GB, {LICENSE_NAME}) when LightCraft offers it, with `segment.model.download {{\"acknowledged\": true}}`, or put model.safetensors, vocab.json and merges.txt in {}.",
+            "{NOT_INSTALLED}. Download it (about {:.1} GB, {LICENSE_NAME}) when Eidos offers it, with `segment.model.download {{\"acknowledged\": true}}`, or put model.safetensors, vocab.json and merges.txt in {}.",
             MODEL_BYTES as f64 / 1e9,
             dir.display()
         ))
@@ -260,9 +260,9 @@ impl Segmenter {
         {
             let mirrors = self.mirrors();
             if mirrors.is_empty() {
-                return Err(lightcraft_segment::fetch::no_mirrors_message());
+                return Err(eidos_segment::fetch::no_mirrors_message());
             }
-            self.download.start(lightcraft_segment::fetch::SAM3_FILES, mirrors, dir, lightcraft_segment::fetch::options())
+            self.download.start(eidos_segment::fetch::SAM3_FILES, mirrors, dir, eidos_segment::fetch::options())
         }
         #[cfg(not(feature = "sam"))]
         {
@@ -347,7 +347,7 @@ fn clicks_of(include: &[Point], exclude: &[Point]) -> Vec<Click> {
 impl Session {
     /// The key and settings of photo `id` as the model sees it: its look without masks, uncropped.
     #[cfg_attr(not(feature = "sam"), allow(dead_code))]
-    fn segment_key(&self, id: PhotoId) -> Option<(u64, lightcraft_develop::DevelopSettings)> {
+    fn segment_key(&self, id: PhotoId) -> Option<(u64, eidos_develop::DevelopSettings)> {
         let p = self.catalog.photo(id)?;
         let mut d = (*p.develop).clone();
         d.masks.clear();
@@ -362,8 +362,8 @@ impl Session {
 
     /// Clicks (in normalized photo coordinates) for the model.
     #[cfg(feature = "sam")]
-    fn model_clicks(clicks: &[Click]) -> Vec<lightcraft_segment::Click> {
-        clicks.iter().map(|c| lightcraft_segment::Click { x: c.at.x as f32, y: c.at.y as f32, positive: c.include }).collect()
+    fn model_clicks(clicks: &[Click]) -> Vec<eidos_segment::Click> {
+        clicks.iter().map(|c| eidos_segment::Click { x: c.at.x as f32, y: c.at.y as f32, positive: c.include }).collect()
     }
 
     /// A worker request about photo `id` (the render job for its model input goes along; the
@@ -382,14 +382,13 @@ impl Session {
         let (key, mut d) = self.segment_key(id).ok_or("no such photo")?;
         let p = self.catalog.photo(id).ok_or("no such photo")?.clone();
         let missing = match &p.source {
-            lightcraft_catalog::Source::File { path } if !std::path::Path::new(path).exists() => Some(path.clone()),
+            eidos_catalog::Source::File { path } if !std::path::Path::new(path).exists() => Some(path.clone()),
             _ => None,
         };
         let render = match region {
             None => self.preview_job(id, INPUT_EDGE, INPUT_EDGE, false, &d).ok_or("no such photo")?,
             Some(region) => {
-                d.crop.geometry =
-                    lightcraft_geom::CropGeometry { rect: lightcraft_geom::Rect::new(region[0], region[1], region[2], region[3]), angle: 0.0 };
+                d.crop.geometry = eidos_geom::CropGeometry { rect: eidos_geom::Rect::new(region[0], region[1], region[2], region[3]), angle: 0.0 };
                 d.crop.flip_h = false;
                 d.crop.flip_v = false;
                 d.geometry.constrain_crop = false;

@@ -4,10 +4,10 @@
 //! Only the rows on screen ask for a face render (the engine caches them, memory and disk).
 
 use egui::{Align2, Color32, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
-use lightcraft_catalog::Person;
+use eidos_catalog::Person;
 use serde_json::json;
 
-use crate::LightcraftApp;
+use crate::EidosApp;
 use crate::theme::Tokens;
 use crate::widgets::register;
 
@@ -18,14 +18,14 @@ const GAP: f32 = 16.0;
 const PAD: f32 = 20.0;
 const HEADER_H: f32 = 44.0;
 
-pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+pub fn show(app: &mut EidosApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let people = app.caches.people(&app.session.catalog, &app.session.filter);
     let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::hover());
     ui.painter().text(pos2(head.left() + PAD, head.center().y), Align2::LEFT_CENTER, crate::i18n::tr("Named People"), t.semibold(15.0), t.text);
     ui.painter().text(pos2(head.right() - PAD, head.center().y), Align2::RIGHT_CENTER, people.len().to_string(), t.font(13.0), t.text_dim);
     // the filters narrowing the list (a date, a keyword…), removable here
-    let chips = lightcraft_engine::filter_chips(&app.session.filter, &app.session.catalog);
+    let chips = eidos_engine::filter_chips(&app.session.filter, &app.session.catalog);
     super::chips::show(app, ui, &chips);
     if people.is_empty() {
         let (title, body) = if chips.is_empty() {
@@ -57,7 +57,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     });
 }
 
-fn card(app: &mut LightcraftApp, ui: &mut egui::Ui, person: &Person, r: Rect, ppp: f32, selected: bool) {
+fn card(app: &mut EidosApp, ui: &mut egui::Ui, person: &Person, r: Rect, ppp: f32, selected: bool) {
     let t = Tokens::get(ui.ctx());
     let face = Rect::from_min_size(r.min, vec2(CARD, CARD));
     let resp = ui.interact(r, egui::Id::new(("person-card", &person.name)), Sense::click());

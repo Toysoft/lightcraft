@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Eidos MSI (WiX Toolset v5: `dotnet tool install -g wix`). Built by package.ps1:
+
+    wix build eidos.wxs -arch x64 -d Version=1.2.3 -d BinDir=... -d IconPath=... -o out.msi
+
+  Per-machine install into `Program Files\Eidos`, a Start Menu shortcut, and Eidos offered
+  under "Open with" for PSD/PSB and the image formats it reads (without taking over the
+  user's default app for them).
+
+  Independent identity: the UpgradeCode and component GUIDs below belong to Eidos alone, so
+  installing Eidos never upgrades, replaces, or shares state with a LightCraft install, and
+  uninstalling either product leaves the other installed. Uninstall removes only what this
+  MSI installed (both binaries, the shortcut, the App Paths key); libraries, settings and
+  presets live outside Program Files and are kept.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Eidos"
+      Manufacturer="Nostos"
+      Version="$(var.Version)"
+      UpgradeCode="0CA56F93-807C-467F-8D22-7C110F30A0AC"
+      Scope="perMachine"
+      Compressed="yes"
+      Language="1033">
+    <SummaryInformation Description="Eidos photo library and raw developer" Manufacturer="Nostos" />
+    <!-- Same-version upgrades let successive pre-releases of one X.Y.Z replace each other
+         (MSI versions are numeric, so 1.2.3-rc.1 and 1.2.3-rc.2 are both 1.2.3). -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of Eidos is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- TODO(eidos-urls): no official Eidos website/support URLs exist yet. The ARP URL
+         properties stay out until they do; upstream LightCraft URLs must never stand in
+         for Eidos destinations. -->
+    <Icon Id="EidosIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="EidosIcon.ico" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Eidos" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="Eidos" Level="1">
+      <ComponentGroupRef Id="EidosFiles" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="EidosFiles" Directory="INSTALLFOLDER">
+      <Component Id="EidosApp" Guid="9E417B2E-47CF-4C4D-96A0-730E224B42F2">
+        <File Id="EidosExe" Source="$(var.BinDir)\eidos.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Eidos"
+              Description="Eidos photo library and raw developer" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
+              Icon="EidosIcon.ico" IconIndex="0" />
+        </File>
+
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\eidos.exe" Value="[#EidosExe]" Type="string" />
+      </Component>
+
+      <Component Id="EidosCli" Guid="F366E4CB-EE1A-42D8-A38C-3F93C7087B67">
+        <File Id="EidosCliExe" Source="$(var.BinDir)\eidos-cli.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

@@ -1,7 +1,7 @@
 //! The develop settings schema. Every field has a neutral default; serde uses `#[serde(default)]` so
 //! older/newer files load (unknown fields are ignored, missing fields take defaults).
 
-use lightcraft_geom::{CropGeometry, Homography, Orientation, Point};
+use eidos_geom::{CropGeometry, Homography, Orientation, Point};
 use serde::{Deserialize, Serialize};
 
 pub const SCHEMA_VERSION: u32 = 1;
@@ -84,7 +84,7 @@ pub enum Treatment {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Profile {
-    /// Profile id from the profile registry (e.g. `lc.color`, `lc.vivid`, `lc.mono`).
+    /// Profile id from the profile registry (e.g. `eidos.color`, `eidos.vivid`, `eidos.mono`).
     pub id: String,
     /// Creative profile amount 0..200 (%).
     pub amount: f64,
@@ -92,7 +92,7 @@ pub struct Profile {
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { id: "lc.color".into(), amount: 100.0 }
+        Self { id: "eidos.color".into(), amount: 100.0 }
     }
 }
 
@@ -542,9 +542,9 @@ impl Default for Optics {
 
 /// Lens corrections embedded in the file, converted to the oriented, default-cropped image: a DNG's `OpcodeList3`
 /// (`WarpRectilinear`, `FixVignetteRadial`), or a raw reader's equivalent of the camera's own correction (Panasonic /
-/// Leica RW2 distortion, `lightcraft_raw`'s `vendor/rw2.rs`). This is camera/file data (stored on the photo record, not in the develop
+/// Leica RW2 distortion, `eidos_raw`'s `vendor/rw2.rs`). This is camera/file data (stored on the photo record, not in the develop
 /// settings); "Enable Profile Corrections" applies it, scaled by the profile distortion/vignetting amounts.
-/// LightCraft never uses Adobe LCP lens profiles.
+/// Eidos never uses Adobe LCP lens profiles.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmbeddedLens {

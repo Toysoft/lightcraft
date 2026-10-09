@@ -1,22 +1,22 @@
 //! Photo Merge in the UI: the HDR / Panorama / HDR Panorama dialog (options + live preview) and
 //! the background merge jobs.
 //!
-//! Previews and the final merge run [`lightcraft_engine::merge::MergeJob`]s on worker threads with
+//! Previews and the final merge run [`eidos_engine::merge::MergeJob`]s on worker threads with
 //! progress and cancellation; the window stays responsive. Changing an option cancels the running
 //! preview and starts a new one. The final merge keeps running after the dialog closes (progress
 //! in a toast); when it finishes, the result is written, imported and selected
-//! ([`lightcraft_engine::Session::finish_merge`]).
+//! ([`eidos_engine::Session::finish_merge`]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
-use lightcraft_catalog::PhotoId;
-use lightcraft_engine::merge::{MergeJob, MergeOutput};
+use eidos_catalog::PhotoId;
+use eidos_engine::merge::{MergeJob, MergeOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::LightcraftApp;
+use crate::EidosApp;
 
 /// The dialog's options (also the parameters of the `merge.*` commands).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -116,8 +116,8 @@ impl MergeState {
     }
 }
 
-fn spawn(app: &LightcraftApp, options: &MergeDialog, ids: &[PhotoId], preview: bool) -> Result<MergeTask, String> {
-    let (kind, finish) = lightcraft_engine::merge::parse(&options.command, &options.params()).map_err(|e| e.to_string())?;
+fn spawn(app: &EidosApp, options: &MergeDialog, ids: &[PhotoId], preview: bool) -> Result<MergeTask, String> {
+    let (kind, finish) = eidos_engine::merge::parse(&options.command, &options.params()).map_err(|e| e.to_string())?;
     let job = app.session.plan_merge(kind, finish, ids, preview).map_err(|e| e.to_string())?;
     let progress = Arc::new(Mutex::new((0.0, "Starting".to_string())));
     let cancel = Arc::new(AtomicBool::new(false));
@@ -144,7 +144,7 @@ fn spawn(app: &LightcraftApp, options: &MergeDialog, ids: &[PhotoId], preview: b
 }
 
 /// Open the merge dialog for the selection.
-pub fn open(app: &mut LightcraftApp, command: &str) -> Result<Value, String> {
+pub fn open(app: &mut EidosApp, command: &str) -> Result<Value, String> {
     let ids = app.session.targets(&json!({}));
     if ids.len() < 2 {
         return Err("select at least 2 photos to merge".into());
@@ -161,7 +161,7 @@ pub fn open(app: &mut LightcraftApp, command: &str) -> Result<Value, String> {
 }
 
 /// Start the full-resolution merge (the dialog's Merge button / `ui.dialog.confirm`).
-pub fn start_final(app: &mut LightcraftApp, opts: &MergeDialog) -> Result<Value, String> {
+pub fn start_final(app: &mut EidosApp, opts: &MergeDialog) -> Result<Value, String> {
     if app.merge.final_task.is_some() {
         return Err("a merge is already running".into());
     }
@@ -177,7 +177,7 @@ pub fn start_final(app: &mut LightcraftApp, opts: &MergeDialog) -> Result<Value,
 
 /// Merge the selection without the dialog, with the options last used for `command` (the
 /// defaults the first time).
-pub fn start_last(app: &mut LightcraftApp, command: &str) -> Result<Value, String> {
+pub fn start_last(app: &mut EidosApp, command: &str) -> Result<Value, String> {
     let ids = app.session.targets(&json!({}));
     if ids.len() < 2 {
         return Err("select at least 2 photos to merge".into());
@@ -188,7 +188,7 @@ pub fn start_last(app: &mut LightcraftApp, command: &str) -> Result<Value, Strin
 }
 
 /// Per frame: keep the preview in sync with the dialog's options, collect finished jobs.
-pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
+pub fn poll(app: &mut EidosApp, ctx: &egui::Context) {
     // preview for the open dialog
     let dialog_opts = match &app.ui.dialog {
         Some(crate::state::Dialog::Merge { opts }) => Some(opts.clone()),
@@ -254,7 +254,7 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
                 } else {
                     "HDR"
                 };
-                match r.map_err(lightcraft_engine::EngineError::Other).and_then(|out| app.session.finish_merge(&t.job, out)) {
+                match r.map_err(eidos_engine::EngineError::Other).and_then(|out| app.session.finish_merge(&t.job, out)) {
                     Ok(v) => {
                         app.merge.last_result = Some(v);
                         app.toast(ctx, crate::i18n::tr_format!("{what} merge added", what = what));
@@ -275,12 +275,12 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
     }
 }
 
-fn last_failed_matches(app: &LightcraftApp, opts: &MergeDialog) -> bool {
+fn last_failed_matches(app: &EidosApp, opts: &MergeDialog) -> bool {
     app.merge.failed_options.as_ref() == Some(opts)
 }
 
 /// The dialog body (options on the left, preview on the right).
-pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, opts: &mut MergeDialog) {
+pub fn body(app: &mut EidosApp, ui: &mut egui::Ui, opts: &mut MergeDialog) {
     let t = crate::theme::Tokens::get(ui.ctx());
     ui.horizontal_top(|ui| {
         // preview
@@ -374,30 +374,30 @@ pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, opts: &mut MergeDialog) 
     });
 }
 
-const BOUNDARY_WARP: lightcraft_develop::ControlSpec = lightcraft_develop::ControlSpec {
+const BOUNDARY_WARP: eidos_develop::ControlSpec = eidos_develop::ControlSpec {
     id: "merge.boundaryWarp",
     label: "Boundary Warp",
-    section: lightcraft_develop::Section::Light,
+    section: eidos_develop::Section::Light,
     min: 0.0,
     max: 100.0,
     default: 0.0,
     step: 1.0,
     decimals: 0,
-    track: lightcraft_develop::Track::Plain,
+    track: eidos_develop::Track::Plain,
 };
-const BRACKET: lightcraft_develop::ControlSpec = lightcraft_develop::ControlSpec {
+const BRACKET: eidos_develop::ControlSpec = eidos_develop::ControlSpec {
     id: "merge.bracket",
     label: "Photos per bracket (0 = auto)",
-    section: lightcraft_develop::Section::Light,
+    section: eidos_develop::Section::Light,
     min: 0.0,
     max: 9.0,
     default: 0.0,
     step: 1.0,
     decimals: 0,
-    track: lightcraft_develop::Track::Plain,
+    track: eidos_develop::Track::Plain,
 };
 
-fn num(ui: &mut egui::Ui, spec: &lightcraft_develop::ControlSpec, v: &mut f64) -> bool {
+fn num(ui: &mut egui::Ui, spec: &eidos_develop::ControlSpec, v: &mut f64) -> bool {
     match crate::widgets::slider(ui, spec, *v, true, None).value {
         Some(n) => {
             *v = n;

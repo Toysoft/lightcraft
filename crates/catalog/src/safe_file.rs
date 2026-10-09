@@ -115,7 +115,7 @@ fn create_temp(path: &Path) -> io::Result<(PathBuf, File)> {
     }
     let dir = parent_of(path);
     for _ in 0..1000 {
-        let tmp = dir.join(format!(".lightcraft-{}-{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let tmp = dir.join(format!(".eidos-{}-{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         match OpenOptions::new().write(true).create_new(true).open(&tmp) {
             Ok(f) => return Ok((tmp, f)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -284,7 +284,7 @@ mod tests {
     use super::*;
 
     fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("lc-safe-file-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("eidos-safe-file-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d

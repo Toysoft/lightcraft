@@ -16,12 +16,12 @@
 
 use std::collections::HashMap;
 
-use lightcraft_catalog::PhotoId;
-use lightcraft_engine::Session;
-use lightcraft_engine::media::{QuickJob, QuickSource, RenderJob, RenderResult};
-use lightcraft_engine::pipeline::StageCache;
-use lightcraft_preview::JobPool;
-use lightcraft_raster::Histogram;
+use eidos_catalog::PhotoId;
+use eidos_engine::Session;
+use eidos_engine::media::{QuickJob, QuickSource, RenderJob, RenderResult};
+use eidos_engine::pipeline::StageCache;
+use eidos_preview::JobPool;
+use eidos_raster::Histogram;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -94,10 +94,10 @@ pub struct Renderer {
     shown_ids: HashMap<Slot, u64>,
     /// Requests made before this id belong to a library or preview cache that is gone.
     epoch: u64,
-    preview_generation: Option<(std::sync::Weak<lightcraft_preview::PreviewCache>, u64)>,
+    preview_generation: Option<(std::sync::Weak<eidos_preview::PreviewCache>, u64)>,
     /// Last thumbnail inputs; weak identities do not retain photo histories or force deep clones.
     /// (photo, size bucket, job key, whether the request went through an embedded stand-in)
-    thumb_inputs: HashMap<PhotoId, (std::sync::Weak<lightcraft_catalog::Photo>, usize, u64, bool)>,
+    thumb_inputs: HashMap<PhotoId, (std::sync::Weak<eidos_catalog::Photo>, usize, u64, bool)>,
     pool: JobPool<Slot, RenderResult>,
     /// Jobs run elsewhere (see [`RenderOffload`]); `queue` holds the ones not started yet.
     offload: Option<Box<dyn RenderOffload>>,
@@ -181,7 +181,7 @@ impl Renderer {
 
 impl Renderer {
     /// Would asking for this thumbnail again (at `priority`) change nothing?
-    pub fn thumb_current(&self, photo: &Arc<lightcraft_catalog::Photo>, bucket: usize, priority: u32) -> bool {
+    pub fn thumb_current(&self, photo: &Arc<eidos_catalog::Photo>, bucket: usize, priority: u32) -> bool {
         let Some(&(ref old, size, key, quick)) = self.thumb_inputs.get(&photo.id) else { return false };
         if old.as_ptr() != Arc::as_ptr(photo) || size != bucket {
             return false;
@@ -197,7 +197,7 @@ impl Renderer {
     }
 
     /// Remember the inputs of the thumbnail just requested (`quick`: through a stand-in).
-    pub fn remember_thumb(&mut self, photo: &Arc<lightcraft_catalog::Photo>, bucket: usize, key: u64, quick: bool) {
+    pub fn remember_thumb(&mut self, photo: &Arc<eidos_catalog::Photo>, bucket: usize, key: u64, quick: bool) {
         if self.thumb_inputs.len() >= 1024 && !self.thumb_inputs.contains_key(&photo.id) {
             self.thumb_inputs.retain(|_, (p, _, _, _)| p.strong_count() > 0);
             if self.thumb_inputs.len() >= 1024
@@ -244,7 +244,7 @@ impl Renderer {
             return;
         }
         self.pending.insert(slot, (job.key, priority));
-        job.request_id = lightcraft_preview::next_tick();
+        job.request_id = eidos_preview::next_tick();
         self.request_ids.insert(slot, job.request_id);
         // (an offload keeps its own per-view stage caches; the flag tells it to)
         let job =
@@ -262,7 +262,7 @@ impl Renderer {
             slot,
             key,
             priority,
-            Box::new(move || if background { lightcraft_engine::memory::in_background(|| job.run()) } else { job.run() }),
+            Box::new(move || if background { eidos_engine::memory::in_background(|| job.run()) } else { job.run() }),
         );
     }
 
@@ -273,7 +273,7 @@ impl Renderer {
         }
         self.quick_tried.insert(slot, job.key);
         self.pending.insert(slot, (job.key, priority));
-        job.request_id = lightcraft_preview::next_tick();
+        job.request_id = eidos_preview::next_tick();
         self.request_ids.insert(slot, job.request_id);
         let key = job.key;
         self.pool.submit(slot, key, priority, Box::new(move || job.run()));
@@ -287,10 +287,10 @@ impl Renderer {
         }
         self.prefetched.insert(slot, job.key);
         self.pending.insert(slot, (job.key, priority));
-        job.request_id = lightcraft_preview::next_tick();
+        job.request_id = eidos_preview::next_tick();
         self.request_ids.insert(slot, job.request_id);
         let key = job.key;
-        self.pool.submit(slot, key, priority, Box::new(move || lightcraft_engine::memory::in_background(|| job.run())));
+        self.pool.submit(slot, key, priority, Box::new(move || eidos_engine::memory::in_background(|| job.run())));
     }
 
     /// Is a request for `slot` queued or running?
@@ -298,7 +298,7 @@ impl Renderer {
     pub fn forget_all(&mut self) {
         self.request_ids.clear();
         self.shown_ids.clear();
-        self.epoch = lightcraft_preview::next_tick();
+        self.epoch = eidos_preview::next_tick();
         self.preview_generation = None;
         self.pool.reprioritize(|_, _| None);
         self.thumb_inputs.clear();
@@ -559,8 +559,8 @@ impl Renderer {
         }
         let waited = now.duration_since(since);
         if waited >= IDLE_TRIM {
-            lightcraft_engine::gpu::trim_pool(0);
-            lightcraft_engine::memory::release();
+            eidos_engine::gpu::trim_pool(0);
+            eidos_engine::memory::release();
             self.idle = Some((since, true));
         } else {
             ctx.request_repaint_after(IDLE_TRIM - waited);
@@ -570,7 +570,7 @@ impl Renderer {
     /// What the renderer holds: per-view stage caches (CPU images and GPU buffers) and textures.
     pub fn memory(&self) -> serde_json::Value {
         let cpu: usize = self.stages.values().map(|s| s.bytes()).sum();
-        let gpu: usize = self.stages.values().map(|s| lightcraft_engine::gpu::stage_bytes(s)).sum();
+        let gpu: usize = self.stages.values().map(|s| eidos_engine::gpu::stage_bytes(s)).sum();
         let tex: usize = self.textures.values().map(|t| t.size[0] * t.size[1] * 4).sum();
         let copies: usize = self.textures.values().filter_map(|t| t.pixels.as_ref()).map(|p| p.pixels.len() * 4).sum();
         serde_json::json!({
@@ -629,7 +629,7 @@ impl Renderer {
 #[cfg(test)]
 mod thumbnail_tests {
     use super::*;
-    use lightcraft_catalog::{Catalog, Op, Photo, Source};
+    use eidos_catalog::{Catalog, Op, Photo, Source};
 
     struct Blocked;
     impl RenderOffload for Blocked {
@@ -653,7 +653,7 @@ mod thumbnail_tests {
         r.pending.insert(Slot::Thumb(PhotoId(1)), (77, 10));
         assert!(r.thumb_current(&old, 384, 10));
         assert!(!r.thumb_current(&old, 512, 10));
-        let mut settings = lightcraft_develop::DevelopSettings::default();
+        let mut settings = eidos_develop::DevelopSettings::default();
         settings.light.exposure = 1.0;
         let undo = catalog.apply(Op::SetDevelop { id: PhotoId(1), settings: Arc::new(settings), label: "edit".into(), edited: None }).unwrap();
         assert!(!r.thumb_current(catalog.photo(PhotoId(1)).unwrap(), 384, 10));
@@ -726,17 +726,17 @@ mod thumbnail_tests {
             std::mem::take(&mut self.0.borrow_mut().finished)
         }
     }
-    fn fixture() -> (crate::LightcraftApp, std::rc::Rc<std::cell::RefCell<Work>>, egui::Context) {
+    fn fixture() -> (crate::EidosApp, std::rc::Rc<std::cell::RefCell<Work>>, egui::Context) {
         fixture_with(Session::new(), (*photo()).clone())
     }
-    fn fixture_with(mut s: Session, photo: Photo) -> (crate::LightcraftApp, std::rc::Rc<std::cell::RefCell<Work>>, egui::Context) {
+    fn fixture_with(mut s: Session, photo: Photo) -> (crate::EidosApp, std::rc::Rc<std::cell::RefCell<Work>>, egui::Context) {
         s.media.file_loader = Some(Arc::new(|_, _| {
-            let mut image = lightcraft_raster::Rgb32f::new(8, 8);
+            let mut image = eidos_raster::Rgb32f::new(8, 8);
             image.data.fill([0.3, 0.2, 0.1]);
             Ok((image, Default::default()))
         }));
         s.catalog.apply(Op::AddPhoto { photo: Box::new(photo) }).unwrap();
-        let mut app = crate::LightcraftApp::new(s, crate::Services::default());
+        let mut app = crate::EidosApp::new(s, crate::Services::default());
         app.renderer.keep_pixels = true;
         let work = std::rc::Rc::new(std::cell::RefCell::new(Work::default()));
         app.renderer.set_offload(Box::new(Manual(work.clone())));
@@ -747,11 +747,11 @@ mod thumbnail_tests {
     fn take_job(work: &std::rc::Rc<std::cell::RefCell<Work>>) -> (Slot, RenderJob) {
         work.borrow_mut().jobs.pop().unwrap()
     }
-    fn finish(app: &mut crate::LightcraftApp, work: &std::rc::Rc<std::cell::RefCell<Work>>, ctx: &egui::Context, slot: Slot, result: RenderResult) {
+    fn finish(app: &mut crate::EidosApp, work: &std::rc::Rc<std::cell::RefCell<Work>>, ctx: &egui::Context, slot: Slot, result: RenderResult) {
         work.borrow_mut().finished.push((slot, result, 0.0));
         app.renderer.poll(ctx, &mut app.session);
     }
-    fn request(app: &mut crate::LightcraftApp) {
+    fn request(app: &mut crate::EidosApp) {
         crate::panels::grid::request_thumb(app, PhotoId(1), 256, 10);
     }
 
@@ -787,7 +787,7 @@ mod thumbnail_tests {
 
     #[test]
     fn resizing_the_disk_cache_keeps_textures_and_skips_rebuilds() {
-        let lib = std::env::temp_dir().join(format!("lc-ui-thumb-resize-{}", std::process::id()));
+        let lib = std::env::temp_dir().join(format!("eidos-ui-thumb-resize-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&lib);
         let mut s = Session::new().with_fs();
         s.open_library(&lib, false).unwrap();
@@ -825,10 +825,10 @@ mod thumbnail_tests {
         let g = gate.clone();
         s.media.preview_loader = Some(Arc::new(move |_: &str, _| {
             drop(g.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
-            Some(lightcraft_raster::Rgba8 { width: 4, height: 4, data: vec![[200, 100, 50, 255]; 16] })
+            Some(eidos_raster::Rgba8 { width: 4, height: 4, data: vec![[200, 100, 50, 255]; 16] })
         }));
         let mut raw = (*photo()).clone();
-        raw.kind = lightcraft_catalog::MediaKind::Raw;
+        raw.kind = eidos_catalog::MediaKind::Raw;
         raw.develop = Arc::new(raw.camera_defaults());
         let (mut app, _, ctx) = fixture_with(s, raw);
         app.renderer.set_offload(Box::new(Blocked));
@@ -880,7 +880,7 @@ mod thumbnail_tests {
         let (mut app, work, ctx) = fixture();
         let mut jobs = Vec::new();
         for exposure in [0.0, 1.0, 2.0] {
-            let mut edit = lightcraft_develop::DevelopSettings::default();
+            let mut edit = eidos_develop::DevelopSettings::default();
             edit.light.exposure = exposure;
             app.session.catalog.apply(Op::SetDevelop { id: PhotoId(1), settings: Arc::new(edit), label: "drag".into(), edited: None }).unwrap();
             let job = app.session.loupe_job(PhotoId(1), 8, 8, true).unwrap().draft();
@@ -910,10 +910,10 @@ mod thumbnail_tests {
         let old_result = old.run();
         app.renderer.forget_all();
         let photo = app.session.catalog.photo(PhotoId(1)).unwrap().as_ref().clone();
-        app.session = lightcraft_engine::Session::new();
+        app.session = eidos_engine::Session::new();
         app.session.catalog.apply(Op::AddPhoto { photo: Box::new(photo) }).unwrap();
         app.session.media.file_loader = Some(Arc::new(|_, _| {
-            let mut image = lightcraft_raster::Rgb32f::new(8, 8);
+            let mut image = eidos_raster::Rgb32f::new(8, 8);
             image.data.fill([0.1, 0.2, 0.9]);
             Ok((image, Default::default()))
         }));
@@ -937,7 +937,7 @@ mod thumbnail_tests {
             let (mut app, work, ctx) = fixture();
             request(&mut app);
             let (slot, old) = take_job(&work);
-            let mut edit = lightcraft_develop::DevelopSettings::default();
+            let mut edit = eidos_develop::DevelopSettings::default();
             edit.light.exposure = 1.0;
             app.session.catalog.apply(Op::SetDevelop { id: PhotoId(1), settings: Arc::new(edit), label: "edit".into(), edited: None }).unwrap();
             request(&mut app);
@@ -973,7 +973,7 @@ mod thumbnail_tests {
         let key = first.key;
         finish(&mut app, &work, &ctx, slot, first.run());
         let original = app.renderer.thumb(PhotoId(1)).unwrap().pixels.clone().unwrap();
-        let mut edit = lightcraft_develop::DevelopSettings::default();
+        let mut edit = eidos_develop::DevelopSettings::default();
         edit.light.exposure = 1.0;
         let undo =
             app.session.catalog.apply(Op::SetDevelop { id: PhotoId(1), settings: Arc::new(edit), label: "edit".into(), edited: None }).unwrap();
@@ -1003,8 +1003,8 @@ mod thumbnail_tests {
         assert_eq!(app.renderer.thumb(PhotoId(1)).unwrap().pixels.as_ref().unwrap().pixels[0].to_array(), [255, 0, 255, 255]);
         // An old job can have the SAME render key and stale decoded pixels.
         let mut old = job.clone();
-        old.source = lightcraft_engine::media::SourceRef::Loaded(Box::new(lightcraft_engine::media::DecodedSource::new(
-            Arc::new(lightcraft_raster::Rgb32f::new(8, 8)),
+        old.source = eidos_engine::media::SourceRef::Loaded(Box::new(eidos_engine::media::DecodedSource::new(
+            Arc::new(eidos_raster::Rgb32f::new(8, 8)),
             None,
         )));
         app.renderer.textures.clear();

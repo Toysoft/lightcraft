@@ -16,7 +16,7 @@
 
 use super::crx_wavelet::{self, Band as WaveletBand, TileEdges};
 use crate::{MAX_SAMPLES, RawError, Result};
-use lightcraft_meta::cr3::Cr3Compression;
+use eidos_meta::cr3::Cr3Compression;
 use rayon::prelude::*;
 use std::ops::Range;
 
@@ -998,7 +998,7 @@ mod tests {
 
     #[test]
     fn optional_cc0_samples_match_external_oracle() {
-        let Some(directory) = std::env::var_os("LIGHTCRAFT_CR3_CORPUS") else { return };
+        let Some(directory) = std::env::var_os("EIDOS_CR3_CORPUS") else { return };
         for (name, expected) in [
             ("cr3-canon-r100-raw.cr3", 0xcbe5299ab9c52630u64),
             ("cr3-canon-m50-raw.cr3", 0x62261f0ba81cfcd2u64),
@@ -1009,12 +1009,12 @@ mod tests {
         ] {
             let path = std::path::Path::new(&directory).join(name);
             let bytes = std::fs::read(path).unwrap();
-            let container = lightcraft_meta::cr3::parse_cr3(&bytes).unwrap();
+            let container = eidos_meta::cr3::parse_cr3(&bytes).unwrap();
             let mut candidates = container
                 .tracks
                 .iter()
                 .filter_map(|track| {
-                    let lightcraft_meta::cr3::Cr3TrackKind::Raw { cmp1: Some((at, length)), .. } = track.kind else { return None };
+                    let eidos_meta::cr3::Cr3TrackKind::Raw { cmp1: Some((at, length)), .. } = track.kind else { return None };
                     let coding = Cr3Compression::parse(bytes.get(at..at + length)?)?;
                     Some((u64::from(coding.width) * u64::from(coding.height), coding, track.data?))
                 })

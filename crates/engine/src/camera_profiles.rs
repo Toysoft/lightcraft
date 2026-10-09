@@ -2,16 +2,16 @@
 //!
 //! A raw file without colour matrices (Sony ARW, Nikon NEF, Fujifilm RAF) gets its look fitted to its own embedded camera
 //! JPEG (`camera_preview`), but one photo shows too little of some colours: a lime shirt covering a
-//! few dozen proxy pixels next to a hillside of foliage at the same hue. `lightcraft-cli calibrate`
+//! few dozen proxy pixels next to a hillside of foliage at the same hue. `eidos-cli calibrate`
 //! pools the colour pairs of many photos per model and fits one matrix and hue/saturation/value
 //! table; photos of that model then only fit their tone and chroma curves.
 //!
-//! Profiles are JSON files (`<model>.json`) in [`dir`]: `LIGHTCRAFT_CAMERA_PROFILES`, else
+//! Profiles are JSON files (`<model>.json`) in [`dir`]: `EIDOS_CAMERA_PROFILES`, else
 //! `<config>/camera-profiles`; a local profile replaces the one built in ([`BUNDLED`], from
 //! `assets/camera-profiles/`). They are read once per process; a damaged or hostile file is
 //! ignored with a warning. They hold aggregate colour statistics only, never image content.
-use lightcraft_color::Mat3;
-use lightcraft_raw::profile::HsvTable;
+use eidos_color::Mat3;
+use eidos_raw::profile::HsvTable;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ const VERSION: u32 = 1;
 /// Largest profile file read (a 5 × 72 × 5 table is ~60 KB of JSON).
 const MAX_FILE: u64 = 4 << 20;
 
-/// Profiles built into LightCraft (`assets/camera-profiles/`, see `assets/ATTRIBUTION.md`):
+/// Profiles built into Eidos (`assets/camera-profiles/`, see `assets/ATTRIBUTION.md`):
 /// `(model, JSON)`.
 pub const BUNDLED: &[(&str, &str)] = &[
     ("ILCE-7M4", include_str!("../../../assets/camera-profiles/ILCE-7M4.json")),
@@ -65,23 +65,25 @@ impl CameraProfile {
     }
 }
 
-/// LightCraft's configuration folder (settings, GPU marker, camera profiles).
+/// The configuration folder (settings, GPU marker, camera profiles). Eidos uses its own
+/// folders, separate from any LightCraft installation: existing Eidos data stays here across
+/// Eidos upgrades.
 pub fn config_dir() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/LightCraft"))
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/Eidos"))
     } else if cfg!(windows) {
-        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("LightCraft"))
+        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("Eidos"))
     } else {
         std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-            .map(|c| c.join("lightcraft"))
+            .map(|c| c.join("eidos"))
     }
 }
 
 /// Where camera profiles are read from and written to.
 pub fn dir() -> Option<PathBuf> {
-    std::env::var_os("LIGHTCRAFT_CAMERA_PROFILES").map(PathBuf::from).or_else(|| config_dir().map(|d| d.join("camera-profiles")))
+    std::env::var_os("EIDOS_CAMERA_PROFILES").map(PathBuf::from).or_else(|| config_dir().map(|d| d.join("camera-profiles")))
 }
 
 /// File name of `model`'s profile: letters, digits, `-` and `_` kept, anything else `_`.
@@ -112,7 +114,7 @@ fn parse(json: &[u8], origin: &str) -> Result<CameraProfile, String> {
 /// The built-in profile for `model`, if any.
 fn bundled(model: &str) -> Option<CameraProfile> {
     let (_, json) = BUNDLED.iter().find(|(m, _)| *m == model)?;
-    parse(json.as_bytes(), &format!("built-in profile {model}")).inspect_err(|e| eprintln!("lightcraft: ignoring camera profile {e}")).ok()
+    parse(json.as_bytes(), &format!("built-in profile {model}")).inspect_err(|e| eprintln!("eidos: ignoring camera profile {e}")).ok()
 }
 
 /// Write `profile` to `dir` (created if needed) as `<model>.json`; returns the path.
@@ -146,11 +148,11 @@ pub fn get(model: &str) -> Option<Arc<CameraProfile>> {
         Some(path) if path.is_file() => match load(&path) {
             Ok(p) if p.model.trim() == model => Some(Arc::new(p)),
             Ok(p) => {
-                eprintln!("lightcraft: ignoring camera profile {}: it is for {:?}, not {model:?}", path.display(), p.model);
+                eprintln!("eidos: ignoring camera profile {}: it is for {:?}, not {model:?}", path.display(), p.model);
                 None
             }
             Err(e) => {
-                eprintln!("lightcraft: ignoring camera profile {e}");
+                eprintln!("eidos: ignoring camera profile {e}");
                 None
             }
         },
@@ -179,7 +181,7 @@ pub fn cache_key() -> u64 {
             })
             .collect();
         files.sort();
-        let mut h = lightcraft_preview::Hasher128::new();
+        let mut h = eidos_preview::Hasher128::new();
         for (name, len, modified) in &files {
             h.str(name).u64(*len).u64(*modified);
         }
@@ -203,7 +205,7 @@ impl Pool {
     /// Add one raw file's colour pairs. `Ok(None)` when the file can't contribute (not an ARW,
     /// NEF or RAF without colour matrices, no usable camera JPEG, too little colour).
     pub fn add(&mut self, bytes: &[u8]) -> Result<Option<String>, String> {
-        let mut raw = lightcraft_raw::decode(bytes).map_err(|e| e.to_string())?;
+        let mut raw = eidos_raw::decode(bytes).map_err(|e| e.to_string())?;
         // colour only: geometric lens corrections would stop the sensor proxy from binning
         raw.opcodes.list3.retain(|op| !op.is_lens_correction());
         let Some(model) = raw.metadata.model.as_deref().map(str::trim).filter(|m| !m.is_empty()) else { return Ok(None) };
@@ -255,9 +257,19 @@ mod tests {
         CameraProfile::new("ILCE-7M4", 12, 3456, Mat3([[1.6, -0.5, -0.1], [-0.2, 1.3, -0.1], [-0.1, -0.2, 1.3]]), Some(table))
     }
 
+    /// Eidos keeps its own settings folder, separate from any upstream LightCraft
+    /// installation: side-by-side installs must never share config, profiles or models.
+    #[test]
+    fn config_dir_is_eidos_owned() {
+        let dir = config_dir().expect("a home folder in tests");
+        let s = dir.to_string_lossy().to_lowercase();
+        assert!(s.contains("eidos"), "{dir:?}");
+        assert!(!s.contains("lightcraft"), "{dir:?}");
+    }
+
     #[test]
     fn profiles_round_trip_and_reject_bad_files() {
-        let dir = std::env::temp_dir().join(format!("lc-camera-profiles-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-camera-profiles-{}", std::process::id()));
         let path = save(&profile(), &dir).unwrap();
         assert_eq!(path.file_name().unwrap(), "ILCE-7M4.json");
         assert_eq!(load(&path).unwrap(), profile());

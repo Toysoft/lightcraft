@@ -29,7 +29,7 @@ keyboard input, and `X` in the Crop panel swaps the crop aspect.
 Shifted number keys also use the physical number key when the keyboard reports punctuation
 (for example, `Shift+1` as `!`). Letter shortcuts continue to follow the keyboard layout.
 
-`Shift+P` picks and advances in the two library grids. In other views it retains LightCraft's
+`Shift+P` picks and advances in the two library grids. In other views it retains Eidos's
 Presets-panel binding. `Shift+Z` remains an alternative pick-and-advance key in all views.
 
 The macOS native menu displays plain-key bindings but leaves execution to egui; only shortcuts

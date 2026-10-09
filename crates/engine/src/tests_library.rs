@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::Session;
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("lc-engine-{tag}-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("eidos-engine-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     d
 }
@@ -59,7 +59,7 @@ fn edits_survive_restart_without_close() {
 fn threshold_compaction_runs_in_the_background() {
     let dir = temp_dir("bg-compact");
     let mut s = open(&dir, true);
-    s.library.as_mut().unwrap().journal_mut().policy = lightcraft_catalog::SnapshotPolicy { max_records: 8, max_bytes: u64::MAX };
+    s.library.as_mut().unwrap().journal_mut().policy = eidos_catalog::SnapshotPolicy { max_records: 8, max_bytes: u64::MAX };
     let ids: Vec<_> = s.catalog.photos().map(|p| p.id).collect();
     let mut background = 0;
     for k in 0..60usize {
@@ -190,25 +190,25 @@ fn new_library_without_seed_is_empty_and_compacts() {
 fn profile_favorites_and_recent_survive_reopen() {
     let dir = temp_dir("profiles");
     let mut s = open(&dir, true);
-    s.execute("profile.favorite", &json!({"id": "lc.bw.sepia"})).unwrap();
-    s.execute("profile.favorite", &json!({"id": "lc.vivid"})).unwrap();
-    s.execute("profile.favorite", &json!({"id": "lc.vivid"})).unwrap(); // toggled off again
+    s.execute("profile.favorite", &json!({"id": "eidos.bw.sepia"})).unwrap();
+    s.execute("profile.favorite", &json!({"id": "eidos.vivid"})).unwrap();
+    s.execute("profile.favorite", &json!({"id": "eidos.vivid"})).unwrap(); // toggled off again
     assert!(s.execute("profile.favorite", &json!({"id": "nope"})).is_err());
-    for id in ["lc.neutral", "lc.vivid", "lc.film.cool-fade", "lc.mono", "lc.cine.teal-amber", "lc.muted.bleached", "lc.vivid"] {
+    for id in ["eidos.neutral", "eidos.vivid", "eidos.film.cool-fade", "eidos.mono", "eidos.cine.teal-amber", "eidos.muted.bleached", "eidos.vivid"] {
         s.execute("develop.profile", &json!({"id": id})).unwrap();
     }
-    let want_recent = ["lc.vivid", "lc.muted.bleached", "lc.cine.teal-amber", "lc.mono", "lc.film.cool-fade"];
+    let want_recent = ["eidos.vivid", "eidos.muted.bleached", "eidos.cine.teal-amber", "eidos.mono", "eidos.film.cool-fade"];
     assert_eq!(s.profile_recent, want_recent, "newest first, deduplicated, at most 5");
     drop(s); // no clean close: every command persisted already
     let mut s = open(&dir, false);
-    assert_eq!(s.profile_favorites, ["lc.bw.sepia"]);
+    assert_eq!(s.profile_favorites, ["eidos.bw.sepia"]);
     assert_eq!(s.profile_recent, want_recent);
     let menu = s.execute("profiles.menu", &json!({})).unwrap();
     assert_eq!(menu["favorites"][0]["name"], "Sepia Tone");
     assert_eq!(menu["recent"].as_array().unwrap().len(), 5);
     assert_eq!(menu["groups"][0]["name"], "Basic");
     let list = s.execute("profiles.list", &json!({})).unwrap();
-    assert!(list.as_array().unwrap().iter().any(|p| p["id"] == "lc.bw.sepia" && p["favorite"] == true));
+    assert!(list.as_array().unwrap().iter().any(|p| p["id"] == "eidos.bw.sepia" && p["favorite"] == true));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -217,16 +217,16 @@ fn the_shown_library_folder_survives_reopen() {
     let dir = temp_dir("libfolder");
     let mut s = open(&dir, true);
     let id = s.catalog.alloc_photo_id();
-    let p = lightcraft_catalog::Photo::new(
+    let p = eidos_catalog::Photo::new(
         id,
-        lightcraft_catalog::Source::File { path: "/pics/trip/a.jpg".into() },
+        eidos_catalog::Source::File { path: "/pics/trip/a.jpg".into() },
         "a.jpg",
         "JPEG",
         60,
         40,
         "2026-01-01T10:00:00",
     );
-    s.commit("Add", lightcraft_catalog::Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    s.commit("Add", eidos_catalog::Op::AddPhoto { photo: Box::new(p) }).unwrap();
     s.execute("library.source", &json!({"kind": "libraryFolder", "path": "/pics/trip"})).unwrap();
     s.save_view();
     drop(s);
@@ -266,8 +266,8 @@ fn smart_album_rule_sets() {
             ]}}}),
         )
         .unwrap();
-    let id = lightcraft_catalog::AlbumId(r["id"].as_u64().unwrap());
-    let want = s.catalog.photos().filter(|p| !p.deleted && p.rating >= 4 && p.flag != lightcraft_catalog::Flag::Reject).count();
+    let id = eidos_catalog::AlbumId(r["id"].as_u64().unwrap());
+    let want = s.catalog.photos().filter(|p| !p.deleted && p.rating >= 4 && p.flag != eidos_catalog::Flag::Reject).count();
     assert!(want > 0);
     assert_eq!(s.catalog.album_count(id), want);
     // live: a new 5-star photo joins
@@ -285,7 +285,7 @@ fn smart_album_rule_sets() {
 /// The filter bar's label multi-select: any of the chosen labels.
 #[test]
 fn filter_any_of_several_labels() {
-    use lightcraft_catalog::ColorLabel;
+    use eidos_catalog::ColorLabel;
     let mut s = crate::Session::with_demo();
     let ids: Vec<u64> = s.catalog.photos().take(3).map(|p| p.id.0).collect();
     for (id, l) in ids.iter().zip(["red", "yellow", "green"]) {
@@ -321,7 +321,7 @@ fn quick_collection_and_target_album() {
     let alb = s.execute("album.create", &serde_json::json!({"name": "Picks"})).unwrap()["id"].as_u64().unwrap();
     s.execute("album.setTarget", &serde_json::json!({"id": alb})).unwrap();
     s.execute("album.toggleTarget", &serde_json::json!({"ids": [ids[2]]})).unwrap();
-    assert_eq!(s.catalog.album_count(lightcraft_catalog::AlbumId(alb)), 1);
+    assert_eq!(s.catalog.album_count(eidos_catalog::AlbumId(alb)), 1);
     assert_eq!(s.catalog.album_count(quick), 2, "the Quick Collection is untouched");
     let smart = s.execute("album.createSmart", &serde_json::json!({"name": "S", "rules": {"rating": 3}})).unwrap()["id"].as_u64().unwrap();
     assert!(s.execute("album.setTarget", &serde_json::json!({"id": smart})).is_err());
@@ -330,12 +330,12 @@ fn quick_collection_and_target_album() {
     assert_eq!(s.catalog.album_count(quick), 0);
 }
 
-/// Scaling check (ignored: `cargo test --release -p lightcraft-engine -- --ignored scale --nocapture`):
+/// Scaling check (ignored: `cargo test --release -p eidos-engine -- --ignored scale --nocapture`):
 /// the per-frame / per-click library queries on a 100k-photo catalog.
 #[test]
 #[ignore]
 fn scale_100k_library_queries() {
-    use lightcraft_catalog::{Op, Photo, PhotoId, Source};
+    use eidos_catalog::{Op, Photo, PhotoId, Source};
     use std::time::Instant;
     let mut s = crate::Session::new();
     let n = 100_000u64;
@@ -394,7 +394,7 @@ fn scale_100k_library_queries() {
     });
     let alb = s.execute("album.createSmart", &serde_json::json!({"name": "S", "rules": {"rating": 5}})).unwrap()["id"].as_u64().unwrap();
     m("smart album count", &mut || {
-        let _ = s.catalog.album_count(lightcraft_catalog::AlbumId(alb));
+        let _ = s.catalog.album_count(eidos_catalog::AlbumId(alb));
     });
     m("albums.list", &mut || {
         let _ = s.execute("albums.list", &serde_json::json!({})).unwrap();
@@ -439,4 +439,18 @@ fn a_library_open_elsewhere_is_refused() {
     other.open_library(&dir, true).unwrap();
     assert_eq!(other.catalog.to_snapshot(), expect);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Eidos keeps its own default library and never falls back to an upstream LightCraft folder:
+// Eidos and LightCraft share no library state.
+#[test]
+fn default_library_is_eidos_only() {
+    use crate::library::DEFAULT_NAME;
+
+    let pictures = temp_dir("default-pictures");
+    std::fs::create_dir_all(&pictures).unwrap();
+    // no migration: a LightCraft folder next to it is ignored, not adopted
+    std::fs::create_dir_all(pictures.join("LightCraft Library")).unwrap();
+    assert_eq!(crate::library::default_dir_from(&pictures), pictures.join(DEFAULT_NAME));
+    let _ = std::fs::remove_dir_all(&pictures);
 }

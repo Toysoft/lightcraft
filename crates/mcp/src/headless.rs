@@ -3,9 +3,9 @@
 
 use std::path::Path;
 
-use lightcraft_engine::Session;
-use lightcraft_engine::catalog::PhotoId;
-use lightcraft_raster::Rgba8;
+use eidos_engine::Session;
+use eidos_engine::catalog::PhotoId;
+use eidos_raster::Rgba8;
 use serde_json::{Value, json};
 
 use crate::backend::Backend;
@@ -56,10 +56,10 @@ impl Headless {
     }
 
     /// The UI command `app.export`, emulated with the same parameters as the desktop app
-    /// (see `lightcraft_engine::export::ExportOptions::from_json`, plus `ids`, `dir`, `path`).
+    /// (see `eidos_engine::export::ExportOptions::from_json`, plus `ids`, `dir`, `path`).
     /// With `path` and no `format`, the format follows the path's extension.
     fn export(&mut self, p: &Value) -> Result<Value, String> {
-        use lightcraft_engine::export::{Destination, ExportFormat, ExportOptions, Resize, export_batch};
+        use eidos_engine::export::{Destination, ExportFormat, ExportOptions, Resize, export_batch};
         let p = &self.session.export_params(p)?;
         let mut opts = ExportOptions::from_params(p).map_err(|e| e.to_string())?;
         if !ExportOptions::has_size_param(p) {
@@ -80,7 +80,7 @@ impl Headless {
             None => vec![self.photo_or_active(p)?],
         };
         let dir = p.get("dir").and_then(Value::as_str).unwrap_or("");
-        let write = &mut lightcraft_engine::export::write_file;
+        let write = &mut eidos_engine::export::write_file;
         let files =
             export_batch(&mut self.session, &ids, &opts, &Destination { dir: dir.to_string(), exact: exact.map(str::to_string) }, write, &|path| {
                 Path::new(path).exists()
@@ -124,7 +124,7 @@ impl Backend for Headless {
             }
             "app.export" => self.export(&p),
             m if m.starts_with("ui.") || m == "app.quit" => {
-                Err(format!("`{m}` needs the desktop app: start `lightcraft --control 7980` and run the MCP server with `--connect`"))
+                Err(format!("`{m}` needs the desktop app: start `eidos --control 7980` and run the MCP server with `--connect`"))
             }
             other => Err(format!("unknown method `{other}`")),
         }
@@ -139,7 +139,7 @@ impl Backend for Headless {
     }
 }
 
-/// Expand folders (recursively, sorted; bounded, see `lightcraft_engine::walk`) into photo files
+/// Expand folders (recursively, sorted; bounded, see `eidos_engine::walk`) into photo files
 /// and make paths absolute.
 pub fn expand_paths(paths: &[String]) -> Vec<String> {
     let absolute = |p: &Path| std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf()).to_string_lossy().to_string();
@@ -148,7 +148,7 @@ pub fn expand_paths(paths: &[String]) -> Vec<String> {
     for p in paths {
         let path = Path::new(p);
         if path.is_dir() {
-            let w = lightcraft_engine::walk::files_in(path, None, lightcraft_engine::walk::Limits::default(), photo);
+            let w = eidos_engine::walk::files_in(path, None, eidos_engine::walk::Limits::default(), photo);
             out.extend(w.files.iter().map(|f| absolute(f)));
         } else {
             // Explicit files are kept even with unknown extensions (the probe decides).
@@ -161,16 +161,16 @@ pub fn expand_paths(paths: &[String]) -> Vec<String> {
 /// Encode by extension: `.png` (default), `.jpg`/`.jpeg` (quality), `.tif`/`.tiff`, `.webp` (lossless),
 /// `.avif` — via the shared export encoder (embeds an sRGB profile).
 pub fn encode_image(ext: &str, img: &Rgba8, quality: u8) -> Result<Vec<u8>, String> {
-    use lightcraft_engine::export::{ExportFormat, ExportOptions};
+    use eidos_engine::export::{ExportFormat, ExportOptions};
     let format = ExportFormat::parse(ext).unwrap_or(ExportFormat::Png);
-    lightcraft_engine::export::encode_image(img, &ExportOptions { format, quality: quality.clamp(1, 100), ..Default::default() })
+    eidos_engine::export::encode_image(img, &ExportOptions { format, quality: quality.clamp(1, 100), ..Default::default() })
 }
 
 /// Encode by the path's extension and write the file.
 pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String> {
     let ext = path.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
     let bytes = encode_image(&ext, img, quality)?;
-    lightcraft_engine::export::write_file(&path.to_string_lossy(), &bytes)
+    eidos_engine::export::write_file(&path.to_string_lossy(), &bytes)
 }
 
 #[cfg(test)]
@@ -180,7 +180,7 @@ mod tests {
     /// `app.export` without `ids` exports the selection (as the desktop app does), else the active photo.
     #[test]
     fn export_follows_the_selection() {
-        let dir = std::env::temp_dir().join(format!("lc-mcp-export-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-mcp-export-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut h = Headless::demo();
         let ids: Vec<u64> = h.session.visible_cloned().iter().take(3).map(|p| p.0).collect();
@@ -201,7 +201,7 @@ mod tests {
     /// The export file-name template takes the Rename Photos tokens.
     #[test]
     fn export_naming_tokens() {
-        let dir = std::env::temp_dir().join(format!("lc-mcp-export-naming-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-mcp-export-naming-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut h = Headless::demo();
         let ids: Vec<u64> = h.session.visible_cloned().iter().take(2).map(|p| p.0).collect();

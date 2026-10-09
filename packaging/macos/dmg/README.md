@@ -7,17 +7,17 @@ Finder scripting on CI, nothing extra installed in the signing job).
 
 | File | What |
 |---|---|
-| `background.svg` | Source of the background: the app icon (`assets/app-icon/lightcraft.svg`, linked, not copied) cropped as a cover on the LightCraft colour field (`#f2a516`), Ink and Paper. Its text (Inter, JetBrains Mono) is outlined, so rendering it needs no fonts. |
+| `background.svg` | Source of the background: the app icon (`assets/app-icon/eidos.svg`, linked, not copied) cropped as a cover on the Eidos colour field (`#f2a516`), Ink and Paper. Its text (Inter, JetBrains Mono) is outlined, so rendering it needs no fonts. |
 | `background.tiff` | The background at 1x (660 × 400 px, 72 dpi) and 2x (1320 × 800 px, 144 dpi) in one HiDPI TIFF (Deflate, sRGB). Goes to `.background/background.tiff`. |
-| `dmg-layout.DS_Store` | Finder's view settings for the volume: window size, icon size 128, LightCraft.app at (326, 205), `Applications` at (574, 205), and the background. Goes to `.DS_Store` in the image; named so it isn't mistaken for (or ignored like) a Finder-generated `.DS_Store`. |
+| `dmg-layout.DS_Store` | Finder's view settings for the volume: window size, icon size 128, Eidos.app at (326, 205), `Applications` at (574, 205), and the background. Goes to `.DS_Store` in the image; named so it isn't mistaken for (or ignored like) a Finder-generated `.DS_Store`. |
 | `generate.py` | Writes `background.tiff` and `dmg-layout.DS_Store` from the SVG and the layout above. |
 
 ## The volume name has no version
 
-The mounted volume is called `LightCraft`, not `LightCraft <version>`. The layout points at the background
+The mounted volume is called `Eidos`, not `Eidos <version>`. The layout points at the background
 through an alias that includes the volume name, and Finder resolves it by that name: with a
 versioned name the window keeps its size and icon positions but shows no background (tested).
-The DMG file name (`lightcraft-<version>-macos-<arch>.dmg`) still carries the version.
+The DMG file name (`eidos-<version>-macos-<arch>.dmg`) still carries the version.
 
 ## Rules
 

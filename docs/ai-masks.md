@@ -1,10 +1,10 @@
 # AI masks (Object and Describe)
 
-LightCraft selects objects with **SAM 3** (Segment Anything with Concepts, Meta 2025), run in
+Eidos selects objects with **SAM 3** (Segment Anything with Concepts, Meta 2025), run in
 pure Rust by `crates/segment` on [candle](https://github.com/huggingface/candle): on the GPU
 through Metal on macOS, on the CPU elsewhere (for now).
 
-**The model is optional.** It is not part of LightCraft, and nothing requires it: without it,
+**The model is optional.** It is not part of Eidos, and nothing requires it: without it,
 Object and Describe offer to download it, every other feature (and every existing mask, see
 below) works, and no render, export or command ever waits for it.
 
@@ -46,11 +46,11 @@ renders them. Editing the photo's look later does not recompute a mask (click ag
 
 ### In the app (recommended)
 
-The first time you pick Object or Describe without the model, LightCraft asks:
+The first time you pick Object or Describe without the model, Eidos asks:
 
 > **Download the SAM 3 model?** Object and Describe masks use SAM 3, Meta's segmentation model.
-> It isn't part of LightCraft, and everything else works without it. Download it once (about
-> 3.4 GB) · *folder*. Licence: SAM License (Meta) — Meta's terms, not LightCraft's. Downloading
+> It isn't part of Eidos, and everything else works without it. Download it once (about
+> 3.4 GB) · *folder*. Licence: SAM License (Meta) — Meta's terms, not Eidos's. Downloading
 > it means accepting them. [Read the SAM License] — **Not Now** / **Download**
 
 Nothing is downloaded until you choose **Download**. The download runs in the background (close
@@ -59,9 +59,9 @@ where it stopped if interrupted (also after quitting), and tries the next downlo
 one fails or stalls. Each file is written as `<name>.part` and moved into the model folder only
 when complete and verified — `model.safetensors` must have the exact size and SHA-256 of Meta's
 official checkpoint; a file that doesn't match is deleted, never used. If no location works, the
-dialog says why and LightCraft carries on without the model.
+dialog says why and Eidos carries on without the model.
 
-Agents and scripts use the same commands (control channel, `lightcraft-cli mcp --connect`):
+Agents and scripts use the same commands (control channel, `eidos-cli mcp --connect`):
 `segment.model.status`, `segment.model.download {"acknowledged": true}` (refused without the
 explicit `acknowledged`: pass it only after the user agreed to the download and the licence),
 `segment.model.cancel`.
@@ -71,13 +71,13 @@ explicit `acknowledged`: pass it only after the user agreed to the download and 
 The model is fetched from an ordered list of mirrors: base URLs where `<base>/model.safetensors`,
 `<base>/vocab.json` and `<base>/merges.txt` live. The list is, in order:
 
-1. `LIGHTCRAFT_SAM3_MIRRORS` (environment variable; URLs separated by commas or spaces);
-2. the file `models/sam3-mirrors.txt` in LightCraft's settings folder (one URL per line, `#`
-   comments) — `~/Library/Application Support/LightCraft/` (macOS), `%APPDATA%\LightCraft\`
-   (Windows), `~/.config/lightcraft/` (Linux);
+1. `EIDOS_SAM3_MIRRORS` (environment variable; URLs separated by commas or spaces);
+2. the file `models/sam3-mirrors.txt` in Eidos's settings folder (one URL per line, `#`
+   comments) — `~/Library/Application Support/Eidos/` (macOS), `%APPDATA%\Eidos\`
+    (Windows), `~/.config/eidos/` (Linux);
 3. the built-in list, `DEFAULT_MIRRORS` in `crates/segment/src/fetch/mod.rs`.
 
-> **Maintainers:** the built-in list is **empty** until LightCraft's own CDN locations exist
+> **Maintainers:** the built-in list is **empty** until Eidos's own CDN locations exist
 > (see the `TODO(maintainer)` there): add them in order of preference, host the three files
 > unchanged, and pin `vocab.json` / `merges.txt` (size + SHA-256) in `SAM3_FILES` at the same
 > time. Until then the in-app download needs a user-configured mirror, and the dialog says so:
@@ -89,11 +89,11 @@ licence there, wait for approval and download with their own token). Someone wit
 use it as their mirror:
 
 ```sh
-LIGHTCRAFT_SAM3_MIRRORS=https://huggingface.co/facebook/sam3/resolve/main \
-LIGHTCRAFT_SAM3_TOKEN=hf_... lightcraft
+EIDOS_SAM3_MIRRORS=https://huggingface.co/facebook/sam3/resolve/main \
+EIDOS_SAM3_TOKEN=hf_... eidos
 ```
 
-(`LIGHTCRAFT_SAM3_TOKEN` is sent as a bearer token only over https, and only to the mirror's own
+(`EIDOS_SAM3_TOKEN` is sent as a bearer token only over https, and only to the mirror's own
 host — not to the storage host it redirects to.)
 
 The download is plain HTTP/1.1 over TLS in pure Rust (rustls with the RustCrypto provider and
@@ -103,7 +103,7 @@ the Mozilla root certificates; no OpenSSL, `ring` or `aws-lc`, nothing compiled 
 ### By hand
 
 Put `model.safetensors`, `vocab.json` and `merges.txt` from `facebook/sam3` in the model folder:
-`models/sam3/` in the settings folder above, or the folder `LIGHTCRAFT_SAM3_DIR` names. Developers
+`models/sam3/` in the settings folder above, or the folder `EIDOS_SAM3_DIR` names. Developers
 can use the installer scripts, which download from Hugging Face with your token and verify the
 weights:
 
@@ -118,7 +118,7 @@ $env:HF_TOKEN = "hf_..."; .\tools\install-sam3.ps1   # Windows
 
 ## Licence of the model
 
-LightCraft's code is MIT OR Apache-2.0; `crates/segment` (a port of Apache-2.0 code) is
+Eidos's code is MIT OR Apache-2.0; `crates/segment` (a port of Apache-2.0 code) is
 Apache-2.0. **The SAM 3 weights are neither**: they are Meta's, released under the **SAM
 License** (<https://github.com/facebookresearch/sam3/blob/main/LICENSE>), a custom licence that
 is not an OSI open-source licence. It grants a non-exclusive, worldwide, non-transferable,
@@ -162,7 +162,7 @@ installed" that says how to get it.
 In the desktop app the commands don't wait for the model: `mask.objectPoint` returns
 `{pending: true}` and the selection is applied when it's computed (one undo step per settled
 selection); `mask.add {kind: "prompt"}` returns `{pending: true}` and the mask appears when
-something is found (or a message says nothing was). `lightcraft-cli` and the headless MCP server
+something is found (or a message says nothing was). `eidos-cli` and the headless MCP server
 wait and return the result (when built with the `sam` feature; the default CLI has no AI masks).
 
 ## Implementation notes
@@ -172,10 +172,10 @@ wait and return the result (when built with the `sam` feature; the default CLI h
   with 2-D RoPE and windowed attention, the feature pyramids, the SAM 2-style prompt encoder and
   two-way mask decoder for clicks, and the CLIP text encoder, DETR encoder/decoder (box
   relative-position bias, presence token) and pixel decoder for text. The CLIP tokenizer is a
-  small BPE in `tokenizer.rs`. The downloader (original code) is the `lightcraft-fetch` crate, shared by any model that is downloaded; `fetch/` here says what SAM 3 needs.
+  small BPE in `tokenizer.rs`. The downloader (original code) is the `eidos-fetch` crate, shared by any model that is downloaded; `fetch/` here says what SAM 3 needs.
 - candle is pinned at 0.9.2: later releases make `candle-core` depend on `tokenizers` with the
   Oniguruma C library, and the product is pure Rust. Weights are read with positional reads (no
-  memory map: `unsafe` stays in `lightcraft-sysmem`), only the tensors a path needs, and every
+  memory map: `unsafe` stays in `eidos-sysmem`), only the tensors a path needs, and every
   tensor's byte range is checked against the file's length when it is opened (a truncated or
   damaged file is an error, never a crash).
 - The engine (`crates/engine/src/segment/`) owns one worker thread with the model and the last
@@ -196,5 +196,5 @@ wait and return the result (when built with the `sam` feature; the default CLI h
 ```sh
 python3 -m venv .venv-sam3 && .venv-sam3/bin/pip install -r tools/requirements-sam3-reference.txt
 .venv-sam3/bin/python tools/sam3_reference.py photo.jpg ref.safetensors
-LIGHTCRAFT_SAM3_DIR=<model dir> LIGHTCRAFT_SAM3_REF=ref.safetensors cargo test -p lightcraft-segment --release -- --nocapture
+EIDOS_SAM3_DIR=<model dir> EIDOS_SAM3_REF=ref.safetensors cargo test -p eidos-segment --release -- --nocapture
 ```

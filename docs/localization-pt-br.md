@@ -1,6 +1,6 @@
-# LightCraft em português do Brasil
+# Eidos em português do Brasil
 
-O LightCraft pode ser exibido em inglês, chinês simplificado, chinês tradicional (Taiwan), japonês e
+O Eidos pode ser exibido em inglês, chinês simplificado, chinês tradicional (Taiwan), japonês e
 português do Brasil. A preferência de idioma é gravada em `language` no `ui.json`.
 
 - Troque em **Editar → Idioma** ou em **Configurações → Geral → Idioma**. A escolha é mantida nas
@@ -28,9 +28,9 @@ Toda tradução de formato é verificada por `format!` do Rust no build. Referen
 consuma o argumento correspondente com `{:.0}` — um texto com precisão 0 não imprime nada.
 
 Aparência, fontes, troca de idioma, persistência da preferência e estabilidade dos IDs de comando são
-verificadas por `cargo test -p lightcraft-ui-egui i18n::tests` (a checagem de glifos só roda com
+verificadas por `cargo test -p eidos-ui-egui i18n::tests` (a checagem de glifos só roda com
 `CRAFT_FONTS_DIR`). Para visualizar o idioma, renderize sem interface gráfica:
 
 ```sh
-LIGHTCRAFT_LANGUAGE=pt-br lightcraft-cli snapshot --demo --script tour.jsonl -o out.png --size 1600x1000
+EIDOS_LANGUAGE=pt-br eidos-cli snapshot --demo --script tour.jsonl -o out.png --size 1600x1000
 ```

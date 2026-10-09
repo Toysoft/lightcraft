@@ -24,13 +24,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use lightcraft_catalog::{MediaKind, Op, Photo, PhotoId, Source};
+use eidos_catalog::{MediaKind, Op, Photo, PhotoId, Source};
 use serde::{Deserialize, Serialize};
 
 use crate::Session;
 use crate::media::ProbeInfo;
 
-/// File extensions LightCraft imports (lower case).
+/// File extensions Eidos imports (lower case).
 pub const EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "tif", "tiff", "webp", "dng", "cr2", "cr3", "nef", "nrw", "arw", "raf", "orf", "rw2", "rwl", "raw", "pef", "psd", "jxl",
     "gif", "bmp", "heic", "avif",
@@ -78,7 +78,7 @@ pub struct ImportOptions {
     pub on_deleted: OnDeleted,
     pub mode: ImportMode,
     /// Applied to every imported photo (one History entry).
-    pub preset: Option<lightcraft_develop::Preset>,
+    pub preset: Option<eidos_develop::Preset>,
     /// Added to every imported photo.
     pub keywords: Vec<String>,
     /// Browsing a folder: photos come in as `local` (not in the library), and a file with the
@@ -219,7 +219,7 @@ pub struct Kept {
 /// The develop settings a photo gets on import: raws start from their as-shot white balance with
 /// default sharpening / colour noise reduction, and file-embedded lens corrections on (as the
 /// camera intended); a user default preset ([`ImportDefaults`]) goes on top.
-pub fn import_defaults(p: &Photo) -> lightcraft_develop::DevelopSettings {
+pub fn import_defaults(p: &Photo) -> eidos_develop::DevelopSettings {
     p.import_defaults()
 }
 
@@ -234,7 +234,7 @@ pub fn has_import_look(p: &Photo) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ImportDefaults {
-    /// Preset applied to raw files (`None` = the LightCraft default).
+    /// Preset applied to raw files (`None` = the Eidos default).
     pub raw_preset: Option<String>,
     /// Use a camera's own default (below) when the photo's camera has one.
     pub per_camera: bool,
@@ -262,7 +262,7 @@ pub struct ImportDefaults {
 pub struct CameraDefault {
     /// Make + model (`Meta::camera`).
     pub camera: String,
-    /// Preset id; `None` = the LightCraft default for this camera.
+    /// Preset id; `None` = the Eidos default for this camera.
     pub preset: Option<String>,
 }
 
@@ -402,7 +402,7 @@ pub fn launch_path(arg: &str, cwd: Option<&Path>, home: Option<&Path>, dcim: imp
             None => LaunchPath::Refused { path: shown, why: "a whole drive".into() },
         });
     }
-    let key = lightcraft_catalog::query::folder_key;
+    let key = eidos_catalog::query::folder_key;
     if home.is_some_and(|h| key(&h.to_string_lossy()) == key(&shown)) {
         return Some(LaunchPath::Refused { path: shown, why: "the whole home folder".into() });
     }
@@ -476,7 +476,7 @@ fn copy_into(dir: &Path, src: &str, name: Option<&str>, probe_hash: Option<&str>
     let name = name
         .map(str::to_string)
         .unwrap_or_else(|| Path::new(src).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "photo".into()));
-    let expect = probe_hash.and_then(lightcraft_preview::Hash128::parse);
+    let expect = probe_hash.and_then(eidos_preview::Hash128::parse);
     crate::import_move::copy_new(Path::new(src), dir, &name, expect).map(|p| p.to_string_lossy().to_string())
 }
 
@@ -1104,7 +1104,7 @@ fn run_transfers(
             };
             std::thread::scope(|sc| {
                 let handles: Vec<_> =
-                    (0..n).filter_map(|i| std::thread::Builder::new().name(format!("lc-import-copy-{i}")).spawn_scoped(sc, work).ok()).collect();
+                    (0..n).filter_map(|i| std::thread::Builder::new().name(format!("eidos-import-copy-{i}")).spawn_scoped(sc, work).ok()).collect();
                 if handles.is_empty() {
                     // no thread to be had: copy here, one after another
                     work();
@@ -1239,7 +1239,7 @@ pub fn commit_prepared(s: &mut Session, opts: &ImportOptions, now: &str, prepare
                     crate::cmd::metadata::apply_to(&mut p.meta, &mp.fields);
                 }
                 for k in &opts.keywords {
-                    let k = lightcraft_catalog::keywords::clean(k);
+                    let k = eidos_catalog::keywords::clean(k);
                     if !k.is_empty() && !p.meta.keywords.iter().any(|x| x.eq_ignore_ascii_case(&k)) {
                         p.meta.keywords.push(k);
                     }
@@ -1249,7 +1249,7 @@ pub fn commit_prepared(s: &mut Session, opts: &ImportOptions, now: &str, prepare
                     let label = format!("Preset: {}", preset.name);
                     p.develop = d.clone();
                     p.edited = Some(now.clone());
-                    p.history.push(lightcraft_catalog::HistoryStep { label, settings: d });
+                    p.history.push(eidos_catalog::HistoryStep { label, settings: d });
                 }
                 report.imported.push(id.0);
                 p.local = opts.local;
@@ -1332,7 +1332,7 @@ pub fn system_clock() -> String {
 
 /// Unix seconds → `YYYY-MM-DDTHH:MM:SS` (UTC), proleptic Gregorian.
 pub fn civil(secs: i64) -> String {
-    lightcraft_catalog::dates::civil(secs)
+    eidos_catalog::dates::civil(secs)
 }
 
 impl Session {
@@ -1354,7 +1354,7 @@ impl Session {
         let edge = edge.clamp(64, crate::media::SourceLevel::Thumb.max_edge());
         let level = crate::media::SourceLevel::Thumb;
         let source = self.media.origin_ref(&p.source, level.max_edge());
-        let key = lightcraft_preview::Hasher128::new().str(&c.path).u64(c.file_size).u64(edge as u64).finish().0 as u64;
+        let key = eidos_preview::Hasher128::new().str(&c.path).u64(c.file_size).u64(edge as u64).finish().0 as u64;
         let small = crate::media::RenderJob {
             request_id: 0,
             cache_generation: self.media.rendered.generation(),
@@ -1365,7 +1365,7 @@ impl Session {
             origin: p.source.clone(),
             info: crate::media::source_info(&p),
             settings: p.develop.clone(),
-            request: lightcraft_pipeline::RenderRequest::fit(edge, edge),
+            request: eidos_pipeline::RenderRequest::fit(edge, edge),
             key,
             cache: None,
             stages: None,
@@ -1392,8 +1392,8 @@ mod prepared_tests {
     #[test]
     fn revalidate_add_only_converts_matching_ready_item() {
         let mut s = Session::new();
-        let existing_path = std::env::temp_dir().join("lightcraft-revalidate-existing.jpg");
-        let other_path = std::env::temp_dir().join("lightcraft-revalidate-other.jpg");
+        let existing_path = std::env::temp_dir().join("eidos-revalidate-existing.jpg");
+        let other_path = std::env::temp_dir().join("eidos-revalidate-other.jpg");
         let existing = Photo::new(PhotoId(1), Source::File { path: existing_path.to_string_lossy().into() }, "existing.jpg", "JPG", 1, 1, "now");
         s.commit("existing", Op::AddPhoto { photo: Box::new(existing) }).unwrap();
         let ready = |path: &Path| ReadyFile {

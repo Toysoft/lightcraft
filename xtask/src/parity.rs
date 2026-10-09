@@ -1,8 +1,8 @@
 //! `cargo xtask parity`: the Lightroom parity tracker (`docs/parity.md`).
 //!
 //! - **Reference check** (in `ci`): every `` `cmd:<id>` `` must be a registered command (engine command specs, as
-//!   listed by `lightcraft-cli commands --json`, or a UI command from `UI_COMMANDS`), every `` `ctl:<id>` `` a develop
-//!   control (`lightcraft-cli controls --json`), and every repository path in backticks must exist (with `:line`
+//!   listed by `eidos-cli commands --json`, or a UI command from `UI_COMMANDS`), every `` `ctl:<id>` `` a develop
+//!   control (`eidos-cli controls --json`), and every repository path in backticks must exist (with `:line`
 //!   inside the file). A trailing `*` matches an id prefix. Row ids must be unique and statuses valid.
 //! - **Summary**: per section done / partial / missing / out of scope and the share of P0 and P1 rows done;
 //!   `--write` refreshes the table between the `parity:summary` markers in the document.
@@ -269,14 +269,11 @@ pub fn with_summary(md: &str, table: &str) -> Option<String> {
 }
 
 fn registry(what: &str) -> Result<BTreeSet<String>, String> {
-    let out = crate::cargo()
-        .args(["run", "-q", "-p", "lightcraft-cli", "--", what, "--json"])
-        .output()
-        .map_err(|e| format!("lightcraft-cli {what}: {e}"))?;
+    let out = crate::cargo().args(["run", "-q", "-p", "eidos-cli", "--", what, "--json"]).output().map_err(|e| format!("eidos-cli {what}: {e}"))?;
     if !out.status.success() {
-        return Err(format!("lightcraft-cli {what} --json failed:\n{}", String::from_utf8_lossy(&out.stderr)));
+        return Err(format!("eidos-cli {what} --json failed:\n{}", String::from_utf8_lossy(&out.stderr)));
     }
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("lightcraft-cli {what}: bad JSON: {e}"))?;
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("eidos-cli {what}: bad JSON: {e}"))?;
     Ok(v.as_array().into_iter().flatten().filter_map(|c| c["id"].as_str().map(str::to_string)).collect())
 }
 

@@ -1,6 +1,6 @@
-# lightcraft-tiff (L0)
+# eidos-tiff (L0)
 
-TIFF / IFD reader and writer. Used by `lightcraft-raw` (DNG, CR2, NEF, ARW…), `lightcraft-meta` (Exif) and
+TIFF / IFD reader and writer. Used by `eidos-raw` (DNG, CR2, NEF, ARW…), `eidos-meta` (Exif) and
 later the TIFF/DNG exporters.
 
 ## Features

@@ -592,7 +592,7 @@ mod tests {
         assert!((c[0]["y"].as_f64().unwrap() - 0.1).abs() < 1e-9 && (c[2]["y"].as_f64().unwrap() - 0.9).abs() < 1e-9);
         assert_eq!(i.unmapped, ["AIStructure.Boost", "OrtonFilter.Amount", "Contrast.Contrast", "Screened: blend mode Screen"]);
         assert!(s["light"]["contrast"] == json!(12.0), "the screen-blended layer isn't folded in");
-        lightcraft_develop::DevelopSettings::default().merged(s).expect("valid develop settings");
+        eidos_develop::DevelopSettings::default().merged(s).expect("valid develop settings");
     }
 
     #[test]
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn import_command_reads_looks_and_bundle_folders() {
-        let dir = std::env::temp_dir().join(format!("lc-luminar-import-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-luminar-import-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("Wild/Vintage.lmp/Contents/resources")).unwrap();
         std::fs::write(dir.join("Wild/Vintage.lmp/Contents/preset.lmp"), modern()).unwrap();

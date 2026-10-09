@@ -84,7 +84,7 @@ impl<S: Copy + Eq + Hash + Send + 'static, R: Send + 'static> JobPool<S, R> {
         for i in 0..self.threads {
             let shared = self.shared.clone();
             let tx = self.tx.clone();
-            let _ = std::thread::Builder::new().name(format!("lc-job-{i}")).spawn(move || {
+            let _ = std::thread::Builder::new().name(format!("eidos-job-{i}")).spawn(move || {
                 while let Some(e) = take(&shared, true) {
                     let t0 = std::time::Instant::now();
                     let result = (e.job)();

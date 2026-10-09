@@ -1,14 +1,14 @@
 //! Synthetic DNG round trips: every storage variant we decode is written with our own TIFF writer (and LJ92
 //! encoder) and must decode bit-exactly.
 
-use lightcraft_color::{D65, Mat3, Xy};
-use lightcraft_raw::opcodes::{Area, Opcode};
-use lightcraft_raw::{
+use eidos_color::{D65, Mat3, Xy};
+use eidos_raw::opcodes::{Area, Opcode};
+use eidos_raw::{
     BlackLevel, Cfa, ColorData, DngCompression, DngWriteOptions, Method, OpcodeLists, Orientation, RawData, RawFormat, RawImage, Rect, decode,
     embedded_preview, probe, write_dng,
 };
-use lightcraft_tiff::tags::{self as t, compression, photometric};
-use lightcraft_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, Value};
+use eidos_tiff::tags::{self as t, compression, photometric};
+use eidos_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, Value};
 
 fn scene_value(x: usize, y: usize, c: u8, max: f32) -> f32 {
     let base = [0.55, 0.8, 0.4][c as usize];
@@ -41,7 +41,7 @@ fn synthetic(w: usize, h: usize, cfa: Option<Cfa>, cpp: usize) -> RawImage {
         baseline_exposure: 0.35,
         ..Default::default()
     };
-    let metadata = lightcraft_meta::Metadata { make: Some("Synth".into()), model: Some("Cam 1".into()), rating: Some(3), ..Default::default() };
+    let metadata = eidos_meta::Metadata { make: Some("Synth".into()), model: Some("Cam 1".into()), rating: Some(3), ..Default::default() };
     RawImage {
         format: RawFormat::Dng,
         width: w,
@@ -101,7 +101,7 @@ fn writer_roundtrip_all_layouts() {
                     let back = decode(&bytes).unwrap();
                     assert_same(&raw, &back);
                     // the header-only probe describes the same image
-                    assert_eq!(lightcraft_raw::probe_info(&bytes).unwrap(), back.info());
+                    assert_eq!(eidos_raw::probe_info(&bytes).unwrap(), back.info());
                 }
             }
         }
@@ -136,10 +136,10 @@ fn deflate_roundtrips_integer_and_float() {
             assert!((a - b).abs() <= tol, "{a} vs {b} (half: {half})");
         }
     }
-    assert_eq!(lightcraft_raw::dngwrite::f32_to_f16(1.0), 0x3c00);
-    assert_eq!(lightcraft_raw::dngwrite::f32_to_f16(-2.0), 0xc000);
-    assert_eq!(lightcraft_raw::dngwrite::f32_to_f16(1e9), 0x7c00);
-    assert_eq!(lightcraft_raw::dngwrite::f32_to_f16(2f32.powi(-24)), 0x0001);
+    assert_eq!(eidos_raw::dngwrite::f32_to_f16(1.0), 0x3c00);
+    assert_eq!(eidos_raw::dngwrite::f32_to_f16(-2.0), 0xc000);
+    assert_eq!(eidos_raw::dngwrite::f32_to_f16(1e9), 0x7c00);
+    assert_eq!(eidos_raw::dngwrite::f32_to_f16(2f32.powi(-24)), 0x0001);
 }
 
 #[test]
@@ -382,7 +382,7 @@ fn lj92_strips_and_levels_and_linearization() {
     let px = pattern(w, h, 1, 12);
     let mut raw = base_ifd(w, h, 12, 1, true);
     raw.set(t::COMPRESSION, Value::Short(vec![compression::JPEG]));
-    let strips: Vec<Vec<u8>> = px.chunks(w * 5).map(|c| lightcraft_raw::ljpeg::encode(c, w, c.len() / w, 1, 12, 6, 0)).collect();
+    let strips: Vec<Vec<u8>> = px.chunks(w * 5).map(|c| eidos_raw::ljpeg::encode(c, w, c.len() / w, 1, 12, 6, 0)).collect();
     raw.set_image(ImageData::Strips { rows_per_strip: 5, strips });
     let table: Vec<u16> = (0..4096u32).map(|i| (i * i / 4096) as u16).collect();
     raw.set(t::LINEARIZATION_TABLE, Value::Short(table.clone()));
@@ -441,14 +441,14 @@ fn preview_and_probe() {
 #[test]
 fn colour_transform_from_decoded_dng() {
     let raw = decode(&write_dng(&synthetic(16, 16, Some(Cfa::bayer("RGGB").unwrap()), 1), &DngWriteOptions::default()).unwrap()).unwrap();
-    let xy = lightcraft_raw::color::as_shot_white_xy(&raw);
-    let t = lightcraft_raw::color::camera_transform(&raw, xy);
+    let xy = eidos_raw::color::as_shot_white_xy(&raw);
+    let t = eidos_raw::color::camera_transform(&raw, xy);
     assert!(!t.matrix_is_fallback);
     // as-shot neutral (0.5, 1, 0.7) → multipliers (2, 1, 1/0.7) up to normalisation
     assert!((t.wb[0] / t.wb[1] - 2.0).abs() < 1e-3, "{:?}", t.wb);
     assert!((t.wb[2] / t.wb[1] - 1.0 / 0.7).abs() < 1e-3);
     assert!((t.baseline_exposure - 0.35).abs() < 1e-6);
-    let (m, _) = lightcraft_raw::color::camera_to_rec2020(&raw, D65);
+    let (m, _) = eidos_raw::color::camera_to_rec2020(&raw, D65);
     let o = m.apply([1.0; 3]);
     assert!(o.iter().all(|v| (v - 1.0).abs() < 1e-9));
 }
@@ -460,9 +460,9 @@ fn vendor_white_balance_survives_dng_conversion() {
     let mut raw = synthetic(16, 16, Some(Cfa::bayer("RGGB").unwrap()), 1);
     raw.color = ColorData::default();
     raw.wb_multipliers = Some([2.25, 1.0, 1.7421875]);
-    let before = lightcraft_raw::color::camera_transform(&raw, lightcraft_raw::color::as_shot_white_xy(&raw));
+    let before = eidos_raw::color::camera_transform(&raw, eidos_raw::color::as_shot_white_xy(&raw));
     let back = decode(&write_dng(&raw, &DngWriteOptions::default()).unwrap()).unwrap();
-    let after = lightcraft_raw::color::camera_transform(&back, lightcraft_raw::color::as_shot_white_xy(&back));
+    let after = eidos_raw::color::camera_transform(&back, eidos_raw::color::as_shot_white_xy(&back));
     for c in 0..3 {
         assert!((before.wb[c] - after.wb[c]).abs() < 1e-3, "{:?} vs {:?}", before.wb, after.wb);
     }
@@ -476,7 +476,7 @@ fn rejects_unsupported_and_broken() {
     raw.set(t::COMPRESSION, Value::Short(vec![compression::LOSSY_JPEG]));
     raw.set_image(ImageData::Strips { rows_per_strip: 8, strips: vec![vec![0; 10]] });
     // lossy JPEG DNGs decode now; a strip that isn't a JPEG is reported as corrupt
-    assert!(matches!(decode(&dng(raw, ByteOrder::Little)), Err(lightcraft_raw::RawError::Corrupt(_))));
+    assert!(matches!(decode(&dng(raw, ByteOrder::Little)), Err(eidos_raw::RawError::Corrupt(_))));
     let mut raw = base_ifd(w, h, 16, 1, true);
     raw.set(t::CFA_PATTERN_EP, Value::Byte(vec![0, 1, 3, 1]));
     raw.set(t::COMPRESSION, Value::Short(vec![1]));
@@ -523,7 +523,7 @@ fn profile_look_tags_are_read_from_ifd0() {
         assert_eq!(look.data[2 * 4 * 2], [0.0, 1.0, 0.9]);
         assert_eq!(p.tone_curve.as_ref().unwrap().points.len(), 4);
         // the header-only probe sees the same profile
-        assert_eq!(lightcraft_raw::probe_info(&bytes).unwrap().color.profile, *p);
+        assert_eq!(eidos_raw::probe_info(&bytes).unwrap().color.profile, *p);
         // our DNG writer keeps the look with the data (conversions, smart previews)
         let again = decode(&write_dng(&img, &DngWriteOptions::default()).unwrap()).unwrap();
         assert_eq!(again.color.profile, *p);

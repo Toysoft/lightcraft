@@ -2,9 +2,9 @@
 //! gamma-encoded luminance at ≤ 1200 px, matched to the reference frame, then a RANSAC homography
 //! (falling back to similarity, then translation, then identity when the scene gives too little).
 
-use lightcraft_geom::{Homography, Point};
-use lightcraft_raster::resample::{Filter, fit};
-use lightcraft_raster::{Plane, Rgb32f};
+use eidos_geom::{Homography, Point};
+use eidos_raster::resample::{Filter, fit};
+use eidos_raster::{Plane, Rgb32f};
 use rayon::prelude::*;
 
 use crate::features::{self, Features};

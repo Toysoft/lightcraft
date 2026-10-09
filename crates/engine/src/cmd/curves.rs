@@ -2,8 +2,8 @@
 //! Medium / Strong Contrast plus the user's, saved with the library preferences, imported and
 //! exported as small JSON files).
 
-use lightcraft_develop::ToneCurve;
-use lightcraft_geom::Point;
+use eidos_develop::ToneCurve;
+use eidos_geom::Point;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -101,7 +101,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Import Point Curve Presets",
             [],
             None,
-            "{path | paths: [file]} — .lccurve JSON files ({format, version, presets: [...]}, an array of presets, or one preset); same-named user presets are replaced → {imported: [name], failed: [[file, error]]}",
+            "{path | paths: [file]} — .eidoscurve (and legacy .lccurve) JSON files ({format, version, presets: [...]}, an array of presets, or one preset); same-named user presets are replaced → {imported: [name], failed: [[file, error]]}",
             always,
             import_presets
         ),
@@ -110,7 +110,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export Point Curve Presets",
             [],
             None,
-            "{path, names?: [name] (default: every user preset)} — writes a .lccurve JSON file → {path, count}",
+            "{path, names?: [name] (default: every user preset)} — writes an .eidoscurve JSON file → {path, count}",
             always,
             export_presets
         ),
@@ -119,9 +119,11 @@ pub fn specs() -> Vec<CommandSpec> {
 // ---------------------------------------------------------------- point-curve presets
 
 /// File extension of exported curve presets (JSON).
-pub const CURVE_PRESET_EXT: &str = "lccurve";
+pub const CURVE_PRESET_EXT: &str = "eidoscurve";
+/// File extension of upstream curve presets, still read on import.
+pub const LEGACY_CURVE_PRESET_EXT: &str = "lccurve";
 /// `format` tag of an exported curve-preset file.
-const FILE_FORMAT: &str = "lightcraft.curvePresets";
+const FILE_FORMAT: &str = "eidos.curvePresets";
 
 /// A named set of point curves (master + red/green/blue, points in 0..1; empty = linear).
 /// Built-ins ship with the app; the user's are saved with the library preferences.

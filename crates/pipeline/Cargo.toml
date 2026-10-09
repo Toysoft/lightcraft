@@ -1,23 +1,23 @@
 [package]
-name = "lightcraft-pipeline"
+name = "eidos-pipeline"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LightCraft develop pipeline: scene-referred, float, resolution independent (CPU reference) (L2)"
+description = "Eidos develop pipeline: scene-referred, float, resolution independent (CPU reference) (L2)"
 
 [lints]
 workspace = true
 
 [dependencies]
-lightcraft-geom = { workspace = true }
-lightcraft-color = { workspace = true }
-lightcraft-raster = { workspace = true }
-lightcraft-develop = { workspace = true }
+eidos-geom = { workspace = true }
+eidos-color = { workspace = true }
+eidos-raster = { workspace = true }
+eidos-develop = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
-lightcraft-scenes = { workspace = true }
+eidos-scenes = { workspace = true }
 proptest = { workspace = true }
 image = { workspace = true }
 serde_json = { workspace = true }

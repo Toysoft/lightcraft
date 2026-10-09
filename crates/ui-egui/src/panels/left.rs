@@ -1,11 +1,11 @@
 //! The left "My Photos" panel: library sources, albums tree, and date groups.
 
 use egui::{Align2, Rect, Sense, pos2, vec2};
-use lightcraft_catalog::{Album, AlbumId, FolderNode, KeywordNode};
-use lightcraft_engine::LibrarySource;
+use eidos_catalog::{Album, AlbumId, FolderNode, KeywordNode};
+use eidos_engine::LibrarySource;
 use serde_json::json;
 
-use crate::LightcraftApp;
+use crate::EidosApp;
 use crate::icons::{Icon, paint};
 use crate::theme::Tokens;
 use crate::widgets::{icon_button, register};
@@ -29,7 +29,7 @@ fn note_width(ui: &egui::Ui, w: f32) {
 }
 
 fn row(
-    app: &mut LightcraftApp,
+    app: &mut EidosApp,
     ui: &mut egui::Ui,
     id: &str,
     icon: Icon,
@@ -43,7 +43,7 @@ fn row(
 
 /// [`row`] whose spoken name is `spoken` when the painted `label` is a shortened form of it.
 fn row_named(
-    app: &mut LightcraftApp,
+    app: &mut EidosApp,
     ui: &mut egui::Ui,
     id: &str,
     icon: Icon,
@@ -110,7 +110,7 @@ fn row_named(
 /// A collapsible section header (Albums, Local, By Date, Keywords): the bold title with a
 /// disclosure chevron after it; a click folds or unfolds the section (kept in the UI state, so it
 /// survives restarts). Returns the header's rect and whether the section is now open.
-fn sidebar_section_header(app: &mut LightcraftApp, ui: &mut egui::Ui, id: &str, title: &str) -> (Rect, bool) {
+fn sidebar_section_header(app: &mut EidosApp, ui: &mut egui::Ui, id: &str, title: &str) -> (Rect, bool) {
     let t = Tokens::get(ui.ctx());
     let title = crate::i18n::tr(title);
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
@@ -132,7 +132,7 @@ fn sidebar_section_header(app: &mut LightcraftApp, ui: &mut egui::Ui, id: &str, 
     (r, open)
 }
 
-pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+pub fn show(app: &mut EidosApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let frame = egui::Frame::NONE.fill(t.chrome).stroke(egui::Stroke::new(1.0, t.divider));
     let width = app.ui.left_width;
@@ -188,7 +188,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                     app.ui.dialog = Some(crate::state::Dialog::SmartRules {
                         id: None,
                         name: String::new(),
-                        rules: lightcraft_catalog::RuleSet { rules: vec![crate::panels::rules_editor::new_rule()], ..Default::default() },
+                        rules: eidos_catalog::RuleSet { rules: vec![crate::panels::rules_editor::new_rule()], ..Default::default() },
                     });
                 }
                 if ui.button(crate::i18n::tr("Create Smart Album from Filter…")).clicked() {
@@ -244,7 +244,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
 /// `cmd::missing::checked_path`). Checking stats every file, which on a network share takes
 /// seconds, so it runs on a worker thread: the count shown is the last finished one, refreshed
 /// at most every 5 s, and at once (after the running check) when the catalog changed.
-fn missing_count(app: &mut LightcraftApp, ui: &mut egui::Ui) -> usize {
+fn missing_count(app: &mut EidosApp, ui: &mut egui::Ui) -> usize {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
     #[derive(Clone, Default)]
     struct Job {
@@ -260,7 +260,7 @@ fn missing_count(app: &mut LightcraftApp, ui: &mut egui::Ui) -> usize {
     let fresh = now - job.at < 5.0 && job.rev == rev;
     if !fresh && !job.running.load(Relaxed) {
         // the same scope as the Missing Photos view: library photos only, never Local browse records
-        let paths = lightcraft_engine::cmd::missing::candidates(&app.session.catalog);
+        let paths = eidos_engine::cmd::missing::candidates(&app.session.catalog);
         job.running.store(true, Relaxed);
         job.at = now;
         job.rev = rev;
@@ -282,7 +282,7 @@ fn missing_count(app: &mut LightcraftApp, ui: &mut egui::Ui) -> usize {
 
 /// Folders on this computer to browse without adding (Lightroom's Local): Pictures, Desktop,
 /// Downloads, the home folder, the folder being browsed, and Browse Folder….
-fn local_section(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+fn local_section(app: &mut EidosApp, ui: &mut egui::Ui) {
     if cfg!(target_arch = "wasm32") {
         return;
     }
@@ -342,9 +342,9 @@ fn local_section(app: &mut LightcraftApp, ui: &mut egui::Ui) {
 }
 
 /// Whether two paths name the same folder, however they are spelled (separators, trailing
-/// slash, `.`/`..`, drive-letter case; see `lightcraft_catalog::query::folder_key`).
+/// slash, `.`/`..`, drive-letter case; see `eidos_catalog::query::folder_key`).
 pub(crate) fn same_folder(a: &str, b: &str) -> bool {
-    a == b || lightcraft_catalog::query::folder_key(a) == lightcraft_catalog::query::folder_key(b)
+    a == b || eidos_catalog::query::folder_key(a) == eidos_catalog::query::folder_key(b)
 }
 
 /// Local's top-level folders and how the folder being browsed sits among them.
@@ -378,7 +378,7 @@ pub(crate) fn local_places(
     browse_root: Option<&str>,
     hidden: &[String],
 ) -> LocalPlaces {
-    use lightcraft_catalog::query::{folder_key, folder_within};
+    use eidos_catalog::query::{folder_key, folder_within};
     let is_hidden = |p: &str| hidden.iter().any(|h| same_folder(h, p));
     let mut places = builtin;
     for path in saved {
@@ -491,7 +491,7 @@ pub(crate) fn fs_cached<T: Clone + Send + 'static>(ui: &egui::Ui, kind: &'static
             repaint.request_repaint();
         };
         #[cfg(not(target_arch = "wasm32"))]
-        if std::thread::Builder::new().name("lc-fs-list".into()).spawn(work).is_err() {
+        if std::thread::Builder::new().name("eidos-fs-list".into()).spawn(work).is_err() {
             cell.lock().unwrap_or_else(std::sync::PoisonError::into_inner).running = false;
             running.fetch_sub(1, Ordering::AcqRel);
         }
@@ -506,20 +506,11 @@ pub(crate) fn fs_cached<T: Clone + Send + 'static>(ui: &egui::Ui, kind: &'static
 /// way down to it open whenever the browsed folder changes, so it shows highlighted in place.
 /// `transient`: a top-level row listed for this session only (it offers Keep in Local).
 #[allow(clippy::too_many_arguments)]
-fn folder_tree(
-    app: &mut LightcraftApp,
-    ui: &mut egui::Ui,
-    name: &str,
-    path: &str,
-    indent: f32,
-    current: Option<&str>,
-    reveal: bool,
-    transient: bool,
-) {
+fn folder_tree(app: &mut EidosApp, ui: &mut egui::Ui, name: &str, path: &str, indent: f32, current: Option<&str>, reveal: bool, transient: bool) {
     let t = Tokens::get(ui.ctx());
     let open_id = egui::Id::new(("folder-open", path.to_string()));
     let sel = current.is_some_and(|c| same_folder(c, path));
-    let on_the_way = !sel && current.is_some_and(|c| lightcraft_catalog::query::folder_within(c, path));
+    let on_the_way = !sel && current.is_some_and(|c| eidos_catalog::query::folder_within(c, path));
     let mut open: bool = ui.data(|d| d.get_temp(open_id)).unwrap_or(false);
     if reveal && on_the_way {
         // opened once per browsed folder: collapsing it again afterwards sticks
@@ -606,7 +597,7 @@ fn folder_tree(
 }
 
 /// One By Date row (`key`: `YYYY`, `YYYY-MM` or `YYYY-MM-DD`); returns whether it is open.
-fn date_row(app: &mut LightcraftApp, ui: &mut egui::Ui, key: &str, label: &str, count: usize, indent: f32) -> bool {
+fn date_row(app: &mut EidosApp, ui: &mut egui::Ui, key: &str, label: &str, count: usize, indent: f32) -> bool {
     let t = Tokens::get(ui.ctx());
     let open_id = egui::Id::new(("date-open", key.to_string()));
     let mut open: bool = ui.data(|d| d.get_temp(open_id)).unwrap_or(false);
@@ -640,13 +631,13 @@ fn date_row(app: &mut LightcraftApp, ui: &mut egui::Ui, key: &str, label: &str, 
 /// By Date and Keywords count every photo in the library, so choosing a row shows those photos
 /// from All Photos, not from whatever album or folder happened to be open, where they could be
 /// missing (issue #341). Only when choosing (`on`), not when clearing the row again.
-fn browse_all_photos(app: &mut LightcraftApp, on: bool) {
+fn browse_all_photos(app: &mut EidosApp, on: bool) {
     if on && app.session.source != LibrarySource::All {
         let _ = app.run("library.source", json!({"kind": "all"}));
     }
 }
 
-fn albums_tree(app: &mut LightcraftApp, ui: &mut egui::Ui, all: &[Album], parent: Option<AlbumId>, indent: f32) {
+fn albums_tree(app: &mut EidosApp, ui: &mut egui::Ui, all: &[Album], parent: Option<AlbumId>, indent: f32) {
     let mut kids: Vec<&Album> = all.iter().filter(|a| a.parent == parent).collect();
     kids.sort_by_key(|a| (!a.folder, a.name.to_lowercase()));
     for a in kids {
@@ -688,7 +679,7 @@ fn albums_tree(app: &mut LightcraftApp, ui: &mut egui::Ui, all: &[Album], parent
 
 /// An album row while photos are dragged from the grid: highlighted under the pointer; a
 /// release there adds them.
-fn drop_target(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response, a: &Album) {
+fn drop_target(app: &mut EidosApp, ui: &mut egui::Ui, resp: &egui::Response, a: &Album) {
     let Some(ids) = app.ui.dragging_photos.clone() else { return };
     let over = ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| resp.rect.contains(p));
     if !over {
@@ -706,7 +697,7 @@ fn drop_target(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response
     }
 }
 
-fn folder_menu(app: &mut LightcraftApp, resp: &egui::Response, a: &Album) {
+fn folder_menu(app: &mut EidosApp, resp: &egui::Response, a: &Album) {
     resp.context_menu(|ui| {
         if !a.folder && !a.is_smart() && ui.button(crate::i18n::tr("Add Selected Photos")).clicked() {
             let _ = app.run("album.addPhotos", json!({"id": a.id.0}));
@@ -733,7 +724,7 @@ fn folder_menu(app: &mut LightcraftApp, resp: &egui::Response, a: &Album) {
         }
         if !a.folder {
             // export: show the album, select its photos, then the dialog / a preset
-            let show_all = |app: &mut LightcraftApp| {
+            let show_all = |app: &mut EidosApp| {
                 let _ = app.run("library.source", json!({"kind": "album", "id": a.id.0}));
                 let _ = app.run("library.selectAll", json!({}));
             };
@@ -780,7 +771,7 @@ fn folder_menu(app: &mut LightcraftApp, resp: &egui::Response, a: &Album) {
 }
 
 /// Whether `id` is `ancestor` or lies inside it.
-fn is_within(app: &LightcraftApp, id: lightcraft_catalog::AlbumId, ancestor: lightcraft_catalog::AlbumId) -> bool {
+fn is_within(app: &EidosApp, id: eidos_catalog::AlbumId, ancestor: eidos_catalog::AlbumId) -> bool {
     let mut cur = Some(id);
     let mut guard = 0;
     while let Some(c) = cur {
@@ -797,11 +788,11 @@ fn is_within(app: &LightcraftApp, id: lightcraft_catalog::AlbumId, ancestor: lig
 }
 
 /// "Folders": where on disk the library's photos were imported from, with photo counts (see
-/// `lightcraft_catalog::folders`). A click makes that folder the source, like an album or a
+/// `eidos_catalog::folders`). A click makes that folder the source, like an album or a
 /// Local folder: its photos and those of the folders inside it fill the grid. The triangle opens
 /// a level. Only folders holding imported photos are
 /// listed; every folder on disk is under Local.
-fn folders_section(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+fn folders_section(app: &mut EidosApp, ui: &mut egui::Ui) {
     let tree = app.caches.folder_tree(&app.session.catalog);
     if tree.is_empty() {
         return;
@@ -815,11 +806,11 @@ fn folders_section(app: &mut LightcraftApp, ui: &mut egui::Ui) {
 
 /// Whenever the shown folder changes (a click, an agent, a rename or its undo), open the rows
 /// above it so it is on screen; folding one by hand afterwards sticks until the choice changes.
-fn reveal_chosen(app: &LightcraftApp, ui: &egui::Ui, tree: &[FolderNode]) {
+fn reveal_chosen(app: &EidosApp, ui: &egui::Ui, tree: &[FolderNode]) {
     let shown = app.session.library_folder.clone().filter(|_| app.session.source == LibrarySource::LibraryFolder);
-    let chosen = shown.filter(|c| !lightcraft_catalog::query::folder_key(c).is_empty());
+    let chosen = shown.filter(|c| !eidos_catalog::query::folder_key(c).is_empty());
     let seen = egui::Id::new("libfolder-revealed");
-    let now = chosen.as_deref().map(lightcraft_catalog::query::folder_key);
+    let now = chosen.as_deref().map(eidos_catalog::query::folder_key);
     if ui.data(|d| d.get_temp::<Option<String>>(seen)) == Some(now.clone()) {
         return;
     }
@@ -827,8 +818,8 @@ fn reveal_chosen(app: &LightcraftApp, ui: &egui::Ui, tree: &[FolderNode]) {
     let Some(chosen) = chosen else { return };
     fn open_above(ui: &egui::Ui, nodes: &[FolderNode], chosen: &str) {
         for n in nodes {
-            if lightcraft_catalog::query::folder_within(chosen, &n.path) && !same_folder(chosen, &n.path) {
-                let key = lightcraft_catalog::query::folder_key(&n.path);
+            if eidos_catalog::query::folder_within(chosen, &n.path) && !same_folder(chosen, &n.path) {
+                let key = eidos_catalog::query::folder_key(&n.path);
                 ui.data_mut(|d| d.insert_temp(egui::Id::new(("libfolder-open", key)), true));
                 open_above(ui, &n.children, chosen);
             }
@@ -837,10 +828,10 @@ fn reveal_chosen(app: &LightcraftApp, ui: &egui::Ui, tree: &[FolderNode]) {
     open_above(ui, tree, &chosen);
 }
 
-fn folder_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[FolderNode], indent: f32) {
+fn folder_rows(app: &mut EidosApp, ui: &mut egui::Ui, nodes: &[FolderNode], indent: f32) {
     let t = Tokens::get(ui.ctx());
     for n in nodes {
-        let key = lightcraft_catalog::query::folder_key(&n.path);
+        let key = eidos_catalog::query::folder_key(&n.path);
         let open_id = egui::Id::new(("libfolder-open", key.clone()));
         // a disk starts open, and so does a folder that holds nothing itself and leads to one
         // folder (`Users` → `me`): the first row where the library branches is what you look for
@@ -897,7 +888,7 @@ fn folder_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[FolderNode],
 
 /// The context menu of a Folders row: a folder's own, a disk's (remove it), none for the
 /// startup disk.
-fn row_menu(app: &mut LightcraftApp, resp: &egui::Response, n: &FolderNode) {
+fn row_menu(app: &mut EidosApp, resp: &egui::Response, n: &FolderNode) {
     if !n.volume {
         folder_menu_for_library(app, resp, n);
     } else if n.path != "/" {
@@ -916,11 +907,11 @@ fn row_menu(app: &mut LightcraftApp, resp: &egui::Response, n: &FolderNode) {
 
 /// The context menu of a folder row: the folder's disk actions (the same as Local's, photos
 /// follow) and taking its photos out of the library.
-fn folder_menu_for_library(app: &mut LightcraftApp, resp: &egui::Response, n: &FolderNode) {
+fn folder_menu_for_library(app: &mut EidosApp, resp: &egui::Response, n: &FolderNode) {
     let path = n.path.as_str();
     let name = std::path::Path::new(path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
     // what dialogs call it: the last two names, so same-named folders are told apart
-    let label = lightcraft_catalog::folders::folder_label(path);
+    let label = eidos_catalog::folders::folder_label(path);
     resp.context_menu(|ui| {
         if ui.button(crate::i18n::tr("Rename Folder…")).clicked() {
             app.ui.dialog = Some(crate::state::Dialog::TextPrompt {
@@ -965,7 +956,7 @@ fn folder_menu_for_library(app: &mut LightcraftApp, resp: &egui::Response, n: &F
 /// "Keywords": the library's keyword tree with photo counts (`a|b|c` keywords nest). A click
 /// filters the grid by the keyword (children included), the triangle opens a level, and the
 /// context menu renames, merges or deletes the keyword across the library.
-fn keywords_section(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+fn keywords_section(app: &mut EidosApp, ui: &mut egui::Ui) {
     let tree = app.caches.keyword_tree(&app.session.catalog);
     if tree.is_empty() {
         return;
@@ -976,7 +967,7 @@ fn keywords_section(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     }
 }
 
-fn keyword_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[KeywordNode], indent: f32) {
+fn keyword_rows(app: &mut EidosApp, ui: &mut egui::Ui, nodes: &[KeywordNode], indent: f32) {
     let t = Tokens::get(ui.ctx());
     for n in nodes {
         let open_id = egui::Id::new(("kw-open", n.path.to_lowercase()));

@@ -1,9 +1,9 @@
 [package]
-name = "lightcraft-tiff"
+name = "eidos-tiff"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LightCraft TIFF/IFD reader and writer (L0)"
+description = "Eidos TIFF/IFD reader and writer (L0)"
 
 [lints]
 workspace = true

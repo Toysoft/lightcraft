@@ -1,9 +1,9 @@
 //! Auto tone and auto white balance (histogram / grey-world statistics on a proxy).
 
-use lightcraft_color::cct::xy_to_temp_tint;
-use lightcraft_color::{REC2020, Xy, bradford, luminance_2020};
-use lightcraft_develop::DevelopSettings;
-use lightcraft_raster::Rgb32f;
+use eidos_color::cct::xy_to_temp_tint;
+use eidos_color::{REC2020, Xy, bradford, luminance_2020};
+use eidos_develop::DevelopSettings;
+use eidos_raster::Rgb32f;
 use serde::Serialize;
 
 use crate::SourceInfo;
@@ -30,7 +30,7 @@ fn percentile(sorted: &[f32], q: f32) -> f32 {
 
 /// Compute auto tone values for `src` under the current white balance (ignores current tone values).
 pub fn auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTone {
-    let mut img = lightcraft_raster::resample::fit(src, 512, 512, lightcraft_raster::resample::Filter::Box);
+    let mut img = eidos_raster::resample::fit(src, 512, 512, eidos_raster::resample::Filter::Box);
     let mut base = DevelopSettings { wb: s.wb, ..DevelopSettings::default() };
     base.light.exposure = 0.0;
     crate::local::scene_linear_pre(&mut img, info, &base);
@@ -63,8 +63,8 @@ pub fn auto_tone(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> AutoTo
 /// lightness — bands brighter than average get brighter, darker ones darker — so areas that
 /// differ only in colour stay apart in grey. Bands with almost no colourful pixels stay at 0.
 pub fn auto_bw_mix(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> [f64; 8] {
-    use lightcraft_color::perceptual::{lab_to_lch, oklab_from_2020};
-    let mut img = lightcraft_raster::resample::fit(src, 512, 512, lightcraft_raster::resample::Filter::Box);
+    use eidos_color::perceptual::{lab_to_lch, oklab_from_2020};
+    let mut img = eidos_raster::resample::fit(src, 512, 512, eidos_raster::resample::Filter::Box);
     let base = DevelopSettings { wb: s.wb, light: s.light, ..DevelopSettings::default() };
     crate::local::scene_linear_pre(&mut img, info, &base);
     let gain = 2f32.powf(base.light.exposure as f32);
@@ -100,7 +100,7 @@ pub fn auto_bw_mix(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings) -> [f64
 
 /// Grey-world white balance weighted towards mid-tone, low-chroma pixels. Returns (temp, tint).
 pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
-    let img = lightcraft_raster::resample::fit(src, 256, 256, lightcraft_raster::resample::Filter::Box);
+    let img = eidos_raster::resample::fit(src, 256, 256, eidos_raster::resample::Filter::Box);
     let (mut acc, mut wsum) = ([0.0f64; 3], 0.0f64);
     for c in &img.data {
         let y = luminance_2020(*c);
@@ -121,7 +121,7 @@ pub fn auto_wb(src: &Rgb32f, info: &SourceInfo) -> (f64, f64) {
     }
     let avg = acc.map(|v| v / wsum);
     let xyz = REC2020.to_xyz().apply(avg);
-    let shot = lightcraft_color::cct::temp_tint_to_xy(info.as_shot_temp, info.as_shot_tint);
+    let shot = eidos_color::cct::temp_tint_to_xy(info.as_shot_temp, info.as_shot_tint);
     let seen = bradford(REC2020.white, shot).apply(xyz);
     let (t, tint) = xy_to_temp_tint(Xy::from_xyz(seen));
     (t.clamp(2000.0, 50000.0).round(), tint.clamp(-150.0, 150.0).round())
@@ -161,7 +161,7 @@ mod tests {
         let (t, _) = auto_wb(&img, &SourceInfo::default());
         assert!(t > 7000.0, "{t}");
         let mut s = DevelopSettings::default();
-        s.wb.mode = lightcraft_develop::WbMode::Custom;
+        s.wb.mode = eidos_develop::WbMode::Custom;
         s.wb.temp = t;
         let (t2, tint2) = auto_wb(&img, &SourceInfo::default());
         let _ = (t2, tint2);
@@ -205,7 +205,7 @@ mod tint_tests {
             let (temp, tint) = auto_wb(&img, &info);
             assert!(tint * sign > 0.0, "{rgb:?}: temp {temp}, tint {tint}");
             let mut s = DevelopSettings::default();
-            s.wb.mode = lightcraft_develop::WbMode::Custom;
+            s.wb.mode = eidos_develop::WbMode::Custom;
             s.wb.temp = temp;
             s.wb.tint = tint;
             let mut corrected = img;

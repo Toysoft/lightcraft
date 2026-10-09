@@ -4,13 +4,13 @@
 //! A global matrix can't follow the camera's hue-dependent rendering (the best matrix rendered a
 //! lime shirt olive that the camera kept lime): a hue/saturation table fitted to the residuals
 //! (applied like a DNG `ProfileHueSatMap`) corrects that when it also improves the held-out pixels.
-use lightcraft_color::{D50, D65, Mat3, PROPHOTO, REC2020, bradford, luminance_2020};
-use lightcraft_pipeline::tone::{CameraTone, ToneMap};
-use lightcraft_raster::{
+use eidos_color::{D50, D65, Mat3, PROPHOTO, REC2020, bradford, luminance_2020};
+use eidos_pipeline::tone::{CameraTone, ToneMap};
+use eidos_raster::{
     Rgb32f,
     resample::{Filter, fit},
 };
-use lightcraft_raw::{RawFormat, RawImage, color::CameraTransform, profile::HsvTable};
+use eidos_raw::{RawFormat, RawImage, color::CameraTransform, profile::HsvTable};
 
 #[derive(Clone, Debug)]
 pub(crate) struct CameraLook {
@@ -44,7 +44,7 @@ pub(crate) fn fit_preview(raw: &RawImage, bytes: &[u8], transform: &CameraTransf
     let profile = raw.metadata.model.as_deref().and_then(crate::camera_profiles::get);
     let colour = profile.as_ref().and_then(|p| Some((p.matrix().mul(&transform.matrix.inverse()?), p.hue_sat.clone())));
     let look = fit_pairs_with(&sensor, &reference, colour)?;
-    if lightcraft_pipeline::profiling() {
+    if eidos_pipeline::profiling() {
         eprintln!(
             "[profile] {:?} camera look: {:?}, {:?}, hue/sat table {}, camera profile available {}",
             raw.format,
@@ -61,7 +61,7 @@ pub(crate) fn fit_preview(raw: &RawImage, bytes: &[u8], transform: &CameraTransf
 /// matrix: the generic camera ≈ sRGB model) and of the file's embedded camera JPEG (linear Rec.2020).
 fn proxies(raw: &RawImage, bytes: &[u8], transform: &CameraTransform, size: usize) -> Option<(Rgb32f, Rgb32f)> {
     let edge = (2 * size).max(384) as u32;
-    let decoded = crate::files::decode_raw_preview(bytes, lightcraft_codecs::DecodeOptions { max_size: Some((edge, edge)), max_pixels: 64_000_000 })?;
+    let decoded = crate::files::decode_raw_preview(bytes, eidos_codecs::DecodeOptions { max_size: Some((edge, edge)), max_pixels: 64_000_000 })?;
     let mut reference = decoded.to_working();
     let (a, crop) = (raw.active_area, raw.crop.clipped(raw.active_area.width, raw.active_area.height));
     if crop.width == 0 || crop.height == 0 || reference.width == 0 || reference.height == 0 {
@@ -221,7 +221,7 @@ fn estimate_cr3_framing(sensor: &Rgb32f, reference: &Rgb32f) -> Option<Cr3Framin
     if best.0 < 0.9 || best.0 < before + 0.04 || held_after < 0.9 || held_after < held_before + 0.04 {
         return None;
     }
-    if lightcraft_pipeline::profiling() {
+    if eidos_pipeline::profiling() {
         eprintln!("[profile] CR3 JPEG framing {:?}, held-out edge agreement {held_before:.4} -> {held_after:.4}", best.1);
     }
     Some(best.1)
@@ -242,10 +242,10 @@ fn align_cr3_framing(sensor: Rgb32f, reference: &Rgb32f) -> Rgb32f {
 /// baseline exposure) → its camera JPEG (linear Rec.2020). `None` for formats with their own
 /// colour matrices, other files or unusable previews.
 pub(crate) fn profile_pairs(raw: &RawImage, bytes: &[u8]) -> Option<Vec<([f64; 3], [f64; 3])>> {
-    if !file_local_look(raw.format) || lightcraft_raw::color::has_matrix(&raw.color) {
+    if !file_local_look(raw.format) || eidos_raw::color::has_matrix(&raw.color) {
         return None;
     }
-    let transform = lightcraft_raw::color::camera_transform(raw, lightcraft_raw::color::as_shot_white_xy(raw));
+    let transform = eidos_raw::color::camera_transform(raw, eidos_raw::color::as_shot_white_xy(raw));
     let (sensor, reference) = proxies(raw, bytes, &transform, PROFILE_PROXY)?;
     let to_camera = transform.matrix.inverse()?;
     let (pairs, _) = collect_pairs(&sensor, &reference, 0.05, None)?;
@@ -262,7 +262,7 @@ pub(crate) fn fit_profile(pairs: &[([f64; 3], [f64; 3])]) -> Option<(Mat3, Optio
 fn sensor_proxy(raw: &RawImage, k: usize, edge: usize) -> Option<Rgb32f> {
     Some(match raw.develop_binned(k, 0.99).ok()? {
         Some(sensor) => sensor,
-        None if raw.cpp == 3 && raw.cfa.is_none() => fit(&raw.develop(lightcraft_raw::Method::Bilinear).ok()?, edge, edge, Filter::Box),
+        None if raw.cpp == 3 && raw.cfa.is_none() => fit(&raw.develop(eidos_raw::Method::Bilinear).ok()?, edge, edge, Filter::Box),
         None => return None,
     })
 }
@@ -279,7 +279,7 @@ fn luma(p: [f64; 3]) -> f64 {
     p[0] * 0.2627 + p[1] * 0.6780 + p[2] * 0.0593
 }
 
-/// The finish stage's tone map and chroma curve (`lightcraft_pipeline::finish`).
+/// The finish stage's tone map and chroma curve (`eidos_pipeline::finish`).
 fn displayed(scene: [f64; 3], tone: &ToneMap) -> [f64; 3] {
     let scene = scene.map(|v| v.max(0.0));
     let y = luma(scene);
@@ -463,7 +463,7 @@ fn fit_pairs_on(sensor: &Rgb32f, reference: &Rgb32f, colour: Option<(Mat3, Optio
             (0..3).map(|c| (original[c] - target[c]).powi(2)).sum::<f64>()
         })
         .sum();
-    if lightcraft_pipeline::profiling() {
+    if eidos_pipeline::profiling() {
         eprintln!(
             "[profile] camera look holdout RMS {:.5} -> {:.5} ({samples} channels{})",
             (before / samples as f64).sqrt(),
@@ -552,7 +552,7 @@ fn fit_hue_sat(pairs: &[([f64; 3], [f64; 3])], matrix: &Mat3) -> Option<HsvTable
         .filter_map(|(_, (x, y))| {
             let p = to.apply(matrix.apply(*x));
             let (hp, sp) = hue_saturation(p)?;
-            let value = f64::from(lightcraft_color::transfer::linear_to_srgb(p[0].max(p[1]).max(p[2]).min(1.0) as f32));
+            let value = f64::from(eidos_color::transfer::linear_to_srgb(p[0].max(p[1]).max(p[2]).min(1.0) as f32));
             let (ht, st) = hue_saturation(to.apply(*y))?;
             // hue is meaningless near neutral
             if sp < 0.08 || st < 0.02 {
@@ -648,9 +648,9 @@ fn fit_chroma(pairs: &[([f64; 3], [f64; 3])], look: &CameraLook) -> Option<Camer
     if samples.len() < 64 {
         return None;
     }
-    let mut curve = [1.0f32; lightcraft_pipeline::tone::CHROMA_N];
+    let mut curve = [1.0f32; eidos_pipeline::tone::CHROMA_N];
     for (j, node) in curve.iter_mut().enumerate() {
-        let at = j as f64 / (lightcraft_pipeline::tone::CHROMA_N - 1) as f64;
+        let at = j as f64 / (eidos_pipeline::tone::CHROMA_N - 1) as f64;
         let (mut weight, mut sum) = (0.0, 0.0);
         for &(o, cp, log_ratio) in &samples {
             let k = (-0.5 * ((o - at) / CHROMA_KERNEL).powi(2)).exp() * cp;
@@ -672,7 +672,7 @@ fn fit_chroma(pairs: &[([f64; 3], [f64; 3])], look: &CameraLook) -> Option<Camer
             .sum()
     };
     let (before, after) = (error(&tone), error(&with));
-    if lightcraft_pipeline::profiling() {
+    if eidos_pipeline::profiling() {
         eprintln!("[profile] ARW chroma curve {curve:?}: held-out error {before:.4} -> {after:.4}");
     }
     (after.is_finite() && after < before).then_some(fitted)
@@ -728,7 +728,7 @@ mod tests {
 
     #[test]
     fn linear_arw_gets_a_sensor_proxy_without_demosaicing() {
-        use lightcraft_raw::{BlackLevel, ColorData, OpcodeLists, Orientation, RawData, RawFormat, Rect};
+        use eidos_raw::{BlackLevel, ColorData, OpcodeLists, Orientation, RawData, RawFormat, Rect};
         let mut raw = RawImage {
             format: RawFormat::Arw,
             width: 32,
@@ -746,7 +746,7 @@ mod tests {
             wb_multipliers: Some([1.0; 3]),
             linearized: true,
             opcodes: OpcodeLists::default(),
-            metadata: lightcraft_meta::Metadata::default(),
+            metadata: eidos_meta::Metadata::default(),
         };
         let proxy = sensor_proxy(&raw, 2, 384).unwrap();
         assert_eq!((proxy.width, proxy.height), (32, 32));
@@ -897,7 +897,7 @@ mod tests {
         assert!(chroma[6] < 0.5 * chroma[1], "highlights bleach relative to shadows: {chroma:?}");
         // and the rendered highlights land on the camera's, far closer than without the curve
         let with = ToneMap::camera(&fit.tone, 0.0, 0.0, 0.0);
-        let without = ToneMap::camera(&fit.tone.with_chroma([1.0; lightcraft_pipeline::tone::CHROMA_N]).unwrap(), 0.0, 0.0, 0.0);
+        let without = ToneMap::camera(&fit.tone.with_chroma([1.0; eidos_pipeline::tone::CHROMA_N]).unwrap(), 0.0, 0.0, 0.0);
         let highlight_error = |map: &ToneMap| -> f64 {
             sensor
                 .data
@@ -1054,7 +1054,7 @@ mod tests {
     /// download or an unfinished codec cannot make this test claim a successful RAW calibration.
     #[test]
     fn corpus_cr3_gets_a_framing_aligned_camera_look() {
-        let path = std::env::var_os("LIGHTCRAFT_CORPUS")
+        let path = std::env::var_os("EIDOS_CORPUS")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"))
             .join("raw/cr3-canon-r100-raw.cr3");
@@ -1062,9 +1062,9 @@ mod tests {
             eprintln!("skip: {} absent", path.display());
             return;
         };
-        let raw = match lightcraft_raw::decode(&bytes) {
+        let raw = match eidos_raw::decode(&bytes) {
             Ok(raw) => raw,
-            Err(lightcraft_raw::RawError::Unsupported(why)) => {
+            Err(eidos_raw::RawError::Unsupported(why)) => {
                 eprintln!("skip CR3 sensor decoder: {why}");
                 return;
             }
@@ -1072,7 +1072,7 @@ mod tests {
         };
         assert_eq!(raw.format, RawFormat::Cr3);
         assert_eq!(raw.info().developed_size(), (6000, 4000));
-        let transform = lightcraft_raw::color::camera_transform(&raw, lightcraft_raw::color::as_shot_white_xy(&raw));
+        let transform = eidos_raw::color::camera_transform(&raw, eidos_raw::color::as_shot_white_xy(&raw));
         let look = fit_preview(&raw, &bytes, &transform);
         eprintln!("R100 guarded colour fit accepted: {}", look.is_some());
         assert!(look.is_some(), "this R100 corpus photo has enough matching colour after camera-framing alignment");
@@ -1086,7 +1086,7 @@ mod tests {
     /// balance is relative to the as-shot look.
     #[test]
     fn corpus_nef_gets_a_camera_look() {
-        let path = std::env::var_os("LIGHTCRAFT_CORPUS")
+        let path = std::env::var_os("EIDOS_CORPUS")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"))
             .join("raw/nef-nikon-d7500-lossless14.nef");
@@ -1103,7 +1103,7 @@ mod tests {
     /// while the embedded JPEG shows the whole sensor; the look is still fitted, against the matching part of it.
     #[test]
     fn corpus_rw2_with_an_in_camera_crop_gets_a_camera_look() {
-        let path = std::env::var_os("LIGHTCRAFT_CORPUS")
+        let path = std::env::var_os("EIDOS_CORPUS")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"))
             .join("raw/rw2-panasonic-fz1000m2-4x3.rw2");
@@ -1122,7 +1122,7 @@ mod tests {
     /// (held-out RMS 0.113): it used to open grey with the neutral fallback.
     #[test]
     fn corpus_arw_with_a_lens_corrected_preview_gets_a_camera_look() {
-        let path = std::env::var_os("LIGHTCRAFT_CORPUS")
+        let path = std::env::var_os("EIDOS_CORPUS")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"))
             .join("raw/arw-sony-a7rm2-12bit-uncompressed.arw");
@@ -1185,7 +1185,7 @@ mod tests {
     /// corpus files.
     #[test]
     fn corpus_raf_colour_and_white_balance() {
-        let dir = std::env::var_os("LIGHTCRAFT_CORPUS")
+        let dir = std::env::var_os("EIDOS_CORPUS")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"))
             .join("raw");

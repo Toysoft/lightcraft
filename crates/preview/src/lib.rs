@@ -21,8 +21,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
 pub use disk::{DiskCache, decode_jpeg, encode_jpeg};
+use eidos_raster::Rgba8;
 pub use hash::{Hash128, Hasher128, hash_bytes};
-use lightcraft_raster::Rgba8;
 pub use lru::{Lru, next_tick};
 pub use pool::JobPool;
 
@@ -116,7 +116,7 @@ impl PreviewCache {
             }
         };
         #[cfg(not(target_arch = "wasm32"))]
-        if std::thread::Builder::new().name("lc-preview-write".into()).spawn(write).is_err() {
+        if std::thread::Builder::new().name("eidos-preview-write".into()).spawn(write).is_err() {
             log::warn!("preview cache: could not start a writer thread");
         }
         #[cfg(target_arch = "wasm32")]

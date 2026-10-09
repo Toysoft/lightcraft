@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use lightcraft_raster::Rgba8;
+use eidos_raster::Rgba8;
 
 use super::*;
 
 #[test]
 fn cleared_generation_cannot_read_or_repopulate_memory_or_disk() {
-    let dir = std::env::temp_dir().join(format!("lc-thumbnail-generation-{}-{}", std::process::id(), next_tick()));
+    let dir = std::env::temp_dir().join(format!("eidos-thumbnail-generation-{}-{}", std::process::id(), next_tick()));
     let cache = Arc::new(PreviewCache::with_disk(1 << 20, &dir, 1 << 20));
     let key = hash_bytes(b"same-key");
     let old = cache.generation();
@@ -51,7 +51,7 @@ fn retired_cache_keeps_its_files_but_refuses_every_read_and_write() {
 }
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("lc-preview-{tag}-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("eidos-preview-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     d
 }

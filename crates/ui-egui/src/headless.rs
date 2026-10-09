@@ -2,7 +2,7 @@
 //! the CPU ([`crate::softpaint`]) — no window, no GPU, no compositor.
 //!
 //! Two users:
-//! - [`Headless`]: a complete windowless app session (`lightcraft-cli snapshot`, tests). It plays
+//! - [`Headless`]: a complete windowless app session (`eidos-cli snapshot`, tests). It plays
 //!   the role eframe plays for the desktop app: builds [`egui::RawInput`], runs `logic` + `ui`,
 //!   keeps a CPU mirror of the textures, executes viewport commands (`Screenshot` is answered with
 //!   a CPU-rendered frame, `InnerSize` resizes, `Close` quits). Control-protocol requests go
@@ -21,7 +21,7 @@ use egui::{Color32, ColorImage, RawInput, TextureId, ViewportCommand, ViewportId
 use serde_json::{Value, json};
 
 use crate::softpaint::{self, CpuTexture, Layered, TextureStore};
-use crate::{ControlRequest, LightcraftApp};
+use crate::{ControlRequest, EidosApp};
 
 /// Background behind the panels (eframe's default clear colour, made opaque).
 const CLEAR: Color32 = Color32::from_rgb(12, 12, 12);
@@ -105,7 +105,7 @@ impl HeadlessView {
 /// A windowless app session: the app's `logic` + `ui` driven frame by frame into a
 /// [`HeadlessView`], with control-protocol requests answered by the shared handler.
 pub struct Headless {
-    pub app: LightcraftApp,
+    pub app: EidosApp,
     pub view: HeadlessView,
     /// Logical size (points) and scale.
     pub size: egui::Vec2,
@@ -119,7 +119,7 @@ pub struct Headless {
 
 impl Headless {
     /// Wrap `app` (its control channel is replaced by the driver's).
-    pub fn new(app: LightcraftApp, size: [f32; 2], pixels_per_point: f32) -> Self {
+    pub fn new(app: EidosApp, size: [f32; 2], pixels_per_point: f32) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut app = app.with_control(rx);
         app.headless_host = true;
@@ -237,7 +237,7 @@ impl Headless {
     #[cfg(test)]
     pub(crate) fn hide_home_above(&mut self, path: &std::path::Path) {
         let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
-        if !home.is_empty() && lightcraft_catalog::query::folder_within(&path.to_string_lossy(), &home) {
+        if !home.is_empty() && eidos_catalog::query::folder_within(&path.to_string_lossy(), &home) {
             let r = self.request("engine.execute", json!({"command": "local.hide", "params": {"path": home}}), Duration::from_secs(10));
             assert_eq!(r["ok"], true, "{r}");
         }
@@ -283,7 +283,7 @@ mod tests {
 
     fn demo(size: [f32; 2]) -> Headless {
         let services = crate::Services { png: None, ..Default::default() };
-        let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
+        let mut app = EidosApp::new(eidos_engine::Session::with_demo(), services);
         app.ui.view = crate::state::ViewMode::PhotoGrid;
         Headless::new(app, size, 1.0)
     }
@@ -335,8 +335,8 @@ mod tests {
     fn compare_survey_and_auto_advance_by_keyboard() {
         let mut h = demo([1000.0, 700.0]);
         let t = Duration::from_secs(10);
-        let rating = |h: &Headless, id: u64| h.app.session.catalog.photo(lightcraft_catalog::PhotoId(id)).unwrap().rating;
-        let flag = |h: &Headless, id: u64| h.app.session.catalog.photo(lightcraft_catalog::PhotoId(id)).unwrap().flag;
+        let rating = |h: &Headless, id: u64| h.app.session.catalog.photo(eidos_catalog::PhotoId(id)).unwrap().rating;
+        let flag = |h: &Headless, id: u64| h.app.session.catalog.photo(eidos_catalog::PhotoId(id)).unwrap().flag;
         let vis: Vec<u64> = h.app.session.visible_cloned().iter().map(|p| p.0).collect();
         h.request("engine.execute", json!({"command": "library.select", "params": {"ids": [vis[0], vis[1]]}}), t);
         let r = h.request("engine.execute", json!({"command": "view.compare"}), t);
@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(h.app.ui.compare, Some((vis[0], vis[1])));
         // Shift+X: reject and advance to the next candidate
         h.request("ui.key", json!({"key": "x", "shift": true}), t);
-        assert_eq!(flag(&h, vis[1]), lightcraft_catalog::Flag::Reject);
+        assert_eq!(flag(&h, vis[1]), eidos_catalog::Flag::Reject);
         assert_eq!(h.app.ui.compare, Some((vis[0], vis[2])));
         h.request("engine.execute", json!({"command": "compare.swap"}), t);
         assert_eq!(h.app.ui.compare, Some((vis[2], vis[0])));
@@ -367,7 +367,7 @@ mod tests {
         assert!(h.app.ui.auto_advance);
         h.request("ui.key", json!({"key": "5"}), t);
         h.request("ui.key", json!({"key": "p"}), t);
-        assert_eq!((rating(&h, vis[3]), flag(&h, vis[4])), (5, lightcraft_catalog::Flag::Pick));
+        assert_eq!((rating(&h, vis[3]), flag(&h, vis[4])), (5, eidos_catalog::Flag::Pick));
         assert_eq!(h.app.session.selection.active.map(|p| p.0), Some(vis[5]));
         assert_eq!(h.app.session.selection.ids.len(), 3, "the survey keeps its selection");
         let img = h.snapshot(SETTLE);
@@ -401,7 +401,7 @@ mod tests {
         h.step_until(SETTLE, |h| h.app.renderer.variant_textures() >= 6);
         assert!(h.app.renderer.variant_textures() >= 6, "variant thumbnails rendered: {}", h.app.renderer.variant_textures());
         // hover: the loupe shows the look, nothing is committed
-        let r = h.request("ui.hoverWidget", json!({"id": "profileCell:lc.vivid"}), t);
+        let r = h.request("ui.hoverWidget", json!({"id": "profileCell:eidos.vivid"}), t);
         assert_eq!(r["ok"], true, "{r}");
         h.settle(SETTLE);
         // the hover render can land after a quiet spell on a loaded machine (FreeBSD CI): wait for it
@@ -418,12 +418,12 @@ mod tests {
         h.step();
         assert!(h.app.hover_preview.is_none());
         // click applies (one history step); the star toggles the favourite
-        h.request("ui.clickWidget", json!({"id": "profileCell:lc.vivid"}), t);
-        assert_eq!(photo(&h).develop.profile.id, "lc.vivid");
+        h.request("ui.clickWidget", json!({"id": "profileCell:eidos.vivid"}), t);
+        assert_eq!(photo(&h).develop.profile.id, "eidos.vivid");
         assert_eq!(photo(&h).history.len(), before.history.len() + 1);
-        h.request("ui.clickWidget", json!({"id": "profileStar:lc.portrait"}), t);
-        assert_eq!(h.app.session.profile_favorites, ["lc.portrait"]);
-        assert_eq!(photo(&h).develop.profile.id, "lc.vivid", "the star doesn't apply");
+        h.request("ui.clickWidget", json!({"id": "profileStar:eidos.portrait"}), t);
+        assert_eq!(h.app.session.profile_favorites, ["eidos.portrait"]);
+        assert_eq!(photo(&h).develop.profile.id, "eidos.vivid", "the star doesn't apply");
         h.settle(SETTLE);
     }
 
@@ -439,7 +439,7 @@ mod tests {
         let id = h.app.session.active().unwrap();
         let photo = |h: &Headless| h.app.session.catalog.photo(id).unwrap().clone();
         let before = photo(&h);
-        h.request("ui.hoverWidget", json!({"id": "preset:lc.bw-high-contrast"}), t);
+        h.request("ui.hoverWidget", json!({"id": "preset:eidos.bw-high-contrast"}), t);
         h.settle(SETTLE);
         h.step_until(SETTLE, |h| h.app.loupe_shown.map(|l| l.1) == Some("hover"));
         assert_eq!(h.app.hover_preview.as_ref().map(|p| p.label.as_str()), Some("Preset: High Contrast B&W"));
@@ -453,7 +453,7 @@ mod tests {
         h.step();
         assert_eq!(h.app.hover_preview.as_ref().map(|p| p.label.as_str()), Some("Preset: High Contrast B&W"));
         // hovering another preset switches smoothly to it
-        h.request("ui.hoverWidget", json!({"id": "preset:lc.warm-glow"}), t);
+        h.request("ui.hoverWidget", json!({"id": "preset:eidos.warm-glow"}), t);
         h.settle(SETTLE);
         h.step();
         assert_eq!(h.app.hover_preview.as_ref().map(|p| p.label.as_str()), Some("Preset: Warm Glow"));
@@ -499,7 +499,7 @@ mod tests {
             assert_eq!(r["ok"], true, "{w}: {r}");
         }
         let f = h.app.session.filter.clone();
-        assert_eq!((f.rating, f.flag, f.label), (3, Some(lightcraft_catalog::Flag::Pick), None), "a second click clears the label");
+        assert_eq!((f.rating, f.flag, f.label), (3, Some(eidos_catalog::Flag::Pick), None), "a second click clears the label");
         let n = h.app.session.visible_cloned().len();
         assert!(n > 0 && n < all);
         h.request("ui.clickWidget", json!({"id": "button:filterSave"}), t);
@@ -531,7 +531,7 @@ mod tests {
         h.app.ui.thumb_size = 120.0;
         h.settle(SETTLE);
         let vis = h.app.session.visible_cloned();
-        let month = h.app.session.catalog.date_runs(&vis, h.app.session.sort.key, lightcraft_catalog::GroupBy::Month);
+        let month = h.app.session.catalog.date_runs(&vis, h.app.session.sort.key, eidos_catalog::GroupBy::Month);
         let r = h.request("ui.clickWidget", json!({"id": format!("group:{}", month[0].key)}), t);
         assert_eq!(r["ok"], true, "{r}");
         h.request("engine.execute", json!({"command": "library.sort", "params": {"group": "none"}}), t);
@@ -587,7 +587,7 @@ mod tests {
         assert!(h.settle(SETTLE), "keyword suggestions did not settle");
         let r = h.request("ui.clickWidget", json!({"id": "kwSuggest:gelato"}), t);
         assert_eq!(r["ok"], true, "{r}");
-        assert!(h.app.session.catalog.photo(lightcraft_catalog::PhotoId(vis[1])).unwrap().meta.keywords.contains(&"gelato".to_string()));
+        assert!(h.app.session.catalog.photo(eidos_catalog::PhotoId(vis[1])).unwrap().meta.keywords.contains(&"gelato".to_string()));
         h.settle(SETTLE);
     }
 
@@ -634,7 +634,7 @@ mod tests {
         h.settle(SETTLE);
         let r = h.request("ui.dialog.confirm", json!({}), t);
         assert_eq!(r["ok"], true, "{r}");
-        let name = |id: u64| h.app.session.catalog.photo(lightcraft_catalog::PhotoId(id)).unwrap().file_name.clone();
+        let name = |id: u64| h.app.session.catalog.photo(eidos_catalog::PhotoId(id)).unwrap().file_name.clone();
         assert!(name(vis[0]).starts_with("Trip-05."), "{}", name(vis[0]));
         assert!(name(vis[1]).starts_with("Trip-06."), "{}", name(vis[1]));
         h.settle(SETTLE);
@@ -653,7 +653,7 @@ mod tests {
         h.request("engine.execute", json!({"command": "dialog.export", "params": {}}), t);
         // the widest variant: watermark graphic and every optional row
         if let Some(crate::state::Dialog::Export { opts, .. }) = &mut h.app.ui.dialog {
-            let mut wm = lightcraft_engine::export::Watermark { image: "logo.png".into(), ..Default::default() };
+            let mut wm = eidos_engine::export::Watermark { image: "logo.png".into(), ..Default::default() };
             wm.text.clear();
             opts.watermark = Some(wm);
         }
@@ -694,7 +694,7 @@ mod tests {
         h.settle(SETTLE);
         if let Some(crate::state::Dialog::Export { full_size, resize, dir, .. }) = &mut h.app.ui.dialog {
             *full_size = false;
-            *resize = lightcraft_engine::export::Resize::long_edge(64);
+            *resize = eidos_engine::export::Resize::long_edge(64);
             *dir = "/lc-test-out".into();
         }
         let r = h.request("ui.dialog.confirm", json!({}), t);
@@ -740,8 +740,8 @@ mod tests {
         let r = h.request("ui.drag", json!({"x": x, "y": y, "toX": tx, "toY": ty, "steps": 12}), t);
         assert_eq!(r["ok"], true, "{r}");
         h.settle(SETTLE);
-        let members = h.app.session.catalog.album(lightcraft_catalog::AlbumId(album)).unwrap().photos.clone();
-        assert_eq!(members, vec![lightcraft_catalog::PhotoId(first)]);
+        let members = h.app.session.catalog.album(eidos_catalog::AlbumId(album)).unwrap().photos.clone();
+        assert_eq!(members, vec![eidos_catalog::PhotoId(first)]);
         assert!(h.app.ui.dragging_photos.is_none(), "the drag ended");
     }
 
@@ -758,7 +758,7 @@ mod tests {
         h.app
             .session
             .catalog
-            .apply(lightcraft_catalog::Op::SetContent {
+            .apply(eidos_catalog::Op::SetContent {
                 id: po,
                 width: ph.width,
                 height: ph.height,
@@ -848,21 +848,21 @@ mod tests {
     fn browse_a_local_folder() {
         let mut h = demo([1300.0, 900.0]);
         let t = Duration::from_secs(10);
-        let dir = std::env::temp_dir().join(format!("lc-ui-browse-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-ui-browse-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("inner")).unwrap();
-        let img = lightcraft_raster::Rgba8::from_fn(24, 16, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
-        let o = lightcraft_engine::export::ExportOptions { format: lightcraft_engine::export::ExportFormat::Png, ..Default::default() };
+        let img = eidos_raster::Rgba8::from_fn(24, 16, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
+        let o = eidos_engine::export::ExportOptions { format: eidos_engine::export::ExportFormat::Png, ..Default::default() };
         for (i, p) in [dir.join("a.png"), dir.join("inner/b.png")].iter().enumerate() {
             let mut img = img.clone();
             img.data[0][0] = i as u8; // different bytes per file
-            std::fs::write(p, lightcraft_engine::export::encode_image(&img, &o).unwrap()).unwrap();
+            std::fs::write(p, eidos_engine::export::encode_image(&img, &o).unwrap()).unwrap();
         }
         let library_before = h.app.session.catalog.photos().filter(|p| !p.local).count();
         let r = h.request("engine.execute", json!({"command": "library.browse", "params": {"path": dir.to_string_lossy()}}), t);
         // the folder is read in the background: the view switches at once, the photos follow
         assert_eq!(r["result"]["scanning"], true, "{r}");
-        assert_eq!(h.app.session.source, lightcraft_engine::LibrarySource::Folder);
+        assert_eq!(h.app.session.source, eidos_engine::LibrarySource::Folder);
         h.settle(SETTLE);
         assert!(h.app.scan.is_none() && h.app.import.is_none());
         assert_eq!(h.app.session.visible_cloned().len(), 1);
@@ -895,7 +895,7 @@ mod tests {
         let size = [1300.0, 900.0];
         let mut h = demo(size);
         let t = Duration::from_secs(10);
-        let dir = std::env::temp_dir().join(format!("lc-ui-hide-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-ui-hide-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.to_string_lossy().to_string();
@@ -959,7 +959,7 @@ mod tests {
     fn kept_local_root_stays_while_browsing_below_and_elsewhere() {
         let mut h = demo([1300.0, 1400.0]);
         let t = Duration::from_secs(10);
-        let base = std::env::temp_dir().join(format!("lc-ui-roots-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("eidos-ui-roots-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         for d in ["Photos/2026/20260101", "Photos/2026/20260114", "Other"] {
             std::fs::create_dir_all(base.join(d)).unwrap();
@@ -971,7 +971,7 @@ mod tests {
         h.hide_home_above(&base);
         let exec = |h: &mut Headless, c: &str, p: Value| h.request("engine.execute", json!({"command": c, "params": p}), t);
         let rects = |h: &mut Headless| -> std::collections::HashMap<String, f64> {
-            let w = h.request("ui.widgets", json!({"filter": "lc-ui-roots-"}), t);
+            let w = h.request("ui.widgets", json!({"filter": "eidos-ui-roots-"}), t);
             w["result"].as_array().unwrap().iter().map(|x| (x["id"].as_str().unwrap().to_string(), x["rect"][0].as_f64().unwrap_or(0.0))).collect()
         };
         h.request("ui.set", json!({"leftPanel": true}), t);
@@ -1049,7 +1049,7 @@ mod tests {
         assert!((exposure(&h) - 0.25).abs() < 1e-9, "{}", exposure(&h));
         let first = h.app.session.active().unwrap();
         h.request("ui.key", json!({"key": "Z", "shift": true}), t);
-        assert_eq!(h.app.session.catalog.photo(first).unwrap().flag, lightcraft_catalog::Flag::Pick);
+        assert_eq!(h.app.session.catalog.photo(first).unwrap().flag, eidos_catalog::Flag::Pick);
         assert_ne!(h.app.session.active(), Some(first), "advanced");
     }
 
@@ -1116,7 +1116,7 @@ mod tests {
         assert_eq!(h.app.ui.right, crate::state::RightPanel::Edit, "no-op outside tools");
     }
 
-    /// ⌘Q (File → Quit LightCraft) closes the window.
+    /// ⌘Q (File → Quit Eidos) closes the window.
     #[test]
     fn cmd_q_quits() {
         let mut h = demo([900.0, 600.0]);
@@ -1132,13 +1132,13 @@ mod tests {
     fn add_folder_opens_the_import_review() {
         let mut h = demo([1200.0, 900.0]);
         let t = Duration::from_secs(10);
-        let dir = std::env::temp_dir().join(format!("lc-addfolder-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-addfolder-{}", std::process::id()));
         let sub = dir.join("day 2");
         std::fs::create_dir_all(&sub).unwrap();
-        let img = lightcraft_raster::Rgba8::from_fn(24, 16, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
-        let png = lightcraft_engine::export::encode_image(
+        let img = eidos_raster::Rgba8::from_fn(24, 16, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
+        let png = eidos_engine::export::encode_image(
             &img,
-            &lightcraft_engine::export::ExportOptions { format: lightcraft_engine::export::ExportFormat::Png, ..Default::default() },
+            &eidos_engine::export::ExportOptions { format: eidos_engine::export::ExportFormat::Png, ..Default::default() },
         )
         .unwrap();
         std::fs::write(dir.join("a.png"), &png).unwrap();
@@ -1194,11 +1194,11 @@ mod tests {
     fn browsing_the_same_folder_again_does_not_restart() {
         let mut h = demo([1200.0, 900.0]);
         let t = Duration::from_secs(10);
-        let dir = std::env::temp_dir().join(format!("lc-browse-again-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-browse-again-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let img = lightcraft_raster::Rgba8::from_fn(8, 8, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
-        let o = lightcraft_engine::export::ExportOptions { format: lightcraft_engine::export::ExportFormat::Png, ..Default::default() };
-        std::fs::write(dir.join("a.png"), lightcraft_engine::export::encode_image(&img, &o).unwrap()).unwrap();
+        let img = eidos_raster::Rgba8::from_fn(8, 8, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
+        let o = eidos_engine::export::ExportOptions { format: eidos_engine::export::ExportFormat::Png, ..Default::default() };
+        std::fs::write(dir.join("a.png"), eidos_engine::export::encode_image(&img, &o).unwrap()).unwrap();
         let gate = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let started = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let (g, n) = (gate.clone(), started.clone());
@@ -1207,7 +1207,7 @@ mod tests {
             while !g.load(std::sync::atomic::Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(5));
             }
-            Ok(lightcraft_engine::media::ProbeInfo { format: "PNG".into(), ..Default::default() })
+            Ok(eidos_engine::media::ProbeInfo { format: "PNG".into(), ..Default::default() })
         }));
         let browse =
             |h: &mut Headless| h.request("engine.execute", json!({"command": "library.browse", "params": {"path": dir.to_string_lossy()}}), t);
@@ -1226,12 +1226,12 @@ mod tests {
     fn add_folder_scans_in_the_background() {
         let mut h = demo([1200.0, 900.0]);
         let t = Duration::from_secs(10);
-        let dir = std::env::temp_dir().join(format!("lc-scanbg-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-scanbg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let img = lightcraft_raster::Rgba8::from_fn(8, 8, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
-        let png = lightcraft_engine::export::encode_image(
+        let img = eidos_raster::Rgba8::from_fn(8, 8, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
+        let png = eidos_engine::export::encode_image(
             &img,
-            &lightcraft_engine::export::ExportOptions { format: lightcraft_engine::export::ExportFormat::Png, ..Default::default() },
+            &eidos_engine::export::ExportOptions { format: eidos_engine::export::ExportFormat::Png, ..Default::default() },
         )
         .unwrap();
         std::fs::write(dir.join("a.png"), &png).unwrap();
@@ -1250,12 +1250,12 @@ mod tests {
     fn folder_scan_cancel_and_busy() {
         let mut h = demo([1200.0, 900.0]);
         let t = Duration::from_secs(10);
-        let dir = std::env::temp_dir().join(format!("lc-scancancel-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-scancancel-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let img = lightcraft_raster::Rgba8::from_fn(8, 8, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
-        let png = lightcraft_engine::export::encode_image(
+        let img = eidos_raster::Rgba8::from_fn(8, 8, |x, y| [(x * 9) as u8, (y * 12) as u8, 80, 255]);
+        let png = eidos_engine::export::encode_image(
             &img,
-            &lightcraft_engine::export::ExportOptions { format: lightcraft_engine::export::ExportFormat::Png, ..Default::default() },
+            &eidos_engine::export::ExportOptions { format: eidos_engine::export::ExportFormat::Png, ..Default::default() },
         )
         .unwrap();
         std::fs::write(dir.join("a.png"), &png).unwrap();
@@ -1266,7 +1266,7 @@ mod tests {
             while !g.load(std::sync::atomic::Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(5));
             }
-            Ok(lightcraft_engine::media::ProbeInfo { format: "PNG".into(), ..Default::default() })
+            Ok(eidos_engine::media::ProbeInfo { format: "PNG".into(), ..Default::default() })
         }));
         let r = h.request("engine.execute", json!({"command": "file.addFolder", "params": {"path": dir.to_string_lossy()}}), t);
         assert_eq!(r["result"]["scanning"], true, "{r}");
@@ -1304,7 +1304,7 @@ mod tests {
         assert_eq!(r["ok"], true, "{r}");
         h.settle(SETTLE);
         assert_eq!(h.request("ui.dialog.confirm", json!({}), t)["ok"], true);
-        let d = h.app.session.develop_of(lightcraft_catalog::PhotoId(ids[1])).unwrap();
+        let d = h.app.session.develop_of(eidos_catalog::PhotoId(ids[1])).unwrap();
         assert_eq!((d.light.exposure, d.color.vibrance), (1.0, 0.0));
         // ⌘F, then typing filters the grid by text
         h.request("ui.set", json!({"view": "grid"}), t);
@@ -1337,7 +1337,7 @@ mod tests {
         let r = h.request("ui.dialog.confirm", json!({}), t);
         assert_eq!(r["ok"], true, "{r}");
         let after = h.app.session.catalog.photo(id).unwrap().captured.clone().unwrap();
-        let secs = lightcraft_catalog::dates::iso_seconds;
+        let secs = eidos_catalog::dates::iso_seconds;
         assert_eq!(secs(&after).unwrap() - secs(&before).unwrap(), -3 * 3600);
         h.settle(SETTLE);
     }
@@ -1353,7 +1353,7 @@ mod tests {
         h.request("ui.set", json!({"view": "detail", "right": "info"}), t);
         let r = h.request("ui.clickWidget", json!({"id": "label:green"}), t);
         assert_eq!(r["ok"], true, "{r}");
-        assert_eq!(h.app.session.catalog.photo(id).unwrap().label, Some(lightcraft_catalog::ColorLabel::Green));
+        assert_eq!(h.app.session.catalog.photo(id).unwrap().label, Some(eidos_catalog::ColorLabel::Green));
         h.request("engine.execute", json!({"command": "dialog.labelNames"}), t);
         if let Some(crate::state::Dialog::LabelNames { names, .. }) = &mut h.app.ui.dialog {
             names[2] = "Approved".into();
@@ -1375,19 +1375,19 @@ mod tests {
     /// with keywords, as one undo step.
     #[test]
     fn import_review_dialog() {
-        let dir = std::env::temp_dir().join(format!("lc-ui-import-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-ui-import-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for i in 0..5u8 {
             let (w, h) = (40usize, 30usize);
             let data: Vec<[u8; 4]> = (0..w * h).map(|k| [(k % w * 6) as u8, i * 40, (k / w * 8) as u8, 255]).collect();
-            let img = lightcraft_raster::Rgba8 { width: w, height: h, data };
-            let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+            let img = eidos_raster::Rgba8 { width: w, height: h, data };
+            let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
             std::fs::write(dir.join(format!("img{i}.png")), png).unwrap();
         }
         std::fs::copy(dir.join("img0.png"), dir.join("img0-copy.png")).unwrap();
         let services = crate::Services { png: None, ..Default::default() };
-        let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo().with_fs(), services);
+        let mut app = EidosApp::new(eidos_engine::Session::with_demo().with_fs(), services);
         app.ui.view = crate::state::ViewMode::PhotoGrid;
         let mut h = Headless::new(app, [1300.0, 900.0], 1.0);
         let t = Duration::from_secs(10);
@@ -1433,18 +1433,17 @@ mod tests {
     #[test]
     fn import_review_offers_recently_deleted_files() {
         for (choice, tag) in [("restore", "r"), ("fresh", "f")] {
-            let dir = std::env::temp_dir().join(format!("lc-ui-import-trash-{tag}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("eidos-ui-import-trash-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             for i in 0..2u8 {
                 let data: Vec<[u8; 4]> = (0..40 * 30).map(|k| [(k % 40 * 6) as u8, i * 90, 7, 255]).collect();
-                let img = lightcraft_raster::Rgba8 { width: 40, height: 30, data };
-                let png =
-                    lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+                let img = eidos_raster::Rgba8 { width: 40, height: 30, data };
+                let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
                 std::fs::write(dir.join(format!("img{i}.png")), png).unwrap();
             }
             let services = crate::Services { png: None, ..Default::default() };
-            let mut app = LightcraftApp::new(lightcraft_engine::Session::new().with_fs(), services);
+            let mut app = EidosApp::new(eidos_engine::Session::new().with_fs(), services);
             app.ui.view = crate::state::ViewMode::PhotoGrid;
             let mut h = Headless::new(app, [1300.0, 900.0], 1.0);
             let t = Duration::from_secs(10);
@@ -1479,7 +1478,7 @@ mod tests {
             let toast = h.app.ui.toast.clone().map(|t| t.0).unwrap_or_default();
             let photos = &h.app.session.catalog;
             assert_eq!(photos.photos().filter(|p| !p.deleted).count(), 2, "{choice}");
-            let old = photos.photo(lightcraft_catalog::PhotoId(id));
+            let old = photos.photo(eidos_catalog::PhotoId(id));
             if choice == "restore" {
                 assert!(toast.contains("1 restored"), "{toast}");
                 assert!(old.is_some_and(|p| !p.deleted && p.rating == 3), "restored with its edits");
@@ -1499,7 +1498,7 @@ mod tests {
         let mut h = demo([1400.0, 1000.0]);
         let t = Duration::from_secs(10);
         let candidates = (0..60)
-            .map(|i| lightcraft_engine::import::ImportCandidate {
+            .map(|i| eidos_engine::import::ImportCandidate {
                 path: format!("/lc-test/img{i}.png"),
                 name: format!("img{i}.png"),
                 error: Some("not read in this test".into()),
@@ -1548,16 +1547,16 @@ mod tests {
     /// restored a re-add selects it in All Photos.
     #[test]
     fn readding_a_deleted_photo_shows_it_in_recently_deleted() {
-        let dir = std::env::temp_dir().join(format!("lc-ui-readd-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-ui-readd-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let img = lightcraft_raster::Rgba8 { width: 16, height: 12, data: vec![[200, 120, 40, 255]; 16 * 12] };
-        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+        let img = eidos_raster::Rgba8 { width: 16, height: 12, data: vec![[200, 120, 40, 255]; 16 * 12] };
+        let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
         let file = dir.join("flower.png");
         std::fs::write(&file, png).unwrap();
         let paths = vec![file.to_string_lossy().to_string()];
         let services = crate::Services { png: None, ..Default::default() };
-        let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo().with_fs(), services);
+        let mut app = EidosApp::new(eidos_engine::Session::with_demo().with_fs(), services);
         app.ui.view = crate::state::ViewMode::PhotoGrid;
         let mut h = Headless::new(app, [1300.0, 900.0], 1.0);
         let t = Duration::from_secs(10);
@@ -1574,7 +1573,7 @@ mod tests {
         let id = h.app.session.selection.active.expect("imported photo selected");
         h.request("engine.execute", json!({"command": "photo.delete", "params": {"ids": [id.0]}}), t);
         assert!(h.app.session.catalog.photo(id).unwrap().deleted);
-        let photo_items = |app: &LightcraftApp| -> Vec<String> {
+        let photo_items = |app: &EidosApp| -> Vec<String> {
             let bar = crate::menubar::menu_bar(app);
             let items = &bar.iter().find(|(title, _)| title == "Photo").expect("Photo menu").1;
             items.iter().filter_map(|n| if let crate::menubar::MenuNode::Item { id, .. } = n { Some(id.clone()) } else { None }).collect()
@@ -1584,7 +1583,7 @@ mod tests {
         h.app.ui.left_panel = false;
         crate::import::start_paths(&mut h.app, paths.clone()).unwrap();
         finish_import(&mut h);
-        assert_eq!(h.app.session.source, lightcraft_engine::LibrarySource::RecentlyDeleted);
+        assert_eq!(h.app.session.source, eidos_engine::LibrarySource::RecentlyDeleted);
         assert_eq!(h.app.session.selection.ids, vec![id]);
         assert!(h.app.ui.left_panel, "the side panel listing Recently Deleted is opened");
         let toast = h.app.ui.toast.clone().expect("toast").0;
@@ -1609,7 +1608,7 @@ mod tests {
         assert!(!h.app.session.catalog.photo(id).unwrap().deleted, "restored");
         crate::import::start_paths(&mut h.app, paths).unwrap();
         finish_import(&mut h);
-        assert_eq!(h.app.session.source, lightcraft_engine::LibrarySource::All);
+        assert_eq!(h.app.session.source, eidos_engine::LibrarySource::All);
         assert_eq!(h.app.session.selection.ids, vec![id]);
         let toast = h.app.ui.toast.clone().expect("toast").0;
         assert!(toast.contains("All Photos"), "{toast}");
@@ -1631,19 +1630,19 @@ mod tests {
     /// the import's batches.
     #[test]
     fn import_copy_renames_into_destination() {
-        let base = std::env::temp_dir().join(format!("lc-ui-import-copy-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("eidos-ui-import-copy-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let (src, dest) = (base.join("card"), base.join("out"));
         std::fs::create_dir_all(&src).unwrap();
         // more files than a batch holds (see `batch_size`)
         for i in 0..20u8 {
-            let img = lightcraft_raster::Rgba8 { width: 8, height: 8, data: vec![[i * 12, 3, 9, 255]; 64] };
-            let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+            let img = eidos_raster::Rgba8 { width: 8, height: 8, data: vec![[i * 12, 3, 9, 255]; 64] };
+            let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
             std::fs::write(src.join(format!("IMG_{i:02}.png")), png).unwrap();
         }
         let dest_s = dest.to_string_lossy().to_string();
         let services = crate::Services { png: None, pick_folder: Some(Box::new(move || Some(dest_s.clone()))), ..Default::default() };
-        let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo().with_fs(), services);
+        let mut app = EidosApp::new(eidos_engine::Session::with_demo().with_fs(), services);
         app.ui.view = crate::state::ViewMode::PhotoGrid;
         let mut h = Headless::new(app, [1300.0, 900.0], 1.0);
         let t = Duration::from_secs(10);
@@ -1672,7 +1671,7 @@ mod tests {
         let mut names: Vec<String> = std::fs::read_dir(&dest).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
         names.sort();
         let want: Vec<String> = (1..=20).map(|i| format!("Trip-{i:02}.png")).collect();
-        assert_eq!(names, want, "numbered across batches of {}", lightcraft_engine::import::batch_size());
+        assert_eq!(names, want, "numbered across batches of {}", eidos_engine::import::batch_size());
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1681,19 +1680,19 @@ mod tests {
     /// template that would climb out of the destination is refused.
     #[test]
     fn import_copy_into_a_custom_folder_template() {
-        let base = std::env::temp_dir().join(format!("lc-ui-import-tpl-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("eidos-ui-import-tpl-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let (src, dest) = (base.join("card"), base.join("out"));
         std::fs::create_dir_all(&src).unwrap();
-        let img = lightcraft_raster::Rgba8 { width: 8, height: 8, data: vec![[40, 3, 9, 255]; 64] };
-        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+        let img = eidos_raster::Rgba8 { width: 8, height: 8, data: vec![[40, 3, 9, 255]; 64] };
+        let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
         std::fs::write(src.join("IMG_01.png"), png).unwrap();
         let dest_s = dest.to_string_lossy().to_string();
         let services = crate::Services { png: None, pick_folder: Some(Box::new(move || Some(dest_s.clone()))), ..Default::default() };
-        let mut session = lightcraft_engine::Session::with_demo().with_fs();
+        let mut session = eidos_engine::Session::with_demo().with_fs();
         // undated files are filed by the import time
         session.clock = Box::new(|| "2026-01-14T05:58:48".to_string());
-        let mut app = LightcraftApp::new(session, services);
+        let mut app = EidosApp::new(session, services);
         app.ui.view = crate::state::ViewMode::PhotoGrid;
         let mut h = Headless::new(app, [1300.0, 1000.0], 1.0);
         let t = Duration::from_secs(10);
@@ -1733,20 +1732,20 @@ mod tests {
     /// Move; the files land in the folder template, renamed, and leave the card.
     #[test]
     fn import_move_into_a_folder_template() {
-        let base = std::env::temp_dir().join(format!("lc-ui-import-move-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("eidos-ui-import-move-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let (src, dest) = (base.join("card"), base.join("Photos"));
         std::fs::create_dir_all(&src).unwrap();
         for i in 0..2u8 {
-            let img = lightcraft_raster::Rgba8 { width: 8, height: 8, data: vec![[40 + i, 3, 9, 255]; 64] };
-            let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+            let img = eidos_raster::Rgba8 { width: 8, height: 8, data: vec![[40 + i, 3, 9, 255]; 64] };
+            let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
             std::fs::write(src.join(format!("IMG_0{i}.png")), png).unwrap();
         }
         let dest_s = dest.to_string_lossy().to_string();
         let services = crate::Services { png: None, pick_folder: Some(Box::new(move || Some(dest_s.clone()))), ..Default::default() };
-        let mut session = lightcraft_engine::Session::with_demo().with_fs();
+        let mut session = eidos_engine::Session::with_demo().with_fs();
         session.clock = Box::new(|| "2026-01-14T05:58:48".to_string());
-        let mut app = LightcraftApp::new(session, services);
+        let mut app = EidosApp::new(session, services);
         app.ui.view = crate::state::ViewMode::PhotoGrid;
         let mut h = Headless::new(app, [1300.0, 1000.0], 1.0);
         let t = Duration::from_secs(10);
@@ -1784,16 +1783,16 @@ mod tests {
     /// inserts it at the text cursor (not appended, not replacing the template).
     #[test]
     fn import_rename_tags_insert_at_the_cursor() {
-        let dir = std::env::temp_dir().join(format!("lc-ui-import-tags-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-ui-import-tags-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let img = lightcraft_raster::Rgba8 { width: 8, height: 8, data: vec![[90, 3, 9, 255]; 64] };
-        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+        let img = eidos_raster::Rgba8 { width: 8, height: 8, data: vec![[90, 3, 9, 255]; 64] };
+        let png = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
         std::fs::write(dir.join("IMG_0007.png"), png).unwrap();
         let lib = dir.join("lib");
-        let mut session = lightcraft_engine::Session::with_demo().with_fs();
+        let mut session = eidos_engine::Session::with_demo().with_fs();
         session.open_library(&lib, false).unwrap();
-        let mut app = LightcraftApp::new(session, crate::Services { png: None, ..Default::default() });
+        let mut app = EidosApp::new(session, crate::Services { png: None, ..Default::default() });
         app.ui.view = crate::state::ViewMode::PhotoGrid;
         let mut h = Headless::new(app, [1300.0, 1000.0], 1.0);
         let t = Duration::from_secs(10);
@@ -1813,7 +1812,7 @@ mod tests {
         st.store(&h.view.ctx, id);
         let r = h.request("ui.clickWidget", json!({"id": "button:importRenameTags"}), t);
         assert_eq!(r["ok"], true, "{r}");
-        let seq3 = lightcraft_engine::rename::TOKENS.iter().position(|x| x.tag == "{seq:3}").unwrap();
+        let seq3 = eidos_engine::rename::TOKENS.iter().position(|x| x.tag == "{seq:3}").unwrap();
         let r = h.request("ui.clickWidget", json!({"id": format!("button:importRenameTag-{seq3}")}), t);
         assert_eq!(r["ok"], true, "{r}");
         let Some(crate::state::Dialog::Import { opts }) = &h.app.ui.dialog else { panic!("no import dialog") };
@@ -1832,7 +1831,7 @@ mod tests {
     fn about_dialog_tabs_show_the_credits() {
         // an empty library: the dialog needs no photos, and no decodes compete with other tests
         let services = crate::Services { png: None, ..Default::default() };
-        let mut h = Headless::new(LightcraftApp::new(lightcraft_engine::Session::new(), services), [1300.0, 820.0], 1.0);
+        let mut h = Headless::new(EidosApp::new(eidos_engine::Session::new(), services), [1300.0, 820.0], 1.0);
         let t = Duration::from_secs(10);
         let r = h.request("ui.menu.invoke", json!({"id": "app.about"}), t);
         assert_eq!(r["ok"], true, "{r}");
@@ -1887,10 +1886,10 @@ mod tests {
         h.request("ui.clickWidget", json!({"id": "button:settingsMemory-2"}), t);
         assert_eq!(h.app.ui.settings.memory_mb, 1024);
         h.step();
-        assert_eq!(lightcraft_engine::memory::budget(), 1024 << 20, "applied through app.memoryBudget");
+        assert_eq!(eidos_engine::memory::budget(), 1024 << 20, "applied through app.memoryBudget");
         h.request("ui.clickWidget", json!({"id": "button:settingsMemory-0"}), t);
         h.step();
-        assert_eq!(lightcraft_engine::memory::budget(), lightcraft_engine::memory::default_budget(), "back to automatic");
+        assert_eq!(eidos_engine::memory::budget(), eidos_engine::memory::default_budget(), "back to automatic");
         // Import: per-camera defaults
         h.request("ui.clickWidget", json!({"id": "button:settingsTab-import"}), t);
         h.request("ui.clickWidget", json!({"id": "check:settings.perCamera"}), t);

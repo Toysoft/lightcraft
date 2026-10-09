@@ -1,0 +1,31 @@
+[package]
+name = "eidos-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Eidos command-line tool: headless render, command listing and the MCP server"
+
+[[bin]]
+name = "eidos-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+eidos-engine = { workspace = true }
+eidos-sysmem = { workspace = true }
+eidos-mcp = { workspace = true }
+eidos-ui-egui = { workspace = true }
+eidos-codecs = { workspace = true }
+eidos-raster = { workspace = true }
+eidos-merge = { workspace = true }
+serde_json = { workspace = true }
+dhat = { workspace = true, optional = true }
+
+[features]
+# Heap profiling: `cargo run --release -p eidos-cli --features dhat-heap -- snapshot …` counts
+# every allocation (live/peak bytes in `library.memory` / `ui.inspect`) and writes dhat-heap.json
+# (open it in DHAT's viewer: allocation sites by bytes at the peak). Slows allocation-heavy work.
+dhat-heap = ["dep:dhat"]

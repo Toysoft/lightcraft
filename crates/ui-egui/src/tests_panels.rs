@@ -7,14 +7,14 @@ use serde_json::json;
 
 use crate::headless::Headless;
 use crate::state::{LEFT_WIDTH, MIN_PHOTO_WIDTH, RIGHT_WIDTH};
-use crate::{LightcraftApp, Services};
+use crate::{EidosApp, Services};
 
 const T: Duration = Duration::from_secs(20);
 const SETTLE: Duration = Duration::from_secs(120);
 
 fn demo(size: [f32; 2], ui: serde_json::Value) -> Headless {
     let services = Services { png: None, ..Default::default() };
-    let app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
+    let app = EidosApp::new(eidos_engine::Session::with_demo(), services);
     let mut h = Headless::new(app, size, 1.0);
     let r = h.request("ui.set", ui, T);
     assert_eq!(r["ok"], true, "{r}");
@@ -226,14 +226,14 @@ fn folders_app(paths: &[&str]) -> Headless {
 }
 
 fn folders_app_sized(paths: &[&str], size: [f32; 2]) -> Headless {
-    use lightcraft_catalog::{Op, Photo, Source};
-    let mut session = lightcraft_engine::Session::new();
+    use eidos_catalog::{Op, Photo, Source};
+    let mut session = eidos_engine::Session::new();
     for path in paths {
         let id = session.catalog.alloc_photo_id();
         let p = Photo::new(id, Source::File { path: (*path).into() }, "x.jpg", "JPEG", 60, 40, "2026-01-01T10:00:00");
         session.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
     }
-    let app = LightcraftApp::new(session, Services { png: None, ..Default::default() });
+    let app = EidosApp::new(session, Services { png: None, ..Default::default() });
     let mut h = Headless::new(app, size, 1.0);
     let r = h.request("ui.set", json!({"view": "photoGrid", "leftPanel": true}), T);
     assert_eq!(r["ok"], true, "{r}");
@@ -265,9 +265,9 @@ fn folders_section_lists_where_photos_were_imported_from_and_fills_the_grid() {
     assert_eq!(h.app.session.visible().len(), 3);
     click(&mut h, "source:libfolder:/pics/trip");
     assert_eq!(h.app.session.visible().len(), 2, "only the photos imported from that folder");
-    assert_eq!(h.app.session.source, lightcraft_engine::LibrarySource::LibraryFolder);
+    assert_eq!(h.app.session.source, eidos_engine::LibrarySource::LibraryFolder);
     assert_eq!(h.app.session.library_folder.as_deref(), Some("/pics/trip"));
-    assert_eq!(h.app.session.filter, lightcraft_catalog::Filter::default(), "a source, not a filter");
+    assert_eq!(h.app.session.filter, eidos_catalog::Filter::default(), "a source, not a filter");
     click(&mut h, "source:all");
     assert_eq!(h.app.session.visible().len(), 3, "All Photos shows everything again");
     // the section folds like the others
@@ -297,7 +297,7 @@ fn disks_are_rows_of_their_own() {
 /// shown before is replaced, and the folder's own row is highlighted.
 #[test]
 fn choosing_a_library_folder_replaces_whatever_was_shown() {
-    use lightcraft_engine::LibrarySource;
+    use eidos_engine::LibrarySource;
     let mut h = folders_app(&["/pics/trip/a.jpg", "/pics/home/b.jpg"]);
     click(&mut h, "libraryFolderToggle:/pics");
     for before in [LibrarySource::Picks, LibrarySource::Folder, LibrarySource::RecentlyDeleted, LibrarySource::Missing] {
@@ -315,10 +315,10 @@ fn choosing_a_library_folder_replaces_whatever_was_shown() {
 #[test]
 fn the_grid_is_titled_after_the_folder() {
     let mut h = folders_app(&["/Volumes/tokyo/photos/travel/a.jpg"]);
-    h.app.session.source = lightcraft_engine::LibrarySource::LibraryFolder;
+    h.app.session.source = eidos_engine::LibrarySource::LibraryFolder;
     h.app.session.library_folder = Some("/Volumes/tokyo/photos/travel".into());
     assert_eq!(crate::i18n::source_title(&h.app.session), "photos/travel");
-    h.app.session.source = lightcraft_engine::LibrarySource::All;
+    h.app.session.source = eidos_engine::LibrarySource::All;
     assert_eq!(crate::i18n::source_title(&h.app.session), "All Photos");
 }
 
@@ -373,7 +373,7 @@ fn a_folder_that_holds_other_disks_only_opens() {
 fn the_chosen_folder_is_always_in_view() {
     let mut h = folders_app(&["/pics/trip/day1/a.jpg", "/pics/trip/b.jpg", "/pics/home/c.jpg"]);
     assert!(!has(&h, "source:libfolder:/pics/trip/day1"), "folded to begin with");
-    h.app.session.source = lightcraft_engine::LibrarySource::LibraryFolder;
+    h.app.session.source = eidos_engine::LibrarySource::LibraryFolder;
     h.app.session.library_folder = Some("/pics/trip/day1".into());
     h.step();
     h.step();
@@ -392,7 +392,7 @@ fn a_renamed_folder_keeps_its_place_in_the_tree() {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
-    let base = std::env::temp_dir().join(format!("lc-ui-rename-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("eidos-ui-rename-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let _cleanup = Cleanup(base.clone());
     std::fs::create_dir_all(base.join("pics/trip")).unwrap();
@@ -400,7 +400,7 @@ fn a_renamed_folder_keeps_its_place_in_the_tree() {
     // the folder tree writes paths with forward slashes, and its widget ids carry them
     let b = base.to_string_lossy().replace('\\', "/");
     let mut h = folders_app(&[&format!("{b}/pics/trip/a.jpg"), &format!("{b}/pics/home/b.jpg")]);
-    h.app.session.source = lightcraft_engine::LibrarySource::LibraryFolder;
+    h.app.session.source = eidos_engine::LibrarySource::LibraryFolder;
     h.app.session.library_folder = Some(format!("{b}/pics/trip"));
     h.step();
     h.step();
@@ -493,7 +493,7 @@ fn a_sidebar_that_fits_does_not_scroll_sideways() {
 fn a_long_folder_name_never_runs_under_the_photo_count() {
     let long = "/very/long/2024-06-12 Tripping Through The Extremely Long Named Mountains Of Somewhere";
     let mut h = folders_app_sized(&[&format!("{long}/a.jpg")], [900.0, 700.0]);
-    h.app.session.source = lightcraft_engine::LibrarySource::LibraryFolder;
+    h.app.session.source = eidos_engine::LibrarySource::LibraryFolder;
     h.app.session.library_folder = Some(long.into());
     h.step();
     h.step();
@@ -602,11 +602,11 @@ fn date_and_keyword_rows_show_their_photos_from_any_source() {
     let r = h.request("ui.clickWidget", json!({"id": row}), T);
     assert_eq!(r["ok"], true, "{r}");
     h.step();
-    assert_eq!(h.app.session.source, lightcraft_engine::LibrarySource::All, "{key}");
+    assert_eq!(h.app.session.source, eidos_engine::LibrarySource::All, "{key}");
     assert!(!h.app.session.visible().is_empty(), "{key}: its photos are shown");
     // choosing the row again clears it, and stays in All Photos
     let r = h.request("ui.clickWidget", json!({"id": row}), T);
     assert_eq!(r["ok"], true, "{r}");
     h.step();
-    assert_eq!(h.app.session.filter, lightcraft_catalog::Filter::default(), "{key}");
+    assert_eq!(h.app.session.filter, eidos_catalog::Filter::default(), "{key}");
 }

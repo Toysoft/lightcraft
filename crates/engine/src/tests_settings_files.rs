@@ -4,14 +4,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use lightcraft_catalog::{MemStore, Store};
+use eidos_catalog::{MemStore, Store};
 use serde_json::json;
 
 use crate::Session;
 use crate::library::LibraryStores;
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("lc-settings-{tag}-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("eidos-settings-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

@@ -2,10 +2,10 @@
 //! bit-exact decoder round-trip tests. The raw image is stored in IFD0 (allowed by DNG 1.7 §"File Structure").
 
 use crate::{RawData, RawError, RawImage, Result, ljpeg, opcodes};
-use lightcraft_color::Mat3;
-use lightcraft_tiff::tags::{self as t, compression, photometric};
-use lightcraft_tiff::writer::{rational, srational};
-use lightcraft_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, Value};
+use eidos_color::Mat3;
+use eidos_tiff::tags::{self as t, compression, photometric};
+use eidos_tiff::writer::{rational, srational};
+use eidos_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, Value};
 use rayon::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,10 +117,10 @@ pub fn write_dng(raw: &RawImage, opts: &DngWriteOptions) -> Result<Vec<u8>> {
         ifd.set(t::MODEL, Value::Ascii(model.clone()));
     }
     let unique = format!("{make} {model}").trim().to_string();
-    ifd.set(t::UNIQUE_CAMERA_MODEL, Value::Ascii(if unique.is_empty() { "LightCraft".into() } else { unique }));
+    ifd.set(t::UNIQUE_CAMERA_MODEL, Value::Ascii(if unique.is_empty() { "Eidos".into() } else { unique }));
     ifd.set(t::ORIENTATION, Value::Short(vec![raw.orientation.to_exif()]));
-    ifd.set(t::SOFTWARE, Value::Ascii("LightCraft".into()));
-    let xmp = opts.xmp.clone().unwrap_or_else(|| lightcraft_meta::write_xmp(&raw.metadata, None));
+    ifd.set(t::SOFTWARE, Value::Ascii("Eidos".into()));
+    let xmp = opts.xmp.clone().unwrap_or_else(|| eidos_meta::write_xmp(&raw.metadata, None));
     ifd.set(t::XMP, Value::Byte(xmp.into_bytes()));
 
     if let Some(cfa) = &raw.cfa {

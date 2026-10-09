@@ -1,14 +1,14 @@
-use lightcraft_develop::{DevelopSettings, controls};
-use lightcraft_raster::Rgb32f;
+use eidos_develop::{DevelopSettings, controls};
+use eidos_raster::Rgb32f;
 
 use crate::{RenderRequest, SourceInfo, render};
 
-fn mean_luma(img: &lightcraft_raster::Rgba8) -> f32 {
+fn mean_luma(img: &eidos_raster::Rgba8) -> f32 {
     img.data.iter().map(|p| 0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32).sum::<f32>() / img.len() as f32
 }
 
 fn scene() -> Rgb32f {
-    lightcraft_scenes::demo_library()[0].render(240, 160)
+    eidos_scenes::demo_library()[0].render(240, 160)
 }
 
 #[test]
@@ -78,14 +78,14 @@ fn directional_sliders() {
 #[test]
 fn resolution_independence_of_local_contrast() {
     // Clarity at two preview sizes should give similar results after downscaling.
-    let src = lightcraft_scenes::demo_library()[3].render(480, 320);
+    let src = eidos_scenes::demo_library()[3].render(480, 320);
     let mut s = DevelopSettings::default();
     s.effects.clarity = 80.0;
     s.light.shadows = 60.0;
     let small = render(&src, &SourceInfo::default(), &s, &RenderRequest::fit(120, 120)).image;
     let big = render(&src, &SourceInfo::default(), &s, &RenderRequest::fit(480, 480)).image;
     let bl = big.to_linear();
-    let down = lightcraft_raster::resample::resize(&bl, small.width, small.height, lightcraft_raster::resample::Filter::Box).to_srgb8();
+    let down = eidos_raster::resample::resize(&bl, small.width, small.height, eidos_raster::resample::Filter::Box).to_srgb8();
     let err: f32 = small.data.iter().zip(&down.data).map(|(a, b)| (a[1] as f32 - b[1] as f32).abs()).sum::<f32>() / small.len() as f32;
     assert!(err < 9.0, "mean abs error {err}");
 }
@@ -93,15 +93,15 @@ fn resolution_independence_of_local_contrast() {
 #[test]
 fn crop_and_straighten_output_size() {
     let mut s = DevelopSettings::default();
-    s.crop.geometry = lightcraft_geom::crop_fit_angle(240.0, 160.0, 8.0, Some(1.0));
+    s.crop.geometry = eidos_geom::crop_fit_angle(240.0, 160.0, 8.0, Some(1.0));
     let r = render(&scene(), &SourceInfo::default(), &s, &RenderRequest::fit(200, 200));
     assert_eq!((r.image.width, r.image.height), (200, 200));
 }
 
 #[test]
 fn mask_brightens_only_inside() {
-    use lightcraft_develop::{Mask, MaskComponent, MaskOp, MaskShape};
-    use lightcraft_geom::Point;
+    use eidos_develop::{Mask, MaskComponent, MaskOp, MaskShape};
+    use eidos_geom::Point;
     let src = Rgb32f::filled(100, 100, [0.1, 0.1, 0.1]);
     let mut s = DevelopSettings::default();
     s.masks.push(Mask {
@@ -111,7 +111,7 @@ fn mask_brightens_only_inside() {
             invert: false,
             shape: MaskShape::Radial { center: Point::new(0.5, 0.5), rx: 0.2, ry: 0.2, angle: 0.0, feather: 10.0, invert: false },
         }],
-        adjust: lightcraft_develop::LocalAdjustments { exposure: 2.0, ..Default::default() },
+        adjust: eidos_develop::LocalAdjustments { exposure: 2.0, ..Default::default() },
         ..Default::default()
     });
     let r = render(&src, &SourceInfo::default(), &s, &RenderRequest::fit(100, 100)).image;
@@ -121,7 +121,7 @@ fn mask_brightens_only_inside() {
 #[test]
 #[ignore]
 fn perf_report() {
-    let src = lightcraft_scenes::demo_library()[0].render(3000, 2000);
+    let src = eidos_scenes::demo_library()[0].render(3000, 2000);
     let mut s = DevelopSettings::default();
     s.light.shadows = 40.0;
     s.effects.clarity = 20.0;
@@ -138,8 +138,8 @@ fn perf_report() {
 #[test]
 fn unedited_rendered_source_is_passthrough() {
     // An sRGB ramp decoded to linear Rec.2020 must render back to (almost) the same 8-bit values.
-    let src8 = lightcraft_raster::Rgba8::from_fn(256, 4, |x, y| [x as u8, (x as u8).wrapping_add(y as u8 * 40), 255 - x as u8, 255]);
-    let m = lightcraft_color::SRGB.to_space(&lightcraft_color::REC2020);
+    let src8 = eidos_raster::Rgba8::from_fn(256, 4, |x, y| [x as u8, (x as u8).wrapping_add(y as u8 * 40), 255 - x as u8, 255]);
+    let m = eidos_color::SRGB.to_space(&eidos_color::REC2020);
     let src = src8.to_linear().map(|c| m.apply_f32(c));
     let r = render(&src, &SourceInfo::default(), &DevelopSettings::default(), &RenderRequest::fit(256, 4)).image;
     let mut worst = 0i32;
@@ -165,7 +165,7 @@ fn typical_edits() -> DevelopSettings {
     s
 }
 
-fn max_diff(a: &lightcraft_raster::Rgba8, b: &lightcraft_raster::Rgba8) -> i32 {
+fn max_diff(a: &eidos_raster::Rgba8, b: &eidos_raster::Rgba8) -> i32 {
     assert_eq!((a.width, a.height), (b.width, b.height));
     a.data.iter().zip(&b.data).map(|(p, q)| (0..3).map(|c| (p[c] as i32 - q[c] as i32).abs()).max().unwrap_or(0)).max().unwrap_or(0)
 }
@@ -190,10 +190,10 @@ fn stage_cache_matches_uncached_render_through_a_slider_session() {
         Box::new(|s| s.effects.dehaze = 25.0),
         Box::new(|s| s.detail.nr_luminance = 60.0),
         Box::new(|s| {
-            s.wb.mode = lightcraft_develop::WbMode::Custom;
+            s.wb.mode = eidos_develop::WbMode::Custom;
             s.wb.temp = 4000.0;
         }),
-        Box::new(|s| s.crop.geometry.rect = lightcraft_geom::Rect::new(0.1, 0.1, 0.9, 0.8)),
+        Box::new(|s| s.crop.geometry.rect = eidos_geom::Rect::new(0.1, 0.1, 0.9, 0.8)),
         Box::new(|s| s.color.saturation = 30.0),
         // optics and geometry (merged after the stage cache): defringe lives in the cached linear stage
         Box::new(|s| s.optics.defringe_purple_amount = 10.0),
@@ -304,10 +304,10 @@ fn refine_saturation_tames_a_contrast_curve() {
     let mut s = DevelopSettings::default();
     let flat = render(&src, &info, &s, &req).image.data[0];
     s.curve.master = vec![
-        lightcraft_geom::Point::new(0.0, 0.0),
-        lightcraft_geom::Point::new(0.3, 0.15),
-        lightcraft_geom::Point::new(0.7, 0.85),
-        lightcraft_geom::Point::new(1.0, 1.0),
+        eidos_geom::Point::new(0.0, 0.0),
+        eidos_geom::Point::new(0.3, 0.15),
+        eidos_geom::Point::new(0.7, 0.85),
+        eidos_geom::Point::new(1.0, 1.0),
     ];
     let full = render(&src, &info, &s, &req).image.data[0];
     s.curve.refine_saturation = 0.0;
@@ -327,8 +327,8 @@ fn soft_proof_maps_into_the_proof_gamut_and_flags_what_does_not_fit() {
     s.color.vibrance = 100.0;
     let info = SourceInfo { raw: true, ..Default::default() };
     let req = |space, proof| RenderRequest { space, proof, ..RenderRequest::fit(120, 120) };
-    let red = |img: &lightcraft_raster::Rgba8| img.data.iter().filter(|p| p[..3] == [255, 0, 0]).count();
-    let blue = |img: &lightcraft_raster::Rgba8| img.data.iter().filter(|p| p[2] == 255 && p[0] == 0 && p[1] < 80).count();
+    let red = |img: &eidos_raster::Rgba8| img.data.iter().filter(|p| p[..3] == [255, 0, 0]).count();
+    let blue = |img: &eidos_raster::Rgba8| img.data.iter().filter(|p| p[2] == 255 && p[0] == 0 && p[1] < 80).count();
 
     // proofing sRGB on an sRGB render changes nothing but the warning
     let plain = render(&src, &info, &s, &req(OutputSpace::Srgb, None)).image;
@@ -362,7 +362,7 @@ fn soft_proof_maps_into_the_proof_gamut_and_flags_what_does_not_fit() {
 
 #[test]
 fn tint_negative_is_green_and_positive_is_magenta() {
-    use lightcraft_develop::WbMode;
+    use eidos_develop::WbMode;
     let src = Rgb32f::filled(16, 16, [0.18; 3]);
     // Rendered images, uncalibrated RAW and calibrated RAW with a nonzero As Shot tint.
     for info in [

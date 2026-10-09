@@ -1,6 +1,6 @@
-//! Standard image codecs for LightCraft (layer L1).
+//! Standard image codecs for Eidos (layer L1).
 //!
-//! - [`sniff`] detects the container format (and flags camera raws for `lightcraft-raw`).
+//! - [`sniff`] detects the container format (and flags camera raws for `eidos-raw`).
 //! - [`decode`] decodes JPEG, PNG, TIFF, WebP, GIF, BMP, PSD (merged composite) and JPEG XL into
 //!   **linear-light** [`Rgb32f`] in the source's own primaries, described by [`SourceSpace`]; ICC
 //!   profiles (matrix/TRC exactly, LUT/CMYK via the `moxcms` CMS), 16-bit and float precision are
@@ -36,7 +36,7 @@ pub use encode::{
 pub use sniff::{Format, sniff};
 pub use space::{NamedSpace, SourceSpace, SpaceOrigin, Trc};
 
-use lightcraft_raster::{Plane, Rgb32f, Rgba8};
+use eidos_raster::{Plane, Rgb32f, Rgba8};
 use serde::{Deserialize, Serialize};
 
 /// Codec errors.
@@ -119,13 +119,13 @@ impl Decoded {
 
     /// Display-encoded 8-bit sRGB (gamut clipped), with alpha.
     pub fn to_srgb8(&self) -> Rgba8 {
-        let m = self.space.to_space(&lightcraft_color::SRGB);
-        let ident = m == lightcraft_color::Mat3::IDENTITY;
+        let m = self.space.to_space(&eidos_color::SRGB);
+        let ident = m == eidos_color::Mat3::IDENTITY;
         let m = m.to_f32();
-        let enc = lightcraft_color::transfer::encode_srgb8;
+        let enc = eidos_color::transfer::encode_srgb8;
         let mut out = Rgba8::new(self.image.width, self.image.height);
         let alpha = self.alpha.as_ref();
-        lightcraft_raster::par_rows(&mut out.data, self.image.width, |y, row| {
+        eidos_raster::par_rows(&mut out.data, self.image.width, |y, row| {
             let src = self.image.row(y);
             let a = alpha.map(|a| a.row(y));
             for (x, (o, p)) in row.iter_mut().zip(src).enumerate() {
@@ -181,7 +181,7 @@ pub fn decode_unguarded(bytes: &[u8], format: Format, opts: &DecodeOptions) -> R
         Format::Jxl => Err(Error::Unsupported(format, "built without the `jxl` feature")),
         Format::Avif => Err(Error::Unsupported(format, "no pure-Rust, permissively licensed AV1 decoder yet")),
         Format::Heif => Err(Error::Unsupported(format, "no pure-Rust, permissively licensed HEVC decoder yet")),
-        Format::RawTiffLike | Format::RawOther => Err(Error::Unsupported(format, "camera raw: decode with lightcraft-raw")),
+        Format::RawTiffLike | Format::RawOther => Err(Error::Unsupported(format, "camera raw: decode with eidos-raw")),
     }
 }
 

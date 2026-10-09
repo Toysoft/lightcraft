@@ -3,12 +3,12 @@
 use egui::{Align2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use serde_json::json;
 
-use crate::LightcraftApp;
+use crate::EidosApp;
 use crate::icons::{Icon, paint};
 use crate::theme::Tokens;
 use crate::widgets::{icon_button, register};
 
-pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+pub fn show(app: &mut EidosApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let left = if app.integrated_titlebar { 78 } else { 10 };
     egui::Panel::top("top_bar")
@@ -95,7 +95,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 },
             );
             // badge: how many filters are on, even with the filter bar closed
-            let active = lightcraft_engine::filter_chips(&app.session.filter, &app.session.catalog).len();
+            let active = eidos_engine::filter_chips(&app.session.filter, &app.session.catalog).len();
             if active > 0 {
                 let c = fr.right_top() + vec2(-3.0, 8.0);
                 ui.painter().circle_filled(c, 7.0, t.accent);
@@ -114,7 +114,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             // saving is failing: the cloud icon turns into a warning until a save succeeds
             let unsaved = app.session.unsaved().map(|(n, e)| {
                 crate::i18n::tr_format!(
-                    "{n} change{} saved in memory but not written to disk: {e}\nLightCraft retries automatically; quitting now would lose {}.",
+                    "{n} change{} saved in memory but not written to disk: {e}\nEidos retries automatically; quitting now would lose {}.",
                     if n == 1 { "" } else { "s" },
                     if n == 1 { "it" } else { "them" },
                     e = e,

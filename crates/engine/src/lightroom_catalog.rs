@@ -9,7 +9,7 @@ use std::sync::{
 };
 
 use crate::lightroom_sqlite::{Database, LiveTable, Value as SqlValue};
-use lightcraft_catalog::{Album, Flag, Op, Photo, PhotoId, Source};
+use eidos_catalog::{Album, Flag, Op, Photo, PhotoId, Source};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -566,7 +566,7 @@ fn apply(s: &mut crate::Session, data: CatalogImport, update_existing: bool) -> 
     if let Some(path) = index_path {
         s.persist()?;
         let bytes = serde_json::to_vec(&applied.index).map_err(|e| error(e.to_string()))?;
-        lightcraft_catalog::safe_file::write_atomic(&path, &bytes).map_err(|e| error(e.to_string()))?;
+        eidos_catalog::safe_file::write_atomic(&path, &bytes).map_err(|e| error(e.to_string()))?;
     }
     Ok(applied.report)
 }
@@ -644,7 +644,7 @@ pub(crate) fn apply_prepared(s: &mut crate::Session, data: CatalogImport, contex
                 &now,
             );
             if ["RAW", "DNG", "ARW", "CR2", "CR3", "NEF", "NRW", "RAF", "ORF", "RW2", "PEF"].contains(&p.format.to_uppercase().as_str()) {
-                p.kind = lightcraft_catalog::MediaKind::Raw;
+                p.kind = eidos_catalog::MediaKind::Raw;
             }
             p
         };
@@ -656,7 +656,7 @@ pub(crate) fn apply_prepared(s: &mut crate::Session, data: CatalogImport, contex
             preserved += 1;
         }
         if !src.xmp.is_empty() {
-            match crate::sidecar::parse_sidecar(&src.xmp, p.kind == lightcraft_catalog::MediaKind::Raw) {
+            match crate::sidecar::parse_sidecar(&src.xmp, p.kind == eidos_catalog::MediaKind::Raw) {
                 Ok(mut sc) => {
                     if let Some(crate::sidecar::DevelopPatch::Partial(partial)) = &mut sc.develop {
                         strip_xmp_sentinels(partial);
@@ -680,9 +680,9 @@ pub(crate) fn apply_prepared(s: &mut crate::Session, data: CatalogImport, contex
             p.meta.keywords = src.keywords.clone();
         }
         if !src.settings.is_empty() && !keep_develop {
-            match mapped_settings(&src.settings, p.kind == lightcraft_catalog::MediaKind::Raw, p.width.max(1) as f64 / p.height.max(1) as f64) {
+            match mapped_settings(&src.settings, p.kind == eidos_catalog::MediaKind::Raw, p.width.max(1) as f64 / p.height.max(1) as f64) {
                 Ok((partial, unknown)) => {
-                    p.develop = Arc::new(lightcraft_develop::apply_partial(&p.develop, &partial, 1.0));
+                    p.develop = Arc::new(eidos_develop::apply_partial(&p.develop, &partial, 1.0));
                     p.edited = Some(now.clone());
                     if !unknown.is_empty() {
                         unmapped.insert(src.source_id, unknown);
@@ -719,7 +719,7 @@ pub(crate) fn apply_prepared(s: &mut crate::Session, data: CatalogImport, contex
             .collections
             .get(&collection_key)
             .copied()
-            .map(lightcraft_catalog::AlbumId)
+            .map(eidos_catalog::AlbumId)
             .filter(|id| s.catalog.album(*id).is_some())
             .unwrap_or_else(|| s.catalog.alloc_album_id());
         index.collections.insert(collection_key, id.0);
@@ -857,7 +857,7 @@ mod tests {
         let data = sample();
         apply(&mut s, data.clone(), false).unwrap();
         let id = s.catalog.photos().find(|p| p.copy_of.is_none()).unwrap().id;
-        s.set_develop(id, lightcraft_develop::DevelopSettings::default(), "Personal edit").unwrap();
+        s.set_develop(id, eidos_develop::DevelopSettings::default(), "Personal edit").unwrap();
         let r = apply(&mut s, data.clone(), false).unwrap();
         assert!(r["preservedExistingEdits"].as_u64().unwrap() > 0);
         assert_eq!(s.catalog.photo(id).unwrap().develop.light.exposure, 0.0);
@@ -940,7 +940,7 @@ mod tests {
 
     #[test]
     fn persistent_reimport_keeps_copy_and_collection_ids_and_capture_time() {
-        let dir = std::env::temp_dir().join(format!("lightcraft-lrcat-reimport-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-lrcat-reimport-{}", std::process::id()));
         let mut s = crate::Session::new();
         s.open_library(&dir, false).unwrap();
         let mut data = sample();
@@ -1044,7 +1044,7 @@ mod tests {
             leaf(&mut bytes[(i + 1) * 2048..(i + 2) * 2048], 0, std::slice::from_ref(row));
         }
         leaf(&mut bytes[..2048], 100, &schema);
-        let path = std::env::temp_dir().join(format!("lightcraft-native-catalog-{}.lrcat", std::process::id()));
+        let path = std::env::temp_dir().join(format!("eidos-native-catalog-{}.lrcat", std::process::id()));
         std::fs::write(&path, &bytes).unwrap();
         let catalog = read(&path).unwrap();
         assert_eq!(catalog.photos.len(), 1);

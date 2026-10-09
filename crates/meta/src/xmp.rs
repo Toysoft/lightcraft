@@ -6,16 +6,17 @@
 //! a packet that binds `http://purl.org/dc/elements/1.1/` to `foo:` still yields `dc:title`.
 //!
 //! Writing emits the interchange subset in standard namespaces (dc, xmp, photoshop, exif, exifEX, tiff, lr) and
-//! LightCraft's full develop settings as an opaque JSON string in `lc:settings`.
+//! Eidos's full develop settings as an opaque JSON string in `eid:settings`.
 
 use crate::{DateTime, Flash, Gps, Metadata, Orientation, Region, RegionKind, parse_number};
-use lightcraft_geom::{Point, Rect};
+use eidos_geom::{Point, Rect};
 use quick_xml::escape::{escape, partial_escape};
 use quick_xml::events::Event;
 use std::collections::BTreeMap;
 
-/// LightCraft's XMP namespace URI (prefix `lc`).
-pub const LC_NS: &str = "http://ns.lightcraft.app/lc/1.0/";
+/// Eidos's XMP namespace URI (prefix `eid`). Provisional: the domain is not established yet;
+/// see the official-URLs TODO list (docs/eidos-release.md) before treating it as permanent.
+pub const EID_NS: &str = "http://ns.eidos.app/eid/1.0/";
 
 const NAMESPACES: &[(&str, &str)] = &[
     ("x", "adobe:ns:meta/"),
@@ -30,7 +31,7 @@ const NAMESPACES: &[(&str, &str)] = &[
     ("aux", "http://ns.adobe.com/exif/1.0/aux/"),
     ("lr", "http://ns.adobe.com/lightroom/1.0/"),
     ("Iptc4xmpCore", "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"),
-    ("lc", LC_NS),
+    ("eid", EID_NS),
     // Read-only: develop settings written by other raw developers (interchange; see docs/xmp-interop.md).
     ("crs", CRS_NS),
     // Read-only: face/pet/focus regions written by Lightroom, digiKam, Picasa and others (MWG Region
@@ -66,8 +67,8 @@ impl std::error::Error for XmpError {}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct XmpData {
     pub metadata: Metadata,
-    /// The opaque `lc:settings` JSON string, if present.
-    pub lc_settings: Option<String>,
+    /// The opaque `eid:settings` JSON string, if present.
+    pub eid_settings: Option<String>,
     /// Every property found, keyed `prefix:name` (struct fields as `prefix:name/prefix:field`); arrays keep
     /// item order, language alternatives put `x-default` first.
     pub properties: BTreeMap<String, Vec<String>>,
@@ -543,8 +544,8 @@ pub fn parse_xmp(s: &str) -> Result<XmpData, XmpError> {
         m.gps = Some(Gps { latitude: lat, longitude: lon, altitude });
     }
     m.regions = values.get("mwg-rs:Regions").map(parse_regions).unwrap_or_default();
-    let lc_settings = props.get("lc:settings").and_then(|v| v.first()).cloned();
-    Ok(XmpData { metadata: m, lc_settings, properties: props, values })
+    let eid_settings = props.get("eid:settings").and_then(|v| v.first()).cloned();
+    Ok(XmpData { metadata: m, eid_settings, properties: props, values })
 }
 
 fn frac(v: f64) -> String {
@@ -554,24 +555,24 @@ fn frac(v: f64) -> String {
             return format!("1/{}", inv.round() as u64);
         }
     }
-    let (n, d) = lightcraft_tiff::writer::rational(v);
+    let (n, d) = eidos_tiff::writer::rational(v);
     format!("{n}/{d}")
 }
 
 fn sfrac(v: f64) -> String {
-    let (n, d) = lightcraft_tiff::writer::srational(v);
+    let (n, d) = eidos_tiff::writer::srational(v);
     format!("{n}/{d}")
 }
 
-/// Serialise the interchange subset of `meta` (plus `lc_settings`, an opaque JSON string, in `lc:settings`)
+/// Serialise the interchange subset of `meta` (plus `eid_settings`, an opaque JSON string, in `eid:settings`)
 /// as a complete XMP packet.
-pub fn write_xmp(meta: &Metadata, lc_settings: Option<&str>) -> String {
-    let lc: Vec<(&str, &str)> = lc_settings.map(|s| ("settings", s)).into_iter().collect();
-    write_xmp_lc(meta, &lc)
+pub fn write_xmp(meta: &Metadata, eid_settings: Option<&str>) -> String {
+    let eid: Vec<(&str, &str)> = eid_settings.map(|s| ("settings", s)).into_iter().collect();
+    write_xmp_eid(meta, &eid)
 }
 
-/// Like [`write_xmp`], with any number of simple `lc:<name>` properties (e.g. `settings`, `flag`).
-pub fn write_xmp_lc(meta: &Metadata, lc: &[(&str, &str)]) -> String {
+/// Like [`write_xmp`], with any number of simple `eid:<name>` properties (e.g. `settings`, `flag`).
+pub fn write_xmp_eid(meta: &Metadata, eid: &[(&str, &str)]) -> String {
     let mut simple: Vec<(&str, String)> = Vec::new();
     let mut push = |k: &'static str, v: Option<String>| {
         if let Some(v) = v {
@@ -617,7 +618,7 @@ pub fn write_xmp_lc(meta: &Metadata, lc: &[(&str, &str)]) -> String {
 
     let mut x = String::new();
     x.push_str("<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n");
-    x.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"LightCraft\">\n");
+    x.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Eidos\">\n");
     x.push_str(" <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
     x.push_str("  <rdf:Description rdf:about=\"\"");
     for (p, u) in NAMESPACES.iter().skip(2).filter(|(p, _)| *p != "crs") {
@@ -627,10 +628,10 @@ pub fn write_xmp_lc(meta: &Metadata, lc: &[(&str, &str)]) -> String {
     for (k, v) in &simple {
         x.push_str(&format!("   <{k}>{}</{k}>\n", escape(v.as_str())));
     }
-    for (k, v) in lc {
+    for (k, v) in eid {
         if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             // element content: quotes needn't be escaped, which keeps the JSON readable
-            x.push_str(&format!("   <lc:{k}>{}</lc:{k}>\n", partial_escape(*v)));
+            x.push_str(&format!("   <eid:{k}>{}</eid:{k}>\n", partial_escape(*v)));
         }
     }
     let array = |x: &mut String, k: &str, kind: &str, items: &[String], lang: bool| {
@@ -689,7 +690,7 @@ mod tests {
             make: Some("Maker & Sons".into()),
             model: Some("X <1>".into()),
             serial_number: Some("SN1".into()),
-            software: Some("LightCraft".into()),
+            software: Some("Eidos".into()),
             lens_make: Some("L".into()),
             lens_model: Some("24-70mm".into()),
             lens_serial_number: Some("LS".into()),
@@ -735,7 +736,7 @@ mod tests {
         let json = r#"{"version":1,"exposure":0.5,"note":"<&>"}"#;
         let x = write_xmp(&m, Some(json));
         let d = parse_xmp(&x).unwrap();
-        assert_eq!(d.lc_settings.as_deref(), Some(json));
+        assert_eq!(d.eid_settings.as_deref(), Some(json));
         let mut got = d.metadata.clone();
         // floats go through rationals
         assert!((got.exposure_bias.unwrap() + 1.0 / 3.0).abs() < 1e-5);
@@ -751,7 +752,7 @@ mod tests {
         let x = write_xmp(&Metadata::default(), None);
         let d = parse_xmp(&x).unwrap();
         assert_eq!(d.metadata, Metadata::default());
-        assert_eq!(d.lc_settings, None);
+        assert_eq!(d.eid_settings, None);
     }
 
     #[test]
@@ -819,12 +820,12 @@ mod tests {
     }
 
     #[test]
-    fn lc_extras_and_crs_prefix() {
-        let x = write_xmp_lc(&Metadata::default(), &[("settings", "{\"a\":1}"), ("flag", "pick"), ("bad name", "x")]);
+    fn eid_extras_and_crs_prefix() {
+        let x = write_xmp_eid(&Metadata::default(), &[("settings", "{\"a\":1}"), ("flag", "pick"), ("bad name", "x")]);
         assert!(!x.contains("xmlns:crs"), "we never write crs:");
         let d = parse_xmp(&x).unwrap();
-        assert_eq!(d.lc_settings.as_deref(), Some("{\"a\":1}"));
-        assert_eq!(d.properties["lc:flag"], vec!["pick".to_string()]);
+        assert_eq!(d.eid_settings.as_deref(), Some("{\"a\":1}"));
+        assert_eq!(d.properties["eid:flag"], vec!["pick".to_string()]);
         assert!(!x.contains("bad name"));
         let foreign = r#"<rdf:Description xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
             xmlns:cr="http://ns.adobe.com/camera-raw-settings/1.0/" cr:Exposure2012="+0.5"/>"#;

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lightcraft_develop::DevelopSettings;
+use eidos_develop::DevelopSettings;
 use proptest::prelude::*;
 
 use crate::journal::{LOG, SNAPSHOT, decode_record, encode_record};
@@ -253,7 +253,7 @@ fn push_history_is_bounded_and_invertible() {
 
 #[test]
 fn fs_store_roundtrip() {
-    let dir = std::env::temp_dir().join(format!("lc-journal-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-journal-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let (mut j, mut c, r) = Journal::open(Box::new(FsStore::open(&dir).unwrap())).unwrap();
     assert!(r.created);
@@ -283,16 +283,12 @@ fn streamed_snapshot_keeps_the_on_disk_format() {
     let (mut j, c, _) = open(&m);
     assert_eq!(c.to_snapshot(), full.to_snapshot());
     j.snapshot(&c).unwrap();
-    let legacy = format!(
-        "{{\"format\":\"lightcraft-catalog\",\"version\":{},\"seq\":{},\"catalog\":{}}}\n",
-        crate::journal::VERSION,
-        j.seq(),
-        c.to_snapshot()
-    );
+    let legacy =
+        format!("{{\"format\":\"eidos-catalog\",\"version\":{},\"seq\":{},\"catalog\":{}}}\n", crate::journal::VERSION, j.seq(), c.to_snapshot());
     assert_eq!(String::from_utf8(m.get(SNAPSHOT).unwrap()).unwrap(), legacy);
     assert_eq!(j.stats().last_snapshot.bytes, legacy.len() as u64);
 
-    let dir = std::env::temp_dir().join(format!("lc-journal-stream-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-journal-stream-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     // an old-style snapshot (written by a build before streaming) loads, and is rewritten the same
@@ -309,7 +305,7 @@ fn streamed_snapshot_keeps_the_on_disk_format() {
 /// place and removes its temp file.
 #[test]
 fn failed_streamed_write_keeps_the_old_file() {
-    let dir = std::env::temp_dir().join(format!("lc-journal-streamfail-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-journal-streamfail-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let mut s = FsStore::open(&dir).unwrap();
     s.write_atomic(SNAPSHOT, b"old").unwrap();

@@ -20,8 +20,8 @@
 //!    are dilated and feathered (Gaussian), upsampled, and remove the frame's weight. Their union
 //!    is the deghost overlay.
 
-use lightcraft_raster::blur::gaussian;
-use lightcraft_raster::{Plane, Rgb32f};
+use eidos_raster::blur::gaussian;
+use eidos_raster::{Plane, Rgb32f};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -80,8 +80,8 @@ pub struct HdrResult {
     pub alignments: Vec<Alignment>,
     pub color: FrameColor,
     pub raw: bool,
-    pub orientation: lightcraft_geom::Orientation,
-    pub metadata: lightcraft_meta::Metadata,
+    pub orientation: eidos_geom::Orientation,
+    pub metadata: eidos_meta::Metadata,
     pub baseline_exposure: f64,
 }
 

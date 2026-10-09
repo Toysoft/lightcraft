@@ -9,8 +9,8 @@
 
 use std::borrow::Cow;
 
-use lightcraft_develop::{DevelopSettings, Treatment, Wheel};
-use lightcraft_geom::Point;
+use eidos_develop::{DevelopSettings, Treatment, Wheel};
+use eidos_geom::Point;
 
 /// Add a colour-grading wheel (`hue` °, `sat` 0..100, `lum` −100..100) scaled by `k` to `w`, as a
 /// colour vector (so a profile's tint combines with the user's instead of replacing it).
@@ -45,26 +45,26 @@ fn fade(pts: &mut Vec<Point>, black: f64, white: f64, k: f64) {
 pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
     let k = (s.profile.amount / 100.0).clamp(0.0, 2.0);
     let id = s.profile.id.as_str();
-    if id == "lc.color" || id.is_empty() || k == 0.0 {
+    if id == "eidos.color" || id.is_empty() || k == 0.0 {
         return Cow::Borrowed(s);
     }
     let mut e = s.clone();
     let add = |v: &mut f64, d: f64| *v = (*v + d * k).clamp(-100.0, 100.0);
     match id {
         // ---- Basic
-        "lc.neutral" => {
+        "eidos.neutral" => {
             add(&mut e.light.contrast, -18.0);
             add(&mut e.color.saturation, -10.0);
             add(&mut e.light.highlights, -10.0);
             add(&mut e.light.shadows, 8.0);
         }
-        "lc.vivid" => {
+        "eidos.vivid" => {
             add(&mut e.light.contrast, 16.0);
             add(&mut e.color.saturation, 14.0);
             add(&mut e.color.vibrance, 14.0);
             add(&mut e.light.blacks, -6.0);
         }
-        "lc.landscape" => {
+        "eidos.landscape" => {
             add(&mut e.light.contrast, 10.0);
             add(&mut e.color.vibrance, 10.0);
             add(&mut e.mixer.green.sat, 14.0);
@@ -73,19 +73,19 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             add(&mut e.mixer.blue.lum, -6.0);
             add(&mut e.effects.clarity, 6.0);
         }
-        "lc.portrait" => {
+        "eidos.portrait" => {
             add(&mut e.light.contrast, -6.0);
             add(&mut e.mixer.orange.sat, -8.0);
             add(&mut e.mixer.orange.lum, 6.0);
             add(&mut e.mixer.red.sat, -5.0);
             add(&mut e.effects.texture, -6.0);
         }
-        "lc.mono" => {
+        "eidos.mono" => {
             e.treatment = Treatment::Bw;
             add(&mut e.light.contrast, 8.0);
         }
         // ---- Film
-        "lc.film.warm-print" => {
+        "eidos.film.warm-print" => {
             add(&mut e.light.contrast, 6.0);
             add(&mut e.color.saturation, -4.0);
             add(&mut e.mixer.orange.lum, 4.0);
@@ -93,14 +93,14 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             wheel(&mut e.grading.highlights, 40.0, 18.0, 0.0, k);
             wheel(&mut e.grading.shadows, 25.0, 8.0, 0.0, k);
         }
-        "lc.film.cool-fade" => {
+        "eidos.film.cool-fade" => {
             add(&mut e.light.contrast, -8.0);
             add(&mut e.color.saturation, -10.0);
             fade(&mut e.curve.master, 0.07, 0.95, k);
             wheel(&mut e.grading.shadows, 210.0, 16.0, 0.0, k);
             wheel(&mut e.grading.highlights, 190.0, 6.0, 0.0, k);
         }
-        "lc.film.golden-hour" => {
+        "eidos.film.golden-hour" => {
             add(&mut e.color.vibrance, 10.0);
             add(&mut e.curve.highlights, -8.0);
             add(&mut e.mixer.orange.sat, 8.0);
@@ -108,7 +108,7 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             wheel(&mut e.grading.global, 45.0, 10.0, 0.0, k);
             wheel(&mut e.grading.highlights, 35.0, 20.0, 0.0, k);
         }
-        "lc.film.faded-slide" => {
+        "eidos.film.faded-slide" => {
             add(&mut e.light.contrast, 14.0);
             add(&mut e.color.vibrance, 8.0);
             add(&mut e.color.saturation, 6.0);
@@ -117,7 +117,7 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             fade(&mut e.curve.red, 0.0, 0.97, k);
         }
         // ---- Cinematic
-        "lc.cine.teal-amber" => {
+        "eidos.cine.teal-amber" => {
             add(&mut e.light.contrast, 10.0);
             add(&mut e.mixer.orange.sat, 6.0);
             add(&mut e.mixer.green.hue, 20.0);
@@ -126,14 +126,14 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             wheel(&mut e.grading.shadows, 195.0, 30.0, 0.0, k);
             wheel(&mut e.grading.highlights, 38.0, 24.0, 0.0, k);
         }
-        "lc.cine.night-blue" => {
+        "eidos.cine.night-blue" => {
             add(&mut e.light.contrast, 12.0);
             add(&mut e.color.saturation, -12.0);
             add(&mut e.curve.darks, -8.0);
             wheel(&mut e.grading.shadows, 220.0, 28.0, -4.0, k);
             wheel(&mut e.grading.midtones, 215.0, 10.0, 0.0, k);
         }
-        "lc.cine.desert-heat" => {
+        "eidos.cine.desert-heat" => {
             add(&mut e.light.contrast, 8.0);
             add(&mut e.curve.lights, 6.0);
             add(&mut e.mixer.blue.sat, -25.0);
@@ -141,7 +141,7 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             wheel(&mut e.grading.global, 32.0, 16.0, 0.0, k);
             wheel(&mut e.grading.highlights, 48.0, 12.0, 0.0, k);
         }
-        "lc.cine.neon-dusk" => {
+        "eidos.cine.neon-dusk" => {
             add(&mut e.light.contrast, 10.0);
             add(&mut e.color.vibrance, 18.0);
             add(&mut e.mixer.magenta.sat, 12.0);
@@ -150,19 +150,19 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             wheel(&mut e.grading.highlights, 330.0, 14.0, 0.0, k);
         }
         // ---- Muted
-        "lc.muted.matte-soft" => {
+        "eidos.muted.matte-soft" => {
             add(&mut e.light.contrast, -12.0);
             add(&mut e.color.saturation, -14.0);
             add(&mut e.curve.highlights, -6.0);
             fade(&mut e.curve.master, 0.08, 0.96, k);
         }
-        "lc.muted.bleached" => {
+        "eidos.muted.bleached" => {
             add(&mut e.light.contrast, 22.0);
             add(&mut e.color.saturation, -38.0);
             add(&mut e.curve.lights, 6.0);
             add(&mut e.effects.clarity, 8.0);
         }
-        "lc.muted.pastel-haze" => {
+        "eidos.muted.pastel-haze" => {
             add(&mut e.light.contrast, -18.0);
             add(&mut e.color.saturation, -20.0);
             add(&mut e.color.vibrance, 12.0);
@@ -170,7 +170,7 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             wheel(&mut e.grading.highlights, 330.0, 6.0, 0.0, k);
             wheel(&mut e.grading.shadows, 200.0, 6.0, 0.0, k);
         }
-        "lc.muted.quiet-green" => {
+        "eidos.muted.quiet-green" => {
             add(&mut e.light.contrast, -4.0);
             add(&mut e.color.saturation, -8.0);
             add(&mut e.mixer.green.sat, -30.0);
@@ -180,7 +180,7 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             fade(&mut e.curve.master, 0.04, 1.0, k);
         }
         // ---- B&W
-        "lc.bw.mono-rich" => {
+        "eidos.bw.mono-rich" => {
             e.treatment = Treatment::Bw;
             add(&mut e.light.contrast, 18.0);
             add(&mut e.curve.darks, -8.0);
@@ -189,7 +189,7 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             add(&mut e.bw_mix.orange, 10.0);
             add(&mut e.bw_mix.blue, -12.0);
         }
-        "lc.bw.red-filter" => {
+        "eidos.bw.red-filter" => {
             e.treatment = Treatment::Bw;
             add(&mut e.light.contrast, 12.0);
             add(&mut e.bw_mix.red, 40.0);
@@ -199,13 +199,13 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
             add(&mut e.bw_mix.aqua, -30.0);
             add(&mut e.bw_mix.blue, -45.0);
         }
-        "lc.bw.soft" => {
+        "eidos.bw.soft" => {
             e.treatment = Treatment::Bw;
             add(&mut e.light.contrast, -14.0);
             add(&mut e.bw_mix.orange, 12.0);
             fade(&mut e.curve.master, 0.06, 0.97, k);
         }
-        "lc.bw.sepia" => {
+        "eidos.bw.sepia" => {
             e.treatment = Treatment::Bw;
             add(&mut e.light.contrast, 6.0);
             fade(&mut e.curve.master, 0.04, 0.98, k);
@@ -217,29 +217,29 @@ pub fn effective(s: &DevelopSettings) -> Cow<'_, DevelopSettings> {
     Cow::Owned(e)
 }
 
-/// Ids of the looks [`effective`] implements (besides the identity `lc.color`).
+/// Ids of the looks [`effective`] implements (besides the identity `eidos.color`).
 pub const LOOK_IDS: &[&str] = &[
-    "lc.neutral",
-    "lc.vivid",
-    "lc.landscape",
-    "lc.portrait",
-    "lc.mono",
-    "lc.film.warm-print",
-    "lc.film.cool-fade",
-    "lc.film.golden-hour",
-    "lc.film.faded-slide",
-    "lc.cine.teal-amber",
-    "lc.cine.night-blue",
-    "lc.cine.desert-heat",
-    "lc.cine.neon-dusk",
-    "lc.muted.matte-soft",
-    "lc.muted.bleached",
-    "lc.muted.pastel-haze",
-    "lc.muted.quiet-green",
-    "lc.bw.mono-rich",
-    "lc.bw.red-filter",
-    "lc.bw.soft",
-    "lc.bw.sepia",
+    "eidos.neutral",
+    "eidos.vivid",
+    "eidos.landscape",
+    "eidos.portrait",
+    "eidos.mono",
+    "eidos.film.warm-print",
+    "eidos.film.cool-fade",
+    "eidos.film.golden-hour",
+    "eidos.film.faded-slide",
+    "eidos.cine.teal-amber",
+    "eidos.cine.night-blue",
+    "eidos.cine.desert-heat",
+    "eidos.cine.neon-dusk",
+    "eidos.muted.matte-soft",
+    "eidos.muted.bleached",
+    "eidos.muted.pastel-haze",
+    "eidos.muted.quiet-green",
+    "eidos.bw.mono-rich",
+    "eidos.bw.red-filter",
+    "eidos.bw.soft",
+    "eidos.bw.sepia",
 ];
 
 #[cfg(test)]
@@ -295,11 +295,11 @@ mod tests {
         let mut s = DevelopSettings::default();
         s.grading.shadows = Wheel { hue: 195.0, sat: 10.0, lum: 0.0 };
         s.curve.master = vec![Point::new(0.0, 0.0), Point::new(0.5, 0.6), Point::new(1.0, 1.0)];
-        s.profile.id = "lc.cine.teal-amber".into();
+        s.profile.id = "eidos.cine.teal-amber".into();
         let e = effective(&s);
         assert!((e.grading.shadows.hue - 195.0).abs() < 1e-6 && (e.grading.shadows.sat - 40.0).abs() < 1e-6, "{:?}", e.grading.shadows);
         assert_eq!(e.curve.master, s.curve.master, "no fade in this look: the user's curve stays");
-        s.profile.id = "lc.muted.matte-soft".into();
+        s.profile.id = "eidos.muted.matte-soft".into();
         let e = effective(&s);
         assert_eq!(e.curve.master.len(), 3, "user points kept");
         let ys: Vec<f64> = e.curve.master.iter().map(|p| p.y).collect();

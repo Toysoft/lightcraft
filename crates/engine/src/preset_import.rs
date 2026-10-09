@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use lightcraft_develop::Preset;
+use eidos_develop::Preset;
 use serde_json::{Map, Value};
 
 use crate::crs::Props;
@@ -23,7 +23,7 @@ pub struct Imported {
     pub unmapped: Vec<String>,
 }
 
-/// Extensions of files read as presets (beyond our own `.lcpreset`).
+/// Extensions of files read as presets (beyond our own `.eidospreset` and legacy `.lcpreset`).
 pub const PRESET_EXTS: &[&str] = &["xmp", "lrtemplate", "zip", "dng", "lmp", "mplumpack"];
 
 // ------------------------------------------------------------------------------------- zip
@@ -433,7 +433,9 @@ pub fn group_from_dir(dir: &str) -> Option<String> {
         "presets",
         "settings",
         "lcpreset",
+        "eidospreset",
         "lightcraft",
+        "eidos",
         "user",
         "develop",
         "files",
@@ -500,7 +502,9 @@ pub fn read_presets(name: &str, bytes: &[u8], group: Option<String>) -> Result<V
             let mut errors = Vec::new();
             for (inner, data) in read_zip(bytes)? {
                 let iext = Path::new(&inner).extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-                if !(PRESET_EXTS.contains(&iext.as_str()) || iext == crate::presets::LCPRESET_EXT) || iext == "zip" {
+                if !(PRESET_EXTS.contains(&iext.as_str()) || iext == crate::presets::EIDOSPRESET_EXT || iext == crate::presets::LEGACY_LCPRESET_EXT)
+                    || iext == "zip"
+                {
                     continue;
                 }
                 let dir_group =
@@ -526,7 +530,7 @@ pub fn read_presets(name: &str, bytes: &[u8], group: Option<String>) -> Result<V
         }
         "xmp" => {
             let text = String::from_utf8_lossy(bytes);
-            let d = lightcraft_meta::parse_xmp(text.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+            let d = eidos_meta::parse_xmp(text.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
             let props = &d.properties;
             let name = props.get("crs:Name").and_then(|v| v.first()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or(stem);
             build(props, &d.values, name, group, false).map(|i| vec![i]).ok_or_else(|| "no develop settings in this XMP file".into())
@@ -534,7 +538,7 @@ pub fn read_presets(name: &str, bytes: &[u8], group: Option<String>) -> Result<V
         // a photo carrying its edits (mobile "DNG presets", edited JPEG / TIFF)
         "dng" | "jpg" | "jpeg" | "tif" | "tiff" => {
             let xmp = embedded_xmp(bytes).ok_or("this photo carries no edits (no XMP)")?;
-            let d = lightcraft_meta::parse_xmp(&xmp).map_err(|e| e.to_string())?;
+            let d = eidos_meta::parse_xmp(&xmp).map_err(|e| e.to_string())?;
             build(&d.properties, &d.values, stem, group, true).map(|i| vec![i]).ok_or_else(|| "this photo carries no edits we can use".into())
         }
         _ => crate::presets::parse_preset_file(name, bytes).map(|v| {
@@ -656,7 +660,7 @@ text]], z = ZSTR "loc" }"#,
         assert!((c[0]["y"].as_f64().unwrap() - 20.0 / 255.0).abs() < 1e-9);
         assert_eq!(v[0].unmapped, vec!["CameraProfile".to_string()], "profiles are ours; the rest is mapped or bookkeeping");
         // it parses into real develop settings
-        let d = lightcraft_develop::DevelopSettings::default().merged(&p.settings).expect("valid develop settings");
+        let d = eidos_develop::DevelopSettings::default().merged(&p.settings).expect("valid develop settings");
         assert_eq!(d.light.exposure, 0.35);
     }
 
@@ -729,7 +733,7 @@ text]], z = ZSTR "loc" }"#,
 
     #[test]
     fn import_command_reads_folders_bundles_and_applies() {
-        let dir = std::env::temp_dir().join(format!("lc-preset-import-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-preset-import-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("Looks/Film")).unwrap();
         std::fs::write(dir.join("Looks/Film/Warm Fade.lrtemplate"), TEMPLATE).unwrap();

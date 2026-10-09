@@ -1,17 +1,17 @@
 [package]
-name = "lightcraft-raster"
+name = "eidos-raster"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LightCraft raster (L0)"
+description = "Eidos raster (L0)"
 
 [lints]
 workspace = true
 
 [dependencies]
 serde = { workspace = true }
-lightcraft-geom = { workspace = true }
-lightcraft-color = { workspace = true }
+eidos-geom = { workspace = true }
+eidos-color = { workspace = true }
 rayon = { workspace = true, optional = true }
 
 [features]

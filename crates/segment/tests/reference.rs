@@ -1,18 +1,18 @@
 //! The port against the reference implementation (Hugging Face `transformers`, fp32).
 //!
 //! Needs the checkpoint and a reference file made by `tools/sam3_reference.py`:
-//! `LIGHTCRAFT_SAM3_DIR=<model dir> LIGHTCRAFT_SAM3_REF=<ref.safetensors> cargo test -p lightcraft-segment --release -- --nocapture`.
+//! `EIDOS_SAM3_DIR=<model dir> EIDOS_SAM3_REF=<ref.safetensors> cargo test -p eidos-segment --release -- --nocapture`.
 //! Skipped (passes) when either is missing.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use candle_core::{Device, IndexOp, Tensor};
-use lightcraft_segment::{Click, Sam3, tokenizer::Tokenizer};
+use eidos_segment::{Click, Sam3, tokenizer::Tokenizer};
 
 fn setup() -> Option<(PathBuf, HashMap<String, Tensor>)> {
-    let dir = PathBuf::from(std::env::var_os("LIGHTCRAFT_SAM3_DIR")?);
-    let reference = PathBuf::from(std::env::var_os("LIGHTCRAFT_SAM3_REF")?);
+    let dir = PathBuf::from(std::env::var_os("EIDOS_SAM3_DIR")?);
+    let reference = PathBuf::from(std::env::var_os("EIDOS_SAM3_REF")?);
     let r = candle_core::safetensors::load(&reference, &Device::Cpu).ok()?;
     Some((dir, r))
 }
@@ -38,7 +38,7 @@ fn mask_disagreement(a: &[f32], b: &[f32]) -> f32 {
 #[test]
 fn matches_reference() {
     let Some((dir, r)) = setup() else {
-        eprintln!("skipped: set LIGHTCRAFT_SAM3_DIR and LIGHTCRAFT_SAM3_REF");
+        eprintln!("skipped: set EIDOS_SAM3_DIR and EIDOS_SAM3_REF");
         return;
     };
     let mut model = Sam3::load(&dir).unwrap();

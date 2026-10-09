@@ -6,7 +6,7 @@
 //! self-contained and `Send`: frontends run it on a worker thread; if the source wasn't cached yet
 //! the job loads it and hands it back in the [`RenderResult`] so the cache can keep it.
 //!
-//! Rendered thumbnails are cached too ([`lightcraft_preview::PreviewCache`]: memory LRU, plus a
+//! Rendered thumbnails are cached too ([`eidos_preview::PreviewCache`]: memory LRU, plus a
 //! disk cache in the library's `thumbs/` folder), keyed by the photo's content hash, the develop
 //! settings hash, the size and [`RENDER_CACHE_VERSION`] — so reopening a library shows its grid
 //! without decoding a single original, and an edit simply produces a new key.
@@ -19,11 +19,11 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Weak};
 
-use lightcraft_catalog::{MediaKind, Photo, PhotoId, Source};
-use lightcraft_develop::DevelopSettings;
-use lightcraft_pipeline::{Quality, RenderRequest, Rendered, SourceInfo, StageCache};
-use lightcraft_preview::{Hash128, Hasher128, Lru, PreviewCache};
-use lightcraft_raster::{Histogram, Rgb32f, Rgba8};
+use eidos_catalog::{MediaKind, Photo, PhotoId, Source};
+use eidos_develop::DevelopSettings;
+use eidos_pipeline::{Quality, RenderRequest, Rendered, SourceInfo, StageCache};
+use eidos_preview::{Hash128, Hasher128, Lru, PreviewCache};
+use eidos_raster::{Histogram, Rgb32f, Rgba8};
 use serde::{Deserialize, Serialize};
 
 const SETTINGS_HASH_ENTRIES: usize = 1024;
@@ -118,7 +118,7 @@ pub struct DecodedSource {
     pub info: Option<SourceInfo>,
     /// A smart preview's stored camera tone curve: the one decoder fact its pixels need that the
     /// catalog's header facts lack (used when `info` is `None`).
-    pub camera_tone: Option<lightcraft_pipeline::tone::CameraTone>,
+    pub camera_tone: Option<eidos_pipeline::tone::CameraTone>,
 }
 
 impl DecodedSource {
@@ -137,7 +137,7 @@ impl DecodedSource {
 pub enum SourceRef {
     Loaded(Box<DecodedSource>),
     Demo {
-        scene: Box<lightcraft_scenes::Scene>,
+        scene: Box<eidos_scenes::Scene>,
         max_edge: usize,
     },
     File {
@@ -188,7 +188,7 @@ pub struct MediaCache {
     settings_hashes: SettingsHashes,
     /// Decoded thumbnail-level sources (LRU by bytes).
     thumbs: Lru<PhotoId, DecodedSource>,
-    /// Decoded preview-level sources with their last use ([`lightcraft_preview::next_tick`]).
+    /// Decoded preview-level sources with their last use ([`eidos_preview::next_tick`]).
     previews: Vec<(PhotoId, DecodedSource, u64)>,
     /// The last full-resolution original (exports; one at a time: ~300 MB at 24 MP).
     full: Option<(PhotoId, DecodedSource, u64)>,
@@ -207,7 +207,7 @@ pub struct MediaCache {
     /// Whether originals (and smart previews) are on disk: cached and checked off the UI thread
     /// in the app (see [`crate::availability`]).
     pub availability: crate::availability::Availability,
-    scenes: Vec<lightcraft_scenes::Scene>,
+    scenes: Vec<eidos_scenes::Scene>,
     /// Rendered thumbnails (memory, plus disk once a library is attached).
     pub rendered: Arc<PreviewCache>,
 }
@@ -324,11 +324,11 @@ impl MediaCache {
         match level {
             SourceLevel::Thumb => self.thumbs.get(&id).cloned(),
             SourceLevel::Preview => self.previews.iter_mut().find(|e| e.0 == id).map(|e| {
-                e.2 = lightcraft_preview::next_tick();
+                e.2 = eidos_preview::next_tick();
                 e.1.clone()
             }),
             SourceLevel::Full => self.full.as_mut().filter(|e| e.0 == id).map(|e| {
-                e.2 = lightcraft_preview::next_tick();
+                e.2 = eidos_preview::next_tick();
                 e.1.clone()
             }),
         }
@@ -355,7 +355,7 @@ impl MediaCache {
     }
 
     fn insert_source(&mut self, id: PhotoId, level: SourceLevel, img: DecodedSource) {
-        let tick = lightcraft_preview::next_tick();
+        let tick = eidos_preview::next_tick();
         match level {
             SourceLevel::Thumb => {
                 let cost = source_bytes(&img.image);
@@ -432,7 +432,7 @@ impl MediaCache {
         match origin {
             Source::Demo { scene } => {
                 if self.scenes.is_empty() {
-                    self.scenes = lightcraft_scenes::demo_library();
+                    self.scenes = eidos_scenes::demo_library();
                 }
                 match self.scenes.iter().find(|s| s.id == *scene) {
                     Some(s) => SourceRef::Demo { scene: Box::new(s.clone()), max_edge },
@@ -497,24 +497,24 @@ impl RenderJob {
 
     /// Draw a diagnostic overlay over the result (e.g. Point Color's visualized range). Gets its
     /// own result key.
-    pub fn with_overlay(mut self, overlay: lightcraft_pipeline::Overlay) -> Self {
+    pub fn with_overlay(mut self, overlay: eidos_pipeline::Overlay) -> Self {
         if self.request.overlay != overlay {
             self.key ^= self.request.overlay.key().wrapping_mul(0x9e37_79b9_7f4a_7c15);
             self.request.overlay = overlay;
             self.key ^= overlay.key().wrapping_mul(0x9e37_79b9_7f4a_7c15);
         }
         // a diagnostic view (visualized range / spots) must never become the photo's cached preview
-        if overlay != lightcraft_pipeline::Overlay::None {
+        if overlay != eidos_pipeline::Overlay::None {
             self.view_cache = None;
         }
         self
     }
 
-    /// Soft-proof the result (see [`lightcraft_pipeline::Proof`]). Gets its own result key and is
+    /// Soft-proof the result (see [`eidos_pipeline::Proof`]). Gets its own result key and is
     /// never kept as the photo's cached preview.
-    pub fn with_proof(mut self, proof: Option<lightcraft_pipeline::Proof>) -> Self {
+    pub fn with_proof(mut self, proof: Option<eidos_pipeline::Proof>) -> Self {
         if self.request.proof != proof {
-            let k = |p: Option<lightcraft_pipeline::Proof>| p.map_or(0, |p| p.key()).wrapping_mul(0xc2b2_ae3d_27d4_eb4f);
+            let k = |p: Option<eidos_pipeline::Proof>| p.map_or(0, |p| p.key()).wrapping_mul(0xc2b2_ae3d_27d4_eb4f);
             self.key ^= k(self.request.proof) ^ k(proof);
             self.request.proof = proof;
         }
@@ -589,22 +589,22 @@ impl RenderJob {
     }
 }
 
-/// Render `src`: on the GPU when `gpu` is set and a GPU is available (`lightcraft_gpu`), else on
+/// Render `src`: on the GPU when `gpu` is set and a GPU is available (`eidos_gpu`), else on
 /// the CPU, reusing `stages` either way. Both produce the same image within 1–3 LSB (see
-/// `docs/gpu-pipeline.md`); `LIGHTCRAFT_GPU=0` or [`lightcraft_gpu::set_enabled`] forces the CPU.
+/// `docs/gpu-pipeline.md`); `EIDOS_GPU=0` or [`eidos_gpu::set_enabled`] forces the CPU.
 pub fn develop(src: &Arc<Rgb32f>, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest, stages: Option<&StageCache>, gpu: bool) -> Rendered {
     // LUT profiles have no GPU stage: they render on the CPU
     if gpu
-        && !lightcraft_pipeline::lut::is_lut_profile(&s.profile.id)
+        && !eidos_pipeline::lut::is_lut_profile(&s.profile.id)
         && !s.masks.iter().any(|m| m.visible && m.refine > 0.0)
         && req.proof.is_none()
-        && let Some(r) = lightcraft_gpu::render(src, info, s, req, stages)
+        && let Some(r) = eidos_gpu::render(src, info, s, req, stages)
     {
         return r;
     }
     match stages {
-        Some(st) => lightcraft_pipeline::render_cached(src, info, s, req, st),
-        None => lightcraft_pipeline::render(src, info, s, req),
+        Some(st) => eidos_pipeline::render_cached(src, info, s, req, st),
+        None => eidos_pipeline::render(src, info, s, req),
     }
 }
 
@@ -819,7 +819,7 @@ impl crate::Session {
     /// photo's own look with its crop replaced by a square around the face (room for hair and chin),
     /// `edge` pixels across (≤ 512). The source level is the smallest that keeps the face sharp, up
     /// to the preview. Cached like [`Self::variant_job`], and `key` likewise follows the content.
-    pub fn face_job(&mut self, id: PhotoId, face: lightcraft_geom::Rect, edge: usize) -> Option<RenderJob> {
+    pub fn face_job(&mut self, id: PhotoId, face: eidos_geom::Rect, edge: usize) -> Option<RenderJob> {
         let p = self.catalog.photo(id)?.clone();
         // `face` is on the upright (EXIF-oriented) photo; the crop below is in the frame after the
         // user's Rotate Left/Right, so carry the box (and the photo's size) over to it.
@@ -833,9 +833,9 @@ impl crate::Session {
         let (cx, cy) = ((face.x0 + face.x1) / 2.0 * w, (face.y0 + face.y1) / 2.0 * h);
         let (cx, cy) = (if cx.is_finite() { cx } else { w / 2.0 }, if cy.is_finite() { cy } else { h / 2.0 });
         let (x0, y0) = (cx.clamp(side / 2.0, w - side / 2.0) - side / 2.0, cy.clamp(side / 2.0, h - side / 2.0) - side / 2.0);
-        let rect = lightcraft_geom::Rect { x0: x0 / w, y0: y0 / h, x1: (x0 + side) / w, y1: (y0 + side) / h };
+        let rect = eidos_geom::Rect { x0: x0 / w, y0: y0 / h, x1: (x0 + side) / w, y1: (y0 + side) / h };
         let mut settings = (*p.develop).clone();
-        settings.crop = lightcraft_develop::Crop { geometry: lightcraft_geom::CropGeometry { rect, angle: 0.0 }, ..Default::default() };
+        settings.crop = eidos_develop::Crop { geometry: eidos_geom::CropGeometry { rect, angle: 0.0 }, ..Default::default() };
         let edge = edge.clamp(16, SourceLevel::Thumb.max_edge());
         // pixels along the long edge that leave `edge` across the crop
         let needed = (edge as f64 * w.max(h) / side).ceil().min(SourceLevel::Preview.max_edge() as f64);
@@ -944,8 +944,8 @@ impl crate::Session {
         id: PhotoId,
         max_w: usize,
         max_h: usize,
-        space: lightcraft_pipeline::OutputSpace,
-        depth: lightcraft_pipeline::OutputDepth,
+        space: eidos_pipeline::OutputSpace,
+        depth: eidos_pipeline::OutputDepth,
     ) -> Result<Rendered, String> {
         let r = self.export_job(id, max_w, max_h, space, depth)?.run();
         self.accept(&r);
@@ -958,8 +958,8 @@ impl crate::Session {
         id: PhotoId,
         max_w: usize,
         max_h: usize,
-        space: lightcraft_pipeline::OutputSpace,
-        depth: lightcraft_pipeline::OutputDepth,
+        space: eidos_pipeline::OutputSpace,
+        depth: eidos_pipeline::OutputDepth,
     ) -> Result<RenderJob, String> {
         let mut job = self.render_job(id, max_w, max_h, false, true).ok_or("no such photo")?;
         job.request.space = space;
@@ -984,7 +984,7 @@ impl crate::Session {
     }
 }
 
-/// What an import learns from a file header (set by the app from `lightcraft-codecs`/`-raw`).
+/// What an import learns from a file header (set by the app from `eidos-codecs`/`-raw`).
 #[derive(Clone, Debug, Default)]
 pub struct ProbeInfo {
     pub width: u32,
@@ -993,18 +993,18 @@ pub struct ProbeInfo {
     pub kind: MediaKind,
     pub file_size: u64,
     pub captured: Option<String>,
-    pub meta: lightcraft_catalog::Meta,
+    pub meta: eidos_catalog::Meta,
     pub as_shot_wb: Option<(f64, f64)>,
     /// Hash of the file's bytes (hex), for duplicate detection. When it is a 32-digit
-    /// [`lightcraft_preview::hash_bytes`] of the whole file (as the native probe computes it),
+    /// [`eidos_preview::hash_bytes`] of the whole file (as the native probe computes it),
     /// Import → Copy verifies each copy against it instead of reading the source again.
     pub content_hash: Option<String>,
     /// Lens corrections embedded in the file (DNG opcodes).
-    pub embedded_lens: Option<lightcraft_develop::EmbeddedLens>,
+    pub embedded_lens: Option<eidos_develop::EmbeddedLens>,
     /// The file's embedded XMP packet (raw/DNG files), for develop settings stored inside the file.
     pub xmp: Option<String>,
     /// A raw variant that can't be decoded yet: why. The file is described (and will be shown and
-    /// edited) from its embedded preview; see [`lightcraft_catalog::Photo::preview_only`].
+    /// edited) from its embedded preview; see [`eidos_catalog::Photo::preview_only`].
     pub preview_only: Option<String>,
 }
 
@@ -1013,7 +1013,7 @@ pub type FileProbe = Arc<dyn Fn(&str) -> Result<ProbeInfo, String> + Send + Sync
 #[cfg(test)]
 mod thumbnail_hash_tests {
     use super::*;
-    use lightcraft_catalog::Op;
+    use eidos_catalog::Op;
 
     fn session() -> crate::Session {
         let mut s = crate::Session::new();
@@ -1111,7 +1111,7 @@ mod tests {
 
     #[test]
     fn decoder_info_survives_render_jobs_cache_and_eviction() {
-        let tone = lightcraft_pipeline::tone::CameraTone::new(std::array::from_fn(|i| {
+        let tone = eidos_pipeline::tone::CameraTone::new(std::array::from_fn(|i| {
             let x = 0.01 * (i + 1) as f32;
             [x, (x * 2.0).min(0.9)]
         }))
@@ -1134,7 +1134,7 @@ mod tests {
         job.settings = Arc::new(DevelopSettings::default());
         let r = job.clone().run();
         assert_eq!(r.loaded.as_ref().unwrap().info, Some(info));
-        let expected = lightcraft_pipeline::render(&r.loaded.as_ref().unwrap().image, &info, &job.settings, &job.request);
+        let expected = eidos_pipeline::render(&r.loaded.as_ref().unwrap().image, &info, &job.settings, &job.request);
         assert_eq!(r.rendered.as_ref().unwrap().image.data, expected.image.data);
         s.accept(&r);
         job.source = s.media.source_ref(s.catalog.photo(id).unwrap(), job.level);
@@ -1160,7 +1160,7 @@ mod tests {
         assert!(m.get(PhotoId(1), SourceLevel::Preview).is_some() && m.get(PhotoId(3), SourceLevel::Preview).is_some());
         // a thumbnail source and a rendered preview compete in the same budget
         m.insert(PhotoId(4), SourceLevel::Thumb, img(500));
-        m.rendered.put(Hash128(7), Arc::new(lightcraft_raster::Rgba8::new(1000, 1000)));
+        m.rendered.put(Hash128(7), Arc::new(eidos_raster::Rgba8::new(1000, 1000)));
         assert!(m.held() <= 30 * mb, "{}", m.held());
         // the newest preview (the one on screen) is never evicted, even alone over budget
         m.set_budget(mb);
@@ -1228,7 +1228,7 @@ mod tests {
             d.profile.id = pid.into();
             d
         };
-        let (a, b) = (with("lc.vivid"), with("lc.bw.sepia"));
+        let (a, b) = (with("eidos.vivid"), with("eidos.bw.sepia"));
         let ja = s.variant_job(id, &a, 128).unwrap();
         let jb = s.variant_job(id, &b, 128).unwrap();
         assert_ne!(ja.key, jb.key, "keys differ per settings");

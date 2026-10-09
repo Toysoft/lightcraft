@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, Flathub). Template: package.sh and the Flatpak
+     manifest substitute @VERSION@ and @DATE@ from Cargo.toml and the build date. -->
+<component type="desktop-application">
+  <id>ai.nostos.eidos</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>Eidos</name>
+  <summary>Organise photos and develop raw files, non-destructively</summary>
+  <developer id="ai.nostos">
+    <name>Nostos</name>
+  </developer>
+  <description>
+    <p>
+      Eidos is a photo library and raw developer. Organise photos and develop raw files, non-destructively
+    </p>
+  </description>
+  <launchable type="desktop-id">ai.nostos.eidos.desktop</launchable>
+  <icon type="stock">ai.nostos.eidos</icon>
+  <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser.
+       TODO(eidos-urls): no official Eidos homepage, tracker, help or contact URLs exist yet, so
+       none are claimed here; upstream LightCraft URLs must never stand in for Eidos destinations.
+       The screenshot below still loads from the upstream repository until Eidos has its own. -->
+  <categories>
+    <category>Graphics</category>
+    <category>RasterGraphics</category>
+    <category>Photography</category>
+  </categories>
+  <keywords>
+    <keyword>photo</keyword>
+    <keyword>raw</keyword>
+    <keyword>camera</keyword>
+    <keyword>library</keyword>
+    <keyword>develop</keyword>
+  </keywords>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Developing a photo with the Light and Effects panels and the filmstrip</caption>
+      <image>https://raw.githubusercontent.com/storytold/lightcraft/main/docs/images/hero-tetons.jpg</image>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#9fd0ff</color>
+    <color type="primary" scheme_preference="dark">#1f64ba</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">760</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>tablet</control>
+  </supports>
+  <provides>
+    <binary>eidos</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

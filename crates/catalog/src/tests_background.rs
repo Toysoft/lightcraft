@@ -261,14 +261,14 @@ fn dropping_the_journal_waits_for_its_snapshot() {
 /// ignores; edits during the snapshot survive; reopening resumes appends.
 #[test]
 fn fs_store_background_snapshot() {
-    let dir = std::env::temp_dir().join(format!("lc-journal-bg-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-journal-bg-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let (mut j, mut live, _) = Journal::open(Box::new(FsStore::open(&dir).unwrap())).unwrap();
     for k in 0..200 {
         edit(&mut j, &mut live, k);
     }
     // a previous crash mid-snapshot left a partial temp file
-    std::fs::write(dir.join(format!("{SNAPSHOT}.tmp")), b"{\"format\":\"lightcraft-catal").unwrap();
+    std::fs::write(dir.join(format!("{SNAPSHOT}.tmp")), b"{\"format\":\"eidos-catal").unwrap();
     let (mut j2, c2, r) = Journal::open(Box::new(FsStore::open(&dir).unwrap())).unwrap();
     assert_eq!((c2.to_snapshot(), r.snapshot_seq), (live.to_snapshot(), 0));
     drop(j);

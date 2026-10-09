@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use lightcraft_catalog::{Op, Photo, PhotoId, Source};
+use eidos_catalog::{Op, Photo, PhotoId, Source};
 use serde::Serialize;
 
 use crate::sidecar::SidecarNaming;
@@ -545,7 +545,7 @@ fn set_file_ops_to(op: &Op, to: &HashSet<&str>, out: &mut Vec<Op>) {
 
 /// The photos among `ids` a rename handles, in order: photos sharing one file (virtual copies)
 /// rename once. No file-system calls.
-pub fn rename_photos(cat: &lightcraft_catalog::Catalog, ids: &[PhotoId]) -> Vec<std::sync::Arc<Photo>> {
+pub fn rename_photos(cat: &eidos_catalog::Catalog, ids: &[PhotoId]) -> Vec<std::sync::Arc<Photo>> {
     let mut seen_paths: HashSet<String> = HashSet::new();
     ids.iter()
         .filter_map(|id| cat.photo(*id))
@@ -1012,7 +1012,7 @@ mod tests {
     /// Issue #95 on the real disk, whichever kind of volume the temp folder is on.
     #[test]
     fn case_only_rename_on_disk() {
-        let dir = std::env::temp_dir().join(format!("lc-rename-case-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-rename-case-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let (upper, lower) = (dir.join("IMG_1.JPG"), dir.join("img_1.JPG"));

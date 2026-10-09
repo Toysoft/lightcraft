@@ -1,4 +1,4 @@
-//! The LightCraft engine façade.
+//! The Eidos engine façade.
 //!
 //! Every user-visible action is a command with a stable id (`photo.rate`, `develop.set`,
 //! `album.create`, `mask.add`…) and JSON parameters. The egui UI, the CLI, the control channel and
@@ -47,13 +47,13 @@ pub mod walk;
 use std::sync::Arc;
 
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
+use eidos_catalog::{Catalog, Filter, Op, PhotoId, Sort};
+use eidos_develop::DevelopSettings;
 pub use fonts::{CRAFT_FONTS, CraftFont};
-use lightcraft_catalog::{Catalog, Filter, Op, PhotoId, Sort};
-use lightcraft_develop::DevelopSettings;
 pub use media::{RenderJob, SourceLevel};
 use serde_json::Value;
 pub use view::{Browse, FilterChip, LibrarySource, Selection, SelectionState, filter_chips};
-pub use {lightcraft_catalog as catalog, lightcraft_develop as develop, lightcraft_gpu as gpu, lightcraft_pipeline as pipeline};
+pub use {eidos_catalog as catalog, eidos_develop as develop, eidos_gpu as gpu, eidos_pipeline as pipeline};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -64,12 +64,12 @@ pub enum EngineError {
     #[error("invalid parameters for `{cmd}`: {msg}")]
     BadParams { cmd: String, msg: String },
     #[error("{0}")]
-    Catalog(#[from] lightcraft_catalog::CatalogError),
+    Catalog(#[from] eidos_catalog::CatalogError),
     /// The command's change is applied (in memory, undoable) but its journal records could not
     /// be written. They stay queued and are written by the next successful save.
-    #[error("saved in memory but not written to disk: {0}; LightCraft will retry")]
+    #[error("saved in memory but not written to disk: {0}; Eidos will retry")]
     NotSaved(String),
-    /// Another process (the app, `lightcraft-cli`, another computer) has the library open.
+    /// Another process (the app, `eidos-cli`, another computer) has the library open.
     #[error("{0}")]
     LibraryInUse(String),
     #[error("{0}")]
@@ -169,8 +169,8 @@ pub struct Session {
     /// The photo that was active before the current one (Paste Settings from Previous).
     pub previous_active: Option<PhotoId>,
     /// Groups last used for Copy (Lightroom remembers them).
-    pub copy_groups: Vec<lightcraft_develop::SettingsGroup>,
-    pub presets: Vec<lightcraft_develop::Preset>,
+    pub copy_groups: Vec<eidos_develop::SettingsGroup>,
+    pub presets: Vec<eidos_develop::Preset>,
     /// Favourite profile ids (persisted with the library, like preset favourites).
     pub profile_favorites: Vec<String>,
     /// Recently applied profile ids, newest first (at most [`presets::RECENT_PROFILES`]).
@@ -213,7 +213,7 @@ pub struct Session {
     /// Imported `.cube` LUT profiles.
     pub lut_profiles: Vec<cmd::lut_profiles::LutProfile>,
     /// The target album B adds to (`None` = the Quick Collection).
-    pub target_album: Option<lightcraft_catalog::AlbumId>,
+    pub target_album: Option<eidos_catalog::AlbumId>,
     /// Auto import: files seen in the watched folder and their size then (a file is imported once
     /// its size held between two scans).
     pub auto_import_seen: std::collections::HashMap<String, u64>,
@@ -268,7 +268,7 @@ impl Session {
             browse: None,
             library_folder: None,
             previous_active: None,
-            copy_groups: lightcraft_develop::SettingsGroup::default_copy(),
+            copy_groups: eidos_develop::SettingsGroup::default_copy(),
             presets: presets::builtin(),
             profile_favorites: Vec::new(),
             profile_recent: Vec::new(),
@@ -302,7 +302,7 @@ impl Session {
             import_defaults: import::ImportDefaults::default(),
             cache_mb: 0,
             smart_previews_dir: None,
-            forget_local_days: lightcraft_catalog::DEFAULT_FORGET_DAYS,
+            forget_local_days: eidos_catalog::DEFAULT_FORGET_DAYS,
         }
     }
 
@@ -413,8 +413,8 @@ impl Session {
         }
         let mut versions = p.versions.clone();
         let created = (self.clock)();
-        let name = lightcraft_catalog::dates::display_time(&created);
-        versions.push(lightcraft_catalog::Version { name, created, settings: p.develop.clone(), auto: true });
+        let name = eidos_catalog::dates::display_time(&created);
+        versions.push(eidos_catalog::Version { name, created, settings: p.develop.clone(), auto: true });
         let autos = versions.iter().filter(|v| v.auto).count();
         if autos > AUTO_VERSIONS
             && let Some(i) = versions.iter().position(|v| v.auto)
@@ -561,7 +561,7 @@ impl Session {
         {
             return self.apply_silent(Op::SetDevelop { id, settings, label: label.into(), edited: Some(now) });
         }
-        let mut ops = vec![self.develop_op(id, (*settings).clone(), label).ok_or(lightcraft_catalog::CatalogError::NoPhoto(id))?];
+        let mut ops = vec![self.develop_op(id, (*settings).clone(), label).ok_or(eidos_catalog::CatalogError::NoPhoto(id))?];
         ops.extend(self.auto_sync_ops(id, &settings, label));
         let op = if ops.len() == 1 { ops.remove(0) } else { Op::Batch { ops } };
         self.commit(label, op)
@@ -595,7 +595,7 @@ impl Session {
             .filter(|x| **x != id)
             .filter_map(|x| self.develop_of(*x).map(|d| (*x, d)))
             .filter_map(|(x, d)| {
-                let synced = lightcraft_develop::apply_partial(&d, &delta, 1.0);
+                let synced = eidos_develop::apply_partial(&d, &delta, 1.0);
                 (synced != *d).then(|| self.develop_op(x, synced, label)).flatten()
             })
             .collect()
@@ -605,7 +605,7 @@ impl Session {
     pub fn develop_op(&self, id: PhotoId, settings: DevelopSettings, label: &str) -> Option<Op> {
         self.catalog.photo(id)?;
         let settings = Arc::new(settings);
-        let step = lightcraft_catalog::HistoryStep { label: label.into(), settings: settings.clone() };
+        let step = eidos_catalog::HistoryStep { label: label.into(), settings: settings.clone() };
         Some(Op::Batch {
             ops: vec![Op::SetDevelop { id, settings, label: label.into(), edited: Some((self.clock)()) }, Op::PushHistory { id, step }],
         })
@@ -652,7 +652,7 @@ impl Session {
         }
         if self.visible_key.as_ref() != Some(&key) {
             // "in the last N days" rules count back from the session's clock
-            lightcraft_catalog::rules::set_now(Some((self.clock)()));
+            eidos_catalog::rules::set_now(Some((self.clock)()));
             let mut f = self.source.to_filter(&self.filter, &self.catalog);
             if self.source == LibrarySource::Folder {
                 // no folder chosen: nothing (an empty path matches nothing)
@@ -673,7 +673,7 @@ impl Session {
                 return self.visible();
             }
             if matches!(self.source, LibrarySource::Album(_))
-                && self.sort.key == lightcraft_catalog::SortKey::CaptureDate
+                && self.sort.key == eidos_catalog::SortKey::CaptureDate
                 && let LibrarySource::Album(a) = self.source
                 && let Some(al) = self.catalog.album(a)
                 && !al.is_smart()

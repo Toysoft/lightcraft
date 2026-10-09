@@ -8,13 +8,13 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
-use lightcraft_catalog::{Op, Photo, PhotoId, Source};
-use lightcraft_engine::{LibrarySource, Session};
+use eidos_catalog::{Op, Photo, PhotoId, Source};
+use eidos_engine::{LibrarySource, Session};
 use serde_json::json;
 
 use crate::headless::Headless;
 use crate::state::{RightPanel, ViewMode};
-use crate::{LightcraftApp, Services};
+use crate::{EidosApp, Services};
 
 /// What one file-system call takes on the "NAS".
 const SLOW: Duration = Duration::from_millis(400);
@@ -44,11 +44,11 @@ impl Calls {
 fn offline_library(calls: &Calls) -> Session {
     let mut s = Session::new();
     for i in 0..N {
-        let path = format!("/lightcraft-offline-nas/IMG_{i:03}.jpg");
+        let path = format!("/eidos-offline-nas/IMG_{i:03}.jpg");
         let p = Photo::new(PhotoId(i + 1), Source::File { path }, &format!("IMG_{i:03}.jpg"), "JPEG", 600, 400, "2026-01-01T00:00:00");
         s.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
     }
-    s.media.smart_dir = Some(std::env::temp_dir().join("lightcraft-offline-smart-previews-none"));
+    s.media.smart_dir = Some(std::env::temp_dir().join("eidos-offline-smart-previews-none"));
     let c = calls.clone();
     s.media.availability.set_probe(Arc::new(move |_| {
         c.record();
@@ -71,7 +71,7 @@ fn max_frame(h: &mut Headless, frames: usize) -> Duration {
 #[test]
 fn offline_originals_never_block_a_frame() {
     let calls = Calls::default();
-    let app = LightcraftApp::new(offline_library(&calls), Services { png: None, ..Default::default() });
+    let app = EidosApp::new(offline_library(&calls), Services { png: None, ..Default::default() });
     let mut h = Headless::new(app, [1200.0, 800.0], 1.0);
     let ui_thread = std::thread::current().id();
     h.app.ui.view = ViewMode::PhotoGrid;
@@ -120,7 +120,7 @@ fn offline_originals_never_block_a_frame() {
 /// stops it with what was read so far added.
 #[test]
 fn import_reads_files_off_the_ui_thread_and_can_be_cancelled() {
-    let dir = std::env::temp_dir().join(format!("lc-ui-slow-import-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-ui-slow-import-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let n = 40;
@@ -133,15 +133,9 @@ fn import_reads_files_off_the_ui_thread_and_can_be_cancelled() {
     s.media.file_probe = Some(Arc::new(move |p: &str| {
         c.record();
         std::thread::sleep(Duration::from_millis(150));
-        Ok(lightcraft_engine::media::ProbeInfo {
-            width: 60,
-            height: 40,
-            format: "JPEG".into(),
-            content_hash: Some(p.to_string()),
-            ..Default::default()
-        })
+        Ok(eidos_engine::media::ProbeInfo { width: 60, height: 40, format: "JPEG".into(), content_hash: Some(p.to_string()), ..Default::default() })
     }));
-    let app = LightcraftApp::new(s, Services { png: None, ..Default::default() });
+    let app = EidosApp::new(s, Services { png: None, ..Default::default() });
     let mut h = Headless::new(app, [1200.0, 800.0], 1.0);
     let ui_thread = std::thread::current().id();
     h.step();

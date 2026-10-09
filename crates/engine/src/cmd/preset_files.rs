@@ -1,10 +1,10 @@
-//! Preset files: import `.lcpreset`, XMP, `.lrtemplate`, DNG-preset, Luminar looks and zip bundles; export `.lcpreset`.
+//! Preset files: import `.eidospreset`, legacy `.lcpreset`, XMP, `.lrtemplate`, DNG-preset, Luminar looks and zip bundles; export `.eidospreset`.
 
 use serde_json::{Value, json};
 
 use super::{CommandSpec, always, bad, cmd, str_param};
 use crate::preset_import::{group_from_dir, read_presets};
-use crate::presets::{LCPRESET_EXT, expand_preset_paths, to_lcpreset};
+use crate::presets::{EIDOSPRESET_EXT, expand_preset_paths, to_eidospreset};
 use crate::{Result, Session};
 
 fn strings(p: &Value, key: &str) -> Option<Vec<String>> {
@@ -52,7 +52,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").filter(|x| !x.trim().is_empty()).ok_or_else(|| bad("preset.export", "missing path"))?;
     let mut path = std::path::PathBuf::from(path);
     if path.extension().is_none() {
-        path.set_extension(LCPRESET_EXT);
+        path.set_extension(EIDOSPRESET_EXT);
     }
     let ids = strings(p, "ids");
     let group = str_param(p, "group");
@@ -72,7 +72,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| crate::EngineError::Other(format!("{}: {e}", dir.display())))?;
     }
-    std::fs::write(&path, to_lcpreset(&chosen)).map_err(|e| crate::EngineError::Other(format!("{}: {e}", path.display())))?;
+    std::fs::write(&path, to_eidospreset(&chosen)).map_err(|e| crate::EngineError::Other(format!("{}: {e}", path.display())))?;
     Ok(json!({"path": path.display().to_string(), "count": chosen.len()}))
 }
 
@@ -83,7 +83,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Import Presets",
             [],
             None,
-            "{paths: [file or folder], group?, dryRun?} — .lcpreset, XMP presets, .lrtemplate, photos carrying edits (DNG/JPEG/TIFF \"DNG presets\"), Luminar looks (.lmp, .mplumpack collections) and .zip bundles of these; folders give their name as group; crs: fields mapped per docs/xmp-interop.md → {imported: [{id,name,group,file,unmapped}], skipped, failed}",
+            "{paths: [file or folder], group?, dryRun?} — .eidospreset (and legacy .lcpreset), XMP presets, .lrtemplate, photos carrying edits (DNG/JPEG/TIFF \"DNG presets\"), Luminar looks (.lmp, .mplumpack collections) and .zip bundles of these; folders give their name as group; crs: fields mapped per docs/xmp-interop.md → {imported: [{id,name,group,file,unmapped}], skipped, failed}",
             always,
             import
         ),
@@ -92,7 +92,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Export Presets",
             [],
             None,
-            "{path, ids?: [presetId], group?: name} (default: all user presets) → {path, count}; writes a .lcpreset JSON file",
+            "{path, ids?: [presetId], group?: name} (default: all user presets) → {path, count}; writes an .eidospreset JSON file",
             always,
             export
         ),

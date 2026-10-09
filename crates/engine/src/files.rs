@@ -1,19 +1,19 @@
 //! Real files: probing (dimensions + metadata for import) and loading (decode → linear Rec.2020,
-//! oriented, downscaled to the requested level). Standard formats go through `lightcraft-codecs`,
-//! camera raws through `lightcraft-raw` (demosaic + DNG colour model).
+//! oriented, downscaled to the requested level). Standard formats go through `eidos-codecs`,
+//! camera raws through `eidos-raw` (demosaic + DNG colour model).
 
 use std::sync::Arc;
 
-use lightcraft_catalog::{MediaKind, Meta};
-use lightcraft_color::cct::xy_to_temp_tint;
-use lightcraft_geom::Orientation;
-use lightcraft_pipeline::SourceInfo;
-use lightcraft_raster::Rgb32f;
-use lightcraft_raster::resample::{Filter, fit};
+use eidos_catalog::{MediaKind, Meta};
+use eidos_color::cct::xy_to_temp_tint;
+use eidos_geom::Orientation;
+use eidos_pipeline::SourceInfo;
+use eidos_raster::Rgb32f;
+use eidos_raster::resample::{Filter, fit};
 
 use crate::media::{FileLoader, FileProbe, PreviewLoader, ProbeInfo};
 
-fn meta_of(m: &lightcraft_meta::Metadata) -> (Meta, Option<String>) {
+fn meta_of(m: &eidos_meta::Metadata) -> (Meta, Option<String>) {
     let shutter = m.exposure_time.map(|t| if t >= 1.0 { format!("{t:.0}") } else { format!("1/{:.0}", 1.0 / t) }).unwrap_or_default();
     let camera = [m.make.clone().unwrap_or_default(), m.model.clone().unwrap_or_default()].join(" ").trim().to_string();
     let meta = Meta {
@@ -33,7 +33,7 @@ fn meta_of(m: &lightcraft_meta::Metadata) -> (Meta, Option<String>) {
         title: m.title.clone().unwrap_or_default(),
         caption: m.caption.clone().unwrap_or_default(),
         copyright: m.copyright.clone().unwrap_or_default(),
-        copyright_status: lightcraft_catalog::CopyrightStatus::from_marked(m.copyright_marked),
+        copyright_status: eidos_catalog::CopyrightStatus::from_marked(m.copyright_marked),
         usage_terms: m.usage_terms.clone().unwrap_or_default(),
         copyright_url: m.copyright_url.clone().unwrap_or_default(),
         creator: m.artist.clone().unwrap_or_default(),
@@ -45,10 +45,10 @@ fn meta_of(m: &lightcraft_meta::Metadata) -> (Meta, Option<String>) {
 
 /// Lens corrections embedded in a raw's `OpcodeList3` (`WarpRectilinear`, `FixVignetteRadial`: a DNG's own, or the
 /// raw reader's equivalent of the camera's correction, e.g. Panasonic / Leica RW2 distortion), re-expressed for the
-/// default-cropped, EXIF-oriented image. These are the only "profile" corrections LightCraft applies.
-pub fn embedded_lens(raw: &lightcraft_raw::RawInfo) -> Option<lightcraft_develop::EmbeddedLens> {
-    use lightcraft_develop::{EmbeddedLens, EmbeddedVignette, EmbeddedWarp};
-    use lightcraft_geom::Point;
+/// default-cropped, EXIF-oriented image. These are the only "profile" corrections Eidos applies.
+pub fn embedded_lens(raw: &eidos_raw::RawInfo) -> Option<eidos_develop::EmbeddedLens> {
+    use eidos_develop::{EmbeddedLens, EmbeddedVignette, EmbeddedWarp};
+    use eidos_geom::Point;
     let (aw, ah) = (raw.active_area.width as f64, raw.active_area.height as f64);
     if aw < 2.0 || ah < 2.0 {
         return None;
@@ -70,12 +70,12 @@ pub fn embedded_lens(raw: &lightcraft_raw::RawInfo) -> Option<lightcraft_develop
     let mut lens = EmbeddedLens::default();
     for op in &raw.opcodes.list3 {
         match op {
-            lightcraft_raw::Opcode::WarpRectilinear { planes, center } if !planes.is_empty() && lens.warp.is_none() => {
+            eidos_raw::Opcode::WarpRectilinear { planes, center } if !planes.is_empty() && lens.warp.is_none() => {
                 let (center, radius) = centre(*center);
                 let p = |i: usize| planes[i.min(planes.len() - 1)];
                 lens.warp = Some(EmbeddedWarp { planes: [p(0), p(1), p(2)], center, radius });
             }
-            lightcraft_raw::Opcode::FixVignetteRadial { k, center } if lens.vignette.is_none() => {
+            eidos_raw::Opcode::FixVignetteRadial { k, center } if lens.vignette.is_none() => {
                 let (center, radius) = centre(*center);
                 lens.vignette = Some(EmbeddedVignette { k: *k, center, radius });
             }
@@ -85,7 +85,7 @@ pub fn embedded_lens(raw: &lightcraft_raw::RawInfo) -> Option<lightcraft_develop
     if lens.warp.is_none() && lens.vignette.is_none() {
         return None;
     }
-    Some(lightcraft_pipeline::optics::reorient_lens(&lens, raw.orientation, cw, ch))
+    Some(eidos_pipeline::optics::reorient_lens(&lens, raw.orientation, cw, ch))
 }
 
 fn ext_upper(name: &str) -> String {
@@ -93,13 +93,13 @@ fn ext_upper(name: &str) -> String {
 }
 
 /// Probe a file's bytes: kind, dimensions (oriented), metadata. Raws are described from their
-/// headers ([`lightcraft_raw::probe_info`]): no pixel data is decompressed.
+/// headers ([`eidos_raw::probe_info`]): no pixel data is decompressed.
 pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
-    let content_hash = Some(lightcraft_preview::hash_bytes(bytes).to_string());
-    let m = lightcraft_meta::extract(bytes);
+    let content_hash = Some(eidos_preview::hash_bytes(bytes).to_string());
+    let m = eidos_meta::extract(bytes);
     let (meta, captured) = meta_of(&m);
-    if lightcraft_raw::probe(bytes).is_some() {
-        let raw = match lightcraft_raw::probe_info(bytes).map_err(|e| preview_reason(bytes, e)) {
+    if eidos_raw::probe(bytes).is_some() {
+        let raw = match eidos_raw::probe_info(bytes).map_err(|e| preview_reason(bytes, e)) {
             Ok(r) => r,
             Err(Ok(why)) => {
                 // a raw variant we can't decode yet: describe it from its embedded preview
@@ -114,7 +114,7 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
                     meta,
                     as_shot_wb: None,
                     content_hash,
-                    xmp: lightcraft_meta::embedded(bytes).xmp,
+                    xmp: eidos_meta::embedded(bytes).xmp,
                     preview_only: Some(why),
                     ..Default::default()
                 });
@@ -128,9 +128,9 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
         if raw.orientation.swaps_axes() {
             std::mem::swap(&mut w, &mut h);
         }
-        let (t, tint) = xy_to_temp_tint(lightcraft_raw::color::as_shot_white_xy_of(&raw));
+        let (t, tint) = xy_to_temp_tint(eidos_raw::color::as_shot_white_xy_of(&raw));
         // Vendor RGB multipliers do not identify an absolute illuminant without camera calibration.
-        let relative = crate::camera_preview::file_local_look(raw.format) && !lightcraft_raw::color::has_matrix(&raw.color);
+        let relative = crate::camera_preview::file_local_look(raw.format) && !eidos_raw::color::has_matrix(&raw.color);
         let as_shot_wb = Some(if relative { (6500.0, 0.0) } else { (t.round(), tint.round()) });
         let embedded_lens = embedded_lens(&raw);
         return Ok(ProbeInfo {
@@ -144,15 +144,15 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
             meta,
             as_shot_wb,
             content_hash,
-            xmp: lightcraft_meta::embedded(bytes).xmp,
+            xmp: eidos_meta::embedded(bytes).xmp,
             preview_only: None,
         });
     }
-    let fmt = lightcraft_codecs::sniff(bytes).ok_or("unrecognized file format")?;
+    let fmt = eidos_codecs::sniff(bytes).ok_or("unrecognized file format")?;
     if !fmt.can_decode() {
         return Err(format!("{fmt:?} files are not supported yet"));
     }
-    let d = lightcraft_codecs::decode(bytes, lightcraft_codecs::DecodeOptions::fit(64, 64)).map_err(|e| e.to_string())?;
+    let d = eidos_codecs::decode(bytes, eidos_codecs::DecodeOptions::fit(64, 64)).map_err(|e| e.to_string())?;
     let o = Orientation::from_exif(d.orientation);
     let (mut w, mut h) = (d.source_width, d.source_height);
     if o.swaps_axes() {
@@ -182,10 +182,10 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
 /// Why a raw that failed to decode should show its embedded preview instead (`Ok`), or the error
 /// to report (`Err`). Variants we can't decode yet always fall back. So does any CR3 error: the CRX
 /// decoder is verified on few bodies, and every CR3 opened from its embedded JPEG before it existed.
-fn preview_reason(bytes: &[u8], e: lightcraft_raw::RawError) -> Result<String, String> {
+fn preview_reason(bytes: &[u8], e: eidos_raw::RawError) -> Result<String, String> {
     match e {
-        lightcraft_raw::RawError::Unsupported(why) => Ok(why),
-        e if lightcraft_raw::probe(bytes) == Some(lightcraft_raw::RawFormat::Cr3) => Ok(format!("CR3 {e}")),
+        eidos_raw::RawError::Unsupported(why) => Ok(why),
+        e if eidos_raw::probe(bytes) == Some(eidos_raw::RawFormat::Cr3) => Ok(format!("CR3 {e}")),
         e => Err(e.to_string()),
     }
 }
@@ -199,7 +199,7 @@ const HIGHLIGHT_CLIP: f32 = 0.99;
 /// cost of Bayer's, so 3× is accepted down to 75 % (a 24 MP X-Trans preview is then ~2000 px
 /// instead of a ~1.2 s full demosaic; zooming in still uses the full-size source).
 /// `None` = demosaic at full size.
-pub fn bin_factor(raw: &lightcraft_raw::RawImage, max_edge: usize) -> Option<usize> {
+pub fn bin_factor(raw: &eidos_raw::RawImage, max_edge: usize) -> Option<usize> {
     let c = raw.crop.clipped(raw.active_area.width, raw.active_area.height);
     let long = if c.width > 1 && c.height > 1 { c.width.max(c.height) } else { raw.active_area.width.max(raw.active_area.height) };
     let need = (max_edge.saturating_mul(9) / 10).max(1);
@@ -223,8 +223,8 @@ pub fn load_vec(bytes: Vec<u8>, max_edge: usize) -> Result<(Rgb32f, SourceInfo),
 }
 
 fn load_bytes_now(bytes: std::borrow::Cow<'_, [u8]>, max_edge: usize) -> Result<(Rgb32f, SourceInfo), String> {
-    if lightcraft_raw::probe(&bytes).is_some() {
-        let mut raw = match lightcraft_raw::decode(&bytes).map_err(|e| preview_reason(&bytes, e)) {
+    if eidos_raw::probe(&bytes).is_some() {
+        let mut raw = match eidos_raw::decode(&bytes).map_err(|e| preview_reason(&bytes, e)) {
             Ok(r) => r,
             Err(Ok(why)) => {
                 // show the camera's embedded JPEG (rendered, not raw) until the variant is supported
@@ -236,8 +236,8 @@ fn load_bytes_now(bytes: std::borrow::Cow<'_, [u8]>, max_edge: usize) -> Result<
         // (removed before the camera look's binned sensor proxy too, which needs an empty `OpcodeList3`).
         let lens = embedded_lens(&raw.info());
         raw.opcodes.list3.retain(|op| !op.is_lens_correction());
-        let xy = lightcraft_raw::color::as_shot_white_xy(&raw);
-        let t = lightcraft_raw::color::camera_transform(&raw, xy);
+        let xy = eidos_raw::color::as_shot_white_xy(&raw);
+        let t = eidos_raw::color::camera_transform(&raw, xy);
         let camera_look = crate::camera_preview::fit_preview(&raw, &bytes, &t);
         drop(bytes);
         // Previews and thumbnails bin the mosaic straight to (about) the size they need; only
@@ -250,22 +250,22 @@ fn load_bytes_now(bytes: std::borrow::Cow<'_, [u8]>, max_edge: usize) -> Result<
         let mut img = match binned {
             Some(img) => img,
             None => {
-                let method = if max_edge <= 600 { lightcraft_raw::Method::Bilinear } else { lightcraft_raw::Method::Ahd };
+                let method = if max_edge <= 600 { eidos_raw::Method::Bilinear } else { eidos_raw::Method::Ahd };
                 raw.develop(method).map_err(|e| e.to_string())?
             }
         };
         // the samples aren't needed any more (the colour model below reads only the tags)
-        raw.data = lightcraft_raw::RawData::U16(Vec::new());
+        raw.data = eidos_raw::RawData::U16(Vec::new());
         let mut stages = vec![("develop", t0.elapsed())];
         stages.push(("transform", t0.elapsed()));
-        lightcraft_raw::highlight::reconstruct(&mut img, t.wb, HIGHLIGHT_CLIP);
+        eidos_raw::highlight::reconstruct(&mut img, t.wb, HIGHLIGHT_CLIP);
         stages.push(("highlights", t0.elapsed()));
         let m = camera_look.as_ref().map(|p| p.matrix.mul(&t.matrix)).unwrap_or(t.matrix).to_f32();
         let hue_sat = camera_look.as_ref().and_then(|p| p.hue_sat.as_ref()).and_then(crate::camera_preview::HueSat::new);
         let gain = 2f32.powf(t.baseline_exposure as f32);
         let wb = t.wb;
         // A DNG's own profile look (hue/saturation map, look table), DNG spec chapter 6.
-        let tables = lightcraft_raw::profile::ProfileTables::new(&raw.color.profile, lightcraft_raw::color::illuminant_weight(&raw.color, xy));
+        let tables = eidos_raw::profile::ProfileTables::new(&raw.color.profile, eidos_raw::color::illuminant_weight(&raw.color, xy));
         img.map_in_place(|p| {
             let c = [p[0] * wb[0], p[1] * wb[1], p[2] * wb[2]];
             let rgb = [
@@ -285,7 +285,7 @@ fn load_bytes_now(bytes: std::borrow::Cow<'_, [u8]>, max_edge: usize) -> Result<
         stages.push(("fit", t0.elapsed()));
         let img = img.into_oriented(raw.orientation);
         stages.push(("orient", t0.elapsed()));
-        if lightcraft_pipeline::profiling() {
+        if eidos_pipeline::profiling() {
             let mut prev = std::time::Duration::ZERO;
             let parts: Vec<String> = stages
                 .iter()
@@ -303,7 +303,7 @@ fn load_bytes_now(bytes: std::borrow::Cow<'_, [u8]>, max_edge: usize) -> Result<
         let (temp, tint) = if relative { (6500.0, 0.0) } else { (temp.round(), tint.round()) };
         return Ok((img, SourceInfo { raw: true, as_shot_temp: temp, as_shot_tint: tint, lens, relative_wb: relative, camera_tone }));
     }
-    let d = lightcraft_codecs::decode(&bytes, lightcraft_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32)).map_err(|e| e.to_string())?;
+    let d = eidos_codecs::decode(&bytes, eidos_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32)).map_err(|e| e.to_string())?;
     drop(bytes);
     let img = d.to_working();
     let img = if img.width.max(img.height) > max_edge { fit(&img, max_edge, max_edge, Filter::Mitchell) } else { img };
@@ -313,12 +313,12 @@ fn load_bytes_now(bytes: std::borrow::Cow<'_, [u8]>, max_edge: usize) -> Result<
 /// A DNG `ProfileToneCurve` (linear in, linear out, 1.0 = white after exposure compensation) as the
 /// finish stage's camera tone curve: 32 knots, log-spaced over 12 stops below white; above white
 /// the camera tone's shoulder continues it.
-pub(crate) fn dng_tone_curve(curve: &lightcraft_raw::profile::ToneCurve) -> Option<lightcraft_pipeline::tone::CameraTone> {
+pub(crate) fn dng_tone_curve(curve: &eidos_raw::profile::ToneCurve) -> Option<eidos_pipeline::tone::CameraTone> {
     let knots: [[f32; 2]; 32] = std::array::from_fn(|i| {
         let x = 2f32.powf(-12.0 + 12.0 * i as f32 / 31.0);
         [x, curve.eval(x).min(0.9995)]
     });
-    lightcraft_pipeline::tone::CameraTone::new(knots)
+    eidos_pipeline::tone::CameraTone::new(knots)
 }
 
 /// Orientation for an embedded preview: its own EXIF orientation when it has one, else the raw file's.
@@ -326,28 +326,28 @@ fn preview_orientation(raw_bytes: &[u8], jpeg_orientation: u16) -> Orientation {
     if jpeg_orientation > 1 {
         return Orientation::from_exif(jpeg_orientation);
     }
-    lightcraft_meta::extract(raw_bytes).orientation.unwrap_or(Orientation::Normal)
+    eidos_meta::extract(raw_bytes).orientation.unwrap_or(Orientation::Normal)
 }
 
 /// Shared colour interpretation for quick previews, unsupported RAW fallback and camera-look fitting.
-pub(crate) fn decode_raw_preview(bytes: &[u8], opts: lightcraft_codecs::DecodeOptions) -> Option<lightcraft_codecs::Decoded> {
-    let jpeg = lightcraft_raw::embedded_preview(bytes)?;
-    match lightcraft_raw::embedded_preview_color_space(bytes) {
+pub(crate) fn decode_raw_preview(bytes: &[u8], opts: eidos_codecs::DecodeOptions) -> Option<eidos_codecs::Decoded> {
+    let jpeg = eidos_raw::embedded_preview(bytes)?;
+    match eidos_raw::embedded_preview_color_space(bytes) {
         Some(space) => {
             let space = match space {
-                lightcraft_raw::PreviewColorSpace::Srgb => lightcraft_codecs::NamedSpace::Srgb,
-                lightcraft_raw::PreviewColorSpace::AdobeRgb => lightcraft_codecs::NamedSpace::AdobeRgb,
+                eidos_raw::PreviewColorSpace::Srgb => eidos_codecs::NamedSpace::Srgb,
+                eidos_raw::PreviewColorSpace::AdobeRgb => eidos_codecs::NamedSpace::AdobeRgb,
             };
-            lightcraft_codecs::decode_jpeg_with_fallback(&jpeg, opts, space).ok()
+            eidos_codecs::decode_jpeg_with_fallback(&jpeg, opts, space).ok()
         }
-        None => lightcraft_codecs::decode(&jpeg, opts).ok(),
+        None => eidos_codecs::decode(&jpeg, opts).ok(),
     }
 }
 
 /// Oriented size of the embedded preview of a raw file.
 fn embedded_preview_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    let jpeg = lightcraft_raw::embedded_preview(bytes)?;
-    let d = lightcraft_codecs::decode(&jpeg, lightcraft_codecs::DecodeOptions::fit(64, 64)).ok()?;
+    let jpeg = eidos_raw::embedded_preview(bytes)?;
+    let d = eidos_codecs::decode(&jpeg, eidos_codecs::DecodeOptions::fit(64, 64)).ok()?;
     let (mut w, mut h) = (d.source_width, d.source_height);
     if preview_orientation(bytes, d.orientation).swaps_axes() {
         std::mem::swap(&mut w, &mut h);
@@ -357,7 +357,7 @@ fn embedded_preview_size(bytes: &[u8]) -> Option<(u32, u32)> {
 
 /// The embedded preview of a raw file as a working-space image no larger than `max_edge`, oriented.
 pub fn load_embedded_preview(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, SourceInfo)> {
-    let d = decode_raw_preview(bytes, lightcraft_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32))?;
+    let d = decode_raw_preview(bytes, eidos_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32))?;
     let img = d.to_working();
     let img = if img.width.max(img.height) > max_edge { fit(&img, max_edge, max_edge, Filter::Mitchell) } else { img };
     Some((img.oriented(preview_orientation(bytes, d.orientation)), SourceInfo::default()))
@@ -365,8 +365,8 @@ pub fn load_embedded_preview(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, S
 
 /// The embedded preview of a raw file for display (sRGB, oriented, no larger than `max_edge`): the
 /// loupe and grid show it until the raw itself has been developed ([`crate::media::QuickJob`]).
-pub fn embedded_preview_srgb(bytes: &[u8], max_edge: usize) -> Option<lightcraft_raster::Rgba8> {
-    let mut d = decode_raw_preview(bytes, lightcraft_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32))?;
+pub fn embedded_preview_srgb(bytes: &[u8], max_edge: usize) -> Option<eidos_raster::Rgba8> {
+    let mut d = decode_raw_preview(bytes, eidos_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32))?;
     if d.image.width.max(d.image.height) > max_edge {
         d.image = fit(&d.image, max_edge, max_edge, Filter::Box);
         d.alpha = None;
@@ -422,7 +422,7 @@ impl crate::Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lightcraft_codecs::{ChromaSubsampling, EncodeImage, EncodeMeta, Samples, encode_jpeg};
+    use eidos_codecs::{ChromaSubsampling, EncodeImage, EncodeMeta, Samples, encode_jpeg};
 
     /// Luminance (from linear RGB) minus its 9 × 9 local mean: tone differences between a render and a camera JPEG
     /// mostly cancel, edges remain.
@@ -474,7 +474,7 @@ mod tests {
     /// lenses is far off. A file shot with the camera's correction off (DMC-GH1) carries no correction.
     #[test]
     fn corpus_rw2_distortion_matches_the_camera_jpeg() {
-        let dir = std::env::var_os("LIGHTCRAFT_CORPUS")
+        let dir = std::env::var_os("EIDOS_CORPUS")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"))
             .join("raw");
@@ -504,12 +504,11 @@ mod tests {
             let (src, info) = load_bytes(&bytes, 2 * EDGE).unwrap();
             assert_eq!(info.lens, probed.embedded_lens, "{name}: probe and decode disagree");
             // Convert to DNG keeps it: the same correction, as the DNG's own `WarpRectilinear`
-            let dng = lightcraft_raw::write_dng(&lightcraft_raw::decode(&bytes).unwrap(), &Default::default()).unwrap();
+            let dng = eidos_raw::write_dng(&eidos_raw::decode(&bytes).unwrap(), &Default::default()).unwrap();
             assert_eq!(probe_bytes("x.dng", &dng).unwrap().embedded_lens, probed.embedded_lens, "{name}: lost in the DNG");
-            let mut s = lightcraft_develop::DevelopSettings::default();
-            let render = |s: &lightcraft_develop::DevelopSettings| {
-                lightcraft_pipeline::render(&src, &info, s, &lightcraft_pipeline::RenderRequest::fit(EDGE, EDGE)).image
-            };
+            let mut s = eidos_develop::DevelopSettings::default();
+            let render =
+                |s: &eidos_develop::DevelopSettings| eidos_pipeline::render(&src, &info, s, &eidos_pipeline::RenderRequest::fit(EDGE, EDGE)).image;
             let before = render(&s);
             s.optics.lens_profile = true;
             let after = render(&s);
@@ -520,9 +519,9 @@ mod tests {
             let (cw, ch) = (cam.width as f64, cam.height as f64);
             let (sw, sh) = if cw / ch > w as f64 / h as f64 { (ch * w as f64 / h as f64, ch) } else { (cw, cw * h as f64 / w as f64) };
             let cam = cam.crop(((cw - sw) / 2.0).round() as usize, ((ch - sh) / 2.0).round() as usize, sw.round() as usize, sh.round() as usize);
-            let cam = lightcraft_raster::resample::resize(&cam, w, h, Filter::Mitchell);
+            let cam = eidos_raster::resample::resize(&cam, w, h, Filter::Mitchell);
             let lin = |v: u8| (v as f32 / 255.0).powf(2.2);
-            let lum8 = |im: &lightcraft_raster::Rgba8, x: usize, y: usize| {
+            let lum8 = |im: &eidos_raster::Rgba8, x: usize, y: usize| {
                 let p = im.data[y * im.width + x];
                 0.3 * lin(p[0]) + 0.6 * lin(p[1]) + 0.1 * lin(p[2])
             };
@@ -587,8 +586,8 @@ mod tests {
     #[test]
     fn corrupt_cr3_falls_back_to_embedded_preview() {
         let b = cr3_with_corrupt_raw(48, 32);
-        let err = lightcraft_raw::decode(&b).expect_err("the fixture's raw data is corrupt");
-        assert!(!matches!(err, lightcraft_raw::RawError::Unsupported(_)), "{err}");
+        let err = eidos_raw::decode(&b).expect_err("the fixture's raw data is corrupt");
+        assert!(!matches!(err, eidos_raw::RawError::Unsupported(_)), "{err}");
         let p = probe_bytes("x.cr3", &b).unwrap();
         assert_eq!((p.width, p.height, p.kind, p.format.as_str()), (48, 32, MediaKind::Raw, "CR3"));
         assert!(p.preview_only.is_some_and(|why| why.contains("CR3")));
@@ -605,9 +604,9 @@ mod tests {
     /// applied when it's developed — Lightroom-converted DNGs rendered flat and muted without it.
     #[test]
     fn dng_profile_look_is_applied() {
-        use lightcraft_raw::profile::{HsvTable, ProfileLook, ToneCurve};
+        use eidos_raw::profile::{HsvTable, ProfileLook, ToneCurve};
         let plain = crate::tests_xmp::synthetic_dng_with(None, Default::default());
-        let mut raw = lightcraft_raw::decode(&plain).unwrap();
+        let mut raw = eidos_raw::decode(&plain).unwrap();
         let sat = |img: &Rgb32f| {
             img.data.iter().map(|p| (p[0].max(p[1]).max(p[2]) - p[0].min(p[1]).min(p[2])) / p[0].max(p[1]).max(p[2]).max(1e-6)).sum::<f32>()
                 / img.data.len() as f32
@@ -619,7 +618,7 @@ mod tests {
         let grey = HsvTable { hue_divisions: 4, sat_divisions: 2, val_divisions: 1, data: vec![[0.0, 0.0, 1.0]; 8], srgb_value: false };
         raw.color.profile =
             ProfileLook { hue_sat_map: [Some(grey), None], look_table: None, tone_curve: ToneCurve::from_tag(&[0.0, 0.0, 0.18, 0.3, 1.0, 1.0]) };
-        let with = lightcraft_raw::write_dng(&raw, &Default::default()).unwrap();
+        let with = eidos_raw::write_dng(&raw, &Default::default()).unwrap();
         let (after, info) = load_bytes(&with, 64).unwrap();
         assert!(sat(&after) < 1e-3, "saturation {} → {}", sat(&before), sat(&after));
         // a saturation-only map keeps brightness roughly (HSV value is kept in ProPhoto RGB)
@@ -632,7 +631,7 @@ mod tests {
             look_table: Some(HsvTable { hue_divisions: 1, sat_divisions: 2, val_divisions: 1, data: vec![[0.0, 1.0, 0.5]; 2], srgb_value: false }),
             ..Default::default()
         };
-        let (dim, _) = load_bytes(&lightcraft_raw::write_dng(&raw, &Default::default()).unwrap(), 64).unwrap();
+        let (dim, _) = load_bytes(&eidos_raw::write_dng(&raw, &Default::default()).unwrap(), 64).unwrap();
         assert!((mean(&dim) / mean(&before) - 0.5).abs() < 0.02, "{} vs {}", mean(&dim), mean(&before));
     }
 
@@ -654,7 +653,7 @@ mod tests {
     #[test]
     fn unsupported_raw_imports_as_preview_only_and_survives_reopen() {
         use serde_json::json;
-        let dir = std::env::temp_dir().join(format!("lc-preview-only-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-preview-only-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (lib, files) = (dir.join("lib"), dir.join("files"));
         std::fs::create_dir_all(&files).unwrap();
@@ -666,7 +665,7 @@ mod tests {
         let scan = s.execute("library.importPreview", &json!({"paths": [path.to_string_lossy()]})).unwrap();
         assert!(scan["candidates"][0]["previewOnly"].as_str().is_some_and(|w| !w.is_empty()), "{scan}");
         let r = s.execute("library.import", &json!({"paths": [path.to_string_lossy()]})).unwrap();
-        let id = lightcraft_catalog::PhotoId(r["imported"][0].as_u64().unwrap());
+        let id = eidos_catalog::PhotoId(r["imported"][0].as_u64().unwrap());
         let p = s.catalog.photo(id).unwrap().clone();
         let why = p.preview_only.clone().expect("marked preview only");
         assert!(why.to_uppercase().contains("CR3"), "the decoder's reason: {why}");
@@ -674,7 +673,7 @@ mod tests {
         assert!(!p.develops_raw());
         // rendered like the JPEG it is: relative white balance, display tone curve, no raw defaults
         assert_eq!(crate::media::source_info(&p), SourceInfo::default());
-        assert_eq!(*p.develop, lightcraft_develop::DevelopSettings::default());
+        assert_eq!(*p.develop, eidos_develop::DevelopSettings::default());
         assert!(s.render_job(id, 48, 48, false, true).unwrap().run().rendered.is_ok());
         // agents see it
         let q = s.execute("catalog.query", &json!({"filter": {}})).unwrap();
@@ -688,7 +687,7 @@ mod tests {
         s.open_library(&lib, false).unwrap();
         assert_eq!(s.catalog.photo(id).unwrap().preview_only.as_deref(), Some(why.as_str()));
         // the file decodes now (here: replaced by a DNG): Reload clears it, undo brings it back
-        std::fs::write(&path, crate::tests_xmp::synthetic_dng_with(None, lightcraft_meta::Metadata::default())).unwrap();
+        std::fs::write(&path, crate::tests_xmp::synthetic_dng_with(None, eidos_meta::Metadata::default())).unwrap();
         let r = s.execute("photo.reload", &json!({"ids": [id.0]})).unwrap();
         assert_eq!(r["reloaded"], json!([id.0]), "{r}");
         assert!(s.catalog.photo(id).unwrap().develops_raw());
@@ -697,7 +696,7 @@ mod tests {
         assert_eq!(s.catalog.photo(id).unwrap().preview_only.as_deref(), Some(why.as_str()));
         // relinking to a file that decodes clears it too
         let dng = files.join("DSC_0001.dng");
-        std::fs::write(&dng, crate::tests_xmp::synthetic_dng_with(None, lightcraft_meta::Metadata::default())).unwrap();
+        std::fs::write(&dng, crate::tests_xmp::synthetic_dng_with(None, eidos_meta::Metadata::default())).unwrap();
         s.execute("photo.relink", &json!({"id": id.0, "path": dng.to_string_lossy()})).unwrap();
         assert_eq!(s.catalog.photo(id).unwrap().preview_only, None);
         drop(s);
@@ -707,13 +706,13 @@ mod tests {
     #[test]
     fn quick_jobs_show_embedded_previews_then_cached_renders() {
         use crate::media::QuickSource;
-        let dir = std::env::temp_dir().join(format!("lc-quick-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-quick-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("a.cr3");
         std::fs::write(&path, cr3_with_preview(96, 64)).unwrap();
         let mut s = crate::Session::new().with_fs();
         let r = s.execute("library.import", &serde_json::json!({"paths": [path.to_string_lossy()]})).unwrap();
-        let id = lightcraft_catalog::PhotoId(r["imported"][0].as_u64().unwrap());
+        let id = eidos_catalog::PhotoId(r["imported"][0].as_u64().unwrap());
         // loupe: an unedited raw opens on its embedded preview…
         let q = s.quick_view_job(id, 1600, true).unwrap().run();
         assert_eq!(q.quick, Some(QuickSource::Embedded));

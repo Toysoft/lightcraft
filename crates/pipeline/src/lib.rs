@@ -1,4 +1,4 @@
-//! The LightCraft develop pipeline (CPU reference implementation).
+//! The Eidos develop pipeline (CPU reference implementation).
 //!
 //! Input: a scene-referred, linear Rec.2020 source image (already EXIF-oriented) at any resolution
 //! (full size or a proxy), plus [`DevelopSettings`]. Output: a display-encoded sRGB image at the
@@ -45,12 +45,12 @@ pub mod visualize;
 pub use output::{DeepImage, DeepSamples, OutputDepth, OutputSpace, OutputTrc, Proof};
 pub use visualize::{MaskView, Overlay};
 
-use lightcraft_develop::{DevelopSettings, Treatment};
+use eidos_develop::{DevelopSettings, Treatment};
 use std::any::Any;
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
-use lightcraft_raster::{Histogram, Plane, Rgb32f, Rgba8, par_rows};
+use eidos_raster::{Histogram, Plane, Rgb32f, Rgba8, par_rows};
 
 pub use tone::ToneMap;
 
@@ -58,7 +58,7 @@ pub use tone::ToneMap;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SourceInfo {
     /// Lens corrections embedded in the file (DNG opcodes), relative to the EXIF-oriented source.
-    pub lens: Option<lightcraft_develop::EmbeddedLens>,
+    pub lens: Option<eidos_develop::EmbeddedLens>,
     /// Raw sources use absolute Kelvin white balance; rendered sources use a relative scale around
     /// their as-shot white.
     pub raw: bool,
@@ -195,7 +195,7 @@ impl StageCache {
     }
 
     /// Per-view state of type `T` kept alongside this cache (created on first use). Lets another
-    /// renderer of the same view (e.g. `lightcraft-gpu`) keep its own stage cache with this one.
+    /// renderer of the same view (e.g. `eidos-gpu`) keep its own stage cache with this one.
     pub fn extension<T: Any + Send + Sync + Default>(&self) -> Arc<T> {
         let mut g = self.ext.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(e) = g.as_ref()
@@ -216,7 +216,7 @@ impl StageCache {
     /// Bytes of the intermediate images held (each buffer counted once; the sources they were
     /// made from belong to their owner and are not counted).
     pub fn bytes(&self) -> usize {
-        fn size<T>(i: &lightcraft_raster::Image<T>) -> usize {
+        fn size<T>(i: &eidos_raster::Image<T>) -> usize {
             i.data.len() * std::mem::size_of::<T>()
         }
         let mut seen: Vec<usize> = Vec::new();
@@ -284,7 +284,7 @@ fn hash_of(parts: impl std::hash::Hash) -> u64 {
 
 /// What a render resolves to before any pixel work: the effective settings (profile and Upright
 /// applied), the geometric frame, the output size and the stage-cache keys. Shared by the CPU
-/// renderer and the GPU renderer (`lightcraft-gpu`), so both key their caches identically.
+/// renderer and the GPU renderer (`eidos-gpu`), so both key their caches identically.
 pub struct Plan<'a> {
     pub settings: Cow<'a, DevelopSettings>,
     pub frame: geometry::Frame,
@@ -433,9 +433,9 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
 }
 
 /// The colour a colour-range mask would sample at normalized image point `p` (OkLab of the
-/// exposed scene colours, as [`MaskShape::ColorRange`](lightcraft_develop::MaskShape) compares
+/// exposed scene colours, as [`MaskShape::ColorRange`](eidos_develop::MaskShape) compares
 /// them), averaged over 3 × 3 pixels of a render fitting `req`. `None` outside the image.
-pub fn color_range_sample(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest, p: lightcraft_geom::Point) -> Option<[f64; 3]> {
+pub fn color_range_sample(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest, p: eidos_geom::Point) -> Option<[f64; 3]> {
     let plan = plan(src, info, s, req);
     let mut img = plan.frame.sample(src, plan.w, plan.h);
     lin_cpu(&mut img, info, &plan);
@@ -450,7 +450,7 @@ pub fn color_range_sample(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, 
     for y in (cy - 1).max(0)..=(cy + 1).min(plan.h as i64 - 1) {
         for x in (cx - 1).max(0)..=(cx + 1).min(plan.w as i64 - 1) {
             let c = img.data[y as usize * plan.w + x as usize].map(|v| v * gain);
-            let lab = lightcraft_color::perceptual::oklab_from_2020(masks::tonemap_for_select(c));
+            let lab = eidos_color::perceptual::oklab_from_2020(masks::tonemap_for_select(c));
             for k in 0..3 {
                 acc[k] += lab[k] as f64;
             }
@@ -475,21 +475,21 @@ fn overlay_alpha(o: Overlay, plan: &Plan<'_>, prep: &Prepared) -> Option<Plane> 
 /// (default look, keeping the crop so framing matches).
 pub fn before_settings(s: &DevelopSettings) -> DevelopSettings {
     let mut b = DevelopSettings { crop: s.crop, orientation: s.orientation, ..DevelopSettings::default() };
-    b.wb = lightcraft_develop::WhiteBalance { mode: lightcraft_develop::WbMode::AsShot, ..b.wb };
+    b.wb = eidos_develop::WhiteBalance { mode: eidos_develop::WbMode::AsShot, ..b.wb };
     b
 }
 
 pub(crate) fn is_bw(s: &DevelopSettings) -> bool {
-    s.treatment == Treatment::Bw || s.profile.id == "lc.mono" || s.profile.id.starts_with("lc.bw.")
+    s.treatment == Treatment::Bw || s.profile.id == "eidos.mono" || s.profile.id.starts_with("eidos.bw.")
 }
 
-/// `LIGHTCRAFT_PROFILE` is set: print per-stage timings to stderr.
+/// `EIDOS_PROFILE` is set: print per-stage timings to stderr.
 pub fn profiling() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LIGHTCRAFT_PROFILE").is_some())
+    *ON.get_or_init(|| std::env::var_os("EIDOS_PROFILE").is_some())
 }
 
-/// Run `f`, printing its duration under `LIGHTCRAFT_PROFILE`.
+/// Run `f`, printing its duration under `EIDOS_PROFILE`.
 pub(crate) fn timed<R>(what: &str, f: impl FnOnce() -> R) -> R {
     if !profiling() {
         return f();

@@ -1,5 +1,5 @@
 //! Exploring the library by folder: `library.folders` lists where the imported photos live and
-//! `library.filter {libraryFolder}` shows one folder's photos (see `lightcraft_catalog::folders`);
+//! `library.filter {libraryFolder}` shows one folder's photos (see `eidos_catalog::folders`);
 //! `library.removeFolder` takes a folder's photos out of the library.
 //!
 //! * Given photos imported from two folders, an agent can list them with counts, then choose one
@@ -9,7 +9,7 @@
 //!   leaves every file where it is.
 //! * Renaming or moving a folder on disk keeps the chosen folder chosen.
 
-use lightcraft_catalog::{Op, Photo, Source};
+use eidos_catalog::{Op, Photo, Source};
 use serde_json::json;
 
 use crate::{LibrarySource, Session, filter_chips};
@@ -29,7 +29,7 @@ struct Scratch(std::path::PathBuf);
 
 impl Scratch {
     fn new(tag: &str) -> Scratch {
-        let dir = std::env::temp_dir().join(format!("lc-folders-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-folders-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Scratch(dir)
@@ -191,7 +191,7 @@ fn the_folder_filter_takes_only_a_text_path() {
 
 /// Folders are compared by identity: a path read back may be spelled with the platform's separator.
 fn same_folder(actual: Option<&str>, expected: &str, why: &str) {
-    let key = lightcraft_catalog::query::folder_key;
+    let key = eidos_catalog::query::folder_key;
     assert_eq!(actual.map(key), Some(key(expected)), "{why}: {actual:?} vs {expected}");
 }
 
@@ -461,5 +461,5 @@ fn the_state_names_a_folder_only_while_it_is_shown() {
 fn a_blank_folder_filter_is_no_filter() {
     let mut s = session();
     s.execute("library.filter", &json!({"libraryFolder": "  "})).unwrap();
-    assert_eq!(s.filter, lightcraft_catalog::Filter::default(), "no hidden 'filters active' state");
+    assert_eq!(s.filter, eidos_catalog::Filter::default(), "no hidden 'filters active' state");
 }

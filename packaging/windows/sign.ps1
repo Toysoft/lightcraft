@@ -15,7 +15,7 @@
   timestamp server, ...). Optional overrides: WINDOWS_TIMESTAMP_URL, SIGNTOOL (path to signtool.exe).
 
 .EXAMPLE
-  pwsh packaging/windows/sign.ps1 dist/lightcraft.exe dist/Lightcraft.msi
+  pwsh packaging/windows/sign.ps1 dist/eidos.exe dist/Eidos.msi
 #>
 param(
   [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
@@ -55,8 +55,10 @@ if (-not $haveCert -and -not $haveAzure) {
 }
 
 $script:SignTool = Find-SignTool
-$common = @('sign', '/v', '/fd', 'SHA256', '/td', 'SHA256', '/d', 'LightCraft', '/du', 'https://github.com/storytold/lightcraft')
-$tmp = Join-Path ([IO.Path]::GetTempPath()) "lightcraft-sign-$PID"
+# TODO(eidos-urls): no official Eidos URL exists yet for signtool's /du (shown in elevation
+# prompts); an upstream LightCraft URL must never stand in for it, so it stays out for now.
+$common = @('sign', '/v', '/fd', 'SHA256', '/td', 'SHA256', '/d', 'Eidos')
+$tmp = Join-Path ([IO.Path]::GetTempPath()) "eidos-sign-$PID"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
 try {

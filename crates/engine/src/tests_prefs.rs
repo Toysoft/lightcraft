@@ -4,14 +4,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lightcraft_catalog::MediaKind;
-use lightcraft_develop::Preset;
+use eidos_catalog::MediaKind;
+use eidos_develop::Preset;
 use serde_json::json;
 
 use crate::Session;
 
 fn temp_dir(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("lc-prefs-{tag}-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("eidos-prefs-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -28,19 +28,19 @@ fn with_presets(s: &mut Session) {
 }
 
 fn dng(dir: &Path, name: &str, make: &str, model: &str) {
-    let meta = lightcraft_meta::Metadata { make: Some(make.into()), model: Some(model.into()), ..Default::default() };
+    let meta = eidos_meta::Metadata { make: Some(make.into()), model: Some(model.into()), ..Default::default() };
     std::fs::write(dir.join(name), crate::tests_xmp::synthetic_dng_with(None, meta)).unwrap();
 }
 
 fn png(path: &Path) {
     let (w, h) = (24usize, 16usize);
     let data: Vec<[u8; 4]> = (0..w * h).map(|i| [(i * 7) as u8, (i * 3) as u8, 90, 255]).collect();
-    let img = lightcraft_raster::Rgba8 { width: w, height: h, data };
-    let bytes = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+    let img = eidos_raster::Rgba8 { width: w, height: h, data };
+    let bytes = eidos_codecs::encode_png(&eidos_codecs::EncodeImage::rgba8(&img), &eidos_codecs::EncodeMeta::default()).unwrap();
     std::fs::write(path, bytes).unwrap();
 }
 
-fn photo_named<'a>(s: &'a Session, name: &str) -> &'a lightcraft_catalog::Photo {
+fn photo_named<'a>(s: &'a Session, name: &str) -> &'a eidos_catalog::Photo {
     s.catalog.photos().find(|p| p.file_name == name).unwrap_or_else(|| panic!("{name} not imported"))
 }
 
@@ -147,7 +147,7 @@ fn default_copyright_and_creator_fill_gaps_on_import() {
     let lib = dir.join("lib");
     png(&dir.join("plain.png"));
     // a DNG that names its own artist keeps it
-    let meta = lightcraft_meta::Metadata { artist: Some("Someone Else".into()), ..Default::default() };
+    let meta = eidos_meta::Metadata { artist: Some("Someone Else".into()), ..Default::default() };
     std::fs::write(dir.join("own.dng"), crate::tests_xmp::synthetic_dng_with(None, meta)).unwrap();
     let mut s = Session::new().with_fs();
     s.open_library(&lib, false).unwrap();
@@ -240,20 +240,25 @@ fn curve_presets_save_apply_export_import_and_persist() {
         let r = s.execute("curve.exportPresets", &json!({"path": file.to_string_lossy()})).unwrap();
         assert_eq!(r["count"], 1);
         let path = r["path"].as_str().unwrap().to_string();
-        assert!(path.ends_with(".lccurve"));
+        assert!(path.ends_with(".eidoscurve"));
         assert!(s.execute("curve.deletePreset", &json!({"name": "Medium Contrast"})).is_err());
         s.execute("curve.deletePreset", &json!({"name": "faded red"})).unwrap();
         assert!(s.curve_presets.is_empty());
         let r = s.execute("curve.importPresets", &json!({"path": path})).unwrap();
         assert_eq!(r["imported"], json!(["Faded Red"]));
         assert_eq!(s.curve_presets.len(), 1);
-        // a file carrying a built-in name doesn't shadow it; junk fails cleanly
-        let other = lib.join("one.lccurve");
+        // a file carrying a built-in name doesn't shadow it; junk fails cleanly; a legacy
+        // upstream `.lccurve` file (old extension, old format tag) still imports
+        let other = lib.join("one.eidoscurve");
         std::fs::write(&other, r#"{"name": "Linear", "master": [[0, 0.05], [1, 1]]}"#).unwrap();
-        let junk = lib.join("junk.lccurve");
+        let legacy = lib.join("old.lccurve");
+        std::fs::write(&legacy, r#"{"format": "lightcraft.curvePresets", "version": 1, "presets": [{"name": "Old S", "master": [[0, 0], [1, 1]]}]}"#)
+            .unwrap();
+        let junk = lib.join("junk.eidoscurve");
         std::fs::write(&junk, "not json").unwrap();
-        let r = s.execute("curve.importPresets", &json!({"paths": [other.to_string_lossy(), junk.to_string_lossy()]})).unwrap();
-        assert_eq!(r["imported"], json!(["Linear (imported)"]));
+        let r =
+            s.execute("curve.importPresets", &json!({"paths": [other.to_string_lossy(), legacy.to_string_lossy(), junk.to_string_lossy()]})).unwrap();
+        assert_eq!(r["imported"], json!(["Linear (imported)", "Old S"]));
         assert_eq!(r["failed"].as_array().unwrap().len(), 1);
         s.close_library().unwrap();
     }
@@ -261,7 +266,7 @@ fn curve_presets_save_apply_export_import_and_persist() {
     let mut s = Session::new().with_fs();
     s.open_library(&lib, false).unwrap();
     let names: Vec<String> = s.curve_presets.iter().map(|p| p.name.clone()).collect();
-    assert_eq!(names, ["Faded Red", "Linear (imported)"]);
+    assert_eq!(names, ["Faded Red", "Linear (imported)", "Old S"]);
     let _ = std::fs::remove_dir_all(&lib);
 }
 
@@ -271,8 +276,8 @@ fn resizing_the_disk_cache_keeps_the_cache_and_its_thumbnails() {
     let mut s = Session::new().with_fs();
     s.open_library(&lib, false).unwrap();
     let cache = s.media.rendered.clone();
-    let key = lightcraft_preview::hash_bytes(b"thumbnail");
-    let img = lightcraft_raster::Rgba8 { width: 4, height: 4, data: vec![[10, 20, 30, 255]; 16] };
+    let key = eidos_preview::hash_bytes(b"thumbnail");
+    let img = eidos_raster::Rgba8 { width: 4, height: 4, data: vec![[10, 20, 30, 255]; 16] };
     cache.put(key, Arc::new(img));
     let generation = cache.generation();
     s.execute("library.preferences", &json!({"cacheMb": 300})).unwrap();
@@ -299,8 +304,8 @@ fn reopening_a_library_retires_the_old_cache_so_its_jobs_cannot_write_after_a_cl
     let job = s.thumb_job(id, 128).unwrap();
     let (old, key) = job.cache.clone().unwrap();
     // a thumbnail written before the reopen is still valid afterwards
-    let kept = lightcraft_preview::hash_bytes(b"kept thumbnail");
-    let img = lightcraft_raster::Rgba8 { width: 4, height: 4, data: vec![[10, 20, 30, 255]; 16] };
+    let kept = eidos_preview::hash_bytes(b"kept thumbnail");
+    let img = eidos_raster::Rgba8 { width: 4, height: 4, data: vec![[10, 20, 30, 255]; 16] };
     old.put(kept, Arc::new(img.clone()));
     s.open_library(&lib, false).unwrap();
     assert!(!Arc::ptr_eq(&old, &s.media.rendered));
@@ -310,7 +315,7 @@ fn reopening_a_library_retires_the_old_cache_so_its_jobs_cannot_write_after_a_cl
     let r = job.run();
     assert!(r.rendered.is_ok());
     old.put(kept, Arc::new(img));
-    let fresh = lightcraft_preview::PreviewCache::with_disk(1 << 20, &lib.join("thumbs"), 1 << 30);
+    let fresh = eidos_preview::PreviewCache::with_disk(1 << 20, &lib.join("thumbs"), 1 << 30);
     assert!(fresh.get(key).is_none(), "stale thumbnail written through the replaced cache");
     assert!(fresh.get(kept).is_none(), "stale put through the replaced cache");
     assert!(s.media.rendered.get(key).is_none());

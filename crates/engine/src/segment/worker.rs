@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
-use lightcraft_develop::SegMask;
-use lightcraft_segment::{Encoded, Sam3};
+use eidos_develop::SegMask;
+use eidos_segment::{Encoded, Sam3};
 
 use super::{Input, Prompt, Tag};
 use crate::media::RenderJob;
@@ -29,7 +29,7 @@ pub const IDLE_UNLOAD: Duration = Duration::from_secs(10 * 60);
 pub enum Kind {
     /// Load the model and encode the photo (so the first click is fast).
     Prepare,
-    Clicks(Vec<lightcraft_segment::Click>),
+    Clicks(Vec<eidos_segment::Click>),
     Text(String),
     /// A zoomed-in pass over `region` (normalized) of the photo, rendered by the job's `render`.
     Detail {
@@ -307,7 +307,7 @@ fn text_logits(model: &mut Sam3, enc: &mut Encoded, text: &str) -> Result<Option
 }
 
 fn run_job(state: &mut State, shared: &Shared, job: &mut Job) -> Result<Option<SegMask>, String> {
-    let side = lightcraft_segment::MASK_SIDE;
+    let side = eidos_segment::MASK_SIDE;
     match std::mem::replace(&mut job.kind, Kind::Prepare) {
         Kind::Prepare => {
             encoded(state, shared, job)?;
@@ -336,11 +336,11 @@ fn run_job(state: &mut State, shared: &Shared, job: &mut Job) -> Result<Option<S
             }
             let logits = match prompt {
                 Prompt::Clicks(clicks) => {
-                    let inside: Vec<lightcraft_segment::Click> = clicks
+                    let inside: Vec<eidos_segment::Click> = clicks
                         .iter()
                         .map(|c| ((c.at.x - region[0]) / rw, (c.at.y - region[1]) / rh, c.include))
                         .filter(|(x, y, _)| (0.0..=1.0).contains(x) && (0.0..=1.0).contains(y))
-                        .map(|(x, y, positive)| lightcraft_segment::Click { x: x as f32, y: y as f32, positive })
+                        .map(|(x, y, positive)| eidos_segment::Click { x: x as f32, y: y as f32, positive })
                         .collect();
                     if !inside.iter().any(|c| c.positive) {
                         return Ok(None);
@@ -361,7 +361,7 @@ mod tests {
 
     fn job(tag: Tag, reply: &mpsc::Sender<Outcome>) -> Job {
         // an empty folder: loading fails with an error (no model files)
-        let dir = std::env::temp_dir().join(format!("lc-sam3-worker-none-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("eidos-sam3-worker-none-{}", std::process::id()));
         Job { dir, key: 1, render: None, missing: None, kind: Kind::Prepare, tag, reply: reply.clone() }
     }
 
@@ -409,10 +409,10 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let (jtx, jrx) = mpsc::channel();
         let clicks = |n: usize| Tag::Clicks {
-            photo: lightcraft_catalog::PhotoId(1),
+            photo: eidos_catalog::PhotoId(1),
             mask: 1,
             comp: 0,
-            hint: vec![lightcraft_geom::Point::new(0.5, 0.5); n],
+            hint: vec![eidos_geom::Point::new(0.5, 0.5); n],
             exclude: vec![],
         };
         for n in 1..=3 {

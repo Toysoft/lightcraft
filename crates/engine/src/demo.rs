@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use lightcraft_catalog::{Album, Flag, Meta, Op, Photo, Source};
-use lightcraft_develop::DevelopSettings;
+use eidos_catalog::{Album, Flag, Meta, Op, Photo, Source};
+use eidos_develop::DevelopSettings;
 
 use crate::Session;
 
 pub fn load(s: &mut Session) {
-    let scenes = lightcraft_scenes::demo_library();
+    let scenes = eidos_scenes::demo_library();
     let mut ids = Vec::new();
     let mut ops = Vec::new();
     for sc in &scenes {
@@ -27,7 +27,7 @@ pub fn load(s: &mut Session) {
             location: sc.meta.location.into(),
             title: sc.name.clone(),
             keywords: sc.meta.keywords.iter().map(|k| k.to_string()).collect(),
-            creator: "LightCraft Demo".into(),
+            creator: "Eidos Demo".into(),
             ..Default::default()
         };
         p.rating = [0, 3, 4, 5, 2, 0, 4, 3][sc.id as usize % 8];
@@ -51,7 +51,7 @@ pub fn load(s: &mut Session) {
                 d.effects.dehaze = 15.0;
             }
             9 => {
-                d.treatment = lightcraft_develop::Treatment::Bw;
+                d.treatment = eidos_develop::Treatment::Bw;
                 d.light.contrast = 35.0;
             }
             _ => {}

@@ -154,7 +154,7 @@ fn token_matches(p: &Photo, tok: &str) -> bool {
 /// Whether `p` has a named face region called `name` (case-insensitive).
 fn has_person(p: &Photo, name: &str) -> bool {
     let name = name.trim().to_lowercase();
-    p.meta.regions.iter().any(|r| r.kind == lightcraft_meta::RegionKind::Face && r.name.as_deref().is_some_and(|n| n.to_lowercase() == name))
+    p.meta.regions.iter().any(|r| r.kind == eidos_meta::RegionKind::Face && r.name.as_deref().is_some_and(|n| n.to_lowercase() == name))
 }
 
 impl Filter {
@@ -411,7 +411,7 @@ impl Catalog {
         let root = filter.library_root();
         for p in self.photos().filter(|p| filter.matches_in(p, self, root.as_deref())) {
             let mut seen: Vec<String> = Vec::new();
-            for r in p.meta.regions.iter().filter(|r| r.kind == lightcraft_meta::RegionKind::Face) {
+            for r in p.meta.regions.iter().filter(|r| r.kind == eidos_meta::RegionKind::Face) {
                 let Some(name) = r.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) else { continue };
                 let key = name.to_lowercase();
                 // the face's size in pixels of the photo
@@ -441,7 +441,7 @@ pub struct Person {
     pub count: usize,
     /// The photo with their largest face, and that face (normalized, in the photo's upright frame).
     pub photo: PhotoId,
-    pub face: lightcraft_meta::Rect,
+    pub face: eidos_meta::Rect,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

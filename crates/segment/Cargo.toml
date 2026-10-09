@@ -1,9 +1,9 @@
 [package]
-name = "lightcraft-segment"
+name = "eidos-segment"
 version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
-description = "LightCraft segmentation: SAM 3 (Segment Anything with Concepts) inference in pure Rust (L3)"
+description = "Eidos segmentation: SAM 3 (Segment Anything with Concepts) inference in pure Rust (L3)"
 
 [lints]
 workspace = true
@@ -18,7 +18,7 @@ log = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 candle-core = { workspace = true }
 candle-nn = { workspace = true }
-lightcraft-fetch = { workspace = true }
+eidos-fetch = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 candle-core = { workspace = true, features = ["metal"] }

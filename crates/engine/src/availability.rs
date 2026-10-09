@@ -126,7 +126,7 @@ impl Availability {
 
     fn spawn_worker(&self, wake: Waker) {
         let (state, probe) = (self.state.clone(), self.probe.clone());
-        let started = std::thread::Builder::new().name("lc-availability".into()).spawn(move || {
+        let started = std::thread::Builder::new().name("eidos-availability".into()).spawn(move || {
             loop {
                 let path = {
                     let mut st = lock(&state);

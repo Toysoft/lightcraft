@@ -1,15 +1,15 @@
 [package]
-name = "lightcraft-preview"
+name = "eidos-preview"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LightCraft preview cache: content hashing, memory LRU, disk thumbnail cache, prioritized job pool (L3)"
+description = "Eidos preview cache: content hashing, memory LRU, disk thumbnail cache, prioritized job pool (L3)"
 
 [lints]
 workspace = true
 
 [dependencies]
-lightcraft-raster = { workspace = true }
+eidos-raster = { workspace = true }
 siphasher = { workspace = true }
 jpeg-encoder = { workspace = true }
 zune-jpeg = { workspace = true }

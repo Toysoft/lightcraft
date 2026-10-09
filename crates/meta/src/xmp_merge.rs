@@ -194,7 +194,7 @@ fn line_start(s: &str, start: usize) -> usize {
     i
 }
 
-/// Merge `fresh` (a packet as [`crate::write_xmp_lc`] writes it) into `existing` following
+/// Merge `fresh` (a packet as [`crate::write_xmp_eid`] writes it) into `existing` following
 /// `rules` (see the module docs). Fails — and the caller must not overwrite `existing` blindly —
 /// when `existing` isn't a well-formed XMP packet.
 pub fn merge_xmp(existing: &str, fresh: &str, rules: MergeRules) -> Result<String, XmpError> {
@@ -288,7 +288,7 @@ mod tests {
     use super::*;
 
     const RULES: MergeRules =
-        MergeRules { owned: &["xmp:Rating", "xmp:Label", "dc:subject", "dc:title", "lc:*"], owned_if_present: &["exif:DateTimeOriginal"] };
+        MergeRules { owned: &["xmp:Rating", "xmp:Label", "dc:subject", "dc:title", "eid:*"], owned_if_present: &["exif:DateTimeOriginal"] };
 
     /// A sidecar as another raw developer writes it: attribute-form simple properties, develop
     /// settings, a structured history, an unknown namespace.
@@ -335,12 +335,12 @@ mod tests {
 
     fn fresh(rating: i8, keywords: &[&str]) -> String {
         let m = crate::Metadata {
-            software: Some("LightCraft".into()),
+            software: Some("Eidos".into()),
             rating: Some(rating),
             keywords: keywords.iter().map(|k| k.to_string()).collect(),
             ..Default::default()
         };
-        crate::write_xmp_lc(&m, &[("settings", "{\"a\":1}"), ("flag", "pick")])
+        crate::write_xmp_eid(&m, &[("settings", "{\"a\":1}"), ("flag", "pick")])
     }
 
     #[test]
@@ -350,8 +350,8 @@ mod tests {
         let p = |k: &str| d.properties.get(k).cloned().unwrap_or_default();
         assert_eq!(p("xmp:Rating"), vec!["4"]);
         assert_eq!(p("dc:subject"), vec!["new", "two"]);
-        assert_eq!(p("lc:settings"), vec!["{\"a\":1}"]);
-        assert_eq!(p("lc:flag"), vec!["pick"]);
+        assert_eq!(p("eid:settings"), vec!["{\"a\":1}"]);
+        assert_eq!(p("eid:flag"), vec!["pick"]);
         assert_eq!(p("xmp:CreatorTool"), vec!["Other App"], "not ours: kept");
         assert_eq!(p("crs:Exposure2012"), vec!["+0.50"]);
         assert_eq!(p("foo:Thing").len(), 1);
@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(d.properties.get("exif:DateTimeOriginal"), Some(&vec!["2020-01-01T00:00:00".to_string()]), "fresh has none: kept");
         let mut m = crate::Metadata { rating: Some(3), ..Default::default() };
         m.capture_time = crate::DateTime::parse_iso("2024-05-06T07:08:09");
-        let out = merge_xmp(ex, &crate::write_xmp_lc(&m, &[]), RULES).unwrap();
+        let out = merge_xmp(ex, &crate::write_xmp_eid(&m, &[]), RULES).unwrap();
         let d = parse_xmp(&out).unwrap();
         assert_eq!(d.properties.get("exif:DateTimeOriginal"), Some(&vec!["2024-05-06T07:08:09".to_string()]));
     }

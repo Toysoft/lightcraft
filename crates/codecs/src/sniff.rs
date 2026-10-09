@@ -3,7 +3,7 @@
 use crate::exif::Tiff;
 use serde::{Deserialize, Serialize};
 
-/// Image container formats LightCraft recognises.
+/// Image container formats Eidos recognises.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Format {
     Jpeg,
@@ -21,9 +21,9 @@ pub enum Format {
     /// Photoshop PSD / PSB (merged composite).
     Psd,
     /// TIFF-structured camera raw (DNG, CR2, NEF, ARW, PEF, ORF, RW2, SRW, 3FR, IIQ, ERF, …):
-    /// route to `lightcraft-raw`.
+    /// route to `eidos-raw`.
     RawTiffLike,
-    /// Non-TIFF camera raw containers (CR3, RAF, CRW, MRW, X3F): route to `lightcraft-raw`.
+    /// Non-TIFF camera raw containers (CR3, RAF, CRW, MRW, X3F): route to `eidos-raw`.
     RawOther,
 }
 
@@ -71,7 +71,7 @@ impl Format {
         }
     }
 
-    /// Camera raw formats (decode with `lightcraft-raw`).
+    /// Camera raw formats (decode with `eidos-raw`).
     pub fn is_raw(self) -> bool {
         matches!(self, Format::RawTiffLike | Format::RawOther)
     }

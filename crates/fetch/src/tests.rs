@@ -131,7 +131,7 @@ fn handle(mut s: TcpStream, hits: &AtomicUsize) {
 }
 
 fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("lc-sam3-fetch-{name}-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("eidos-sam3-fetch-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     d
 }
@@ -295,7 +295,7 @@ fn no_mirrors_is_a_clear_error_and_mirror_lists_are_parsed() {
     let e = run(&[pinned()], &[], &dir, &AtomicBool::new(false)).0.unwrap_err();
     assert_eq!(e, DownloadError::NoMirrors);
     assert!(e.to_string().contains("no download location"));
-    let file = std::env::temp_dir().join(format!("lc-sam3-mirrors-{}.txt", std::process::id()));
+    let file = std::env::temp_dir().join(format!("eidos-sam3-mirrors-{}.txt", std::process::id()));
     std::fs::write(&file, "# mine\nhttps://b.example/m/ # second\n\nnot a url\nhttps://a.example/x\n").unwrap();
     let defaults = ["https://c.example/d", "https://a.example/x"];
     let m = mirrors(Some("https://a.example/x/, ftp://no"), Some(&file), &defaults);

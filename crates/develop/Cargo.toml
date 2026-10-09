@@ -1,16 +1,16 @@
 [package]
-name = "lightcraft-develop"
+name = "eidos-develop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LightCraft develop settings: the non-destructive edit model, control specs, presets (L1)"
+description = "Eidos develop settings: the non-destructive edit model, control specs, presets (L1)"
 
 [lints]
 workspace = true
 
 [dependencies]
-lightcraft-geom = { workspace = true }
-lightcraft-color = { workspace = true }
+eidos-geom = { workspace = true }
+eidos-color = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 miniz_oxide = { workspace = true }

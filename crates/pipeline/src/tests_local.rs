@@ -1,8 +1,8 @@
 //! Pixel tests of the local (mask) Noise, Moiré and Defringe sliders.
 
-use lightcraft_develop::{DevelopSettings, LocalAdjustments, Mask, MaskComponent, MaskOp, MaskShape};
-use lightcraft_geom::Point;
-use lightcraft_raster::{Rgb32f, Rgba8};
+use eidos_develop::{DevelopSettings, LocalAdjustments, Mask, MaskComponent, MaskOp, MaskShape};
+use eidos_geom::Point;
+use eidos_raster::{Rgb32f, Rgba8};
 
 use crate::{RenderRequest, SourceInfo, render};
 

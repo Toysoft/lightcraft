@@ -211,7 +211,7 @@ fn snapshot_with_unlogged_ops_saves_them() {
 /// `FsStore::truncate` on a file that was never created (an append that failed first) is a no-op.
 #[test]
 fn fs_store_truncates_a_missing_file_quietly() {
-    let dir = std::env::temp_dir().join(format!("lc-torn-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-torn-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let mut s = FsStore::open(&dir).unwrap();
     s.truncate(LOG, 0).unwrap();

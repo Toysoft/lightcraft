@@ -1,7 +1,7 @@
 //! Safetensors weights read on demand.
 //!
 //! Tensors are read from the file when a module asks for them (positional reads, no memory
-//! map: `unsafe` stays in `lightcraft-sysmem`), so building only the point-prompt model never
+//! map: `unsafe` stays in `eidos-sysmem`), so building only the point-prompt model never
 //! touches the text encoder's bytes.
 
 use std::collections::HashMap;
@@ -119,7 +119,7 @@ mod tests {
     use super::*;
 
     fn write(name: &str, header: &str, data_len: usize) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("lc-weights-{name}-{}.safetensors", std::process::id()));
+        let p = std::env::temp_dir().join(format!("eidos-weights-{name}-{}.safetensors", std::process::id()));
         let mut b = (header.len() as u64).to_le_bytes().to_vec();
         b.extend_from_slice(header.as_bytes());
         b.extend(std::iter::repeat_n(0u8, data_len));
@@ -141,7 +141,7 @@ mod tests {
         let wrap = write("wrap", r#"{"a":{"dtype":"F32","shape":[1],"data_offsets":[18446744073709551612,18446744073709551616]}}"#, 16);
         assert!(Weights::open(&wrap).is_err());
         // a header longer than the file
-        let p = std::env::temp_dir().join(format!("lc-weights-hdr-{}.safetensors", std::process::id()));
+        let p = std::env::temp_dir().join(format!("eidos-weights-hdr-{}.safetensors", std::process::id()));
         std::fs::write(&p, 1000u64.to_le_bytes()).unwrap();
         assert!(Weights::open(&p).is_err());
         for f in [ok, short, huge, wrap, p] {

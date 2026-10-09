@@ -6,9 +6,9 @@
 //! - **Remove** is Heal with an automatically chosen source: candidate offsets on rings around the
 //!   spot are scored by how well the source's surrounding annulus matches the target's.
 
-use lightcraft_develop::{Spot, SpotMode};
-use lightcraft_geom::Point;
-use lightcraft_raster::Rgb32f;
+use eidos_develop::{Spot, SpotMode};
+use eidos_geom::Point;
+use eidos_raster::Rgb32f;
 
 use crate::geometry::Frame;
 
@@ -80,13 +80,7 @@ pub fn auto_source(img: &Rgb32f, target: (f32, f32), r: f32) -> (f32, f32) {
 /// A source offset (normalized, as [`Spot::source_offset`]) for `spot` on `src` developed with
 /// `s`: the best match, or with `avoid` (the current offset) the best one at least a spot radius
 /// away from it ("refresh source"). `None` when no candidate fits in the image.
-pub fn pick_source(
-    src: &Rgb32f,
-    info: &crate::SourceInfo,
-    s: &lightcraft_develop::DevelopSettings,
-    spot: &Spot,
-    avoid: Option<Point>,
-) -> Option<Point> {
+pub fn pick_source(src: &Rgb32f, info: &crate::SourceInfo, s: &eidos_develop::DevelopSettings, spot: &Spot, avoid: Option<Point>) -> Option<Point> {
     let frame = crate::frame_for(src, info, s, true);
     let (w, h) = frame.fit(512, 512);
     if w == 0 || h == 0 {
@@ -173,9 +167,9 @@ pub fn apply(img: &mut Rgb32f, spots: &[Spot], frame: &Frame, ppl: f64) {
                 height: bh,
                 data: tgt.iter().zip(&src).zip(&outside).map(|((t, s), m)| [(t[0] - s[0]) * m, (t[1] - s[1]) * m, (t[2] - s[2]) * m]).collect(),
             };
-            let wts = lightcraft_raster::Plane { width: bw, height: bh, data: outside };
+            let wts = eidos_raster::Plane { width: bw, height: bh, data: outside };
             let sigma = (r * 0.6).max(1.0);
-            let (bd, bm) = (lightcraft_raster::blur::gaussian(&diff, sigma), lightcraft_raster::blur::gaussian(&wts, sigma));
+            let (bd, bm) = (eidos_raster::blur::gaussian(&diff, sigma), eidos_raster::blur::gaussian(&wts, sigma));
             Some(Rgb32f {
                 width: bw,
                 height: bh,
@@ -214,7 +208,7 @@ pub fn apply(img: &mut Rgb32f, spots: &[Spot], frame: &Frame, ppl: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lightcraft_develop::DevelopSettings;
+    use eidos_develop::DevelopSettings;
 
     #[test]
     fn remove_erases_a_dot() {

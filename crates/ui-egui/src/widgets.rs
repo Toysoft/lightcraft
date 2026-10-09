@@ -3,7 +3,7 @@
 //! ([`register`]) so the control channel can find and click it by name.
 
 use egui::{Align2, Color32, CornerRadius, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
-use lightcraft_develop::{ControlSpec, Track};
+use eidos_develop::{ControlSpec, Track};
 
 use crate::icons::{Icon, paint};
 use crate::theme::Tokens;
@@ -16,11 +16,11 @@ pub struct Registry(pub Vec<(String, Rect)>);
 /// Record a widget's automation id and screen rect for this frame.
 pub fn register(ctx: &egui::Context, id: impl Into<String>, rect: Rect) {
     let id = id.into();
-    ctx.data_mut(|d| d.get_temp_mut_or_default::<Registry>(egui::Id::new("lc-registry")).0.push((id, rect)));
+    ctx.data_mut(|d| d.get_temp_mut_or_default::<Registry>(egui::Id::new("eidos-registry")).0.push((id, rect)));
 }
 
 pub fn take_registry(ctx: &egui::Context) -> Vec<(String, Rect)> {
-    ctx.data_mut(|d| std::mem::take(&mut d.get_temp_mut_or_default::<Registry>(egui::Id::new("lc-registry")).0))
+    ctx.data_mut(|d| std::mem::take(&mut d.get_temp_mut_or_default::<Registry>(egui::Id::new("eidos-registry")).0))
 }
 
 // ------------------------------------------------------------------ preview-only raws
@@ -34,7 +34,7 @@ pub fn preview_only_variant(reason: &str) -> &str {
 /// What a preview-only raw means for the user (see `Photo::preview_only`).
 pub fn preview_only_explanation(reason: &str) -> String {
     crate::i18n::tr_format!(
-        "LightCraft can't decode this raw variant yet ({}). You're editing the camera's embedded JPEG preview, which already includes the camera's picture style (e.g. Monochrome) and white balance.",
+        "Eidos can't decode this raw variant yet ({}). You're editing the camera's embedded JPEG preview, which already includes the camera's picture style (e.g. Monochrome) and white balance.",
         preview_only_variant(reason)
     )
 }
@@ -524,7 +524,7 @@ mod tests {
         let spec = |id, min, max, step| ControlSpec {
             id,
             label: "",
-            section: lightcraft_develop::controls::Section::Light,
+            section: eidos_develop::controls::Section::Light,
             min,
             max,
             default: 0.0,
@@ -541,9 +541,9 @@ mod tests {
     /// Typed values (issue #322): signs, a decimal comma, units; on the control's steps, in range.
     #[test]
     fn typed_values_are_stepped_and_clamped() {
-        let exposure = lightcraft_develop::controls::find("light.exposure").unwrap();
-        let contrast = lightcraft_develop::controls::find("light.contrast").unwrap();
-        let temp = lightcraft_develop::controls::find("wb.temp").unwrap();
+        let exposure = eidos_develop::controls::find("light.exposure").unwrap();
+        let contrast = eidos_develop::controls::find("light.contrast").unwrap();
+        let temp = eidos_develop::controls::find("wb.temp").unwrap();
         assert_eq!(typed_value(exposure, "1.5"), Some(1.5));
         assert_eq!(typed_value(exposure, " +0,25 "), Some(0.25));
         assert_eq!(typed_value(exposure, "-12"), Some(exposure.min), "clamped");
@@ -567,7 +567,7 @@ mod access_tests {
         let ctx = egui::Context::default();
         crate::theme::install_fonts(&ctx);
         ctx.enable_accesskit();
-        let spec = lightcraft_develop::controls::find("light.exposure").unwrap();
+        let spec = eidos_develop::controls::find("light.exposure").unwrap();
         let mut found = Vec::new();
         for _ in 0..3 {
             let out = ctx.run_ui(egui::RawInput::default(), |ui| {

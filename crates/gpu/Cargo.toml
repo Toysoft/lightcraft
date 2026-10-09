@@ -1,19 +1,19 @@
 [package]
-name = "lightcraft-gpu"
+name = "eidos-gpu"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "LightCraft GPU develop pipeline: wgpu compute (WGSL) twin of the CPU pipeline, which stays the reference (L3)"
+description = "Eidos GPU develop pipeline: wgpu compute (WGSL) twin of the CPU pipeline, which stays the reference (L3)"
 
 [lints]
 workspace = true
 
 [dependencies]
-lightcraft-geom = { workspace = true }
-lightcraft-color = { workspace = true }
-lightcraft-raster = { workspace = true }
-lightcraft-develop = { workspace = true }
-lightcraft-pipeline = { workspace = true }
+eidos-geom = { workspace = true }
+eidos-color = { workspace = true }
+eidos-raster = { workspace = true }
+eidos-develop = { workspace = true }
+eidos-pipeline = { workspace = true }
 log = { workspace = true }
 
 # Native only: Metal / Vulkan / DX12 through wgpu (pure Rust; the drivers are the system's).
@@ -24,4 +24,4 @@ pollster = { workspace = true }
 bytemuck = { workspace = true }
 
 [dev-dependencies]
-lightcraft-scenes = { workspace = true }
+eidos-scenes = { workspace = true }

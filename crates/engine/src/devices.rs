@@ -26,10 +26,10 @@ pub struct Device {
 /// How long a scan is served before [`devices`] starts another one.
 pub const MAX_AGE: Duration = Duration::from_secs(2);
 
-/// Folders whose children are mounted volumes on this platform. `LIGHTCRAFT_DEVICE_ROOTS`
+/// Folders whose children are mounted volumes on this platform. `EIDOS_DEVICE_ROOTS`
 /// (paths joined like `PATH`) replaces them (tests, unusual mounts).
 fn mount_parents() -> Vec<std::path::PathBuf> {
-    if let Some(v) = std::env::var_os("LIGHTCRAFT_DEVICE_ROOTS") {
+    if let Some(v) = std::env::var_os("EIDOS_DEVICE_ROOTS") {
         return std::env::split_paths(&v).collect();
     }
     let mut out = Vec::new();
@@ -93,7 +93,7 @@ impl DeviceWatch {
             s.refreshing = true;
             let me = self.clone();
             // the scan runs without the state lock; `get` only ever waits for a list clone
-            let spawned = std::thread::Builder::new().name("lightcraft-devices".into()).spawn(move || {
+            let spawned = std::thread::Builder::new().name("eidos-devices".into()).spawn(move || {
                 let list = (me.scanner)();
                 me.store(list);
             });
@@ -160,7 +160,7 @@ pub fn on_change(f: impl Fn() + Send + Sync + 'static) {
 
 fn scan() -> Vec<Device> {
     let mut extra = Vec::new();
-    if cfg!(windows) && std::env::var_os("LIGHTCRAFT_DEVICE_ROOTS").is_none() {
+    if cfg!(windows) && std::env::var_os("EIDOS_DEVICE_ROOTS").is_none() {
         extra.extend((b'D'..=b'Z').map(|c| std::path::PathBuf::from(format!("{}:\\", c as char))));
     }
     devices_in(&mount_parents(), extra)
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn volumes_with_a_dcim_folder_are_devices() {
-        let base = std::env::temp_dir().join(format!("lc-devices-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("eidos-devices-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("EOS_DIGITAL/DCIM/100CANON")).unwrap();
         std::fs::create_dir_all(base.join("Backup/Photos")).unwrap();

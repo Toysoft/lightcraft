@@ -1,11 +1,11 @@
-//! M0.9 acceptance: drive LightCraft over MCP (stdio framing), set exposure and render an image.
+//! M0.9 acceptance: drive Eidos over MCP (stdio framing), set exposure and render an image.
 //! Runs against the headless backend directly and through the TCP control-channel transport
 //! (`Remote`) to a stand-in control server.
 
 use std::io::{BufRead, BufReader, Cursor, Write};
 use std::net::TcpListener;
 
-use lightcraft_mcp::{Backend, Headless, Remote, Server, base64_decode};
+use eidos_mcp::{Backend, Headless, Remote, Server, base64_decode};
 use serde_json::{Value, json};
 
 /// Feed a whole session through `Server::serve` and return the replies by id.
@@ -26,7 +26,7 @@ fn mean_of(result: &Value) -> (f64, u32, u32) {
     assert_eq!(img["mimeType"], "image/png");
     let png = base64_decode(img["data"].as_str().unwrap()).unwrap();
     assert_eq!(&png[1..4], b"PNG");
-    let d = lightcraft_codecs::decode(&png, Default::default()).unwrap();
+    let d = eidos_codecs::decode(&png, Default::default()).unwrap();
     let rgba = d.to_srgb8();
     let sum: u64 = rgba.data.iter().map(|p| p[0] as u64 + p[1] as u64 + p[2] as u64).sum();
     (sum as f64 / (3 * rgba.data.len()) as f64, d.width, d.height)
@@ -43,7 +43,7 @@ fn exposure_roundtrip(server: &mut Server) {
         ],
     );
     assert_eq!(replies.len(), 3, "notifications get no reply");
-    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "lightcraft");
+    assert_eq!(replies[0]["result"]["serverInfo"]["name"], "eidos");
     let tools: Vec<&str> = replies[1]["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert!(tools.contains(&"set_develop") && tools.contains(&"render_photo") && tools.contains(&"cmd_develop_set"));
     let id = replies[2]["result"]["structuredContent"]["photos"][0]["id"].as_u64().expect("a photo");
@@ -82,11 +82,11 @@ fn headless_set_exposure_and_render() {
 
 #[test]
 fn import_render_export_real_file() {
-    let dir = std::env::temp_dir().join(format!("lightcraft-mcp-e2e-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("eidos-mcp-e2e-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     // A synthetic gradient PNG to import.
-    let img = lightcraft_raster::Rgba8::from_fn(96, 64, |x, y| [(x * 2) as u8, (y * 3) as u8, 128, 255]);
-    lightcraft_mcp::write_image(&dir.join("sub/gradient.png"), &img, 90).unwrap();
+    let img = eidos_raster::Rgba8::from_fn(96, 64, |x, y| [(x * 2) as u8, (y * 3) as u8, 128, 255]);
+    eidos_mcp::write_image(&dir.join("sub/gradient.png"), &img, 90).unwrap();
     let out = dir.join("out.jpg");
     let mut server = Server::new(Box::new(Headless::default()));
     let replies = session(
@@ -105,7 +105,7 @@ fn import_render_export_real_file() {
     assert_eq!(replies[2]["result"]["content"][0]["mimeType"], "image/jpeg");
     let jpg = std::fs::read(&out).unwrap();
     assert_eq!(&jpg[..2], &[0xff, 0xd8]);
-    let d = lightcraft_codecs::decode(&jpg, Default::default()).unwrap();
+    let d = eidos_codecs::decode(&jpg, Default::default()).unwrap();
     assert_eq!((d.width, d.height), (48, 32));
     let _ = std::fs::remove_dir_all(&dir);
 }
