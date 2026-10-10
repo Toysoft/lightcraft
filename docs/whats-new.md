@@ -2,6 +2,15 @@
 
 ## 2026-10-14
 
+### Lightroom catalog import
+- Large catalogs import several times faster: originals are described from their headers, so a raw's pixel data is
+  never read (a DNG or CR3 from 2–3 % of its bytes; a raw shown from its embedded preview with that preview). A
+  38,500-photo catalog with 1.1 TB of originals on a USB SSD took about 2 minutes instead of about half an hour.
+  NEF, ORF, PEF, ARW6 and JPEG files are still read whole.
+- Photos appear batch by batch while the catalog is imported. ✕ keeps what was added; importing the catalog again
+  continues and adds the collections.
+- Adding the photos no longer pauses the window: XMP and develop settings are prepared in the background.
+
 ### Hard-edged Heal and Clone spots
 - A spot with Feather at 0 no longer draws black pixels exactly on its radius. This also fixes spots at 0% Opacity
   changing pixels along their edge. The hard edge now leaves pixels on the radius unchanged.

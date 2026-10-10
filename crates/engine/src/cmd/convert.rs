@@ -201,9 +201,12 @@ fn edit_copy(s: &mut Session, p: &Value, id: lightcraft_catalog::PhotoId, opts: 
 
 /// The op that brings a photo up to date with what its file is now (`info`, a fresh probe), or
 /// `None` when nothing changed. Covers a raw that became decodable (or stopped being: a different
-/// file relinked), i.e. a change of [`lightcraft_catalog::Photo::preview_only`].
+/// file relinked), i.e. a change of [`lightcraft_catalog::Photo::preview_only`]. A photo with no
+/// hash on record (added from its headers, as a Lightroom catalog's originals are) is not changed
+/// by the probe having one: its size, dimensions and preview state decide, so a Reload of the same
+/// file adds no undo step and keeps its previews (their key is the path and size while there is no hash).
 pub(crate) fn content_op(id: lightcraft_catalog::PhotoId, ph: &lightcraft_catalog::Photo, info: crate::media::ProbeInfo) -> Option<Op> {
-    let same = info.content_hash == ph.content_hash
+    let same = (ph.content_hash.is_none() || info.content_hash == ph.content_hash)
         && info.file_size == ph.file_size
         && (info.width, info.height) == (ph.width, ph.height)
         && info.preview_only == ph.preview_only;
