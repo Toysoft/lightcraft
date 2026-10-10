@@ -1,6 +1,6 @@
 # LightCraft roadmap
 
-**Stage: alpha** · next: beta, ~29 points and ~340–600 h away
+**Stage: alpha** · next: beta, ~16 points and ~340–600 h away
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (full re-measure against Lightroom Classic 15.5 and the installed Lightroom 9.6; restructured to the progress-docs standard) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
@@ -14,13 +14,21 @@ from [docs/gaps.md](docs/gaps.md). The full assessment, method and evidence are 
 |---|---:|---|
 | **Feature breadth** (checklist) | **81.1%** of 517 rows (P0 98.0%, P1 95.1%, P2 46.9%) | measured: [parity-checklist.md](docs/parity-checklist.md) recount |
 | **Feature breadth** (weighted by use) | **~76%** | estimated |
-| **Ready for real work** (full target) | **~46%** (42–50%) | estimated: weighted depth × written discounts |
+| **Ready for real work** (full target) | **~59%** (54–64%) | estimated: weighted sum over the dimensions |
 | **Mainstream practitioner** | **~51%** (46–56%) | estimated |
 | **Essentials user** | **~63%** (58–68%) | estimated |
 | Remaining to **beta** | **~340–600 h** (Opus 5.5 agent hours, ~60% parallel) | estimated |
 | Remaining to **full parity** | **~1,000–1,800 h** (~70% parallel) | estimated |
 
-The gap between the two numbers is quality and coverage, not missing buttons: camera colour is
+Each audience with its own hours (Opus 5.5 agent wall-clock hours to ~95%):
+
+| Audience | Ready | Opus 5.5 agent wall-clock hours to ~95% | Work that dominates |
+|---|---:|---:|---|
+| Full target (ready for real work) | **~59%** | **1,000–1,800 h** (~70% parallelizes) | raw colour, lens and camera data; AI models; Classic output modules; localization; plug-in ecosystem |
+| Mainstream practitioner | **~51%** | **450–840 h** (~60% parallelizes) | camera colour and render fidelity; CR3 / ORF / HE NEF; lens database; subject / sky masks; Lightroom XMP exchange; stability |
+| Essentials user | **~63%** | **160–300 h** (~50% parallelizes) | default raw look for popular cameras; launch stability; basic-slider feel; opening CR3 / HEIC files people send |
+
+The gap between breadth and readiness is quality and coverage, not missing buttons: camera colour is
 estimated rather than measured, CR3 decodes on three verified Canon bodies, compressed ORF and HE NEF
 open as previews, rendering is tuned by eye, AI masks are heuristics, there is no lens database, and
 tests run in CI on FreeBSD only. **Why alpha:** core workflows run end to end, but readiness is below
@@ -106,8 +114,9 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 ## Progress log
 
-- 2026-10-10 (later): readiness re-derived from written weights × discounts: full ~46% (was ~55%,
-  an unwritten judgement), mainstream practitioner ~51%, essentials user ~63%; alpha gate passes.
+- 2026-10-10 (final): full ready is a weighted sum over the dimensions (~59%; method aligned with
+  the standard); mainstream practitioner ~51% (450–840 h), essentials user ~63% (160–300 h);
+  alpha gate passes.
 - 2026-10-10: full re-measure for the progress-docs standard: stage alpha, ready ~55%, checklist
   81.1%; new docs (target-app-parity, gaps, roadmap, architecture, raw / file-format / hardware / UI
   / localization parity); `docs/parity.md` renamed `docs/parity-checklist.md`. Landed today: Nikon
@@ -144,6 +153,7 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-10 | minor | Full ready restored to the additive weighted sum (~59%; method aligned with the standard, no new evidence); hours per audience; beta ~16 points away |
 | 2026-10-10 | minor | Mainstream practitioner and essentials user numbers; full ready 55% → 46% (method written down); beta 340–600 h |
 | 2026-10-10 | minor | Alpha gate added (core-workflow check): passes, stays alpha |
 | 2026-10-10 | major | Restructured to the progress-docs standard; re-measured; *Where we stand*, *Parity estimate* and *Totals* moved to docs/target-app-parity.md, milestones and risks to docs/roadmap.md, raw coverage to docs/raw-parity.md, catalog migration to docs/file-format-parity.md, CJK notes to docs/localization-parity.md |

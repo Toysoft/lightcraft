@@ -302,7 +302,7 @@ LightCraft is young and moving fast: **alpha**. **Where we honestly stand** (det
 
 - **By feature count we're at ~81%** of Lightroom (core features 98%), tracked row by row in
   [docs/parity-checklist.md](docs/parity-checklist.md).
-- **As a day-to-day Lightroom replacement we're nearer 46% for the whole product, ~51% for a typical working photographer and ~63% for
+- **As a day-to-day Lightroom replacement we're nearer 59% for the whole product, ~51% for a typical working photographer and ~63% for
   casual use.** It's great for JPEG/DNG and most Sony / Panasonic /
   Fujifilm / Nikon / older-Canon raws on one machine; see [docs/raw-parity.md](docs/raw-parity.md) for your camera.
 - **The biggest gaps:**
