@@ -302,7 +302,8 @@ LightCraft is young and moving fast: **alpha**. **Where we honestly stand** (det
 
 - **By feature count we're at ~81%** of Lightroom (core features 98%), tracked row by row in
   [docs/parity-checklist.md](docs/parity-checklist.md).
-- **As a day-to-day Lightroom replacement we're nearer 55%.** It's great for JPEG/DNG and most Sony / Panasonic /
+- **As a day-to-day Lightroom replacement we're nearer 46% for the whole product, ~51% for a typical working photographer and ~63% for
+  casual use.** It's great for JPEG/DNG and most Sony / Panasonic /
   Fujifilm / Nikon / older-Canon raws on one machine; see [docs/raw-parity.md](docs/raw-parity.md) for your camera.
 - **The biggest gaps:**
   - **camera colour calibration:** Sony, Nikon, Panasonic, Fujifilm and Canon CR3 raws have guarded estimates from their camera JPEGs, with built-in ILCE-7CR, ILCE-7M4, X-H2S and X-T4 profiles; measured calibration is missing, and other raws or rejected fits retain a neutral matrix;

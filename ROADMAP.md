@@ -1,6 +1,6 @@
 # LightCraft roadmap
 
-**Stage: alpha** · next: beta, ~20 points and ~300–520 h away
+**Stage: alpha** · next: beta, ~29 points and ~340–600 h away
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (full re-measure against Lightroom Classic 15.5 and the installed Lightroom 9.6; restructured to the progress-docs standard) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
@@ -14,18 +14,22 @@ from [docs/gaps.md](docs/gaps.md). The full assessment, method and evidence are 
 |---|---:|---|
 | **Feature breadth** (checklist) | **81.1%** of 517 rows (P0 98.0%, P1 95.1%, P2 46.9%) | measured: [parity-checklist.md](docs/parity-checklist.md) recount |
 | **Feature breadth** (weighted by use) | **~76%** | estimated |
-| **Ready for real work** | **~55%** (50–60%) | estimated |
-| Remaining to **beta** | **~300–520 h** (Opus 5.5 agent hours, ~60% parallel) | estimated |
+| **Ready for real work** (full target) | **~46%** (42–50%) | estimated: weighted depth × written discounts |
+| **Mainstream practitioner** | **~51%** (46–56%) | estimated |
+| **Essentials user** | **~63%** (58–68%) | estimated |
+| Remaining to **beta** | **~340–600 h** (Opus 5.5 agent hours, ~60% parallel) | estimated |
 | Remaining to **full parity** | **~1,000–1,800 h** (~70% parallel) | estimated |
 
 The gap between the two numbers is quality and coverage, not missing buttons: camera colour is
 estimated rather than measured, CR3 decodes on three verified Canon bodies, compressed ORF and HE NEF
 open as previews, rendering is tuned by eye, AI masks are heuristics, there is no lens database, and
 tests run in CI on FreeBSD only. **Why alpha:** core workflows run end to end, but readiness is below
-the ~75% beta bar and Lightroom's main inputs, raw files, still have blocking gaps (Canon, ~30% of
+the ~75% beta bar (it is above the ~40% alpha bar) and Lightroom's main inputs, raw files, still have blocking gaps (Canon, ~30% of
 raw users, decodes CR3 on three verified bodies). It passes the alpha gate: all six core workflows
 (import, cull, develop, save and reopen, batch looks, export) work end to end on macOS
-([docs/roadmap.md](docs/roadmap.md#alpha-gate)). Hours are calibrated on this repo's PR history; see
+([docs/roadmap.md](docs/roadmap.md#alpha-gate)). The three readiness numbers and their weights and discounts are in
+[target-app-parity.md](docs/target-app-parity.md#ready-for-real-work-mainstream-practitioner-and-essentials-user).
+Hours are calibrated on this repo's PR history; see
 [target-app-parity.md](docs/target-app-parity.md#how-hours-are-calibrated).
 
 ## By dimension
@@ -102,6 +106,8 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 ## Progress log
 
+- 2026-10-10 (later): readiness re-derived from written weights × discounts: full ~46% (was ~55%,
+  an unwritten judgement), mainstream practitioner ~51%, essentials user ~63%; alpha gate passes.
 - 2026-10-10: full re-measure for the progress-docs standard: stage alpha, ready ~55%, checklist
   81.1%; new docs (target-app-parity, gaps, roadmap, architecture, raw / file-format / hardware / UI
   / localization parity); `docs/parity.md` renamed `docs/parity-checklist.md`. Landed today: Nikon
@@ -138,6 +144,7 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-10 | minor | Mainstream practitioner and essentials user numbers; full ready 55% → 46% (method written down); beta 340–600 h |
 | 2026-10-10 | minor | Alpha gate added (core-workflow check): passes, stays alpha |
 | 2026-10-10 | major | Restructured to the progress-docs standard; re-measured; *Where we stand*, *Parity estimate* and *Totals* moved to docs/target-app-parity.md, milestones and risks to docs/roadmap.md, raw coverage to docs/raw-parity.md, catalog migration to docs/file-format-parity.md, CJK notes to docs/localization-parity.md |
 | 2026-10-08 | minor | *Where we stand* by dimension and by kind of user |

@@ -14,8 +14,10 @@ have their own documents: [raw-parity.md](raw-parity.md), [file-format-parity.md
 |---|---:|---|
 | **Feature breadth**, checklist | **81.1%** of 517 in-scope rows (P0 98.0%, P1 95.1%, P2 46.9%) | **measured**: recount of [parity-checklist.md](parity-checklist.md) rows (✅ 1, 🟡 ½, 🚫 left out), the same rule `cargo xtask parity` uses |
 | **Feature breadth**, weighted by use | **~76%** | estimated: feature-area table below |
-| **Ready for real work** | **~55%** (range 50–60%) | estimated: feature areas ~57% weighted, pulled down by stability, platforms, ecosystem |
-| Remaining to **beta** | **~300–520 h** | estimated; ~60% parallelizes |
+| **Ready for real work** (full target) | **~46%** (range 42–50%) | estimated: weighted feature depth 57.2% × written discounts ×0.804, see [below](#ready-for-real-work-mainstream-practitioner-and-essentials-user) |
+| **Mainstream practitioner** | **~51%** (range 46–56%) | estimated: weekly areas of a working photographer, depth 63.7% × 0.804 |
+| **Essentials user** | **~63%** (range 58–68%) | estimated: core features at default settings, depth 75.6% × 0.830 |
+| Remaining to **beta** | **~340–600 h** | estimated; ~60% parallelizes |
 | Remaining to **full parity** | **~1,000–1,800 h** | estimated; ~70% parallelizes |
 | **Stage** | **alpha** | see [Stage](#stage) |
 
@@ -104,10 +106,93 @@ search embeddings; generative remove runs in Adobe's cloud.
 **Blocked on a model strategy** (maintainer decision): licensable weights or our own training;
 pure-Rust inference is proven (faces, SAM 3, denoise).
 
+## Ready for real work, mainstream practitioner and essentials user
+
+Three readiness numbers, computed the same way (craftrules `standards/progress-docs.md`): a written
+set of areas with weights, the weighted average of their depth ("Ready" in the tables above), then
+written multiplicative discounts for what still stops real work. They differ only in scope.
+
+### Discounts (evidence: open issues from users, 2026-10-10)
+
+| Discount | Full and mainstream | Essentials | Evidence |
+|---|---:|---:|---|
+| Interaction fidelity / UI clarity | ×0.95 | ×0.95 | brush live preview gaps and feathering (#517, #518); crop artefacts and limits (#731, #742, #770, #771); Compare white-balance selector (#743–#745); low-res slider previews (#330); dialogs taller than the window (#781); mouse-wheel scroll (#714); 100% zoom capped (gap 4) |
+| Stability on real machines | ×0.92 | ×0.92 | launch and quit crashes or silent startup failures (#250 macOS 12 Intel, #315 Windows Intel GPU, #431 Intel Mac, #260, #462, #783 Linux / Nouveau, #790 Windows installer); tests run in CI on FreeBSD only (gap 9) |
+| File exchange with Lightroom users (full, mainstream) / opening files people send (essentials) | ×0.92 | ×0.95 | Adobe XMP sidecars change colours (#290), XMP CameraProfile and Upright ignored (#204, #205), catalog import fails (#599), same Light values render differently (#523, #209), no write-back to `.lrcat`; for casual users: CR3 beyond verified bodies, compressed ORF, HE NEF open as previews (#473, #485, #556), HEIC trouble (#693) |
+| **Product** | **×0.804** | **×0.830** | |
+
+### Full target (ready for real work): ~46%
+
+All 13 feature areas of the [Features](#features) table with their weights: weighted depth
+**57.2%** × 0.804 = **~46%** (range 42–50%). Hardware, localization, ecosystem and AI are reported as
+dimensions and not folded in again.
+
+### Mainstream practitioner: ~51%
+
+A working photographer (wedding, portrait, events, landscape) shooting raw on one current camera,
+weekly: import, cull, develop, a few masks, sync a look, export. Excluded: Classic output modules,
+video, generative / cloud AI, plug-ins, tethering and other specialist hardware, languages other
+than the user's own.
+
+| Area | Weight | Depth |
+|---|---:|---:|
+| Import and library | 18% | 80% |
+| Cull: views, compare, zoom, ratings | 12% | 70% |
+| Raw decoding for their camera | 15% | 65% (decoding ~78% weighted by maker, less thin verification) |
+| Default colour and rendering | 12% | 40% |
+| Global develop adjustments | 15% | 70% |
+| Crop, geometry, lens corrections | 6% | 50% |
+| Masking (manual, subject / sky; no generative) | 8% | 45% |
+| Heal / remove (no generative), denoise | 5% | 40% |
+| Presets, copy / paste / sync | 5% | 85% |
+| Export | 4% | 75% |
+| **Weighted depth** | 100% | **63.7%** |
+
+63.7% × 0.804 = **~51%** (range 46–56%).
+
+### Essentials user: ~63%
+
+A casual photographer with default settings: import, look through, rate, fix a few photos with the
+basic sliders, crop, apply a preset, undo, export JPEGs.
+
+| Feature | Weight | Depth |
+|---|---:|---:|
+| Import photos | 15% | 80% |
+| Browse grid and detail view | 10% | 85% |
+| Rate and flag | 5% | 90% |
+| Basic sliders (exposure, contrast, highlights, shadows, white balance, vibrance / saturation) | 22% | 70% (slider strength differs from Lightroom, #196, #521) |
+| Auto | 5% | 65% (#318) |
+| Crop and straighten | 10% | 80% |
+| Presets and profiles | 8% | 80% |
+| Undo and history | 5% | 90% |
+| Default look of their camera's raws | 10% | 45% |
+| Export JPEG | 10% | 85% |
+| **Weighted depth** | 100% | **75.6%** |
+
+75.6% × 0.830 = **~63%** (range 58–68%).
+
+### User evidence (GitHub issues, excluding the four maintainers)
+
+- 324 issues from 159 users; 162 open. 8,719 stars, 2,698 forks (2026-10-10).
+- Of the 162 open: **~92 core-path bugs** (33 colour / rendering, 16 decoding, ~36 UI / workflow, 7
+  launch / stability), ~11 developer / test infrastructure, **~59 feature requests or niche asks**
+  (plug-ins, mobile, sync servers, tablets, MIDI, geocoding, themes).
+- Praise in issue text (love / amazing / great work / awesome): ~14 issues; "thank you" in 27.
+  **No explicit "switched from Lightroom" report** was found ("switched" matches 6 issues, none a
+  switch report).
+- Reading: strong interest, but most open user issues are core-path, and raw colour dominates them,
+  so the mainstream number is held down by default rendering rather than missing features.
+
+### Why the full number moved (55% → 46%)
+
+The earlier ~55% was the feature-area depth (57%) "pulled down" by an unwritten judgement. It is
+now the written depth × the written discounts above. No new features were lost; the method is
+explicit. The stage stays **alpha** (above ~40% and the core-workflow gate passes).
+
 ## Stage
 
 **Alpha.** Core workflows exist end to end (import, cull, develop, mask, export, catalog migration),
-but ready-for-real-work is ~55%, below the ~75% beta bar, and the main file formats have blocking
+but ready-for-real-work is ~46%, below the ~75% beta bar, and the main file formats have blocking
 gaps: Canon CR3 decodes from sensor data on three verified bodies only, compressed ORF and HE NEF
 open as previews, and colour on every non-DNG raw is estimated rather than measured.
 
@@ -115,8 +200,9 @@ open as previews, and colour on every non-DNG raw is estimated rather than measu
 work end to end on macOS; see the table in [roadmap.md](roadmap.md#alpha-gate). The partial rows (CR3
 variants, compressed ORF, HE NEF as previews; capped 100% zoom) degrade but don't block a workflow.
 
-**To beta:** ~20 points of readiness, **~300–520 h**: the ten `B` gaps in [gaps.md](gaps.md)
-(~250–460 h) plus CI on the main platforms and stability work around them. Beta needs: CR3, ORF and
+**To beta:** ~29 points of readiness, **~340–600 h**: the ten `B` gaps in [gaps.md](gaps.md)
+(~250–460 h), plus burning down the ~92 open core-path user issues (40–80 h) and stability work
+around them. Beta needs: CR3, ORF and
 HE NEF decoding from sensor data; measured colour for the popular models and a fidelity suite with
 scores; full-resolution zoom; Subject / Sky / People masks; a lens profile database for the
 popular lenses; tests in CI on macOS, Windows and Linux.
@@ -153,6 +239,7 @@ most of its list; what remains is the data-heavy part (colour, lenses, models) i
 
 | Date | Checklist (all / P0 / P1 / P2) | Ready for real work | Remaining to full parity | Source |
 |---|---|---|---|---|
+| 2026-10-10 (later) | 81.1% (unchanged) | ~46% full · ~51% mainstream · ~63% essentials | 1,000–1,800 h | written weights × discounts |
 | 2026-10-10 | 81.1% / 98.0% / 95.1% / 46.9% (517 rows) | ~55% | 1,000–1,800 h | this re-measure |
 | 2026-10-08 | 79.7% / 98.2% / 95.6% / 41.6% (509 rows) | 60–70% | — | ROADMAP *Where we stand* |
 | 2026-10-02 | 75.6% | — | 270–505 h (cloud parity without AI / Classic: 130–255 h) | ROADMAP *Parity estimate* |
@@ -173,5 +260,6 @@ P2 items 12–25 h; look tuning, performance, packaging, hardening 25–45 h.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-10 | minor | Added mainstream practitioner (~51%) and essentials user (~63%) numbers; full ready re-derived from written weights × discounts (55% → 46%); user-issue evidence; beta hours 340–600 |
 | 2026-10-10 | minor | Stage re-checked against the core-workflow alpha gate: passes, stays alpha |
 | 2026-10-10 | major | Created per the progress-docs standard: full re-measure (checklist recount, installed Lightroom 9.6 bundle listing, code counts, catalogs, CI), feature areas with weights, dimensions, AI, stage, calibration; merged ROADMAP's *Where we stand* and *Parity estimate* |

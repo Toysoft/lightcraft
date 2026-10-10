@@ -9,7 +9,7 @@ LightCraft has no `cargo xtask scorecard`; the measured checklist is
 
 ## Current focus
 
-Toward **beta** (~300–520 Opus 5.5 agent hours; ranked, each a gap in [gaps.md](gaps.md)):
+Toward **beta** (~340–600 Opus 5.5 agent hours; ranked, each a gap in [gaps.md](gaps.md)):
 
 1. **Camera colour of our own** (gap 1, 50–90 h): chart-based calibration for the most-used models,
    building on the per-file JPEG fits and pooled profiles (`lightcraft-cli calibrate`); never Adobe
@@ -43,7 +43,7 @@ against the code, tests, issues and [gaps.md](gaps.md).
 
 **Result: passes.** Every core workflow runs end to end on macOS and the work survives quit and
 reopen; the partial rows degrade fidelity for some cameras and large files but don't stop the
-workflow, so LightCraft stays **alpha** (ready for real work ~55%, above the ~40% bar).
+workflow, so LightCraft stays **alpha** (ready for real work ~46%, above the ~40% bar).
 
 ## After beta
 
@@ -108,5 +108,6 @@ calibration: M0–M13 took ≈ 25 active hours against an estimate of ≈ 110–
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-10 | minor | Beta hours 340–600; full ready ~46% in the gate note |
 | 2026-10-10 | minor | Added the Alpha gate table (core-workflow gate from the revised standard): passes, stays alpha |
 | 2026-10-10 | major | Created: milestones moved from ROADMAP.md (statuses refreshed: M3 ✅, M11 / M12 / M15 detail), current focus re-ranked toward beta, risks and design notes kept |
