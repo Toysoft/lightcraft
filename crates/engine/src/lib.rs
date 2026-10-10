@@ -968,17 +968,18 @@ impl Session {
 
     // ---------------------------------------------------------------- library view
 
-    /// Makes the view point only at albums the library holds: one that is gone is no longer the
-    /// source (All Photos is), the filter's album or the target album. THE place this is checked:
-    /// commands, undo and redo, opening a library and every look at the grid run it, so whatever
-    /// removed an album (a command, an undo, a background task) or named one (a saved filter, a
-    /// saved view) need not know. Three lookups: it runs every time.
+    /// Makes the view show only albums the library holds: one that is gone is no longer the
+    /// source (All Photos is) or the filter's album. THE place this is checked: commands, undo
+    /// and redo, opening a library and every look at the grid run it, so whatever removed an
+    /// album (a command, an undo, a background task) or named one (a saved filter, a saved view)
+    /// need not know. Two lookups: it runs every time.
     ///
     /// An album that comes back (its deletion undone) is not shown again by itself, as after
     /// `album.delete` and undo before: the grid stays where the person was put.
     ///
-    /// The selection is not this function's: photos that go away by undo come back by redo still
-    /// selected, and what reads the selection (`active`, `targets`) looks each photo up.
+    /// What is only looked up when it is used is left as it is, and so comes back with an undo:
+    /// the target album (a missing one means the Quick Collection) and the selection (`active`
+    /// and `targets` leave out photos that are gone).
     pub fn reconcile_view(&mut self) {
         let cat = &self.catalog;
         let gone = |a: &lightcraft_catalog::AlbumId| cat.album(*a).is_none();
@@ -987,9 +988,6 @@ impl Session {
         }
         if self.filter.album.as_ref().is_some_and(gone) {
             self.filter.album = None;
-        }
-        if self.target_album.as_ref().is_some_and(gone) {
-            self.target_album = None;
         }
     }
 
@@ -1245,8 +1243,15 @@ impl Session {
     }
 
     /// The photos commands act on when a call names none: the selection, else the active photo.
+    /// As far as its photos are there: one taken away by undo stays selected for the redo, and is
+    /// acted on by nothing meanwhile.
     pub fn selected(&self) -> Vec<PhotoId> {
-        if self.selection.ids.is_empty() { self.selection.active.into_iter().collect() } else { self.selection.ids.clone() }
+        let there = |id: &PhotoId| self.catalog.photo(*id).is_some();
+        if self.selection.ids.is_empty() {
+            self.selection.active.into_iter().filter(there).collect()
+        } else {
+            self.selection.ids.iter().copied().filter(there).collect()
+        }
     }
 }
 
