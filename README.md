@@ -255,7 +255,8 @@ eidos --control 7980 ~/Pictures/trip
 
 - **Pure Rust, no C.** Our own RAW decoders (DNG, Canon CR2/CR3, Sony ARW, Nikon NEF, Fujifilm RAF incl. X-Trans,
   Panasonic RW2 / Leica RWL, Pentax PEF, Olympus ORF), our own colour science, our own pipeline. JPEG, PNG, TIFF, WebP,
-  PSD composites and JPEG XL open today.
+  PSD composites and JPEG XL open today; HEIC/HEIF photos too with `--features heif` (HEVC is a build-time choice,
+  as in PhotoCraft).
 - **Scene-referred & wide-gamut.** Linear Rec.2020 float internally, Bradford-adapted white balance, gamut mapping
   instead of clipping, a filmic shoulder for raw and pixel-exact pass-through for JPEGs you haven't touched.
 - **Resolution-independent edits.** Radii and brush sizes are relative to the image, so a 400 px preview, your
@@ -355,7 +356,8 @@ Language**; the choice applies immediately and persists. See [docs/localization.
 **Logs:** the desktop app writes its log to standard error and to `logs/eidos.log` in its settings folder
 (Linux `$XDG_CONFIG_HOME/eidos/logs/`, by default `~/.config/eidos/logs/`; macOS
 `~/Library/Application Support/Eidos/logs/`; Windows `%APPDATA%\Eidos\logs\`), never in the library. A
-launch from a desktop menu or the Dock has no terminal, so attach this file to a bug report. Each start moves the
+launch from a desktop menu or the Dock has no terminal, so attach this file to a bug report (**Help ▸ Open Log
+Folder** shows it in the file manager). Each start moves the
 previous log to `eidos.1.log` and that one to `eidos.2.log`, so the log of a run that crashed survives the
 next start; the file stops growing at 16 MiB, `--version` and `--help` write none, and runs with
 `EIDOS_NO_PREFS` log to standard error only. By default Eidos's own crates log at `info` and everything else

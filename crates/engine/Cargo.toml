@@ -22,6 +22,7 @@ eidos-preview = { workspace = true }
 eidos-codecs = { workspace = true }
 eidos-raw = { workspace = true }
 eidos-meta = { workspace = true }
+eidos-faces = { workspace = true }
 miniz_oxide = { workspace = true }
 eidos-merge = { workspace = true }
 rayon = { workspace = true }
@@ -32,7 +33,12 @@ log = { workspace = true }
 ab_glyph = { workspace = true }
 # Apply the font’s vertical substitutions and origins to Japanese watermarks.
 harfrust = { version = "0.12", default-features = false, features = ["std"] }
+unicode-segmentation = "1.13"
 eidos-segment = { workspace = true, optional = true }
+
+# model downloads run natively only (the web build fetches no models)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+eidos-fetch = { workspace = true }
 
 [features]
 # AI masks with SAM 3 (Object / Describe). Off for the web and CLI builds.
@@ -40,3 +46,4 @@ sam = ["dep:eidos-segment"]
 
 [dev-dependencies]
 libc = { workspace = true }
+eidos-tiff = { workspace = true }

@@ -9,6 +9,12 @@ default-run = "eidos"
 [lints]
 workspace = true
 
+[features]
+default = []
+# Open HEIC/HEIF photos (the optional eidos-heif crate). Not default so distributors choose
+# it (HEVC patents); build with `--features heif` to include it.
+heif = ["eidos-codecs/heif"]
+
 [dependencies]
 eidos-engine = { workspace = true, features = ["sam"] }
 eidos-sysmem = { workspace = true }

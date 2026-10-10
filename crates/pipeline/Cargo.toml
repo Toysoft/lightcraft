@@ -13,6 +13,7 @@ eidos-geom = { workspace = true }
 eidos-color = { workspace = true }
 eidos-raster = { workspace = true }
 eidos-develop = { workspace = true }
+eidos-raw = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 

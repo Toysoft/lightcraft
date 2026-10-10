@@ -2,16 +2,18 @@
 //!
 //! - [`probe`] recognises raw containers; [`decode`] turns a file into a [`RawImage`] (sensor data + everything
 //!   needed to render it: CFA, black/white levels, active area, default crop, orientation, DNG colour tags,
-//!   opcode lists, [`Metadata`]); [`embedded_preview`] returns the largest embedded JPEG.
+//!   opcode lists, [`Metadata`]); [`embedded_preview`] returns the largest embedded JPEG (or DNG 1.7 JPEG XL) preview;
+//!   [`semantic_masks`] reads a DNG's semantic masks (segmentation mattes, e.g. iPhone ProRAW's sky matte).
 //! - [`RawImage::normalized`] subtracts black, scales white to 1.0 and crops to the active area (applying DNG
 //!   `OpcodeList1`/`OpcodeList2`); [`demosaic`] turns CFA data into camera-RGB [`Rgb32f`];
 //!   [`RawImage::develop`] does all of it plus `OpcodeList3` and the default crop; [`RawImage::develop_binned`]
 //!   produces the same at 1/k of the size straight from the mosaic (previews, thumbnails).
 //! - [`color`] implements the DNG colour model (dual-illuminant interpolation, forward matrices, white balance)
 //!   and produces camera → linear Rec.2020 D65 matrices; [`profile`] reads and applies a DNG's own profile
-//!   look tables and tone curve.
+//!   look tables and tone curve, and [`gaintable`] its gain table map (Apple ProRAW's local tone mapping).
 //!
-//! Formats: DNG (uncompressed, lossless JPEG, lossy JPEG (Smart Previews), Deflate incl. floating point, tiled/stripped, CFA and LinearRaw),
+//! Formats: DNG (uncompressed, lossless JPEG, lossy JPEG (Smart Previews), Deflate incl. floating point, JPEG XL (DNG 1.7,
+//! `jxl` feature, on by default), tiled/stripped, CFA and LinearRaw),
 //! Canon CR2 / CR3 (lossless CRX Bayer and version 0x100/0x200 C-RAW), Nikon NEF/NRW (uncompressed, Huffman lossless / lossy compressed), Sony ARW (uncompressed, ARW2, lossless), Fujifilm RAF (uncompressed Bayer
 //! and X-Trans, lossless and lossy compressed), Panasonic RW2 / Leica RWL / Panasonic RAW (every raw format: compressed 4 and 6, the prefix-coded strips of 8,
 //! packed 2/5/7, the 16-bit words of the oldest bodies), Pentax PEF (uncompressed, Huffman), Olympus ORF (uncompressed).
@@ -27,11 +29,15 @@ pub mod color;
 pub mod demosaic;
 mod dng;
 pub mod dngwrite;
+pub mod gaintable;
 pub mod highlight;
+#[cfg(feature = "jxl")]
+mod jxl;
 pub mod ljpeg;
 pub mod opcodes;
 mod preview;
 pub mod profile;
+pub mod semantic;
 mod tiffraw;
 mod unpack;
 mod vendor;
@@ -44,6 +50,7 @@ pub use eidos_meta::Metadata;
 pub use eidos_raster::Rgb32f;
 pub use opcodes::{Opcode, OpcodeLists};
 pub use preview::{PreviewColorSpace, embedded_preview, embedded_preview_color_space};
+pub use semantic::{SemanticMask, semantic_masks};
 
 use eidos_color::Xy;
 use eidos_tiff::{Tiff, TiffError};
@@ -83,6 +90,12 @@ pub enum RawFormat {
     Rw2,
     Pef,
     Srw,
+    /// Canon CRW (CIFF heap), the bodies before the CR2 era.
+    Crw,
+    /// Minolta MRW (`\0MRM` block container).
+    Mrw,
+    /// Sigma / Foveon X3F (`FOVb`).
+    X3f,
     /// Another TIFF-based raw (3FR, IIQ, ERF, KDC, DCR, MOS, …).
     OtherTiff,
 }
@@ -119,6 +132,15 @@ pub fn probe(bytes: &[u8]) -> Option<RawFormat> {
     if bytes.starts_with(b"IIU\0") {
         return Some(RawFormat::Rw2);
     }
+    if bytes.starts_with(b"\0MRM") {
+        return Some(RawFormat::Mrw);
+    }
+    if bytes.starts_with(b"FOVb") {
+        return Some(RawFormat::X3f);
+    }
+    if bytes.len() >= 14 && bytes.starts_with(b"II") && &bytes[6..14] == b"HEAPCCDR" {
+        return Some(RawFormat::Crw);
+    }
     if bytes.len() >= 10 && bytes.starts_with(b"II*\0") && &bytes[8..10] == b"CR" {
         return Some(RawFormat::Cr2);
     }
@@ -130,10 +152,7 @@ pub fn probe(bytes: &[u8]) -> Option<RawFormat> {
         return Some(RawFormat::Dng);
     }
     let make = t.find(eidos_tiff::tags::MAKE).and_then(|e| e.value.as_str()).unwrap_or_default().to_ascii_uppercase();
-    let has_cfa = t.all_ifds().iter().any(|i| {
-        i.u16(eidos_tiff::tags::PHOTOMETRIC) == Some(eidos_tiff::tags::photometric::CFA)
-            || i.u16(eidos_tiff::tags::COMPRESSION).is_some_and(|c| c == 34713 || c == 32767 || c == 32769 || c == 32770)
-    });
+    let has_cfa = has_raw_ifd(&t);
     if make.starts_with("CANON") && t.ifds.len() >= 4 && t.ifds[3].u16(eidos_tiff::tags::COMPRESSION) == Some(6) {
         return Some(RawFormat::Cr2);
     }
@@ -149,10 +168,101 @@ pub fn probe(bytes: &[u8]) -> Option<RawFormat> {
     if make.starts_with("SAMSUNG") {
         return Some(RawFormat::Srw);
     }
-    if has_cfa {
+    if has_cfa || thumbnail_shell(&t, bytes.len()).is_some() || is_preview_container(ifd0) {
         return Some(RawFormat::OtherTiff);
     }
     None
+}
+
+/// Whether some IFD is marked as raw: CFA photometric, or a raw-only compression value (99 is not a
+/// registered TIFF compression; Leaf MOS files use it for their tiled 16-bit lossless-JPEG raw).
+fn has_raw_ifd(t: &Tiff) -> bool {
+    t.all_ifds().iter().any(|i| {
+        i.u16(eidos_tiff::tags::PHOTOMETRIC) == Some(eidos_tiff::tags::photometric::CFA)
+            || i.u16(eidos_tiff::tags::COMPRESSION).is_some_and(|c| c == 34713 || c == 32767 || c == 32769 || c == 32770 || c == 99)
+    })
+}
+
+/// IFD0 that is not an image at all: no `ImageWidth` / `ImageLength`, but a JPEG preview pointer or
+/// `SubIFDs` (the layout of Kodak KDC files, whose pictures sit in private tags). A plain TIFF reader
+/// rejects such a file as malformed even though it carries a preview.
+fn is_preview_container(ifd0: &eidos_tiff::Ifd) -> bool {
+    use eidos_tiff::tags::{IMAGE_LENGTH, IMAGE_WIDTH, JPEG_INTERCHANGE_FORMAT, SUB_IFDS};
+    !ifd0.contains(IMAGE_WIDTH) && !ifd0.contains(IMAGE_LENGTH) && (ifd0.contains(JPEG_INTERCHANGE_FORMAT) || ifd0.contains(SUB_IFDS))
+}
+
+/// A TIFF whose first image is only a reduced copy of a picture stored somewhere else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ThumbnailShell {
+    /// Size of the first image (IFD0).
+    pub thumb: (u32, u32),
+    /// Size of the picture it stands in for.
+    pub full: (u32, u32),
+}
+
+/// Some raw files are a TIFF "shell" around a private block: IFD0 holds a small RGB preview and nothing
+/// in the TIFF structure marks the real image as raw (no CFA photometric, no raw compression). The
+/// structure still gives them away, with a generic rule that names no maker or model: the file
+/// declares a picture at least 4x larger than IFD0 in both directions, and either
+/// - a `SubIFDs` child of IFD0 is that bigger image (an 8-bit grey mosaic in one such file), or
+/// - the Exif `PixelXDimension` / `PixelYDimension` say so *and* the file holds enough bytes outside
+///   every IFD's strips and tiles to carry that many pixels at one bit each (a downsized copy that kept
+///   its old Exif size has no such block).
+///
+/// A multi-page TIFF is not caught (its pages are the IFD chain, not `SubIFDs`), nor a pyramid whose
+/// IFD0 is the full image.
+fn thumbnail_shell(t: &Tiff, len: usize) -> Option<ThumbnailShell> {
+    use eidos_tiff::tags::{IMAGE_LENGTH, IMAGE_WIDTH, PIXEL_X_DIMENSION, PIXEL_Y_DIMENSION};
+    let ifd0 = t.ifds.first()?;
+    let (w0, h0) = (ifd0.u32(IMAGE_WIDTH)?, ifd0.u32(IMAGE_LENGTH)?);
+    if w0 == 0 || h0 == 0 {
+        return None;
+    }
+    let much_bigger = |(w, h): (u32, u32)| u64::from(w) >= 4 * u64::from(w0) && u64::from(h) >= 4 * u64::from(h0);
+    let shell = |full| Some(ThumbnailShell { thumb: (w0, h0), full });
+    let mut best: Option<(u32, u32)> = None;
+    for s in &ifd0.sub_ifds {
+        if s.image().is_ok()
+            && let (Some(w), Some(h)) = (s.u32(IMAGE_WIDTH), s.u32(IMAGE_LENGTH))
+            && much_bigger((w, h))
+            && best.is_none_or(|(bw, bh)| u64::from(w) * u64::from(h) > u64::from(bw) * u64::from(bh))
+        {
+            best = Some((w, h));
+        }
+    }
+    if let Some(full) = best {
+        return shell(full);
+    }
+    let exif = t.exif()?;
+    let full = (exif.u32(PIXEL_X_DIMENSION)?, exif.u32(PIXEL_Y_DIMENSION)?);
+    if !much_bigger(full) {
+        return None;
+    }
+    // bytes covered by image data (strips and tiles shared between IFDs, e.g. IFD0 and its thumbnail, count once)
+    let mut seen = std::collections::BTreeMap::new();
+    for ifd in t.all_ifds() {
+        if let Ok(info) = ifd.image() {
+            for c in info.chunks(len as u64) {
+                seen.insert(c.offset, c.len);
+            }
+        }
+    }
+    let covered = seen.values().fold(0u64, |a, &l| a.saturating_add(l));
+    let spare = (len as u64).saturating_sub(covered);
+    (spare.saturating_mul(8) >= u64::from(full.0) * u64::from(full.1)).then_some(())?;
+    shell(full)
+}
+
+/// Why [`decode`] gives up on a file [`probe`] called [`RawFormat::OtherTiff`].
+fn other_tiff_reason(bytes: &[u8]) -> String {
+    let t = Tiff::parse_with(bytes, &eidos_tiff::ParseOptions { max_ifds: 256, ..Default::default() }).ok();
+    match t.as_ref().filter(|t| !has_raw_ifd(t)).and_then(|t| thumbnail_shell(t, bytes.len())) {
+        Some(s) => format!(
+            "{}x{} raw image in a private block, not decoded yet (the file's first image is a {}x{} reduced copy)",
+            s.full.0, s.full.1, s.thumb.0, s.thumb.1
+        ),
+        None => "OtherTiff files are not decoded yet".to_string(),
+    }
 }
 
 /// Decode a raw file.
@@ -195,6 +305,7 @@ fn decode_with(bytes: &[u8], mode: Mode) -> Result<RawImage> {
         RawFormat::Rw2 => vendor::rw2::decode(bytes, mode),
         RawFormat::Pef => vendor::pef::decode(bytes, mode),
         RawFormat::Orf => vendor::orf::decode(bytes, mode),
+        RawFormat::OtherTiff => Err(RawError::Unsupported(other_tiff_reason(bytes))),
         other => Err(RawError::Unsupported(format!("{other:?} files are not decoded yet"))),
     }
 }
@@ -405,8 +516,13 @@ pub struct ColorData {
     pub as_shot_white_xy: Option<Xy>,
     /// EV to add for a "normal" rendering (`BaselineExposure` + `BaselineExposureOffset`).
     pub baseline_exposure: f64,
+    /// `BaselineSharpness`: sharpening relative to a reference camera (`None`: the DNG default,
+    /// 1). Read and written back by DNG export; rendering doesn't use it yet.
+    #[serde(default)]
+    pub baseline_sharpness: Option<f64>,
     /// The file's own camera-profile look (`ProfileHueSatMap*`, `ProfileLookTable*`,
-    /// `ProfileToneCurve`), applied by [`color`]'s users at render time.
+    /// `ProfileToneCurve`), applied by [`color`]'s users at render time, and its
+    /// `ProfileGainTableMap*`, kept (a DNG export writes it back) but not rendered.
     #[serde(default)]
     pub profile: profile::ProfileLook,
 }
@@ -621,6 +737,136 @@ mod tests {
         assert_eq!(b.at(3, 2, 0, 1), 2.0);
         assert_eq!(b.mean(), 2.5);
         assert_eq!(BlackLevel::uniform(7.0).at(9, 9, 0, 3), 7.0);
+    }
+
+    // --- TIFF shells around a private raw block (thumbnail-only IFD0) ---
+
+    use eidos_tiff::{IfdBuilder, ImageData, TiffWriter, Value, tags as t};
+
+    /// An uncompressed 8-bit RGB image IFD.
+    fn rgb_ifd(w: u32, h: u32) -> IfdBuilder {
+        let mut ifd = IfdBuilder::new();
+        ifd.set(t::IMAGE_WIDTH, Value::Long(vec![w]));
+        ifd.set(t::IMAGE_LENGTH, Value::Long(vec![h]));
+        ifd.set(t::BITS_PER_SAMPLE, Value::Short(vec![8, 8, 8]));
+        ifd.set(t::SAMPLES_PER_PIXEL, Value::Short(vec![3]));
+        ifd.set(t::PHOTOMETRIC, Value::Short(vec![2]));
+        ifd.set(t::COMPRESSION, Value::Short(vec![1]));
+        ifd.set_image(ImageData::Strips { rows_per_strip: h, strips: vec![vec![90u8; (w * h * 3) as usize]] });
+        ifd
+    }
+
+    fn exif_size(w: u32, h: u32) -> IfdBuilder {
+        IfdBuilder::new().with(t::PIXEL_X_DIMENSION, Value::Long(vec![w])).with(t::PIXEL_Y_DIMENSION, Value::Long(vec![h]))
+    }
+
+    fn write(chain: &[IfdBuilder]) -> Vec<u8> {
+        TiffWriter::default().write(chain).unwrap()
+    }
+
+    const SHELL_REASON: &str = "raw image in a private block";
+
+    /// A bigger image in a `SubIFDs` child of a small IFD0 (the layout of an 8-bit-mosaic TIFF raw).
+    #[test]
+    fn thumbnail_with_a_bigger_sub_ifd_is_an_undecodable_raw() {
+        let mut ifd0 = rgb_ifd(16, 12);
+        ifd0.add_sub_ifd(rgb_ifd(64, 48));
+        let bytes = write(&[ifd0]);
+        assert_eq!(probe(&bytes), Some(RawFormat::OtherTiff));
+        let Err(RawError::Unsupported(why)) = decode(&bytes) else { panic!("expected Unsupported") };
+        assert!(why.contains("64x48") && why.contains("16x12") && why.contains(SHELL_REASON), "{why}");
+        // a sub-IFD that is not much bigger (a pyramid level) does not count
+        let mut ifd0 = rgb_ifd(16, 12);
+        ifd0.add_sub_ifd(rgb_ifd(32, 24));
+        assert_eq!(probe(&write(&[ifd0])), None);
+    }
+
+    /// Exif says the picture is far bigger than IFD0 and the file holds a block that could carry it.
+    #[test]
+    fn thumbnail_with_a_private_block_behind_the_exif_size_is_an_undecodable_raw() {
+        let mut ifd0 = rgb_ifd(16, 12);
+        ifd0.set_child(t::EXIF_IFD, exif_size(400, 300));
+        let mut bytes = write(&[ifd0.clone()]);
+        // no private block: a downsized copy that kept its old Exif size is an ordinary image
+        assert_eq!(probe(&bytes), None);
+        // 400 x 300 pixels at one bit each is 15000 bytes: 14000 is not enough, 16000 is
+        bytes.extend(std::iter::repeat_n(7u8, 14_000));
+        assert_eq!(probe(&bytes), None);
+        bytes.extend(std::iter::repeat_n(7u8, 2_000));
+        assert_eq!(probe(&bytes), Some(RawFormat::OtherTiff));
+        let Err(RawError::Unsupported(why)) = decode(&bytes) else { panic!("expected Unsupported") };
+        assert!(why.contains("400x300") && why.contains("16x12") && why.contains(SHELL_REASON), "{why}");
+        // truncating it never panics
+        for n in (0..bytes.len()).step_by(37) {
+            let _ = probe(&bytes[..n]);
+            let _ = decode(&bytes[..n]);
+        }
+    }
+
+    /// Ordinary TIFFs stay images: the full picture first, equal Exif size, or later pages that are bigger.
+    #[test]
+    fn ordinary_tiffs_are_not_shells() {
+        let padded = |chain: &[IfdBuilder]| {
+            let mut b = write(chain);
+            b.extend(std::iter::repeat_n(0u8, 100_000));
+            b
+        };
+        let mut full = rgb_ifd(400, 300);
+        full.set_child(t::EXIF_IFD, exif_size(400, 300));
+        assert_eq!(probe(&padded(&[full])), None);
+        // the Exif size is much bigger than IFD0, with spare bytes, but IFD0 is not tiny next to it
+        let mut near = rgb_ifd(120, 90);
+        near.set_child(t::EXIF_IFD, exif_size(400, 300));
+        assert_eq!(probe(&padded(&[near])), None);
+        // a multi-page TIFF whose first page is small
+        assert_eq!(probe(&padded(&[rgb_ifd(16, 12), rgb_ifd(400, 300)])), None);
+        // no dimensions at all
+        assert_eq!(probe(&padded(&[IfdBuilder::new().with(t::MAKE, Value::Ascii("X".into()))])), None);
+    }
+
+    // --- containers that are recognised but not decoded, with a preview ---
+
+    #[test]
+    fn private_containers_are_recognised_by_their_magic() {
+        assert_eq!(probe(b"II\x1a\0\0\0HEAPCCDR\0\0"), Some(RawFormat::Crw));
+        assert_eq!(probe(b"\0MRM\0\x01\0\0"), Some(RawFormat::Mrw));
+        assert_eq!(probe(b"FOVb\x02\0\x02\0"), Some(RawFormat::X3f));
+        for f in [RawFormat::Crw, RawFormat::Mrw, RawFormat::X3f] {
+            assert!(!f.is_supported());
+        }
+        assert!(matches!(decode(b"\0MRM\0\x01\0\0"), Err(RawError::Unsupported(w)) if w.contains("Mrw")));
+        // too short for the CIFF signature
+        assert_eq!(probe(b"II\x1a\0\0\0HEAP"), None);
+    }
+
+    /// An IFD0 with a JPEG pointer but no `ImageWidth` / `ImageLength` (the Kodak KDC layout) is a raw
+    /// container with a preview; a TIFF reader would call it malformed.
+    #[test]
+    fn ifd0_without_dimensions_but_with_a_jpeg_is_a_preview_container() {
+        let jpeg: Vec<u8> = [&[0xffu8, 0xd8, 0xff, 0xc0, 0, 0x0b, 8, 0, 1, 0, 1, 1, 1, 0x11, 0][..], &[0x55; 40], &[0xff, 0xd9]].concat();
+        let off = 8 + 2 + 24 + 4;
+        let mut f = b"II*\0\x08\0\0\0\x02\0".to_vec();
+        for (tag, v) in [(513u16, off as u32), (514, jpeg.len() as u32)] {
+            f.extend_from_slice(&tag.to_le_bytes());
+            f.extend_from_slice(&[4, 0, 1, 0, 0, 0]);
+            f.extend_from_slice(&v.to_le_bytes());
+        }
+        f.extend_from_slice(&[0, 0, 0, 0]);
+        f.extend_from_slice(&jpeg);
+        assert_eq!(probe(&f), Some(RawFormat::OtherTiff));
+        assert!(matches!(decode(&f), Err(RawError::Unsupported(_))));
+        assert_eq!(embedded_preview(&f), Some(jpeg));
+        // no pointer and no sub-IFDs: just a broken TIFF
+        let g = write(&[IfdBuilder::new().with(t::MAKE, Value::Ascii("KODAK".into()))]);
+        assert_eq!(probe(&g), None);
+    }
+
+    /// Compression 99 (not a registered TIFF value; Leaf MOS tiles) marks a raw even without a CFA tag.
+    #[test]
+    fn private_compression_99_is_a_raw() {
+        let mut ifd = rgb_ifd(16, 12);
+        ifd.set(t::COMPRESSION, Value::Short(vec![99]));
+        assert_eq!(probe(&write(&[ifd])), Some(RawFormat::OtherTiff));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! The Settings dialog (⌘,): General, Import, Performance, Interface.
+//! The Settings dialog (⌘,): General, Import, Performance, Interface, Faces.
 //!
 //! Changes apply immediately (no OK/Cancel). Where they are stored:
 //! - **app settings** ([`crate::state::AppSettings`]: startup view, delete confirmation, GPU,
@@ -12,12 +12,13 @@ use egui::RichText;
 use serde_json::{Value, json};
 
 use crate::EidosApp;
-use crate::state::{GridBadges, PREVIEW_EDGES, StartupView};
+use crate::state::{GridBadges, PREVIEW_LIMITS, StartupView};
 use crate::theme::Tokens;
 use crate::widgets::register;
 
 /// (id, label) of the tabs, in order.
-pub const TABS: &[(&str, &str)] = &[("general", "General"), ("import", "Import"), ("performance", "Performance"), ("interface", "Interface")];
+pub const TABS: &[(&str, &str)] =
+    &[("general", "General"), ("import", "Import"), ("performance", "Performance"), ("interface", "Interface"), ("faces", "Faces")];
 
 /// Thumbnail cache sizes offered (MB).
 const CACHE_SIZES: [u32; 5] = [512, 1024, 2048, 4096, 8192];
@@ -43,11 +44,12 @@ pub fn body(app: &mut EidosApp, ui: &mut egui::Ui, tab: &mut String) {
         "import" => import_tab(app, ui, &t),
         "performance" => performance_tab(app, ui, &t),
         "interface" => interface_tab(app, ui, &t),
+        "faces" => super::faces::settings_tab(app, ui, &t),
         _ => general_tab(app, ui, &t),
     }
 }
 
-fn heading(ui: &mut egui::Ui, t: &Tokens, text: &str) {
+pub(super) fn heading(ui: &mut egui::Ui, t: &Tokens, text: &str) {
     ui.add_space(4.0);
     ui.label(RichText::new(crate::i18n::tr(text)).font(t.semibold(12.5)).color(t.text));
 }
@@ -63,12 +65,12 @@ fn row<R>(ui: &mut egui::Ui, t: &Tokens, label: &str, add: impl FnOnce(&mut egui
     .inner
 }
 
-fn hint(ui: &mut egui::Ui, t: &Tokens, text: &str) {
+pub(super) fn hint(ui: &mut egui::Ui, t: &Tokens, text: &str) {
     ui.label(RichText::new(crate::i18n::tr(text)).size(11.0).color(t.text_dim));
 }
 
 /// A checkbox addressable as `check:{id}`; true when toggled.
-fn check(ui: &mut egui::Ui, id: &str, value: &mut bool, label: &str) -> bool {
+pub(super) fn check(ui: &mut egui::Ui, id: &str, value: &mut bool, label: &str) -> bool {
     let r = ui.checkbox(value, crate::i18n::tr(label));
     register(ui.ctx(), format!("check:{id}"), r.rect);
     r.changed()
@@ -372,11 +374,18 @@ fn performance_tab(app: &mut EidosApp, ui: &mut egui::Ui, t: &Tokens) {
     };
     hint(ui, t, &status);
     row(ui, t, crate::i18n::tr("Preview size"), |ui| {
-        let opts: Vec<(u32, String)> = PREVIEW_EDGES.iter().map(|e| (*e, format!("{e} px"))).collect();
+        let opts: Vec<(u32, String)> =
+            PREVIEW_LIMITS.iter().map(|e| (*e, if *e == 0 { crate::i18n::tr("Automatic").to_string() } else { format!("{e} px") })).collect();
         let opts: Vec<(u32, &str)> = opts.iter().map(|(e, l)| (*e, l.as_str())).collect();
-        choices(ui, "settingsPreview", &opts, &mut app.ui.settings.preview_edge);
+        choices(ui, "settingsPreview", &opts, &mut app.ui.settings.preview_limit);
     });
-    hint(ui, t, crate::i18n::tr("Largest long edge the Detail view renders at; larger is sharper on big displays but slower."));
+    hint(
+        ui,
+        t,
+        crate::i18n::tr(
+            "Automatic renders the Detail view at the size it is shown, up to the photo's own pixels. Choose a size to cap it: smaller is faster.",
+        ),
+    );
     row(ui, t, crate::i18n::tr("Memory for caches"), |ui| {
         let auto = crate::i18n::tr_format!("Automatic ({} MB)", eidos_engine::memory::default_budget() >> 20);
         let opts = [(0u32, auto.as_str()), (512, "512 MB"), (1024, "1 GB"), (2048, "2 GB"), (4096, "4 GB")];
@@ -548,13 +557,17 @@ pub fn open_library(app: &mut EidosApp, p: &Value) -> Result<Value, String> {
     }
     let path = match p.get("path").and_then(Value::as_str) {
         Some(x) => x.to_string(),
-        None => match app.services.pick_folder.as_mut() {
-            Some(pick) => match pick() {
-                Some(x) => x,
-                None => return Ok(Value::Null),
-            },
-            None => return Err("no folder dialog on this platform".into()),
-        },
+        None => {
+            let req = crate::pick::PickRequest::folder(crate::i18n::tr("Open Library"));
+            match crate::pick::ask(app, "app.openLibrary", p, "path", req, |s| s.pick_folder.as_mut().and_then(|f| f()).map(|x| vec![x])) {
+                crate::pick::Picked::Now(v) => match v.into_iter().next() {
+                    Some(x) => x,
+                    None => return Ok(Value::Null),
+                },
+                crate::pick::Picked::Later => return Ok(Value::Null),
+                crate::pick::Picked::Unavailable => return Err("no folder dialog on this platform".into()),
+            }
+        }
     };
     app.session.close_library().map_err(|e| e.to_string())?;
     app.session.open_library(&path, false).map_err(|e| e.to_string())?;

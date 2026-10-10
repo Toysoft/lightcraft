@@ -336,12 +336,13 @@ impl Photo {
     pub fn develops_raw(&self) -> bool {
         self.kind == MediaKind::Raw && self.preview_only.is_none()
     }
-    /// The current ARW, NEF, RW2, RAF and CR3 readers have vendor WB multipliers but no measured camera
+    /// The current ARW, NEF, RW2, RAF, CR3, CR2 and PEF readers have vendor WB multipliers but no measured camera
     /// illuminant. Use adjustments relative to the camera's as-shot look, as for rendered
     /// photographs (the engine's `camera_preview::file_local_look` covers the same formats; RWL and
     /// RAW are Leica's and the oldest Panasonic bodies' names for RW2 files).
     pub fn relative_wb(&self) -> bool {
-        self.develops_raw() && ["ARW", "NEF", "NRW", "RW2", "RWL", "RAW", "RAF", "CR3"].iter().any(|f| self.format.eq_ignore_ascii_case(f))
+        self.develops_raw()
+            && ["ARW", "NEF", "NRW", "RW2", "RWL", "RAW", "RAF", "CR3", "CR2", "PEF"].iter().any(|f| self.format.eq_ignore_ascii_case(f))
     }
     /// The develop settings import gave this photo: [`Photo::camera_defaults`], or the user's
     /// default preset applied on top of them ([`Photo::import_look`]).
@@ -404,12 +405,16 @@ pub struct Album {
     /// The Quick Collection: a regular album that B adds to (one per library).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub quick: bool,
+    /// Its place among the albums of the same kind in its folder, once the user ordered them by
+    /// hand (see [`crate::Catalog::album_children`]); `None`: listed by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
 }
 
 impl Album {
     /// A regular (manual) album.
     pub fn new(id: AlbumId, name: impl Into<String>) -> Album {
-        Album { id, name: name.into(), parent: None, folder: false, photos: Vec::new(), cover: None, smart: None, quick: false }
+        Album { id, name: name.into(), parent: None, folder: false, photos: Vec::new(), cover: None, smart: None, quick: false, order: None }
     }
     pub fn is_smart(&self) -> bool {
         self.smart.is_some()

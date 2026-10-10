@@ -62,7 +62,7 @@ impl SettingsHashes {
 }
 
 /// Bump when the pipeline's output changes, to invalidate cached thumbnails.
-pub const RENDER_CACHE_VERSION: u64 = 13;
+pub const RENDER_CACHE_VERSION: u64 = 16;
 
 /// Thumbnails render at one of these long edges (so window/cell size changes reuse the cache).
 pub const THUMB_SIZES: [usize; 4] = [128, 256, 384, 512];
@@ -104,6 +104,20 @@ impl SourceLevel {
     }
 }
 
+/// Pixels along the source's long edge that an output `out_long` pixels long needs: a crop shows
+/// only part of the photo, so its pixels come from a source that many times larger (the source
+/// level is chosen from this, or a tight crop shown at its own pixels would be a stretched preview).
+fn source_edge_needed(p: &Photo, settings: &DevelopSettings, apply_crop: bool, out_long: usize) -> usize {
+    let (w, h) = (f64::from(p.width.max(1)), f64::from(p.height.max(1)));
+    let r = settings.crop.geometry.rect;
+    let shown = if apply_crop { (r.width() * w).max(r.height() * h) } else { w.max(h) };
+    if !shown.is_finite() || shown < 1.0 {
+        return out_long;
+    }
+    let needed = out_long as f64 * w.max(h) / shown;
+    if needed.is_finite() { needed.min(usize::MAX as f64 / 2.0) as usize } else { out_long }
+}
+
 /// Decodes a file into a linear Rec.2020 image no larger than `max_edge` (set by the app).
 pub type FileLoader = Arc<dyn Fn(&str, usize) -> Result<(Rgb32f, SourceInfo), String> + Send + Sync>;
 
@@ -129,7 +143,7 @@ impl DecodedSource {
     /// What to render these pixels against: the decoder's facts, else `header` (the catalog's)
     /// with any stored camera tone curve.
     pub fn info_or(&self, header: SourceInfo) -> SourceInfo {
-        self.info.unwrap_or(SourceInfo { camera_tone: self.camera_tone.or(header.camera_tone), ..header })
+        self.info.clone().unwrap_or_else(|| SourceInfo { camera_tone: self.camera_tone.or(header.camera_tone), ..header })
     }
 }
 
@@ -239,8 +253,9 @@ fn rendered_budget(share: usize) -> usize {
     RENDERED_MEM_BYTES.min(share / 4)
 }
 
-fn source_bytes(img: &Rgb32f) -> usize {
-    img.data.len() * 12 + 64 + std::mem::size_of::<SourceInfo>()
+fn source_bytes(s: &DecodedSource) -> usize {
+    let mattes = s.info.as_ref().and_then(|i| i.mattes.as_ref()).map_or(0, |m| m.bytes());
+    s.image.data.len() * 12 + 64 + std::mem::size_of::<SourceInfo>() + mattes
 }
 
 impl MediaCache {
@@ -305,8 +320,8 @@ impl MediaCache {
             let Some((tick, which)) = candidates.into_iter().flatten().min() else { break };
             let freed = match which {
                 0 => self.thumbs.pop_oldest(),
-                1 => self.previews.iter().position(|e| e.2 == tick).map(|i| source_bytes(&self.previews.remove(i).1.image)),
-                2 => self.full.take().map(|e| source_bytes(&e.1.image)),
+                1 => self.previews.iter().position(|e| e.2 == tick).map(|i| source_bytes(&self.previews.remove(i).1)),
+                2 => self.full.take().map(|e| source_bytes(&e.1)),
                 _ => self.rendered.evict_oldest(),
             };
             match freed {
@@ -358,7 +373,7 @@ impl MediaCache {
         let tick = eidos_preview::next_tick();
         match level {
             SourceLevel::Thumb => {
-                let cost = source_bytes(&img.image);
+                let cost = source_bytes(&img);
                 self.thumbs.insert(id, img, cost);
             }
             SourceLevel::Preview => {
@@ -389,11 +404,20 @@ impl MediaCache {
         (self.thumbs.len(), self.thumbs.cost())
     }
 
+    /// Whether the decoded source of `id` at `level` is held.
+    pub fn has_source(&self, id: PhotoId, level: SourceLevel) -> bool {
+        match level {
+            SourceLevel::Thumb => self.thumbs.contains(&id),
+            SourceLevel::Preview => self.previews.iter().any(|e| e.0 == id),
+            SourceLevel::Full => self.full.as_ref().is_some_and(|e| e.0 == id),
+        }
+    }
+
     /// Decoded sources held: (thumbnail level, preview level, full size).
     pub fn usage(&self) -> (crate::memory::Usage, crate::memory::Usage, crate::memory::Usage) {
         use crate::memory::Usage;
-        let previews = Usage::new(self.previews.len(), self.previews.iter().map(|e| source_bytes(&e.1.image)).sum());
-        let full = self.full.as_ref().map(|e| Usage::new(1, source_bytes(&e.1.image))).unwrap_or_default();
+        let previews = Usage::new(self.previews.len(), self.previews.iter().map(|e| source_bytes(&e.1)).sum());
+        let full = self.full.as_ref().map(|e| Usage::new(1, source_bytes(&e.1))).unwrap_or_default();
         (Usage::new(self.thumbs.len(), self.thumbs.cost()), previews, full)
     }
 
@@ -718,9 +742,13 @@ impl crate::Session {
         thumb_bucket: Option<usize>,
     ) -> Option<RenderJob> {
         let p = self.catalog.photo(id)?.clone();
-        let level = SourceLevel::for_size(max_w.max(max_h));
-        let source = self.media.source_ref(&p, level);
         let settings = if before { Arc::new(self.before_settings(&p)) } else { p.develop.clone() };
+        let level = SourceLevel::for_size(if thumb_bucket.is_some() {
+            max_w.max(max_h) // (grid thumbnails of tight crops stay cheap)
+        } else {
+            source_edge_needed(&p, &settings, apply_crop, max_w.max(max_h))
+        });
+        let source = self.media.source_ref(&p, level);
         let request = RenderRequest { apply_crop, ..RenderRequest::fit(max_w, max_h) };
         // the photo id is part of the key: two photos with the same settings and size must not
         // share a result (a view slot showing photo A would otherwise look current for photo B)
@@ -881,10 +909,84 @@ impl crate::Session {
         Some(job)
     }
 
+    /// A render of one window of the loupe's frame, for a view zoomed past what one whole-frame
+    /// render can hold: the frame is `full_w × full_h` (the size the loupe would draw it at) and
+    /// the result is `window`'s pixels of it, at that scale, from the source level that size needs.
+    /// Nothing is cached here (a window is only worth keeping while it is on screen). `None`: no
+    /// such photo, or the window reads (spots, Auto Mask strokes) more than one render can hold.
+    pub fn region_job(
+        &mut self,
+        id: PhotoId,
+        full_w: usize,
+        full_h: usize,
+        window: eidos_pipeline::PixelWindow,
+        apply_crop: bool,
+    ) -> Option<RenderJob> {
+        self.region_job_of(id, full_w, full_h, window, apply_crop, false)
+    }
+
+    /// [`Self::region_job`] of the photo without its edits (its crop kept): the Before side.
+    pub fn region_job_before(
+        &mut self,
+        id: PhotoId,
+        full_w: usize,
+        full_h: usize,
+        window: eidos_pipeline::PixelWindow,
+        apply_crop: bool,
+    ) -> Option<RenderJob> {
+        self.region_job_of(id, full_w, full_h, window, apply_crop, true)
+    }
+
+    fn region_job_of(
+        &mut self,
+        id: PhotoId,
+        full_w: usize,
+        full_h: usize,
+        window: eidos_pipeline::PixelWindow,
+        apply_crop: bool,
+        before: bool,
+    ) -> Option<RenderJob> {
+        let mut job = self.render_job(id, full_w, full_h, before, apply_crop)?;
+        // what the window's spots and Auto Mask strokes read must fit in one render: else the
+        // caller keeps the whole-frame render (a window alone would come out wrong)
+        let p = self.catalog.photo(id)?;
+        let frame = eidos_pipeline::geometry::Frame::with_lens(
+            p.width.max(1) as usize,
+            p.height.max(1) as usize,
+            &job.settings,
+            apply_crop,
+            p.embedded_lens.as_ref(),
+        );
+        let ppl = frame.px_per_long(full_w);
+        eidos_pipeline::spots::window_for_reads_checked(&job.settings, &frame, full_w, full_h, ppl, window.clamped(full_w, full_h))?;
+        job.request.window = Some(window);
+        job.key = Hasher128::new()
+            .u64(job.key)
+            .str("window")
+            .u64(window.x as u64)
+            .u64(window.y as u64)
+            .u64(window.w as u64)
+            .u64(window.h as u64)
+            .finish()
+            .0 as u64;
+        Some(job)
+    }
+
     /// The embedded preview of an unedited raw (path, loader), when the app installed a loader.
     fn embedded_of(&self, p: &Photo) -> Option<(String, PreviewLoader)> {
         match (&p.source, &self.media.preview_loader) {
             (Source::File { path }, Some(l)) if p.kind == MediaKind::Raw && crate::import::has_import_look(p) => Some((path.clone(), l.clone())),
+            _ => None,
+        }
+    }
+
+    /// The camera's embedded preview of a raw file, for the face scan. Faces are read from the unedited picture, so the
+    /// photo's edits do not matter, and the camera's own JPEG (oriented, display-ready) costs a fraction of decoding the
+    /// raw. `None` for anything else, and where the host installed no loader.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn scan_preview_of(&self, p: &Photo) -> Option<(String, PreviewLoader)> {
+        match (&p.source, &self.media.preview_loader) {
+            (Source::File { path }, Some(l)) if p.kind == MediaKind::Raw => Some((path.clone(), l.clone())),
             _ => None,
         }
     }
@@ -1120,20 +1222,21 @@ mod tests {
         let mut s = crate::Session::with_demo();
         let id = s.active().unwrap();
         let mut job = s.render_job(id, 64, 64, false, true).unwrap();
+        let loaded_info = info.clone();
         job.source = SourceRef::File {
             path: "synthetic.arw".into(),
             max_edge: 64,
             loader: Some(Arc::new(move |_, _| {
                 let mut image = Rgb32f::new(64, 64);
                 image.data.fill([0.1; 3]);
-                Ok((image, info))
+                Ok((image, loaded_info.clone()))
             })),
             fallback: None,
         };
         job.info = SourceInfo::default(); // Header facts cannot override decoder facts.
         job.settings = Arc::new(DevelopSettings::default());
         let r = job.clone().run();
-        assert_eq!(r.loaded.as_ref().unwrap().info, Some(info));
+        assert_eq!(r.loaded.as_ref().unwrap().info.as_ref(), Some(&info));
         let expected = eidos_pipeline::render(&r.loaded.as_ref().unwrap().image, &info, &job.settings, &job.request);
         assert_eq!(r.rendered.as_ref().unwrap().image.data, expected.image.data);
         s.accept(&r);
@@ -1216,6 +1319,110 @@ mod tests {
         let plain: Vec<_> = s.catalog.photos().filter(|p| !p.is_edited()).map(|p| p.id).take(2).collect();
         let (a, b) = (s.render_job(plain[0], 1600, 1600, false, true).unwrap(), s.render_job(plain[1], 1600, 1600, false, true).unwrap());
         assert_ne!(a.key, b.key);
+    }
+
+    // Issue #323: a window of a 1:1 view is its own job: the window's pixels, at the zoom scale,
+    // from the original, with a key of its own
+    #[test]
+    fn region_jobs_render_a_window_of_the_zoomed_frame() {
+        use eidos_pipeline::PixelWindow;
+        let mut s = crate::Session::with_demo();
+        let p = s.catalog.photos().next().unwrap().clone();
+        let (w, h) = (p.width as usize, p.height as usize);
+        assert!(w.max(h) > 2560, "demo photos are camera-sized");
+        let win = PixelWindow { x: w / 3, y: h / 3, w: 300, h: 200 };
+        let job = s.region_job(p.id, w, h, win, true).unwrap();
+        assert_eq!(job.level, SourceLevel::Full, "a 1:1 window reads the original");
+        let img = job.run().rendered.unwrap().image;
+        assert_eq!((img.width, img.height), (300, 200));
+        // other windows, and the whole-frame job, never share a key
+        let other = s.region_job(p.id, w, h, PixelWindow { x: win.x + 64, ..win }, true).unwrap();
+        let whole = s.render_job(p.id, w, h, false, true).unwrap();
+        let again = s.region_job(p.id, w, h, win, true).unwrap();
+        assert_ne!(other.key, again.key);
+        assert_ne!(whole.key, again.key);
+        assert_eq!(s.region_job(p.id, w, h, win, true).unwrap().key, again.key, "the same window keeps its key");
+        // a window never writes the photo's view preview or the thumbnail cache
+        assert!(again.view_cache.is_none() && again.cache.is_none());
+    }
+
+    // Issue #323: a tight crop shown at its own pixels needs the original, not the 2560 px preview
+    #[test]
+    fn a_tight_crop_reads_the_source_level_its_pixels_need() {
+        let mut s = crate::Session::with_demo();
+        let p = s.catalog.photos().next().unwrap().clone();
+        let long = p.width.max(p.height) as usize;
+        assert!(long > 2560);
+        let id = p.id;
+        let mut d = (*s.develop_of(id).unwrap()).clone();
+        // the uncropped photo at 1600 px: the preview is plenty
+        assert_eq!(s.render_job(id, 1600, 1600, false, true).unwrap().level, SourceLevel::Preview);
+        // a crop to 30 % of each side shown 1600 px long needs 1600 / 0.3 px of the source
+        d.crop.geometry.rect = eidos_geom::Rect { x0: 0.2, y0: 0.2, x1: 0.5, y1: 0.5 };
+        s.set_develop(id, d, "Crop").unwrap();
+        assert_eq!(s.render_job(id, 1600, 1600, false, true).unwrap().level, SourceLevel::Full);
+        // …but with the crop tool open (the whole photo shown) it does not
+        assert_eq!(s.render_job(id, 1600, 1600, false, false).unwrap().level, SourceLevel::Preview);
+        // and a crop shown small enough still reads the preview
+        assert_eq!(s.render_job(id, 600, 600, false, true).unwrap().level, SourceLevel::Preview);
+    }
+
+    // a window whose spot reads from further away than a render can hold is refused
+    #[test]
+    fn a_region_job_is_refused_when_a_spot_reads_beyond_what_fits() {
+        use eidos_pipeline::PixelWindow;
+        let mut s = crate::Session::with_demo();
+        let id = s.active().unwrap();
+        let p = s.catalog.photo(id).unwrap().clone();
+        let (w, h) = (p.width as usize * 8, p.height as usize * 8);
+        let mut d = (*s.develop_of(id).unwrap()).clone();
+        d.spots.push(eidos_develop::Spot {
+            points: vec![eidos_geom::Point::new(0.2, 0.5)],
+            size: 0.01,
+            source_offset: Some(eidos_geom::Point::new(0.6, 0.0)),
+            ..Default::default()
+        });
+        s.set_develop(id, d, "Spot").unwrap();
+        let win = PixelWindow { x: (w as f64 * 0.2) as usize - 100, y: h / 2 - 100, w: 400, h: 300 };
+        assert!(s.region_job(id, w, h, win, true).is_none());
+        // a window elsewhere is fine
+        assert!(s.region_job(id, w, h, PixelWindow { x: 5000, y: 5000, w: 400, h: 300 }, true).is_some());
+    }
+
+    // Issue #323: the Before side of a Before/After view at 1:1 is a window too, of the photo
+    // without its edits (the crop is kept), with a key of its own
+    #[test]
+    fn a_before_window_shows_the_unedited_look() {
+        use eidos_pipeline::PixelWindow;
+        let mut s = crate::Session::with_demo();
+        let id = s.active().unwrap();
+        let p = s.catalog.photo(id).unwrap().clone();
+        let (w, h) = (p.width as usize, p.height as usize);
+        let mut d = (*s.develop_of(id).unwrap()).clone();
+        d.light.exposure = 2.0;
+        s.set_develop(id, d, "Exposure").unwrap();
+        let win = PixelWindow { x: w / 3, y: h / 3, w: 200, h: 150 };
+        let after = s.region_job(id, w, h, win, true).unwrap();
+        let before = s.region_job_before(id, w, h, win, true).unwrap();
+        assert_ne!(after.key, before.key);
+        let (a, b) = (after.run().rendered.unwrap().image, before.run().rendered.unwrap().image);
+        assert_eq!((a.width, a.height), (b.width, b.height));
+        let mean = |i: &Rgba8| i.data.iter().map(|p| p[1] as f64).sum::<f64>() / i.data.len() as f64;
+        assert!(mean(&a) > mean(&b) + 10.0, "two stops brighter after: {} vs {}", mean(&a), mean(&b));
+    }
+
+    #[test]
+    fn has_source_follows_what_the_session_accepted() {
+        let mut s = crate::Session::with_demo();
+        let id = s.active().unwrap();
+        let p = s.catalog.photo(id).unwrap().clone();
+        let long = p.width.max(p.height) as usize;
+        assert!(!s.media.has_source(id, SourceLevel::Full));
+        let r = s.render_job(id, long, long, false, true).unwrap().run();
+        s.accept(&r);
+        assert!(s.media.has_source(id, SourceLevel::Full));
+        assert!(!s.media.has_source(id, SourceLevel::Preview));
+        assert!(!s.media.has_source(PhotoId(id.0 + 1), SourceLevel::Full));
     }
 
     #[test]

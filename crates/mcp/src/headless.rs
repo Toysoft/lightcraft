@@ -13,7 +13,8 @@ use crate::backend::Backend;
 /// File extensions recognised as photos when expanding folders.
 pub const PHOTO_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "tif", "tiff", "webp", "dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2", "rwl", "raw", "pef", "psd", "jxl", "gif",
-    "bmp", "avif",
+    "bmp", "avif", // containers Eidos cannot decode but imports as preview only (their embedded JPEG)
+    "iiq", "crw", "mrw", "x3f", "kdc", "mos", "erf",
 ];
 
 /// Headless backend: a [`Session`] with filesystem hooks.
@@ -30,7 +31,7 @@ impl Drop for Headless {
 
 impl Default for Headless {
     fn default() -> Self {
-        Self::new(Session::new().with_fs())
+        Self::new(Session::new().with_fs().with_default_face_models())
     }
 }
 
@@ -41,7 +42,7 @@ impl Headless {
 
     /// A headless session with the procedurally generated demo library.
     pub fn demo() -> Self {
-        Self::new(Session::with_demo().with_fs())
+        Self::new(Session::with_demo().with_fs().with_default_face_models())
     }
 
     fn photo_or_active(&self, p: &Value) -> Result<PhotoId, String> {

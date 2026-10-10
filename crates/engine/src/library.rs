@@ -34,7 +34,7 @@ pub const DEFAULT_NAME: &str = "Eidos Library";
 
 /// The default library location: `$EIDOS_LIBRARY` if set, else `~/Pictures/Eidos Library`
 /// (`%USERPROFILE%\Pictures\Eidos Library` on Windows). Eidos never looks for, opens, or
-/// migrates upstream LightCraft libraries: the two products share no library state.
+/// migrates upstream Eidos libraries: the two products share no library state.
 pub fn default_dir() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("EIDOS_LIBRARY").filter(|p| !p.is_empty()) {
         return Some(PathBuf::from(p));
@@ -303,6 +303,9 @@ impl Session {
         {
             log::error!("library: {e}");
         }
+        // what was learned about the old library's faces is saved, and none of it carries over (photo ids are per library)
+        #[cfg(not(target_arch = "wasm32"))]
+        self.faces.library_changed();
         let (mut journal, mut catalog, report) = Journal::open(catalog)?;
         // A loaded catalog counts revisions from 0, like every other one. Caches (sidebar counts,
         // keyword tree, the grid's list…) are keyed on the revision, so give each library loaded

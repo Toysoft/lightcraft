@@ -30,7 +30,7 @@ mode ([mcp.md](mcp.md)) is a thin layer over this channel. Implementation:
 | `engine.commands` | — | Engine + UI commands: id, label, menu, shortcut, params doc, enabled |
 | `ui.menu.list` | — | Menu entries (flat: id, label, menu path, shortcut, enabled) |
 | `ui.menu.tree` | — | The menu bar as shown (File … Help): items `{id, params?, label, shortcut?, enabled, checked?}`, separators, submenus — the model behind the native macOS menu bar and the in-window menus |
-| `ui.inspect` | — | UI state, window, canvas/image rects, `scroll: {grid, filmstrip}` (scroll offsets in points, `null` until drawn), active photo, selection, perf (`frameMs` = layout, `logicMs` = per-frame logic before it, `updateMs` = both, `maxUpdateMs`, `fps`, render queue …, `gpu` = adapter in use, `gpuReason` = why renders don't use the GPU, `gpuFallback` = latest render redone on the CPU and why — see `docs/gpu-pipeline.md`), status, memory (bytes per cache, see `library.memory`; plus stage caches and textures), `export: {running: {total, done, current} \| null, last}`, `notices` (warnings waiting to be shown, e.g. a damaged settings file; OK = `button:noticeOk`), `quitPrompt` (why quitting was stopped: unsaved changes; `button:quitRetry` / `button:quitAnyway` / `button:quitCancel`), `import: {done, total, imported, cancelled} \| null` (an import runs on a worker thread), `tasks` (other background work: `Find Missing Photos`, `Auto Import`) |
+| `ui.inspect` | — | UI state, window, `loupe` (`source`, and `region: {full, window, pending}` when a zoomed view also renders the window on screen at no more than 100 % — `full` is the frame it is cut from, `window` its `[x, y, w, h]` — and `regionBefore` for the Before side of a Before/After view), canvas/image rects, `scroll: {grid, filmstrip}` (scroll offsets in points, `null` until drawn), active photo, selection, perf (`frameMs` = layout, `logicMs` = per-frame logic before it, `updateMs` = both, `maxUpdateMs`, `fps`, render queue …, `gpu` = adapter in use, `gpuReason` = why renders don't use the GPU, `gpuFallback` = latest render redone on the CPU and why — see `docs/gpu-pipeline.md`), status, memory (bytes per cache, see `library.memory`; plus stage caches — `budgetBytes`, `trimmed`, `sharedSourceBytes` (the one device copy of a big original) — and textures), `export: {running: {total, done, current} \| null, last}`, `notices` (warnings waiting to be shown, e.g. a damaged settings file; OK = `button:noticeOk`), `quitPrompt` (why quitting was stopped: unsaved changes; `button:quitRetry` / `button:quitAnyway` / `button:quitCancel`), `import: {done, total, imported, cancelled} \| null` (an import runs on a worker thread), `tasks` (other background work: `Find Missing Photos`, `Auto Import`), `fileDialogs` (commands waiting on a native file dialog, which runs off the UI thread; they run again with the answer when it closes) |
 | `ui.widgets` | `{filter?}` | On-screen widgets `{id, rect: [x, y, w, h]}` (screen points) |
 | `ui.clickWidget` / `ui.dragWidget` / `ui.hoverWidget` | `{id, count?, fx?, fy?}` / `{id, toX?, toY?, dx?, dy?, steps?}` / `{id, fx?, fy?}` | Real egui input on a widget (hover: the pointer rests on it, e.g. for preset/profile previews) |
 | `ui.move` / `ui.click` / `ui.drag` | `{x, y, count?, button?}` / `{x, y, toX, toY, steps?}` | Raw pointer input, screen points |
@@ -85,13 +85,26 @@ scissor clipping as egui's GPU backends, so the image matches the window (minus 
 - **In the running app:** `{"method": "ui.screenshot", "params": {"path": "a.png", "headless": true}}`.
   The UI is drawn into an offscreen context from the app's logic tick, which keeps running when the
   window is occluded or the display sleeps/locks. Windowed screenshots fall back to this after 2 s.
-- **Without any app window:** `eidos-cli snapshot` runs a whole app session headlessly and
-  answers the same control requests (same handler) from a JSON-lines script:
+- **Without any app window:** `eidos-cli snapshot` runs a whole app session headlessly.
+  Photo development also defaults to the CPU, so the initial frames do not discover a GPU adapter
+  or load a graphics driver. `EIDOS_GPU=1` does not opt snapshots back into GPU rendering.
+  This applies only to the snapshot session: even `--library DIR` leaves the desktop app's saved
+  `ui.json` preferences untouched. It answers the same control requests (same handler) from a JSON-lines script:
 
 ```text
 eidos-cli snapshot --demo -o grid.png --size 1600x1000 [--scale 2]
 eidos-cli snapshot --library DIR --script tour.jsonl -o shot.png
 ```
+
+Headless screenshot dimensions must be finite and at least one logical point, with a finite,
+positive scale. Rounded output must be at least one pixel per edge, at most 16,384 pixels
+per edge and 64 million pixels in total. `snapshot` and `ui.resize` reject requests outside
+these limits before layout or rasterization; supplied resize dimensions must be numbers.
+UI zoom changes text and control sizes while preserving the snapshot viewport's requested
+physical pixel dimensions. Later `ui.resize` requests use current egui points; validation
+and rasterization both convert them to native viewport points before rounding the output
+pixels. A native edge below one point after zooming out is valid if it rounds to at least
+one pixel.
 
   `tour.jsonl` holds one request per line (`#` comments allowed), e.g.
   `{"method": "ui.set", "params": {"view": "detail", "right": "edit", "openSections": ["optics"]}}`

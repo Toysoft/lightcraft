@@ -92,17 +92,29 @@ pub fn inspect(app: &EidosApp, ctx: &egui::Context) -> Value {
         "activeMask": app.session.active_mask,
         "widgetCount": app.widgets.len(),
         "perf": {"frameMs": app.perf.frame_ms, "logicMs": app.perf.logic_ms, "updateMs": app.perf.update_ms, "maxUpdateMs": app.perf.max_update_ms, "fps": app.perf.fps, "lastRenderMs": app.renderer.last_main_ms, "renderQueue": app.renderer.queued(), "rendersInFlight": app.renderer.in_flight(), "pendingSlots": app.renderer.pending_slots(), "mergeRunning": app.merge.busy(), "lastMerge": app.merge.last_result, "rendersDone": app.renderer.completed, "thumbTextures": app.renderer.thumb_textures(), "variantTextures": app.renderer.variant_textures(), "gpu": (eidos_engine::gpu::ready() && eidos_engine::gpu::available()).then(eidos_engine::gpu::adapter_name).flatten(), "gpuReason": eidos_engine::gpu::unavailable_reason(), "gpuFallback": eidos_engine::gpu::last_fallback()},
-        "loupe": app.loupe_shown.map(|(p, src)| json!({"photo": p.0, "source": src, "pending": app.renderer.is_pending(crate::render::Slot::Main)})),
+        "loupe": app.loupe_shown.map(|(p, src)| json!({
+            "photo": p.0,
+            "source": src,
+            "pending": app.renderer.is_pending(crate::render::Slot::Main),
+            // zoomed past the whole-frame render: the window rendered at no more than 100 % (pixels of its frame)
+            "region": app.region_view.map(|r| json!({"full": [r.full.0, r.full.1], "window": [r.window.x, r.window.y, r.window.w, r.window.h], "pending": app.renderer.is_pending(crate::render::Slot::Region)})),
+            // …and the same for the Before side of a Before/After view
+            "regionBefore": app.region_before_view.map(|r| json!({"full": [r.full.0, r.full.1], "window": [r.window.x, r.window.y, r.window.w, r.window.h], "pending": app.renderer.is_pending(crate::render::Slot::RegionBefore)})),
+        })),
         "hoverPreview": app.hover_preview.as_ref().map(|h| h.label.clone()),
         "status": app.ui.status,
         "notices": app.notices,
         "quitPrompt": app.quit_prompt,
+        // how hard the background face scan may work right now, and why it is judged so (see `panels::faces::scan_pace`)
+        "faceScan": {"pace": app.caches.faces_pace, "focused": app.caches.faces_in_front, "pending": app.caches.faces_pending, "indexed": app.caches.faces_indexed},
         "unsaved": app.session.unsaved().map(|(n, e)| json!({"ops": n, "error": e})),
         "libraryProblem": app.library_problem.as_ref().map(crate::panels::library_problem::LibraryProblem::to_json),
         "scan": app.scan.as_ref().map(crate::import::ScanTask::status),
         "export": {"running": app.export.as_ref().map(crate::export_task::ExportTask::status), "last": app.last_export_result},
         "import": app.import.as_ref().map(crate::import::ImportTask::status),
         "tasks": app.tasks.labels(),
+        // commands waiting on a native file dialog shown off the UI thread (`pick`)
+        "fileDialogs": app.pending_picks.iter().map(|p| p.command.clone()).collect::<Vec<_>>(),
         "memory": memory(app),
     })
 }
@@ -313,8 +325,18 @@ pub fn handle(app: &mut EidosApp, ctx: &egui::Context, req: &ControlRequest) -> 
             ok(Value::Null)
         }
         "ui.resize" => {
+            for name in ["width", "height"] {
+                if p.get(name).is_some() && f(name).is_none() {
+                    return err(format!("ui.resize: {name} must be a number"));
+                }
+            }
             let w = f("width").unwrap_or(1600.0) as f32;
             let h = f("height").unwrap_or(1000.0) as f32;
+            let zoom = ctx.zoom_factor();
+            let native_scale = ctx.input(|i| i.viewport().native_pixels_per_point).unwrap_or_else(|| ctx.pixels_per_point() / zoom);
+            if let Err(e) = crate::headless::resized_viewport([w, h], native_scale, zoom) {
+                return err(e);
+            }
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
             ok(Value::Null)
         }

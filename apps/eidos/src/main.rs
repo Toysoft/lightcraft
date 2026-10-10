@@ -281,8 +281,44 @@ fn windows_open_url_command(url: &str) -> std::process::Command {
     c
 }
 
-fn services() -> Services {
+/// The platform services; `ctx` repaints when a file dialog closes, and `log_file` is
+/// for Help ▸ Open Log Folder.
+fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Services {
     Services {
+        // Commands' file dialogs run on their own thread (#191): a dialog on the UI thread
+        // stopped the window answering the compositor, which then reported the app as hung.
+        picker: Some(Box::new(move |req: eidos_ui_egui::pick::PickRequest| {
+            use eidos_ui_egui::pick::PickKind;
+            let (tx, rx) = std::sync::mpsc::channel();
+            let repaint = ctx.clone();
+            std::thread::Builder::new()
+                .name("file-dialog".into())
+                .spawn(move || {
+                    let mut d = rfd::FileDialog::new();
+                    if let Some(t) = &req.title {
+                        d = d.set_title(t);
+                    }
+                    if let Some((name, exts)) = &req.filter {
+                        d = d.add_filter_nocase(name.clone(), exts);
+                    }
+                    if let Some(n) = &req.file_name {
+                        d = d.set_file_name(n);
+                    }
+                    let s = |p: std::path::PathBuf| p.to_string_lossy().to_string();
+                    let paths: Vec<String> = match req.kind {
+                        PickKind::Files => d.pick_files().unwrap_or_default().into_iter().map(s).collect(),
+                        PickKind::File => d.pick_file().map(s).into_iter().collect(),
+                        PickKind::Folder => d.pick_folder().map(s).into_iter().collect(),
+                        PickKind::Save => d.save_file().map(s).into_iter().collect(),
+                    };
+                    // the app may have quit meanwhile: nobody to tell
+                    let _ = tx.send(paths);
+                    repaint.request_repaint();
+                })
+                .map_err(|e| format!("could not start the file dialog: {e}"))?;
+            Ok(rx)
+        })),
+        log_file: log_file.map(|p| p.display().to_string()),
         pick_lightroom_catalog: Some(Box::new(|| {
             rfd::FileDialog::new()
                 .set_title(eidos_ui_egui::i18n::tr("Import Lightroom Catalog"))
@@ -364,6 +400,14 @@ fn services() -> Services {
                 .map(|p| p.to_string_lossy().to_string())
                 .collect()
         })),
+        pick_model_file: Some(Box::new(|| {
+            rfd::FileDialog::new()
+                .set_title(eidos_ui_egui::i18n::tr("Add a Face Recognition Model"))
+                .add_filter_nocase(eidos_ui_egui::i18n::tr("Face models (ONNX)"), &["onnx"])
+                .pick_file()
+                .map(|p| vec![p.to_string_lossy().to_string()])
+                .unwrap_or_default()
+        })),
         pick_tracklog: Some(Box::new(|| {
             rfd::FileDialog::new()
                 .set_title(eidos_ui_egui::i18n::tr("Auto-Tag from Tracklog"))
@@ -410,12 +454,19 @@ fn services() -> Services {
     }
 }
 
+/// The library session with the folder face models are kept in (`<config>/models`).
+fn open_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
+    let (mut s, problem) = open_library_session(in_memory, dir, seed_demo);
+    s.face_models_dir = eidos_engine::config::default_face_models_dir();
+    (s, problem)
+}
+
 /// The persistent library session, or with `--memory` an in-memory one (demo photos).
 ///
 /// If the library can't be opened the session is empty and in memory — never seeded with the
 /// demo photos, never written anywhere — and the problem is returned: the window then says so
 /// and offers Try Again / Choose Another Library… / Continue Without Saving / Quit (issue #100).
-fn open_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
+fn open_library_session(in_memory: bool, dir: Option<std::path::PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
     if in_memory {
         return (if seed_demo { Session::with_demo() } else { Session::new() }.with_fs().with_system_clock(), None);
     }
@@ -603,6 +654,8 @@ fn main() -> eframe::Result {
         wgpu_options: window_wgpu_options(),
         ..Default::default()
     };
+    // the app's copy: `log_file` is still named in the message of a start that fails
+    let app_log_file = log_file.clone();
     let started = eframe::run_native(
         "Eidos",
         options,
@@ -614,7 +667,7 @@ fn main() -> eframe::Result {
                 std::env::var_os("EIDOS_SAM3_DIR").map(std::path::PathBuf::from).or_else(|| config_dir().map(|d| d.join("models").join("sam3")));
             // the user's own download locations, one base URL per line (EIDOS_SAM3_MIRRORS too)
             session.segmenter.mirrors_file = config_dir().map(|d| d.join("models").join("sam3-mirrors.txt"));
-            let mut app = EidosApp::new(session, services());
+            let mut app = EidosApp::new(session, services(cc.egui_ctx.clone(), app_log_file.as_deref()));
             if let Some(ui) = prefs {
                 app.ui = ui;
             }
@@ -700,11 +753,11 @@ mod tests {
     }
 
     /// Eidos ships its own application identity (Wayland app id, .desktop file, icon name),
-    /// independent of any upstream LightCraft installation on the same machine.
+    /// independent of any upstream Eidos installation on the same machine.
     #[test]
     fn app_identity_is_eidos_owned() {
         assert_eq!(APP_ID, "ai.nostos.eidos");
-        assert!(!APP_ID.contains("lightcraft"));
+        assert!(!APP_ID.contains("eidos"));
     }
 
     /// Issue #374: launch arguments that would walk a whole drive or home folder are reported,

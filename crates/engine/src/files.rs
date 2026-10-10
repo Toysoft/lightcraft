@@ -92,8 +92,10 @@ fn ext_upper(name: &str) -> String {
     std::path::Path::new(name).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default()
 }
 
-/// Probe a file's bytes: kind, dimensions (oriented), metadata. Raws are described from their
-/// headers ([`eidos_raw::probe_info`]): no pixel data is decompressed.
+/// Probe a file's bytes: kind, dimensions (oriented), metadata. No pixel data is decompressed:
+/// raws are described from their headers ([`eidos_raw::probe_info`]), other images too
+/// ([`eidos_codecs::read_header`], which refuses truncated files but can't see damage inside
+/// compressed data that is all there: such a file imports and shows as unreadable when rendered).
 pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
     let content_hash = Some(eidos_preview::hash_bytes(bytes).to_string());
     let m = eidos_meta::extract(bytes);
@@ -152,9 +154,10 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
     if !fmt.can_decode() {
         return Err(format!("{fmt:?} files are not supported yet"));
     }
-    let d = eidos_codecs::decode(bytes, eidos_codecs::DecodeOptions::fit(64, 64)).map_err(|e| e.to_string())?;
-    let o = Orientation::from_exif(d.orientation);
-    let (mut w, mut h) = (d.source_width, d.source_height);
+    // headers only (issue #367: decoding the pixels was nearly all of an import's CPU time)
+    let header = eidos_codecs::read_header(bytes).map_err(|e| e.to_string())?;
+    let o = Orientation::from_exif(header.orientation);
+    let (mut w, mut h) = (header.width, header.height);
     if o.swaps_axes() {
         std::mem::swap(&mut w, &mut h);
     }
@@ -182,11 +185,15 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
 /// Why a raw that failed to decode should show its embedded preview instead (`Ok`), or the error
 /// to report (`Err`). Variants we can't decode yet always fall back. So does any CR3 error: the CRX
 /// decoder is verified on few bodies, and every CR3 opened from its embedded JPEG before it existed.
+/// So does any other failure of a recognised raw (damaged or oversized raw data, unreadable TIFF
+/// structure): its preview may still be intact. Only a file that is not a raw reports an error.
 fn preview_reason(bytes: &[u8], e: eidos_raw::RawError) -> Result<String, String> {
+    use eidos_raw::RawError;
     match e {
-        eidos_raw::RawError::Unsupported(why) => Ok(why),
+        RawError::Unsupported(why) => Ok(why),
         e if eidos_raw::probe(bytes) == Some(eidos_raw::RawFormat::Cr3) => Ok(format!("CR3 {e}")),
-        e => Err(e.to_string()),
+        RawError::NotRaw => Err(RawError::NotRaw.to_string()),
+        e => Ok(e.to_string()),
     }
 }
 
@@ -238,7 +245,8 @@ fn load_bytes_now(bytes: std::borrow::Cow<'_, [u8]>, max_edge: usize) -> Result<
         raw.opcodes.list3.retain(|op| !op.is_lens_correction());
         let xy = eidos_raw::color::as_shot_white_xy(&raw);
         let t = eidos_raw::color::camera_transform(&raw, xy);
-        let camera_look = crate::camera_preview::fit_preview(&raw, &bytes, &t);
+        // the source's segmentation mattes (DNG semantic masks), read while the preview is fitted
+        let (camera_look, mattes) = rayon::join(|| crate::camera_preview::fit_preview(&raw, &bytes, &t), || dng_mattes(&bytes, &raw));
         drop(bytes);
         // Previews and thumbnails bin the mosaic straight to (about) the size they need; only
         // larger levels (exports, 1:1) demosaic the whole sensor.
@@ -299,15 +307,60 @@ fn load_bytes_now(bytes: std::borrow::Cow<'_, [u8]>, max_edge: usize) -> Result<
         }
         let (temp, tint) = xy_to_temp_tint(xy);
         let relative = crate::camera_preview::file_local_look(raw.format) && t.matrix_is_fallback;
+        // White balance re-evaluates the file's own colour model (when it has one and no
+        // file-local look matrix sits on top of it)
+        let camera_color = (!t.matrix_is_fallback && camera_look.is_none()).then(|| {
+            let tags = eidos_raw::ColorData { profile: Default::default(), ..raw.color.clone() };
+            Arc::new(eidos_pipeline::CameraColor { tags, developed_for: xy })
+        });
         let camera_tone = camera_look.as_ref().map(|p| p.tone).or_else(|| raw.color.profile.tone_curve.as_ref().and_then(dng_tone_curve));
         let (temp, tint) = if relative { (6500.0, 0.0) } else { (temp.round(), tint.round()) };
-        return Ok((img, SourceInfo { raw: true, as_shot_temp: temp, as_shot_tint: tint, lens, relative_wb: relative, camera_tone }));
+        return Ok((
+            img,
+            SourceInfo { raw: true, as_shot_temp: temp, as_shot_tint: tint, lens, relative_wb: relative, camera_color, camera_tone, mattes },
+        ));
     }
-    let d = eidos_codecs::decode(&bytes, eidos_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32)).map_err(|e| e.to_string())?;
+    let d = eidos_codecs::decode(&bytes, fit_box(max_edge)).map_err(|e| e.to_string())?;
     drop(bytes);
     let img = d.to_working();
     let img = if img.width.max(img.height) > max_edge { fit(&img, max_edge, max_edge, Filter::Mitchell) } else { img };
     Ok((img.into_oriented(Orientation::from_exif(d.orientation)), SourceInfo::default()))
+}
+
+/// The semantic masks of a DNG that AI masks understand, over the developed image (default crop,
+/// oriented like it). Person mattes without a confidently selected pixel are left out (the
+/// Subject mask then falls back to its heuristic); a sky matte counts even when empty (no sky).
+fn dng_mattes(bytes: &[u8], raw: &eidos_raw::RawImage) -> Option<Arc<eidos_pipeline::masks::Mattes>> {
+    use eidos_pipeline::masks::{MatteKind, Mattes};
+    if raw.format != eidos_raw::RawFormat::Dng {
+        return None;
+    }
+    let mut mattes = Mattes::default();
+    for m in eidos_raw::semantic_masks(bytes) {
+        let Some(kind) = matte_kind(&m.name) else { continue };
+        let Some(img) = m.developed(raw.active_area, raw.crop) else { continue };
+        if kind != MatteKind::Sky && !img.data.iter().any(|&v| v >= 128) {
+            continue;
+        }
+        mattes.push(kind, img.into_oriented(raw.orientation));
+    }
+    (!mattes.is_empty()).then(|| Arc::new(mattes))
+}
+
+/// What a semantic mask selects, by its `SemanticName`: Apple's (iPhone ProRAW) are named after
+/// their auxiliary image types, `urn:com:apple:photo:<year>:aux:<type>`. Other names: `None`.
+fn matte_kind(name: &str) -> Option<eidos_pipeline::masks::MatteKind> {
+    use eidos_pipeline::masks::MatteKind::*;
+    let kind = name.strip_prefix("urn:com:apple:photo:")?.rsplit(':').next()?;
+    Some(match kind {
+        "semanticskymatte" => Sky,
+        "semanticskinmatte" => Skin,
+        "semantichairmatte" => Hair,
+        "semanticteethmatte" => Teeth,
+        "semanticglassesmatte" => Glasses,
+        "portraiteffectsmatte" => Person,
+        _ => return None,
+    })
 }
 
 /// A DNG `ProfileToneCurve` (linear in, linear out, 1.0 = white after exposure compensation) as the
@@ -329,10 +382,23 @@ fn preview_orientation(raw_bytes: &[u8], jpeg_orientation: u16) -> Orientation {
     eidos_meta::extract(raw_bytes).orientation.unwrap_or(Orientation::Normal)
 }
 
+/// What stands in for a raw file we can't decode: its largest embedded JPEG, else, for a TIFF-based
+/// raw, the file's own first image when the TIFF reader can show it (a reduced RGB copy: the only
+/// preview some containers carry). Returns image bytes for [`eidos_codecs::decode`].
+fn stand_in_image(bytes: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
+    if let Some(jpeg) = eidos_raw::embedded_preview(bytes) {
+        return Some(std::borrow::Cow::Owned(jpeg));
+    }
+    let undecodable = eidos_raw::probe(bytes).is_some_and(|f| !f.is_supported());
+    (undecodable && eidos_codecs::sniff(bytes).is_some_and(|f| f == eidos_codecs::Format::Tiff)).then_some(std::borrow::Cow::Borrowed(bytes))
+}
+
 /// Shared colour interpretation for quick previews, unsupported RAW fallback and camera-look fitting.
 pub(crate) fn decode_raw_preview(bytes: &[u8], opts: eidos_codecs::DecodeOptions) -> Option<eidos_codecs::Decoded> {
-    let jpeg = eidos_raw::embedded_preview(bytes)?;
-    match eidos_raw::embedded_preview_color_space(bytes) {
+    let jpeg = stand_in_image(bytes)?;
+    // the colour space is a property of the JPEG; a TIFF stand-in is read by the TIFF reader
+    let is_jpeg = matches!(jpeg, std::borrow::Cow::Owned(_));
+    match eidos_raw::embedded_preview_color_space(bytes).filter(|_| is_jpeg) {
         Some(space) => {
             let space = match space {
                 eidos_raw::PreviewColorSpace::Srgb => eidos_codecs::NamedSpace::Srgb,
@@ -346,7 +412,7 @@ pub(crate) fn decode_raw_preview(bytes: &[u8], opts: eidos_codecs::DecodeOptions
 
 /// Oriented size of the embedded preview of a raw file.
 fn embedded_preview_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    let jpeg = eidos_raw::embedded_preview(bytes)?;
+    let jpeg = stand_in_image(bytes)?;
     let d = eidos_codecs::decode(&jpeg, eidos_codecs::DecodeOptions::fit(64, 64)).ok()?;
     let (mut w, mut h) = (d.source_width, d.source_height);
     if preview_orientation(bytes, d.orientation).swaps_axes() {
@@ -357,7 +423,7 @@ fn embedded_preview_size(bytes: &[u8]) -> Option<(u32, u32)> {
 
 /// The embedded preview of a raw file as a working-space image no larger than `max_edge`, oriented.
 pub fn load_embedded_preview(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, SourceInfo)> {
-    let d = decode_raw_preview(bytes, eidos_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32))?;
+    let d = decode_raw_preview(bytes, fit_box(max_edge))?;
     let img = d.to_working();
     let img = if img.width.max(img.height) > max_edge { fit(&img, max_edge, max_edge, Filter::Mitchell) } else { img };
     Some((img.oriented(preview_orientation(bytes, d.orientation)), SourceInfo::default()))
@@ -366,7 +432,7 @@ pub fn load_embedded_preview(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, S
 /// The embedded preview of a raw file for display (sRGB, oriented, no larger than `max_edge`): the
 /// loupe and grid show it until the raw itself has been developed ([`crate::media::QuickJob`]).
 pub fn embedded_preview_srgb(bytes: &[u8], max_edge: usize) -> Option<eidos_raster::Rgba8> {
-    let mut d = decode_raw_preview(bytes, eidos_codecs::DecodeOptions::fit(max_edge as u32, max_edge as u32))?;
+    let mut d = decode_raw_preview(bytes, fit_box(max_edge))?;
     if d.image.width.max(d.image.height) > max_edge {
         d.image = fit(&d.image, max_edge, max_edge, Filter::Box);
         d.alpha = None;
@@ -375,9 +441,24 @@ pub fn embedded_preview_srgb(bytes: &[u8], max_edge: usize) -> Option<eidos_rast
     Some(d.to_srgb8().oriented(o))
 }
 
+/// Decode options fitting into a `max_edge` square; `usize::MAX` (a full-size load) or any edge past
+/// `u32::MAX` asks for the largest box rather than wrapping to a small one.
+fn fit_box(max_edge: usize) -> eidos_codecs::DecodeOptions {
+    let e = u32::try_from(max_edge).unwrap_or(u32::MAX);
+    eidos_codecs::DecodeOptions::fit(e, e)
+}
+
 /// Filesystem-backed embedded-preview hook (native).
+///
+/// Reads the whole file to find the preview, so it holds the memory gate for twice the file's size (the file and the
+/// decoded preview): background work (the face scan) waits for room, interactive work is counted and never waits.
 pub fn fs_preview_loader() -> PreviewLoader {
-    Arc::new(|path: &str, max_edge: usize| embedded_preview_srgb(&std::fs::read(path).ok()?, max_edge))
+    Arc::new(|path: &str, max_edge: usize| {
+        let len = std::fs::metadata(path).map(|m| usize::try_from(m.len()).unwrap_or(usize::MAX)).unwrap_or(0);
+        let gate = crate::memory::work_gate();
+        let _permit = if crate::memory::is_background() { gate.acquire(len.saturating_mul(2)) } else { gate.acquire_urgent(len.saturating_mul(2)) };
+        embedded_preview_srgb(&std::fs::read(path).ok()?, max_edge)
+    })
 }
 
 /// Filesystem-backed hooks (native). On the web the host installs bytes-based hooks instead.
@@ -389,7 +470,7 @@ pub fn fs_preview_loader() -> PreviewLoader {
 /// yields to them.
 pub fn fs_hooks() -> (FileLoader, FileProbe) {
     let loader: FileLoader = Arc::new(|path: &str, max_edge: usize| {
-        let len = std::fs::metadata(path).map(|m| m.len() as usize).unwrap_or(0);
+        let len = std::fs::metadata(path).map(|m| usize::try_from(m.len()).unwrap_or(usize::MAX)).unwrap_or(0);
         let weight = len * if max_edge <= crate::media::SourceLevel::Thumb.max_edge() { 3 } else { 6 };
         let gate = crate::memory::work_gate();
         let _permit = if crate::memory::is_background() { gate.acquire(weight) } else { gate.acquire_urgent(weight) };
@@ -400,7 +481,7 @@ pub fn fs_hooks() -> (FileLoader, FileProbe) {
         r
     });
     let probe: FileProbe = Arc::new(|path: &str| {
-        let len = std::fs::metadata(path).map(|m| m.len() as usize).unwrap_or(0);
+        let len = std::fs::metadata(path).map(|m| usize::try_from(m.len()).unwrap_or(usize::MAX)).unwrap_or(0);
         let _permit = crate::memory::work_gate().acquire(len);
         let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
         probe_bytes(path, &bytes)
@@ -423,6 +504,37 @@ impl crate::Session {
 mod tests {
     use super::*;
     use eidos_codecs::{ChromaSubsampling, EncodeImage, EncodeMeta, Samples, encode_jpeg};
+
+    /// Issue #367: probes read headers, not pixels, and report what the decode-based probe did:
+    /// oriented dimensions (EXIF orientation 6 swaps them), metadata, the error for a truncated
+    /// file or one that isn't an image.
+    #[test]
+    fn image_probe_reads_headers_like_the_decode_did() {
+        let (w, h) = (300u32, 200u32);
+        let rgb: Vec<u8> = (0..w * h * 3).map(|i| (i * 7 % 251) as u8).collect();
+        let img = EncodeImage::new(w, h, 3, Samples::U8(&rgb));
+        for o in [None, Some(1), Some(6), Some(3), Some(8)] {
+            let exif = o.map(eidos_codecs::exif::minimal_exif);
+            let meta = EncodeMeta { exif: exif.as_deref(), ..Default::default() };
+            let jpeg = encode_jpeg(&img, 90, ChromaSubsampling::S420, &meta).unwrap();
+            let png = eidos_codecs::encode_png(&img, &meta).unwrap();
+            for (name, bytes) in [("a.jpg", &jpeg), ("a.png", &png)] {
+                let p = probe_bytes(name, bytes).unwrap();
+                // what the probe computed from a decode before
+                let d = eidos_codecs::decode(bytes, eidos_codecs::DecodeOptions::fit(64, 64)).unwrap();
+                let swap = Orientation::from_exif(d.orientation).swaps_axes();
+                let want = if swap { (d.source_height, d.source_width) } else { (d.source_width, d.source_height) };
+                assert_eq!((p.width, p.height), want, "{name} {o:?}");
+                assert_eq!((p.width, p.height), if matches!(o, Some(6 | 8)) { (h, w) } else { (w, h) }, "{name} {o:?}");
+                assert_eq!(p.kind, MediaKind::Image);
+                assert_eq!(p.format, if name == "a.jpg" { "JPEG" } else { "PNG" });
+                assert_eq!(p.file_size, bytes.len() as u64);
+                assert!(p.content_hash.is_some());
+                assert!(probe_bytes(name, &bytes[..bytes.len() / 2]).is_err(), "{name}: truncated file accepted");
+            }
+        }
+        assert!(probe_bytes("x.jpg", b"not an image").is_err());
+    }
 
     /// Luminance (from linear RGB) minus its 9 × 9 local mean: tone differences between a render and a camera JPEG
     /// mostly cancel, edges remain.
@@ -616,8 +728,12 @@ mod tests {
         assert!(info.camera_tone.is_none());
         // a map that removes all saturation, and a tone curve
         let grey = HsvTable { hue_divisions: 4, sat_divisions: 2, val_divisions: 1, data: vec![[0.0, 0.0, 1.0]; 8], srgb_value: false };
-        raw.color.profile =
-            ProfileLook { hue_sat_map: [Some(grey), None], look_table: None, tone_curve: ToneCurve::from_tag(&[0.0, 0.0, 0.18, 0.3, 1.0, 1.0]) };
+        raw.color.profile = ProfileLook {
+            hue_sat_map: [Some(grey), None],
+            look_table: None,
+            tone_curve: ToneCurve::from_tag(&[0.0, 0.0, 0.18, 0.3, 1.0, 1.0]),
+            gain_table_map: None,
+        };
         let with = eidos_raw::write_dng(&raw, &Default::default()).unwrap();
         let (after, info) = load_bytes(&with, 64).unwrap();
         assert!(sat(&after) < 1e-3, "saturation {} → {}", sat(&before), sat(&after));
@@ -633,6 +749,119 @@ mod tests {
         };
         let (dim, _) = load_bytes(&eidos_raw::write_dng(&raw, &Default::default()).unwrap(), 64).unwrap();
         assert!((mean(&dim) / mean(&before) - 0.5).abs() < 0.02, "{} vs {}", mean(&dim), mean(&before));
+    }
+
+    /// iPhone ProRAW-style semantic masks drive the Sky mask: Apple's sky matte (here the right
+    /// half of the sensor, i.e. the bottom of the photo once turned 90° clockwise — where the sky
+    /// heuristic would never look) is used; a matte with an unknown name is ignored.
+    #[test]
+    fn dng_sky_matte_drives_the_sky_mask() {
+        use eidos_develop::{DevelopSettings, LocalAdjustments, Mask, MaskComponent, MaskOp, MaskShape};
+        use eidos_pipeline::{RenderRequest, render};
+        use eidos_tiff::tags::{self as t, photometric};
+        use eidos_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, Value};
+        let (w, h) = (16u32, 8u32);
+        let image = |ifd: &mut IfdBuilder, w: u32, h: u32, cpp: u16, bits: u16, data: Vec<u8>| {
+            ifd.set(t::IMAGE_WIDTH, Value::Long(vec![w]));
+            ifd.set(t::IMAGE_LENGTH, Value::Long(vec![h]));
+            ifd.set(t::BITS_PER_SAMPLE, Value::Short(vec![bits; cpp as usize]));
+            ifd.set(t::SAMPLES_PER_PIXEL, Value::Short(vec![cpp]));
+            ifd.set(t::COMPRESSION, Value::Short(vec![1]));
+            ifd.set_image(ImageData::Strips { rows_per_strip: h, strips: vec![data] });
+        };
+        let mut raw = IfdBuilder::new();
+        raw.set(t::NEW_SUBFILE_TYPE, Value::Long(vec![0]));
+        raw.set(t::PHOTOMETRIC, Value::Short(vec![photometric::LINEAR_RAW]));
+        image(&mut raw, w, h, 3, 16, 12000u16.to_le_bytes().repeat((w * h * 3) as usize));
+        let matte = |name: &str, right: bool| {
+            let mut m = IfdBuilder::new();
+            m.set(t::NEW_SUBFILE_TYPE, Value::Long(vec![t::SUBFILE_SEMANTIC_MASK]));
+            m.set(t::PHOTOMETRIC, Value::Short(vec![photometric::MASK]));
+            m.set(t::SEMANTIC_NAME, Value::Ascii(name.into()));
+            image(&mut m, w / 2, h / 2, 1, 8, (0..w / 2 * h / 2).map(|i| if (i % (w / 2) >= w / 4) == right { 255 } else { 0 }).collect());
+            m
+        };
+        let mut ifd0 = IfdBuilder::new();
+        ifd0.set(t::NEW_SUBFILE_TYPE, Value::Long(vec![1]));
+        ifd0.set(t::DNG_VERSION, Value::Byte(vec![1, 6, 0, 0]));
+        ifd0.set(t::MAKE, Value::Ascii("Apple".into()));
+        ifd0.set(t::ORIENTATION, Value::Short(vec![6]));
+        ifd0.set(t::COLOR_MATRIX_1, Value::SRational(vec![(1, 1), (0, 1), (0, 1), (0, 1), (1, 1), (0, 1), (0, 1), (0, 1), (1, 1)]));
+        ifd0.set(t::CALIBRATION_ILLUMINANT_1, Value::Short(vec![21]));
+        ifd0.set(t::PHOTOMETRIC, Value::Short(vec![photometric::RGB]));
+        image(&mut ifd0, 4, 2, 3, 8, vec![128; 24]);
+        ifd0.add_sub_ifd(raw);
+        ifd0.add_sub_ifd(matte("urn:com:apple:photo:2020:aux:semanticskymatte", true));
+        ifd0.add_sub_ifd(matte("urn:com:apple:photo:2020:aux:semanticsomethingelse", false));
+        let bytes = TiffWriter::new(ByteOrder::Little, false).write(&[ifd0]).unwrap();
+
+        let (img, info) = load_bytes(&bytes, 64).unwrap();
+        assert_eq!((img.width, img.height), (8, 16));
+        assert!(info.mattes.is_some());
+        let sky = Mask {
+            components: vec![MaskComponent { name: None, op: MaskOp::Add, invert: false, shape: MaskShape::Sky }],
+            adjust: LocalAdjustments { exposure: -3.0, ..Default::default() },
+            ..Default::default()
+        };
+        let s = DevelopSettings { masks: vec![sky], ..Default::default() };
+        let req = RenderRequest::fit(8, 16);
+        let green = |s: &DevelopSettings, info: &SourceInfo, y: usize| render(&img, info, s, &req).image.get(4, y)[1] as i32;
+        let plain = DevelopSettings::default();
+        assert_eq!(green(&s, &info, 2), green(&plain, &info, 2), "no sky at the top");
+        assert!(green(&s, &info, 13) + 40 < green(&plain, &info, 13), "the sky at the bottom is darkened");
+        // without the matte the heuristic looks at the top of the frame instead
+        let heuristic = SourceInfo { mattes: None, ..info.clone() };
+        assert!(green(&s, &heuristic, 2) < green(&plain, &heuristic, 2));
+        assert_eq!(green(&s, &heuristic, 13), green(&plain, &heuristic, 13));
+    }
+
+    /// A DNG's white balance is re-evaluated through its own colour model: the decoder hands the
+    /// pipeline the file's colour tags (without the profile look, applied at load) and the white
+    /// the pixels were developed for, and a custom white balance renders a neutral differently
+    /// from the Bradford adaptation it replaces.
+    #[test]
+    fn dng_white_balance_uses_the_camera_colour_model() {
+        use eidos_pipeline::{RenderRequest, render};
+        let dng = crate::tests_xmp::synthetic_dng_with(None, Default::default());
+        let raw = eidos_raw::decode(&dng).unwrap();
+        let (img, info) = load_bytes(&dng, 64).unwrap();
+        let cc = info.camera_color.as_ref().expect("a DNG with a colour matrix");
+        assert_eq!(cc.developed_for, eidos_raw::color::as_shot_white_xy(&raw));
+        assert!(cc.tags.profile.is_empty());
+        assert_eq!(cc.tags.color_matrix, raw.color.color_matrix);
+        let mut s = eidos_develop::DevelopSettings::default();
+        (s.wb.mode, s.wb.temp, s.wb.tint) = (eidos_develop::WbMode::Custom, 3000.0, 20.0);
+        let req = RenderRequest::fit(32, 32);
+        let camera = render(&img, &info, &s, &req).image;
+        let adapted = render(&img, &SourceInfo { camera_color: None, ..info.clone() }, &s, &req).image;
+        assert_ne!(camera.data, adapted.data);
+    }
+
+    /// Apple ProRAW: like Lightroom Classic, the default render ignores the file's
+    /// `ProfileGainTableMap` (Apple's local tone mapping); a map that would double every pixel
+    /// changes nothing.
+    #[test]
+    fn dng_gain_table_map_is_not_rendered() {
+        use eidos_raw::gaintable::GainTableMap;
+        let plain = crate::tests_xmp::synthetic_dng_with(None, Default::default());
+        let mut raw = eidos_raw::decode(&plain).unwrap();
+        let (before, _) = load_bytes(&eidos_raw::write_dng(&raw, &Default::default()).unwrap(), 64).unwrap();
+        raw.color.profile.gain_table_map = Some(GainTableMap {
+            points_v: 1,
+            points_h: 1,
+            points_n: 1,
+            spacing_v: 1.0,
+            spacing_h: 1.0,
+            origin_v: 0.0,
+            origin_h: 0.0,
+            weights: [0.2, 0.2, 0.2, 0.2, 0.2],
+            gamma: 1.0,
+            gains: vec![2.0],
+        });
+        let with_map = eidos_raw::write_dng(&raw, &Default::default()).unwrap();
+        assert!(eidos_raw::decode(&with_map).unwrap().color.profile.gain_table_map.is_some(), "the map is kept");
+        let (after, _) = load_bytes(&with_map, 64).unwrap();
+        assert_eq!(before.data, after.data);
     }
 
     #[test]
@@ -701,6 +930,84 @@ mod tests {
         assert_eq!(s.catalog.photo(id).unwrap().preview_only, None);
         drop(s);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A raw whose TIFF shell holds only a small RGB image (IFD0) next to a private block, as Exif
+    /// declares a picture 25x its size.
+    fn tiff_shell(w: u32, h: u32, shell: bool) -> Vec<u8> {
+        use eidos_tiff::{IfdBuilder, ImageData, TiffWriter, Value, tags as t};
+        let mut ifd0 = IfdBuilder::new();
+        ifd0.set(t::IMAGE_WIDTH, Value::Long(vec![w]));
+        ifd0.set(t::IMAGE_LENGTH, Value::Long(vec![h]));
+        ifd0.set(t::BITS_PER_SAMPLE, Value::Short(vec![8, 8, 8]));
+        ifd0.set(t::SAMPLES_PER_PIXEL, Value::Short(vec![3]));
+        ifd0.set(t::PHOTOMETRIC, Value::Short(vec![2]));
+        ifd0.set(t::COMPRESSION, Value::Short(vec![1]));
+        let px: Vec<u8> = (0..w * h).flat_map(|i| [(i % 251) as u8, 128, 200]).collect();
+        ifd0.set_image(ImageData::Strips { rows_per_strip: h, strips: vec![px] });
+        ifd0.set_child(
+            t::EXIF_IFD,
+            IfdBuilder::new().with(t::PIXEL_X_DIMENSION, Value::Long(vec![w * 25])).with(t::PIXEL_Y_DIMENSION, Value::Long(vec![h * 25])),
+        );
+        let mut b = TiffWriter::default().write(&[ifd0]).unwrap();
+        if shell {
+            b.extend(std::iter::repeat_n(0x5au8, (w * h * 625 / 8) as usize + 100));
+        }
+        b
+    }
+
+    /// A TIFF raw whose only image is a small thumbnail used to open as a plain image of that size
+    /// ("a 150 MP file renders 296x220"), with nothing saying so. Now it is recognised as a raw we can't
+    /// decode: preview only, with the reason, still showing that image.
+    #[test]
+    fn thumbnail_only_tiff_raw_is_preview_only_not_a_plain_image() {
+        let b = tiff_shell(24, 16, true);
+        let p = probe_bytes("IMG_0001.IIQ", &b).unwrap();
+        assert_eq!((p.kind, p.format.as_str(), p.width, p.height), (MediaKind::Raw, "IIQ", 24, 16));
+        let why = p.preview_only.expect("marked preview only");
+        assert!(why.contains("600x400") && why.contains("24x16"), "{why}");
+        let (img, src) = load_bytes(&b, 12).unwrap();
+        assert_eq!((img.width, img.height, src.raw), (12, 8, false));
+        assert!(embedded_preview_srgb(&b, 12).is_some());
+        // the same pixels without the private block are a small ordinary image
+        let plain = probe_bytes("small.tif", &tiff_shell(24, 16, false)).unwrap();
+        assert_eq!((plain.kind, plain.preview_only, plain.width, plain.height), (MediaKind::Image, None, 24, 16));
+        assert!(eidos_raw::probe(&tiff_shell(24, 16, false)).is_none());
+    }
+
+    /// Recognised raw containers we don't decode (Minolta MRW here: the preview's first byte is
+    /// overwritten in the file) import as preview only with the JPEG's size, instead of failing.
+    #[test]
+    fn undecodable_container_with_a_preview_imports_as_preview_only() {
+        let px: Vec<u8> = (0..40 * 30).flat_map(|i| [(i % 251) as u8, 128, 200]).collect();
+        let mut jpeg = encode_jpeg(&EncodeImage::new(40, 30, 3, Samples::U8(&px)), 90, ChromaSubsampling::S444, &EncodeMeta::default()).unwrap();
+        jpeg[0] = 0x02;
+        let mut f = b"\0MRM\0\x01\0\0".to_vec();
+        f.extend(std::iter::repeat_n(0x11u8, 300));
+        f.extend_from_slice(&jpeg);
+        f.extend(std::iter::repeat_n(0x22u8, 300));
+        let p = probe_bytes("A.MRW", &f).unwrap();
+        assert_eq!((p.kind, p.format.as_str(), p.width, p.height), (MediaKind::Raw, "MRW", 40, 30));
+        assert!(p.preview_only.is_some_and(|w| w.contains("Mrw")));
+        let (img, src) = load_bytes(&f, 20).unwrap();
+        assert_eq!((img.width, img.height, src.raw), (20, 15, false));
+        // without a JPEG: a clear error
+        let e = probe_bytes("A.MRW", b"\0MRM\0\x01\0\0 nothing here").unwrap_err();
+        assert!(e.contains("without an embedded preview"), "{e}");
+    }
+
+    /// Any failure of a recognised raw (not only an unsupported variant) can fall back to its preview;
+    /// CR3 keeps its own wording.
+    #[test]
+    fn decode_failures_of_recognised_raws_may_fall_back_to_the_preview() {
+        use eidos_raw::RawError;
+        let cr3 = b"\0\0\0\x18ftypcrx \0\0\0\x01";
+        assert_eq!(preview_reason(b"x", RawError::Unsupported("x".into())), Ok("x".to_string()));
+        assert!(preview_reason(b"x", RawError::Corrupt("bad strip".into())).is_ok_and(|w| w.contains("bad strip")));
+        assert!(preview_reason(b"x", RawError::Limit("too big")).is_ok());
+        assert!(preview_reason(b"x", RawError::Tiff(eidos_tiff::TiffError::MissingTag(256))).is_ok());
+        assert!(preview_reason(b"x", RawError::NotRaw).is_err());
+        assert!(preview_reason(cr3, RawError::Corrupt("bad".into())).is_ok_and(|w| w.starts_with("CR3 ")));
     }
 
     #[test]

@@ -2,6 +2,19 @@
 
 ## October 2026
 
+### Albums tree
+- Album folders fold with the same disclosure triangle as Local, By Date, Folders and Keywords.
+- Right-click a folder ▸ New ▸ Create Album… / Create Smart Album… / Create Smart Album from Filter… / Create Folder…
+  makes it inside that folder (`dialog.newAlbum`, `dialog.newFolder`, `dialog.smartAlbum`, `dialog.newSmartAlbum` take `parent`).
+- Drag an album or folder onto a folder to move it there (a closed folder opens after 0.6 s under the pointer; a
+  "Albums" header takes it back to the top level; Esc cancels; holding a dragged album or photos near the top or bottom edge of the sidebar scrolls it). Drop on the top or bottom half of another album,
+  or the edge of another folder, to place it before or after it: that folder is then ordered by hand. Right-click ▸
+  Sort Contents A–Z (or ＋ ▸ Sort Albums A–Z at the top level) goes back to by name. To put a folder after an open
+  folder, fold that folder first (the bottom of an open folder means "inside"). Agents use `album.reorder`
+  (`id`, `parent?`, `before?`) and `album.sort`.
+- The catalog format is now version 3 (`Album.order`, `Op::SetAlbumOrder`). Once this version has opened a library,
+  older versions refuse it, as with every format change.
+
 ### Library keyboard culling
 - Colour labels tint thumbnail surrounds in Square Grid and the Detail filmstrip, and a translucent footer along the bottom of the photo in Photo Grid. Label confirmations use a matching pale colour.
 - Setting or clearing a colour label shows a brief bottom confirmation, like rating a photo; custom label names appear in the message too.
@@ -15,6 +28,16 @@
   belonged to another command moves to the new one. Menus show the new keys; agents use `app.setShortcut`.
 
 ### RAW decoding
+- Canon CR2 and Pentax PEF raws get the same starting look fitted to the camera's own JPEG as ARW, NEF, RW2, RAF
+  and CR3, instead of opening flat and desaturated (issue #310). Photos already imported pick it up when re-rendered.
+- JPEG XL compressed DNGs (DNG 1.7) now open: lossless tiles decode sample for sample (checked on synthetic files);
+  lossy tiles decode too, but no real file has checked them yet. A JPEG XL preview stored in the DNG is used like an
+  embedded JPEG.
+- Apple ProRAW's gain table map (its local tone mapping, `ProfileGainTableMap`) is now read and kept when a photo is
+  exported or converted to DNG. It is not applied to the render: Lightroom Classic renders ProRAW without it.
+- iPhone ProRAW and other DNGs that carry their own segmentation mattes (DNG semantic masks) use them for the Select
+  Sky, Subject and Background masks instead of our heuristics, so the sky is selected where the camera found it
+  (checked on one CC0 iPhone 12 Pro ProRAW). Photos without mattes are unchanged.
 - Panasonic and Leica raws (RW2, RWL) are now corrected for lens distortion the way the camera corrects its own JPEG
   (issue #256): the correction the camera records in the file is applied under Lens Corrections ▸ Enable Profile
   Corrections, on by default for newly imported photos, with the same framing as the camera's JPEG. At 12 mm the
@@ -22,6 +45,12 @@
   are unchanged; photos imported before this change get it when imported again.
 - Canon CR3 raws now develop from their sensor data: lossless RAW and C-RAW, checked sample for sample on the EOS
   M50, R100 and R8. CR3 files the decoder can't read yet still open from their embedded JPEG, as before.
+- Canon CRW, Minolta MRW, Sigma X3F, Kodak KDC, Leaf MOS and Epson ERF files that Eidos can't decode yet
+  now import as "preview only" with their embedded JPEG instead of failing. A raw whose data is damaged but whose
+  preview is intact does the same.
+- Raw files whose raw data sits in a private block of a TIFF (Phase One / Leaf IIQ, Canon EOS-1D / 1Ds and Kodak DCS
+  TIFFs) are no longer opened as a thumbnail-sized ordinary image. They are recognised as raws Eidos can't decode
+  yet and import as "preview only", with the reason.
 - Sony ILCE-7M4 downsized lossless ARWs now decode subsampled YCbCr tiles into linear RGB,
   preserving RAW editing & full-resolution export instead of using embedded JPEG previews.
 - Sony A7R II (and other) raws whose camera JPEG is lens-corrected no longer open grey and too dark (issue #232): the
@@ -33,12 +62,22 @@
   existing Eidos edits are preserved by default. Source settings/history are archived, unsupported
   fields are reported, and the original Lightroom database stays read-only. Rendering is approximate.
 
+### Formats
+- HEIC / HEIF photos (iPhone and Mac) open now: the optional `eidos-heif` crate (heic-rs, pure Rust) behind
+  codecs' `heif` feature — 8- and 10-bit, alpha, grid tiles, the container's rotation/mirror/crop, ICC, EXIF and XMP.
+  Off by default (HEVC patents are the distributor's call, same as PhotoCraft); official builds pass `--features heif`.
+
 ### Presets and profiles
 - Import presets from other editors: XMP presets, classic `.lrtemplate` files, "DNG presets" from mobile apps and `.zip`
   bundles of any of these — whole folders at once, grouped by pack. Masks inside presets come along.
 - Luminar looks: `.lmp` files and `.mplumpack` collections import as presets (grouped by collection); the sliders
   with a counterpart here come along, the rest is listed.
 - 23 new built-in presets: Portrait, Landscape, Urban, Food, Seasons, Vintage and B&W toners.
+- Importing XMP presets no longer lists bookkeeping fields (`Cluster`, `SortName`, `SupportsAmount2`, the as-shot
+  white, empty Point Color slots…) as settings that couldn't be carried over.
+- A preset whose lens-profile switch is off no longer turns off the lens corrections built into a DNG (iPhone ProRAW
+  and other files with embedded distortion / vignetting corrections), matching what the preset does elsewhere.
+- A red / green / blue curve in an XMP preset without the master curve is ignored, as Lightroom ignores it.
 - Imported `.cube` LUT profiles appear in the Profile menu and the profile browser, grouped by their folder, and stay
   favourites across restarts (issue #328).
 
@@ -46,6 +85,10 @@
 - The Tint slider works the right way round (issues #188, #321): left adds green, right adds magenta, as its track
   shows and as in Lightroom, and Tint values in Lightroom XMP sidecars now render as they do there. A custom Tint
   saved in an earlier version now shifts the other way; set it again (or re-run Auto / the white-balance picker).
+- White balance on DNGs (and other raws with a colour matrix) re-develops the photo for the new white through the
+  camera's own colour matrices, as Lightroom does, instead of shifting the colours of the as-shot rendering: a grey
+  lit by the chosen white comes out grey and saturated colours move as the camera records them. The eyedropper and
+  Auto use the same model. Custom white balances on these photos render slightly differently than before.
 - Crop (issue #295): a Lock toggle keeps the aspect ratio on every handle, Custom takes your own ratio (Apply), and
   dragging a handle into the image edge stops there instead of pushing the crop out of shape.
 
@@ -76,6 +119,8 @@
 ### Library
 - Choosing a date under By Date or a keyword under Keywords shows those photos from All Photos, as their counts
   promise, instead of filtering whatever album or folder was open, which often showed nothing (issue #341).
+)
+)
 
 ### Reliability
 - If the desktop app can't open its window (for example when no graphics device can be used), it now says so in a
@@ -91,6 +136,8 @@
   with the logs of the two previous runs beside it, so warnings and crashes of a run started from a desktop menu or the
   Dock can be attached to a bug report. `EIDOS_LOG` works as before; `RUST_LOG` takes env_logger-style
   directives. See README → Quick start → Logs.
+- Help → Open Log Folder shows that log file in the file manager (Finder, Explorer, or the folder on Linux), so it
+  can be attached to a report without hunting for the settings folder (issue #260).
 - `eidos-cli` logs warnings on stderr too (issue #168); `EIDOS_LOG` or `RUST_LOG` picks another level.
 - Eidos no longer crashes at launch on Windows PCs whose Vulkan driver is broken (issue #136, e.g. some Intel UHD
   630 drivers): on Windows the window and GPU rendering use DirectX 12 only and never load the Vulkan driver unless
@@ -133,7 +180,7 @@
 - The catalog has a format version (issue #102). Opening a library from an older version upgrades it; a library
   written by a newer Eidos is refused with "this library was written by a newer version of Eidos" and left
   untouched — older versions no longer read part of it as a damaged log. Once this version has opened a library,
-  LightCraft 0.2.0 and older refuse it ("unsupported format … v2").
+  Eidos 0.2.0 and older refuse it ("unsupported format … v2").
 - The control port (`--control`) closes a connection as soon as it receives anything that isn't a JSON request
   (issue #94): an HTTP request from a web page can no longer carry a command in its body. Lines are capped at
   4 MiB and connections at 16.
@@ -213,6 +260,9 @@
   lost everything at quit; a temporary session shows a banner the whole time and never writes to your library.
 
 ### Editing
+- Optional remote SAM 3: keep the native editor local and run Object, Describe, and detail
+  inference on a Mac through SSH. Saved masks still render and export offline.
+  See [remote Metal inference](ai-masks.md#remote-metal-inference).
 - AI masks with SAM 3 (Object and Describe in the Masking panel): click an object to select it (⌥-click leaves a
   part out), or type what to select ("sky", "the red car", "car, road"); both combine with other masks, have an
   Edge setting, and get a sharper zoomed-in pass in the background. The model runs inside Eidos in pure Rust
