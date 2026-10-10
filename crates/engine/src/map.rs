@@ -64,6 +64,13 @@ impl MapState {
         self.service = None;
     }
 
+    /// Load tiles with `service` from now on, its source becoming the current one (not saved): a
+    /// host with its own transport, or tests with a fake one. Changing the source replaces it.
+    pub fn set_service(&mut self, service: TileService) {
+        self.source = service.source().clone();
+        self.service = Some(service);
+    }
+
     /// The service if one is running (no side effects).
     pub fn service(&self) -> Option<&TileService> {
         self.service.as_ref()

@@ -4,9 +4,47 @@ LightCraft shows where photos were taken on a map drawn from raster map tiles. T
 fetches, from where, how it follows the tile provider's rules, what that means for your privacy, and how to turn it
 off.
 
-Status: the map core is in place (`crates/map`: tile maths, tile sources, the tile cache and the fetch queue, plus the
-`map.*` commands below). The map view, photo pins and the map in the Info panel come next; until then nothing in the
-app asks for tiles, so nothing is fetched.
+Status: the Map view (below) shows the photos in view as pins and clusters over the tiles. Still to come: dragging
+photos onto the map to geotag them, the location filter bar, saved locations, track logs drawn on the map, and the map
+in the Info panel. Nothing is fetched until the Map view is on screen.
+
+## The Map view
+
+View ▸ Map, or the map pin in the bottom bar (next to People), shows the photos in view (the current source, filter
+and sort: the same photos as the grid) on a map, with the filmstrip below.
+
+- **Pins**: each photo with a GPS position is a pin. Pins closer than about 60 px merge into a cluster showing how
+  many photos it holds; zooming in splits clusters until every photo has its own pin. Pins of selected photos are blue,
+  the active photo's has a thicker ring.
+- **Selecting**: a click on a pin or cluster selects its photos (the filmstrip shows them selected); ⌘-click or
+  ⇧-click adds them to the selection; a double-click opens the first one in Detail. Resting the pointer on a pin shows
+  its photo's thumbnail (the first photo's, with the count, for a cluster).
+- **Moving**: drag to pan; the mouse wheel, a pinch or ⌘-scroll zooms around the pointer; a two-finger scroll pans;
+  a double-click on the map zooms in. The buttons at the top right zoom out / in and **Fit to Photos** (shows every
+  photo with a position); ⌘- / ⌘= / ⌘0 do the same in this view.
+- The first time the map is shown it fits the photos with a position; after that it stays where you left it for the
+  session.
+- "N photos without GPS" at the bottom left counts the photos in view that have no position (set one in the Info
+  panel, or with Photo ▸ Auto-Tag from Tracklog…).
+- The tile source's attribution is always shown at the bottom right. Tiles not loaded yet show a lower zoom's tile
+  magnified, or grey. In offline mode the map is grey with the note "Map tiles are off".
+
+Photos whose GPS position is invalid (out of range, NaN) are counted as without GPS, never placed. Clusters are
+recomputed only when the view moves, from positions projected once per change of the photo list: 50 000 photos on
+screen take about 4 ms (release build), a few thousand well under 1 ms.
+
+Commands (UI commands: they need the map's size, so the app, `lightcraft-cli snapshot` and `mcp --connect` have them):
+
+| Command | Params | Result |
+|---|---|---|
+| `view.map` | — | Switch to the Map view → `{withGps, withoutGps}` |
+| `map.fit` | — | Fit the photos with a position (the world when there are none) → the map state |
+| `map.setView` | `{lat?, lon?, zoom?}` | Centre (degrees) and zoom (0 to the source's max zoom; fractional allowed); what is left out stays → the map state |
+| `map.zoomIn` / `map.zoomOut` | — | One zoom level in / out, around the centre → the map state |
+| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, tiles: {drawn, missing, textures, uploads}}`; `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
+
+Widgets (`ui.widgets`): `map:canvas`, `map:pin:<first photo id>`, `map:fit`, `icon:mapZoomIn`, `icon:mapZoomOut`,
+`map:attribution`, `map:withoutGps`, `map:hoverThumb`.
 
 ## What is fetched, and when
 

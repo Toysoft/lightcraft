@@ -65,6 +65,8 @@ mod tests_labels;
 #[cfg(test)]
 mod tests_library_problem;
 #[cfg(test)]
+mod tests_map;
+#[cfg(test)]
 mod tests_masking;
 #[cfg(test)]
 mod tests_masking_layout;
@@ -324,6 +326,8 @@ pub struct LightcraftApp {
     pub library_problem: Option<panels::library_problem::LibraryProblem>,
     /// The activity stack shows every task, not just the first few ("+N more" was clicked).
     pub activity_expanded: bool,
+    /// The Map view's centre and zoom, tile textures and photo pins (for the session).
+    pub map: panels::map::MapView,
 }
 
 impl LightcraftApp {
@@ -390,6 +394,7 @@ impl LightcraftApp {
             display_error: None,
             library_problem: None,
             activity_expanded: false,
+            map: Default::default(),
             model_setup: Default::default(),
         }
     }
@@ -1061,6 +1066,7 @@ impl LightcraftApp {
             state::ViewMode::Survey => panels::compare::show_survey(self, ui),
             state::ViewMode::Reference => panels::compare::show_reference(self, ui),
             state::ViewMode::People => panels::people::show(self, ui),
+            state::ViewMode::Map => panels::map::show(self, ui),
         });
         panels::second::show(self, &ctx);
         panels::notices::show(self, &ctx);

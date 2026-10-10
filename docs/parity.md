@@ -41,16 +41,16 @@ and prints the summary; `cargo xtask parity --write` refreshes the summary table
 | R. Video (VID) | 0 | 0 | 5 | 1 | — | 0/2 (0%) |
 | S. Export (EXP) | 15 | 2 | 1 | 0 | 7/7 (100%) | 7/7 (100%) |
 | T. Share (SHARE) | 0 | 0 | 0 | 4 | — | — |
-| U. Map & location (MAP) | 0 | 1 | 1 | 0 | — | 0/1 (0%) |
-| V. Preferences (PREF) | 7 | 1 | 2 | 2 | 1/1 (100%) | 5/5 (100%) |
+| U. Map & location (MAP) | 0 | 2 | 0 | 0 | — | 0/1 (0%) |
+| V. Preferences (PREF) | 6 | 2 | 2 | 2 | 1/1 (100%) | 4/5 (80%) |
 | W. Cloud & AI infrastructure (CLOUD / AI) | 1 | 0 | 1 | 2 | — | — |
 | X. Cross-cutting behaviours (BEHAV) | 18 | 6 | 1 | 1 | 8/8 (100%) | 6/9 (67%) |
-| Y. Menus | 82 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
+| Y. Menus | 83 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 75 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
-| Lightroom Classic extras | 32 | 11 | 39 | 9 | — | 22/24 (92%) |
-| **Total** | 393 | 39 | 84 | 36 | 192/200 (96%) | 142/152 (93%) |
+| Lightroom Classic extras | 34 | 15 | 34 | 9 | — | 23/25 (92%) |
+| **Total** | 399 | 50 | 71 | 36 | 192/200 (96%) | 143/155 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **79.9%** of 516 in-scope rows — P0 98.0% of 200 · P1 95.7% of 152 · P2 42.9% of 163.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.5%** of 520 in-scope rows — P0 98.0% of 200 · P1 95.2% of 155 · P2 48.5% of 164.
 <!-- /parity:summary -->
 
 ## Top gaps
@@ -84,7 +84,8 @@ Take the first one nobody is working on.
    the app offers a consented, verified download, but **LightCraft's CDN mirrors are not configured yet** (the
    built-in list is empty, so today users need their own mirror or a manual install). Subject / Sky / People could
    use the same model with fixed prompts; denoise / super-resolution models remain a maintainer decision.
-7. **HDR** (Q. HDR, LR-EXP-HDR), **video** (R. Video), **Classic output modules** (Map view, Book, Slideshow module,
+7. **HDR** (Q. HDR, LR-EXP-HDR), **video** (R. Video), **Classic output modules** (Map: the view with pins exists, geotagging by drag,
+   the location filter and saved locations next; Book, Slideshow module,
    Print, publish): large, well understood, lower priority than 1–5. Contact-sheet PDF export now covers a
    basic Print workflow; custom picture packages, printer integration and print colour management remain open.
 8. **LR-VIEW-ZOOM** (P0): pinch zoom and two-finger pan now work, with stable image cursors between gesture events.
@@ -480,7 +481,7 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 | Id | Feature | Tier | Status | Evidence | Missing / notes |
 |---|---|---|---|---|---|
 | LR-MAP-INFO | Location in the info panel | P1 | 🟡 | `cmd:photo.setMeta` (`location`, `city`, `state`, `country`, `gps`), `crates/ui-egui/src/panels/right.rs` | location, city, state/province, country and GPS editable; Show on Map (OpenStreetMap in the browser); no map in the panel |
-| LR-MAP-MODULE | Map module [Classic] | P2 | ⬜ | `cmd:map.tileSource`, `cmd:map.cacheInfo`, `cmd:map.clearCache`, `crates/map`, `docs/map.md` | core in place, no view yet: Web Mercator tile maths, tile source (OpenStreetMap by default, custom or offline), on-disk tile cache and a viewport-only fetch queue; the map view, pins and Info panel map are still to come |
+| LR-MAP-MODULE | Map module [Classic] | P2 | 🟡 | `cmd:view.map`, `cmd:map.fit`, `cmd:map.setView`, `cmd:map.state`, `cmd:map.tileSource`, `cmd:map.cacheInfo`, `cmd:map.clearCache`, `crates/map`, `crates/ui-egui/src/panels/map.rs`, `docs/map.md` | a Map view (View ▸ Map, LRC-MAP-VIEW) over the core: Web Mercator tile maths, tile source (OpenStreetMap by default, custom or offline), on-disk tile cache and a viewport-only fetch queue. Not yet: geotagging by dragging photos onto the map (LRC-MAP-GEOTAG), the location filter bar (LRC-MAP-FILTER), saved locations (LRC-MAP-LOCATIONS), track logs drawn on the map, the map in the Info panel (LR-MAP-INFO), an offline basemap |
 
 ## V. Preferences (PREF)
 
@@ -597,6 +598,7 @@ visible menu bar yet: the menu model is only exposed through the control channel
 | MENU-VIEW-ZOOM | Zoom in / out / toggle / fit / 1:1 | P0 | ✅ | `cmd:view.zoomIn`, `cmd:view.zoomOut`, `cmd:view.zoomToggle`, `cmd:view.zoomFit`, `cmd:view.zoom100` | |
 | MENU-VIEW-CLIPPING | Show Clipping | P0 | ✅ | `cmd:view.clipping` | |
 | MENU-VIEW-MASKOVERLAY | Mask overlay / cycle colour | P0 | ✅ | `cmd:view.maskOverlay`, `cmd:view.maskOverlayMode`, `cmd:view.maskOverlayColor` | colour cycles through the panel's swatches (no params) or takes `color` / `opacity` |
+| MENU-VIEW-MAP | Map | P2 | ✅ | `cmd:view.map` | View ▸ Map and the map pin in the bottom bar (LRC-MAP-VIEW) |
 | MENU-VIEW-INCLUDESUBFOLDERS | Include subfolders | P1 | ✅ | `cmd:library.browse` (`subfolders`) | toggle in the folder header; imports of folders are recursive |
 | MENU-VIEW-SORT | Sort submenu | P0 | ✅ | `cmd:library.sort`, `cmd:library.shuffle` | Random + Reshuffle; no colour-label key |
 | MENU-VIEW-STACKS | Expand/collapse stacks | P1 | ✅ | `cmd:stack.expandAll`, `cmd:stack.collapseAll` | |
@@ -777,10 +779,10 @@ From `08-lightroom-classic-extras.md` (Classic-only features) and part 2 of `06-
 | LRC-DEV-PROCESS | Process versions, Update to Current Process | P1 | ✅ | `cmd:develop.updateProcess`, `cmd:develop.reset`, `cmd:develop.get`, `crates/develop/src/settings.rs`, `crates/pipeline/src/finish.rs`, `docs/process-versions.md` | each photo records the rendering process its settings are interpreted by: settings saved before this existed load as V1, new photos and Reset get the latest, virtual copies inherit, copy / paste / sync / presets keep each photo's own; Photo ▸ Update to Current Process (one undo step, enabled while a selected photo is on an older process); a number from a newer LightCraft is kept and renders with the newest known process. Only V1 exists so far: this is what lets a retuned default tone (#146) or stronger Light sliders (#196) ship without changing existing edits |
 | LRC-DEV-VIEWOPTIONS | Develop view options | P2 | ⬜ | | |
 | LRC-DEV-VIDEO | Video frame capture | P2 | ⬜ | | |
-| LRC-MAP-VIEW | Map view | P2 | ⬜ | | |
+| LRC-MAP-VIEW | Map view | P2 | ✅ | `cmd:view.map`, `cmd:map.fit`, `cmd:map.setView`, `cmd:map.zoomIn`, `cmd:map.zoomOut`, `cmd:map.state`, `crates/ui-egui/src/panels/map.rs`, `crates/map/src/cluster.rs` | View ▸ Map (or the pin in the bottom bar), with the filmstrip: the photos in view (source, filter and sort, as the grid) with a GPS position as pins on a slippy map; nearby pins merge into a counted cluster per zoom (60 px cells) and split as you zoom in; a click selects a pin's photos (⌘ / ⇧ adds), a double-click opens the first in Detail, hovering shows its thumbnail; selected photos' pins are blue. Drag to pan, mouse wheel / pinch / ⌘-scroll zoom around the pointer, two-finger scroll pans, double-click the map zooms in, + / − and Fit to Photos (⌘= / ⌘- / ⌘0 too); the first visit fits the photos, the view is kept for the session; "N photos without GPS" bottom left; the tile source's attribution always shown bottom right; offline, a grey map with a note. One map style (the tile source's; satellite / terrain imagery is out by licence), no location search (LRC-MAP-REVGEO), no H to hide pins (KEY-HIDEPINS) |
 | LRC-MAP-GEOTAG | Drag photos onto the map | P2 | ⬜ | | |
 | LRC-MAP-LOCATIONS | Saved locations | P2 | ⬜ | | |
-| LRC-MAP-TRACKLOG | GPS track logs | P2 | ✅ | `cmd:photo.autoTagTracklog`, `cmd:photo.tagFromTracklog`, `crates/meta/src/gpx.rs` | Photo ▸ Auto-Tag from Tracklog…: a GPX 1.0 / 1.1 track log sets the GPS of the selected photos by capture time — interpolated between the points of a track segment, else the nearest point within `maxGap` (10 min); never across segment breaks. The camera's time zone comes from the photo (Exif offset) or is asked for; photos that already have a location keep it unless `replace`; `dryRun` previews; one undo step. No track drawn on a map (no Map module) |
+| LRC-MAP-TRACKLOG | GPS track logs | P2 | ✅ | `cmd:photo.autoTagTracklog`, `cmd:photo.tagFromTracklog`, `crates/meta/src/gpx.rs` | Photo ▸ Auto-Tag from Tracklog…: a GPX 1.0 / 1.1 track log sets the GPS of the selected photos by capture time — interpolated between the points of a track segment, else the nearest point within `maxGap` (10 min); never across segment breaks. The camera's time zone comes from the photo (Exif offset) or is asked for; photos that already have a location keep it unless `replace`; `dryRun` previews; one undo step. The track isn't drawn on the map yet |
 | LRC-MAP-FILTER | Location filter bar | P2 | ⬜ | | |
 | LRC-MAP-REVGEO | Reverse geocoding | OOS | 🚫 | | |
 | LRC-BOOK-SETTINGS | Book settings | P2 | ⬜ | | |

@@ -2,6 +2,15 @@
 
 ## October 2026
 
+### Map view
+- View ▸ Map (or the map pin in the bottom bar) shows the photos in view on a map, with the filmstrip below. Nearby
+  photos gather in a numbered cluster that splits as you zoom in; click a pin to select its photos, double-click to
+  open one, rest the pointer on it to see the photo.
+- Drag to pan; the mouse wheel or a pinch zooms where the pointer is; Fit to Photos frames every photo with a location.
+  The count of photos without GPS is shown bottom left.
+- The map uses OpenStreetMap's tiles (credited on the map) or a tile server you choose, only fetches what is on screen,
+  and can be switched off (`map.tileSource {offline: true}`); see [Map](map.md) for what is sent where.
+
 ### Activity stack
 - Long-running tasks show in one place, top left under the top bar, as in Lightroom Classic (issue #345): imports and
   folder scans, exports (and the contact sheet PDF), Synchronize Folder, Build / Smart Previews, Lightroom catalog import, Photo Merge, model downloads, the face scan,

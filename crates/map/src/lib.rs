@@ -5,6 +5,8 @@
 //!   of photo pins, the [`Bounds`] of a set of points (antimeridian aware) and the view that fits
 //!   them ([`fit_bounds`]). Input points are checked ([`LatLon::new`]): NaN, infinities and
 //!   out-of-range latitudes/longitudes are dropped, never propagated.
+//! - [`cluster`]: photo pins grouped per zoom ([`cluster()`]): points projected once
+//!   ([`MapPoint`]), grouped every frame into world-anchored screen cells.
 //! - [`source`]: where tiles come from ([`TileSource`]): OpenStreetMap's standard tiles by default,
 //!   a user-configured `https://…/{z}/{x}/{y}.png` template, or offline (no network at all).
 //! - [`cache`]: the on-disk tile cache ([`TileCache`]): PNG bytes plus HTTP freshness metadata,
@@ -23,17 +25,21 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod cache;
+pub mod cluster;
 pub mod http_date;
 pub mod mercator;
 pub mod service;
 pub mod source;
 
 #[cfg(test)]
+mod tests_cluster;
+#[cfg(test)]
 mod tests_mercator;
 #[cfg(test)]
 mod tests_service;
 
 pub use cache::{CacheInfo, CachedTile, DEFAULT_CACHE_BYTES, TileCache, TileMeta};
+pub use cluster::{CLUSTER_CELL, Cluster, MapPoint, cluster};
 pub use mercator::{Bounds, LatLon, MAX_LATITUDE, MAX_ZOOM, TILE_SIZE, TileKey, Viewport, VisibleTile, fit_bounds};
 pub use service::{HttpResponse, ServiceStats, TileEvent, TileImage, TileService, Transport};
 pub use source::{OSM_ATTRIBUTION, OSM_TILE_URL, TileSource, USER_AGENT};

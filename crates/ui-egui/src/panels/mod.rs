@@ -17,6 +17,7 @@ pub mod keyword_list;
 pub mod keywording;
 pub mod left;
 pub mod library_problem;
+pub mod map;
 pub mod masking;
 pub mod notices;
 pub mod people;
