@@ -4,9 +4,10 @@ LightCraft shows where photos were taken on a map drawn from raster map tiles. T
 fetches, from where, how it follows the tile provider's rules, what that means for your privacy, and how to turn it
 off.
 
-Status: the Map view (below) shows the photos in view as pins and clusters over the tiles, and the Info panel shows a
-small map of the active photo's place. Still to come: dragging photos onto the map to geotag them, the location filter
-bar, saved locations and track logs drawn on the map. Nothing is fetched until a map is on screen.
+Status: the Map view (below) shows the photos in view as pins and clusters over the tiles, you can drag photos onto it
+to set their location (and move or remove pins), and the Info panel shows a small map of the active photo's place.
+Still to come: the location filter bar, saved locations and track logs drawn on the map. Nothing is fetched until a
+map is on screen.
 
 ## The Map view
 
@@ -24,14 +25,54 @@ and sort: the same photos as the grid) on a map, with the filmstrip below.
   photo with a position); ⌘- / ⌘= / ⌘0 do the same in this view.
 - The first time the map is shown it fits the photos with a position; after that it stays where you left it for the
   session.
-- "N photos without GPS" at the bottom left counts the photos in view that have no position (set one in the Info
-  panel, or with Photo ▸ Auto-Tag from Tracklog…).
+- "N photos without GPS" at the bottom left counts the photos in view that have no position (drag them onto the map
+  from the filmstrip, set one in the Info panel, or use Photo ▸ Auto-Tag from Tracklog…).
 - The tile source's attribution is always shown at the bottom right. Tiles not loaded yet show a lower zoom's tile
   magnified, or grey. In offline mode the map is grey with the note "Map tiles are off".
 
 Photos whose GPS position is invalid (out of range, NaN) are counted as without GPS, never placed. Clusters are
 recomputed only when the view moves, from positions projected once per change of the photo list: 50 000 photos on
 screen take about 4 ms (release build), a few thousand well under 1 ms.
+
+## Geotagging: putting photos on the map
+
+As in Lightroom Classic's Map module:
+
+- **Drop photos on the map**: drag photos from the filmstrip onto the map and let go where they were taken. A drag
+  takes the selected photos (or, when the photo you grab isn't selected, just that one); while they are over the map
+  a pin with their count follows the pointer, and the drop sets every one of them to the point under it. Photos that
+  already had a position are moved (Lightroom does the same). One undo step (Edit ▸ Undo "Set GPS Coordinates")
+  puts all of them back where they were, or off the map.
+- **Move a pin**: drag a single photo's pin to its new place (one undo step). A cluster isn't moved: dragging it pans
+  the map, as a drag on the empty map does, so zoom in until the photo has its own pin. A pin dropped outside the map
+  (on the filmstrip, say) stays where it was.
+- **Lock Markers** (the map's toolbar, top right) stops pins from being moved; dragging one then pans the map. It is
+  saved with the window layout (`ui.json`), and `map.lockMarkers {on?}` sets or toggles it.
+- **Remove GPS Coordinates**: Photo ▸ Remove GPS Coordinates clears the position of the selected photos; a right-click
+  on a pin offers the same for that pin's photos. One undo step.
+- The map can't show the poles (Web Mercator stops at ±85.05° latitude), so a drop reaches 85.05° north or south at
+  most; drop above the top edge and you get the edge. Longitudes wrap around the world. Type a position closer to a pole
+  in the Info panel's GPS field.
+- Where positions are saved: in the library, and in XMP sidecars (EXIF GPS: `exif:GPSLatitude` /
+  `exif:GPSLongitude`) when they are written (Photo ▸ Save Metadata to File, or at once with File ▸ Automatically
+  Write Changes into XMP on). A position you set or clear in LightCraft replaces the sidecar's, so a cleared one (or an undone geotag) is
+  removed from it; LightCraft doesn't read GPS from sidecars, so a sidecar's position for a photo whose position you
+  never touched in LightCraft is left alone.
+- Dropping files from the system's file manager onto the map isn't supported (they import, as anywhere in the app).
+
+| Command | Params | Result |
+|---|---|---|
+| `photo.setGps` | `{ids?, lat, lon}` | Set the position of the photos (default: the selection): `lat` −90…90, `lon` in degrees (wrapped into −180…180); anything else, or ids that are none of the library's photos, is refused → `{changed, lat, lon}` |
+| `photo.removeGps` | `{ids?}` | Clear the position of the photos (default: the selection) → `{changed}` |
+| `map.lockMarkers` | `{on?}` | Lock Markers on / off (toggles without `on`) → `{on}` |
+
+`photo.setGps` and `photo.removeGps` are library commands (also in `lightcraft-cli` and the headless MCP server);
+`map.lockMarkers` is a UI command. `map.state` also reports `lockMarkers`, `movingPin` (`{id, x, y}` while a pin is dragged) and `drop` (`{count, x, y,
+lat, lon}` while photos are dragged over the map). Widgets: `map:lockMarkers`, `map:pinMenu:removeGps` (the pin's
+menu). Agents can hold a drag across requests with `ui.pointer {screen: true, events: [{kind: "down", …}, {kind:
+"drag", …}]}` and drop it with `{kind: "up"}` (see the control protocol).
+
+## Map commands
 
 Commands (UI commands: they need the map's size, so the app, `lightcraft-cli snapshot` and `mcp --connect` have them):
 
@@ -41,7 +82,7 @@ Commands (UI commands: they need the map's size, so the app, `lightcraft-cli sna
 | `map.fit` | — | Fit the photos with a position (the world when there are none) → the map state |
 | `map.setView` | `{lat?, lon?, zoom?}` | Centre (degrees) and zoom (0 to the source's max zoom; fractional allowed); what is left out stays → the map state |
 | `map.zoomIn` / `map.zoomOut` | — | One zoom level in / out, around the centre → the map state |
-| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, tiles: {drawn, missing, textures, uploads}, miniMap}` (`miniMap`: the Info panel's map, below); `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
+| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, lockMarkers, movingPin, drop, tiles: {drawn, missing, textures, uploads}, miniMap}` (`miniMap`: the Info panel's map, below); `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
 
 Widgets (`ui.widgets`): `map:canvas`, `map:pin:<first photo id>`, `map:fit`, `icon:mapZoomIn`, `icon:mapZoomOut`,
 `map:attribution`, `map:withoutGps`, `map:hoverThumb`.

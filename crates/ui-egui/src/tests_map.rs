@@ -13,11 +13,11 @@ use crate::headless::Headless;
 use crate::state::ViewMode;
 use crate::{LightcraftApp, Services};
 
-const T: Duration = Duration::from_secs(20);
-const SETTLE: Duration = Duration::from_secs(120);
+pub(super) const T: Duration = Duration::from_secs(20);
+pub(super) const SETTLE: Duration = Duration::from_secs(120);
 
 /// A tile server in the test: every tile is the same 256 px PNG (or garbage for `bad` columns).
-struct FakeTiles {
+pub(super) struct FakeTiles {
     png: Vec<u8>,
     requests: AtomicUsize,
     /// Tiles whose x is odd come back as bytes that aren't an image.
@@ -46,21 +46,21 @@ fn tile_png() -> Vec<u8> {
     lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap()
 }
 
-fn fake(garbage_odd: bool) -> Arc<FakeTiles> {
+pub(super) fn fake(garbage_odd: bool) -> Arc<FakeTiles> {
     Arc::new(FakeTiles { png: tile_png(), requests: AtomicUsize::new(0), garbage_odd })
 }
 
 /// Paris ×3, London ×2, New York ×1.
-const PLACES: [(f64, f64); 6] =
+pub(super) const PLACES: [(f64, f64); 6] =
     [(48.8584, 2.2945), (48.8606, 2.3376), (48.8530, 2.3499), (51.5007, -0.1246), (51.5081, -0.0759), (40.7484, -73.9857)];
 
 /// The demo library at 1400 × 900 with the fake tile server; the first six photos in view get
 /// [`PLACES`] (returned in that order).
-fn demo(tiles: Option<Arc<FakeTiles>>) -> (Headless, Vec<u64>) {
+pub(super) fn demo(tiles: Option<Arc<FakeTiles>>) -> (Headless, Vec<u64>) {
     demo_sized(tiles, [1400.0, 900.0])
 }
 
-fn demo_sized(tiles: Option<Arc<FakeTiles>>, size: [f32; 2]) -> (Headless, Vec<u64>) {
+pub(super) fn demo_sized(tiles: Option<Arc<FakeTiles>>, size: [f32; 2]) -> (Headless, Vec<u64>) {
     let services = Services { png: None, ..Default::default() };
     let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
     if let Some(f) = tiles {
@@ -78,27 +78,27 @@ fn demo_sized(tiles: Option<Arc<FakeTiles>>, size: [f32; 2]) -> (Headless, Vec<u
     (h, ids)
 }
 
-fn run(h: &mut Headless, id: &str, params: Value) -> Value {
+pub(super) fn run(h: &mut Headless, id: &str, params: Value) -> Value {
     let r = h.request("engine.execute", json!({"command": id, "params": params}), T);
     assert_eq!(r["ok"], true, "{id}: {r}");
     r["result"].clone()
 }
 
-fn state(h: &mut Headless) -> Value {
+pub(super) fn state(h: &mut Headless) -> Value {
     run(h, "map.state", json!({}))
 }
 
-fn frames(h: &mut Headless, n: usize) {
+pub(super) fn frames(h: &mut Headless, n: usize) {
     for _ in 0..n {
         h.step();
     }
 }
 
-fn clusters(s: &Value) -> Vec<Value> {
+pub(super) fn clusters(s: &Value) -> Vec<Value> {
     s["clusters"].as_array().cloned().unwrap_or_default()
 }
 
-fn ids_of(c: &Value) -> Vec<u64> {
+pub(super) fn ids_of(c: &Value) -> Vec<u64> {
     let mut v: Vec<u64> = c["ids"].as_array().unwrap().iter().filter_map(Value::as_u64).collect();
     v.sort();
     v
@@ -353,7 +353,7 @@ fn mini(h: &mut Headless) -> Value {
     state(h)["miniMap"].clone()
 }
 
-fn widget(h: &Headless, id: &str) -> Option<egui::Rect> {
+pub(super) fn widget(h: &Headless, id: &str) -> Option<egui::Rect> {
     h.app.widgets.iter().find(|(w, _)| w == id).map(|(_, r)| *r)
 }
 

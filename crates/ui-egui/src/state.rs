@@ -346,6 +346,8 @@ pub struct UiState {
     pub show_counts: bool,
     /// Face / pet boxes (read from XMP) over the photo in the loupe.
     pub face_boxes: bool,
+    /// Map view: Lock Markers (pins can't be dragged to move a photo's position; `map.lockMarkers`).
+    pub map_lock_markers: bool,
     /// Left-sidebar sections folded shut by their header (`albums`, `local`, `byDate`,
     /// `keywords`); the rest are open.
     pub collapsed_sidebar: Vec<String>,
@@ -818,6 +820,7 @@ impl Default for UiState {
             grid_info: "filename".into(),
             show_counts: true,
             face_boxes: true,
+            map_lock_markers: false,
             collapsed_sidebar: Vec::new(),
             name_edit: None,
             person_page: None,

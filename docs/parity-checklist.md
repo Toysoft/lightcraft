@@ -50,12 +50,12 @@ cited here still exists. Formerly docs/parity.md.
 | V. Preferences (PREF) | 6 | 2 | 2 | 2 | 1/1 (100%) | 4/5 (80%) |
 | W. Cloud & AI infrastructure (CLOUD / AI) | 1 | 0 | 1 | 2 | — | — |
 | X. Cross-cutting behaviours (BEHAV) | 18 | 6 | 1 | 1 | 8/8 (100%) | 6/9 (67%) |
-| Y. Menus | 83 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
+| Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 75 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
-| Lightroom Classic extras | 34 | 15 | 34 | 9 | — | 23/25 (92%) |
-| **Total** | 400 | 49 | 71 | 36 | 192/200 (96%) | 144/155 (93%) |
+| Lightroom Classic extras | 35 | 15 | 33 | 9 | — | 23/25 (92%) |
+| **Total** | 402 | 49 | 70 | 36 | 192/200 (96%) | 144/155 (93%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.6%** of 520 in-scope rows — P0 98.0% of 200 · P1 95.5% of 155 · P2 48.5% of 164.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.9%** of 521 in-scope rows — P0 98.0% of 200 · P1 95.5% of 155 · P2 49.4% of 165.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -414,7 +414,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | Id | Feature | Tier | Status | Evidence | Missing / notes |
 |---|---|---|---|---|---|
 | LR-MAP-INFO | Location in the info panel | P1 | ✅ | `cmd:photo.setMeta` (`location`, `city`, `state`, `country`, `gps`), `cmd:map.state`, `crates/ui-egui/src/panels/right.rs`, `crates/ui-egui/src/panels/map.rs` | location, city, state/province, country and GPS editable; under them a map of the active photo's place (zoom 14, its pin, the tile credit; shares the Map view's tiles; fetches only while on screen; grey with a note offline); clicking it opens the Map view centred there; Open in Browser shows the place on openstreetmap.org |
-| LR-MAP-MODULE | Map module [Classic] | P2 | 🟡 | `cmd:view.map`, `cmd:map.fit`, `cmd:map.setView`, `cmd:map.state`, `cmd:map.tileSource`, `cmd:map.cacheInfo`, `cmd:map.clearCache`, `crates/map`, `crates/ui-egui/src/panels/map.rs`, `docs/map.md` | a Map view (View ▸ Map, LRC-MAP-VIEW) over the core: Web Mercator tile maths, tile source (OpenStreetMap by default, custom or offline), on-disk tile cache and a viewport-only fetch queue. Not yet: geotagging by dragging photos onto the map (LRC-MAP-GEOTAG), the location filter bar (LRC-MAP-FILTER), saved locations (LRC-MAP-LOCATIONS), track logs drawn on the map, the map in the Info panel (LR-MAP-INFO), an offline basemap |
+| LR-MAP-MODULE | Map module [Classic] | P2 | 🟡 | `cmd:view.map`, `cmd:map.fit`, `cmd:map.setView`, `cmd:map.state`, `cmd:map.tileSource`, `cmd:map.cacheInfo`, `cmd:map.clearCache`, `crates/map`, `crates/ui-egui/src/panels/map.rs`, `docs/map.md` | a Map view (View ▸ Map, LRC-MAP-VIEW) over the core: Web Mercator tile maths, tile source (OpenStreetMap by default, custom or offline), on-disk tile cache and a viewport-only fetch queue. Geotagging by dragging photos onto the map, moving pins, Lock Markers and Remove GPS Coordinates (LRC-MAP-GEOTAG). Not yet: the location filter bar (LRC-MAP-FILTER), saved locations (LRC-MAP-LOCATIONS), track logs drawn on the map, an offline basemap (the map in the Info panel: LR-MAP-INFO) |
 
 ## V. Preferences (PREF)
 
@@ -554,6 +554,7 @@ visible menu bar yet: the menu model is only exposed through the control channel
 | MENU-PHOTO-UPDATEAI | Update AI settings | P2 | ⬜ | | |
 | MENU-PHOTO-RENAME | Rename N photos… | P1 | ✅ | `cmd:dialog.rename` | live “Rename N Photos…” label |
 | MENU-PHOTO-CAPTURETIME | Edit capture time… | P1 | ✅ | `cmd:dialog.captureTime` | |
+| MENU-PHOTO-REMOVEGPS | Remove GPS Coordinates [Classic] | P2 | ✅ | `cmd:photo.removeGps` | clears the selected photos' GPS position, one undo step; also on a map pin's right-click menu (LRC-MAP-GEOTAG) |
 | MENU-PHOTO-COVER | Set as album cover | P2 | ✅ | `cmd:album.setCover` | |
 | MENU-PHOTO-DELETE | Delete N photos… | P0 | ✅ | `cmd:photo.delete` | no confirmation; static label |
 | MENU-PHOTO-MOVETOCLOUD | Move/copy to cloud | OOS | 🚫 | | |
@@ -713,7 +714,7 @@ From `08-lightroom-classic-extras.md` (Classic-only features) and part 2 of `06-
 | LRC-DEV-VIEWOPTIONS | Develop view options | P2 | ⬜ | | |
 | LRC-DEV-VIDEO | Video frame capture | P2 | ⬜ | | |
 | LRC-MAP-VIEW | Map view | P2 | ✅ | `cmd:view.map`, `cmd:map.fit`, `cmd:map.setView`, `cmd:map.zoomIn`, `cmd:map.zoomOut`, `cmd:map.state`, `crates/ui-egui/src/panels/map.rs`, `crates/map/src/cluster.rs` | View ▸ Map (or the pin in the bottom bar), with the filmstrip: the photos in view (source, filter and sort, as the grid) with a GPS position as pins on a slippy map; nearby pins merge into a counted cluster per zoom (60 px cells) and split as you zoom in; a click selects a pin's photos (⌘ / ⇧ adds), a double-click opens the first in Detail, hovering shows its thumbnail; selected photos' pins are blue. Drag to pan, mouse wheel / pinch / ⌘-scroll zoom around the pointer, two-finger scroll pans, double-click the map zooms in, + / − and Fit to Photos (⌘= / ⌘- / ⌘0 too); the first visit fits the photos, the view is kept for the session; "N photos without GPS" bottom left; the tile source's attribution always shown bottom right; offline, a grey map with a note. One map style (the tile source's; satellite / terrain imagery is out by licence), no location search (LRC-MAP-REVGEO), no H to hide pins (KEY-HIDEPINS) |
-| LRC-MAP-GEOTAG | Drag photos onto the map | P2 | ⬜ | | |
+| LRC-MAP-GEOTAG | Drag photos onto the map | P2 | ✅ | `cmd:photo.setGps`, `cmd:photo.removeGps`, `cmd:map.lockMarkers`, `crates/ui-egui/src/panels/map.rs`, `crates/ui-egui/src/tests_map_geotag.rs` | photos dragged from the filmstrip (the selection, or the photo under the pointer) and dropped on the Map view get the drop point's position, overwriting any they had, as one undo step; a pin follows the pointer while they are over the map. A drag that starts on a single photo's pin moves it (one undo step); a cluster's drag pans, as in Lightroom Classic. Lock Markers in the map toolbar stops pins from moving (saved with the UI state). Right-click a pin, or Photo ▸ Remove GPS Coordinates, to clear the position (one undo step). Positions go to XMP sidecars as EXIF GPS; a cleared one (or an undone geotag) is removed from the sidecar. Drops reach latitude ±85.05° at most (the map's edge). No auto-pan when a drag nears the map's edge, no Escape to cancel a drag, no OS file drops onto the map |
 | LRC-MAP-LOCATIONS | Saved locations | P2 | ⬜ | | |
 | LRC-MAP-TRACKLOG | GPS track logs | P2 | ✅ | `cmd:photo.autoTagTracklog`, `cmd:photo.tagFromTracklog`, `crates/meta/src/gpx.rs` | Photo ▸ Auto-Tag from Tracklog…: a GPX 1.0 / 1.1 track log sets the GPS of the selected photos by capture time — interpolated between the points of a track segment, else the nearest point within `maxGap` (10 min); never across segment breaks. The camera's time zone comes from the photo (Exif offset) or is asked for; photos that already have a location keep it unless `replace`; `dryRun` previews; one undo step. No track drawn on a map (no Map module) |
 | LRC-MAP-FILTER | Location filter bar | P2 | ⬜ | | |

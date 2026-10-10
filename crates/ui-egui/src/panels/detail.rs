@@ -1982,7 +1982,8 @@ pub(crate) fn filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, r: Rect) {
             if !local.intersects(vp.expand2(vec2(cell_w * 4.0, 0.0))) {
                 continue;
             }
-            let resp = ui.interact(cr, egui::Id::new(("film", id.0)), Sense::click());
+            // a drag takes the selection along (to an album, a keyword, or the Map view to geotag it)
+            let resp = ui.interact(cr, egui::Id::new(("film", id.0)), Sense::click_and_drag());
             register(ui.ctx(), format!("film:{}", id.0), cr);
             let state = app.session.selection.state_of(*id);
             let sel = state == lightcraft_engine::SelectionState::Active;
@@ -2040,6 +2041,9 @@ pub(crate) fn filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, r: Rect) {
                     "replace"
                 };
                 let _ = app.run("library.select", json!({"ids": [id.0], "mode": mode}));
+            }
+            if resp.drag_started() {
+                super::grid::start_photo_drag(app, *id);
             }
             // the same photo actions as the grid and loupe (Restore / Delete Permanently in Recently Deleted)
             resp.context_menu(|ui| super::grid::context_menu(app, ui, *id));

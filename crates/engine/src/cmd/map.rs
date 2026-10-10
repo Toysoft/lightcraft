@@ -1,9 +1,11 @@
-//! Map commands: the tile source (where map tiles come from, saved with the library preferences)
-//! and the tile cache. See docs/map.md.
+//! Map commands: the tile source (where map tiles come from, saved with the library preferences),
+//! the tile cache, and geotagging (`photo.setGps`, `photo.removeGps`: what dropping photos on the
+//! Map view, moving a pin and Photo ▸ Remove GPS Coordinates run). See docs/map.md.
 
+use lightcraft_catalog::{Op, PhotoId};
 use serde_json::{Value, json};
 
-use super::{CommandSpec, always, bad, cmd};
+use super::{CommandSpec, always, bad, cmd, has_selection, names_photos};
 use crate::{EngineError, Result, Session};
 use lightcraft_map::source::{OFFLINE_ID, OSM_ID, OSM_TILE_URL};
 use lightcraft_map::{TileSource, cache};
@@ -97,8 +99,106 @@ fn clear_cache(s: &mut Session, _: &Value) -> Result<Value> {
     Ok(json!({"bytes": gone.bytes, "tiles": gone.tiles, "dir": root.to_string_lossy()}))
 }
 
+/// A coordinate parameter: a finite number (JSON has no NaN, but a huge exponent must not pass).
+fn coord(id: &str, p: &Value, key: &str) -> Result<f64> {
+    match p.get(key) {
+        Some(v) => v.as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(id, format!("`{key}` must be a number (degrees)"))),
+        None => Err(bad(id, format!("missing `{key}` (degrees)"))),
+    }
+}
+
+/// `lon` folded into −180…180 (190 is −170: the same meridian), `None` when not finite.
+pub(crate) fn wrap_lon(lon: f64) -> Option<f64> {
+    if !lon.is_finite() {
+        return None;
+    }
+    if (-180.0..=180.0).contains(&lon) {
+        return Some(lon);
+    }
+    Some((lon + 180.0).rem_euclid(360.0) - 180.0)
+}
+
+/// The photos a geotag command acts on: those named (`ids` / `id`) that exist, else the
+/// selection. Naming only photos that don't exist is an error (nothing to do, and the caller
+/// should know).
+fn gps_targets(s: &Session, p: &Value, id: &str) -> Result<Vec<PhotoId>> {
+    let named = names_photos(p);
+    if named && !p.get("ids").is_none_or(|v| v.is_null() || v.is_array()) {
+        return Err(bad(id, "`ids` is a list of photo ids"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    let t: Vec<PhotoId> = s.targets(p).into_iter().filter(|i| s.catalog.photo(*i).is_some() && seen.insert(*i)).collect();
+    if t.is_empty() {
+        return Err(bad(id, if named { "no such photo" } else { "no photos selected" }));
+    }
+    Ok(t)
+}
+
+/// Set (`Some`) or clear (`None`) the GPS position of `targets`, one undo step `label`.
+fn commit_gps(s: &mut Session, targets: &[PhotoId], gps: Option<(f64, f64)>, label: &str) -> Result<usize> {
+    let ops: Vec<Op> = targets
+        .iter()
+        .filter_map(|id| s.catalog.photo(*id))
+        .filter(|ph| ph.meta.gps != gps)
+        .map(|ph| {
+            let mut m = ph.meta.clone();
+            m.gps = gps;
+            Op::SetMeta { id: ph.id, meta: Box::new(m) }
+        })
+        .collect();
+    let n = ops.len();
+    if n > 0 {
+        s.commit(label, Op::Batch { ops })?;
+        s.gps_edited.extend(targets.iter().copied());
+    }
+    Ok(n)
+}
+
+fn set_gps(s: &mut Session, p: &Value) -> Result<Value> {
+    const C: &str = "photo.setGps";
+    let lat = coord(C, p, "lat")?;
+    let lon = coord(C, p, "lon")?;
+    if !(-90.0..=90.0).contains(&lat) {
+        return Err(bad(C, format!("lat {lat} is outside −90…90")));
+    }
+    let lon = wrap_lon(lon).ok_or_else(|| bad(C, "`lon` must be a number (degrees)"))?;
+    let targets = gps_targets(s, p, C)?;
+    let changed = commit_gps(s, &targets, Some((lat, lon)), "Set GPS Coordinates")?;
+    Ok(json!({"changed": changed, "lat": lat, "lon": lon}))
+}
+
+fn remove_gps(s: &mut Session, p: &Value) -> Result<Value> {
+    let targets = gps_targets(s, p, "photo.removeGps")?;
+    let changed = commit_gps(s, &targets, None, "Remove GPS Coordinates")?;
+    Ok(json!({"changed": changed}))
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        CommandSpec {
+            explicit_targets: true,
+            ..cmd!(
+                "photo.setGps",
+                "Set GPS Coordinates",
+                [],
+                None,
+                "{ids?, lat, lon} — set the GPS position of the photos (default: the selection) to lat (−90…90) / lon (degrees; wrapped into −180…180), one undo step; what dropping photos on the Map view or moving a pin does → {changed, lat, lon}",
+                has_selection,
+                set_gps
+            )
+        },
+        CommandSpec {
+            explicit_targets: true,
+            ..cmd!(
+                "photo.removeGps",
+                "Remove GPS Coordinates",
+                ["Photo"],
+                None,
+                "{ids?} — clear the GPS position of the photos (default: the selection), one undo step → {changed}",
+                has_selection,
+                remove_gps
+            )
+        },
         cmd!(
             "map.tileSource",
             "Map Tile Source",
@@ -209,5 +309,84 @@ mod tests {
         assert_eq!(r["tiles"], 3);
         assert_eq!(s.execute("map.cacheInfo", &json!({})).unwrap()["tiles"], 0);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn gps(s: &Session, id: PhotoId) -> Option<(f64, f64)> {
+        s.catalog.photo(id).and_then(|p| p.meta.gps)
+    }
+
+    #[test]
+    fn set_gps_sets_every_photo_in_one_undo_step() {
+        let mut s = Session::with_demo();
+        let ids: Vec<PhotoId> = s.catalog.photos().take(3).map(|p| p.id).collect();
+        s.execute("photo.setMeta", &json!({"ids": [ids[0].0], "gps": [10.0, 20.0]})).unwrap();
+        let r = s.execute("photo.setGps", &json!({"ids": ids.iter().map(|i| i.0).collect::<Vec<_>>(), "lat": 48.85, "lon": 2.29})).unwrap();
+        assert_eq!(r["changed"], 3, "{r}");
+        for id in &ids {
+            assert_eq!(gps(&s, *id), Some((48.85, 2.29)));
+        }
+        assert_eq!(s.undo.last().map(|u| u.label.as_str()), Some("Set GPS Coordinates"));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(gps(&s, ids[0]), Some((10.0, 20.0)), "the old position comes back");
+        assert_eq!((gps(&s, ids[1]), gps(&s, ids[2])), (None, None), "one step undoes them all");
+        // the same position again changes nothing (no empty undo step)
+        s.execute("edit.redo", &json!({})).unwrap();
+        let steps = s.undo.len();
+        assert_eq!(s.execute("photo.setGps", &json!({"ids": [ids[1].0], "lat": 48.85, "lon": 2.29})).unwrap()["changed"], 0);
+        assert_eq!(s.undo.len(), steps);
+        // longitude wraps around the world
+        let r = s.execute("photo.setGps", &json!({"ids": [ids[1].0], "lat": -33.9, "lon": 190.0})).unwrap();
+        assert_eq!(r["lon"].as_f64(), Some(-170.0));
+        assert_eq!(gps(&s, ids[1]), Some((-33.9, -170.0)));
+    }
+
+    #[test]
+    fn set_gps_refuses_hostile_values_and_changes_nothing() {
+        let mut s = Session::with_demo();
+        let id = s.catalog.photos().next().unwrap().id;
+        s.execute("library.select", &json!({"ids": [id.0]})).unwrap();
+        let steps = s.undo.len();
+        for bad in [
+            json!({"lat": 91.0, "lon": 0.0}),
+            json!({"lat": -90.5, "lon": 0.0}),
+            json!({"lat": "north", "lon": 0.0}),
+            json!({"lat": null, "lon": 0.0}),
+            json!({"lon": 0.0}),
+            json!({"lat": 0.0}),
+            json!({"lat": 0.0, "lon": [1]}),
+            json!({"lat": 0.0, "lon": 0.0, "ids": [999_999_999]}),
+            json!({"lat": 0.0, "lon": 0.0, "ids": "1"}),
+            json!({"lat": 0.0, "lon": 0.0, "ids": [-1, "x"]}),
+        ] {
+            assert!(matches!(s.execute("photo.setGps", &bad), Err(EngineError::BadParams { .. })), "{bad}");
+        }
+        // a number too large for f64 isn't a coordinate either
+        let huge: Value = serde_json::from_str(r#"{"lat": 0, "lon": 1e400}"#).unwrap_or(json!({"lat": 0, "lon": f64::MAX}));
+        let _ = s.execute("photo.setGps", &huge);
+        assert!(s.undo.len() <= steps + 1);
+        assert!(gps(&s, id).is_none_or(|(la, lo)| la.is_finite() && lo.is_finite() && lo.abs() <= 180.0));
+        assert_eq!(wrap_lon(f64::NAN), None);
+        assert_eq!(wrap_lon(f64::INFINITY), None);
+        assert_eq!(wrap_lon(540.0), Some(-180.0));
+        assert_eq!(wrap_lon(-190.0), Some(170.0));
+        assert_eq!(wrap_lon(180.0), Some(180.0));
+    }
+
+    #[test]
+    fn remove_gps_clears_the_selection_in_one_undo_step() {
+        let mut s = Session::with_demo();
+        let ids: Vec<u64> = s.catalog.photos().take(2).map(|p| p.id.0).collect();
+        s.execute("photo.setGps", &json!({"ids": ids, "lat": 51.5, "lon": -0.12})).unwrap();
+        s.execute("library.select", &json!({"ids": ids})).unwrap();
+        let r = s.execute("photo.removeGps", &json!({})).unwrap();
+        assert_eq!(r["changed"], 2);
+        assert!(ids.iter().all(|i| gps(&s, PhotoId(*i)).is_none()));
+        assert_eq!(s.undo.last().map(|u| u.label.as_str()), Some("Remove GPS Coordinates"));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(ids.iter().all(|i| gps(&s, PhotoId(*i)) == Some((51.5, -0.12))));
+        assert!(s.execute("photo.removeGps", &json!({"ids": [123_456_789]})).is_err());
+        // it is in the Photo menu
+        let spec = crate::cmd::find_command("photo.removeGps").unwrap();
+        assert_eq!(spec.menu, &["Photo"]);
     }
 }

@@ -67,6 +67,8 @@ mod tests_library_problem;
 #[cfg(test)]
 mod tests_map;
 #[cfg(test)]
+mod tests_map_geotag;
+#[cfg(test)]
 mod tests_masking;
 #[cfg(test)]
 mod tests_masking_layout;

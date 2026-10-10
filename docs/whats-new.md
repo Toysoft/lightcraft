@@ -13,6 +13,12 @@
 - The Info panel shows a small map of the photo's place under its location fields (the active photo's, with several
   selected). Click it to open the Map view there; **Open in Browser** (formerly Show on Map) still opens
   OpenStreetMap's site.
+- Put photos on the map: drag them from the filmstrip onto the Map view and let go where they were taken (a pin follows
+  the pointer); they all get that position in one undo step, replacing any they had. Drag a photo's pin to move it;
+  **Lock Markers** in the map's toolbar keeps pins in place. Photo ▸ **Remove GPS Coordinates** (or right-click a pin)
+  clears the position. Positions are written to XMP sidecars like the Info panel's. Agents: `photo.setGps`,
+  `photo.removeGps`, `map.lockMarkers`.
+- The filmstrip's photos can be dragged now, in every view: onto the map, onto an album or a keyword, as from the grid.
 
 ### Activity stack
 - Long-running tasks show in one place, top left under the top bar, as in Lightroom Classic (issue #345): imports and
