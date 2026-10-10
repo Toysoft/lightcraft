@@ -69,7 +69,8 @@ impl TileMeta {
     /// whether it may be stored (`no-store` says no).
     pub fn from_response<'a>(now: i64, header: impl Fn(&str) -> Option<&'a str>) -> (TileMeta, bool) {
         let (expires, store) = freshness(now, header("cache-control"), header("expires"), header("date"));
-        let keep = |v: Option<&str>| v.map(str::trim).filter(|v| !v.is_empty() && v.len() <= 256 && !v.chars().any(char::is_control)).map(str::to_string);
+        let keep =
+            |v: Option<&str>| v.map(str::trim).filter(|v| !v.is_empty() && v.len() <= 256 && !v.chars().any(char::is_control)).map(str::to_string);
         (TileMeta { fetched: now, expires, etag: keep(header("etag")), last_modified: keep(header("last-modified")) }, store)
     }
 
@@ -77,7 +78,12 @@ impl TileMeta {
     /// validators the server sent (else the old ones).
     pub fn revalidated<'a>(&self, now: i64, header: impl Fn(&str) -> Option<&'a str>) -> TileMeta {
         let (fresh, _) = TileMeta::from_response(now, header);
-        TileMeta { fetched: now, expires: fresh.expires, etag: fresh.etag.or_else(|| self.etag.clone()), last_modified: fresh.last_modified.or_else(|| self.last_modified.clone()) }
+        TileMeta {
+            fetched: now,
+            expires: fresh.expires,
+            etag: fresh.etag.or_else(|| self.etag.clone()),
+            last_modified: fresh.last_modified.or_else(|| self.last_modified.clone()),
+        }
     }
 
     /// Fresh at `now` (else shown, but revalidated).
@@ -306,7 +312,8 @@ fn walk(root: &Path, sweep: bool) -> Vec<Entry> {
             .map(|rd| rd.filter_map(Result::ok).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()).collect())
             .unwrap_or_default()
     };
-    let numeric = |p: &Path| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| !n.is_empty() && n.len() <= 10 && n.bytes().all(|b| b.is_ascii_digit()));
+    let numeric =
+        |p: &Path| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| !n.is_empty() && n.len() <= 10 && n.bytes().all(|b| b.is_ascii_digit()));
     for source in dirs(root) {
         if source.file_name().and_then(|n| n.to_str()).is_none_or(|n| validate_id(n).is_err()) {
             continue;
@@ -439,7 +446,11 @@ mod tests {
     fn freshness_follows_the_headers() {
         let now = 1_000_000;
         assert_eq!(freshness(now, Some("max-age=3600"), None, None), (now + 3600, true));
-        assert_eq!(freshness(now, Some("public, max-age=86400, stale-while-revalidate=1"), Some("Thu, 01 Jan 1970 00:00:00 GMT"), None), (now + 86_400, true), "max-age wins over Expires");
+        assert_eq!(
+            freshness(now, Some("public, max-age=86400, stale-while-revalidate=1"), Some("Thu, 01 Jan 1970 00:00:00 GMT"), None),
+            (now + 86_400, true),
+            "max-age wins over Expires"
+        );
         assert_eq!(freshness(now, Some("max-age=abc"), None, None), (now, true), "a bad max-age is 0");
         assert_eq!(freshness(now, Some("no-cache"), None, None), (now, true));
         assert!(!freshness(now, Some("no-store"), None, None).1);
@@ -460,9 +471,15 @@ mod tests {
         let h = [("Cache-Control", "max-age=60"), ("ETag", "\"abc\""), ("Last-Modified", "Sun, 06 Nov 1994 08:49:37 GMT")];
         let (m, store) = TileMeta::from_response(100, headers(&h));
         assert!(store);
-        assert_eq!(m, TileMeta { fetched: 100, expires: 160, etag: Some("\"abc\"".into()), last_modified: Some("Sun, 06 Nov 1994 08:49:37 GMT".into()) });
+        assert_eq!(
+            m,
+            TileMeta { fetched: 100, expires: 160, etag: Some("\"abc\"".into()), last_modified: Some("Sun, 06 Nov 1994 08:49:37 GMT".into()) }
+        );
         assert!(m.is_fresh(159) && !m.is_fresh(160));
-        assert_eq!(m.conditional_headers(), vec![("If-None-Match", "\"abc\"".to_string()), ("If-Modified-Since", "Sun, 06 Nov 1994 08:49:37 GMT".to_string())]);
+        assert_eq!(
+            m.conditional_headers(),
+            vec![("If-None-Match", "\"abc\"".to_string()), ("If-Modified-Since", "Sun, 06 Nov 1994 08:49:37 GMT".to_string())]
+        );
         // a 304 without headers: 7 days, same validators
         let r = m.revalidated(500, headers(&[]));
         assert_eq!((r.fetched, r.expires, r.etag.as_deref()), (500, 500 + DEFAULT_FRESH_SECS, Some("\"abc\"")));
@@ -488,7 +505,11 @@ mod tests {
         assert_eq!(c.read(k).unwrap(), CachedTile { meta: newer.clone(), bytes: b"png bytes".to_vec() });
         assert!(!c.refresh(key(3, 0, 0), &newer).unwrap(), "nothing to refresh");
         // no .part left behind
-        let leftovers: Vec<_> = fs::read_dir(root.join("osm/3/2")).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().ends_with(".part")).collect();
+        let leftovers: Vec<_> = fs::read_dir(root.join("osm/3/2"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
+            .collect();
         assert!(leftovers.is_empty());
         assert_eq!(info(&root), CacheInfo { bytes: fs::metadata(root.join("osm/3/2/1.tile")).unwrap().len(), tiles: 1 });
         // an unusable source id never becomes a path

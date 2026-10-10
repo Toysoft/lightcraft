@@ -161,7 +161,12 @@ impl Viewport {
     /// wrapped, zoom in [0, [`MAX_ZOOM`]], size in [0, [`MAX_VIEW_PX`]] (NaN → 0).
     pub fn new(center: LatLon, zoom: f64, width: f64, height: f64) -> Viewport {
         let size = |v: f64| if v.is_nan() { 0.0 } else { v.clamp(0.0, MAX_VIEW_PX) };
-        Viewport { center: LatLon { lat: clamp_lat(center.lat), lon: wrap_lon(center.lon) }, zoom: clamp_zoom(zoom), width: size(width), height: size(height) }
+        Viewport {
+            center: LatLon { lat: clamp_lat(center.lat), lon: wrap_lon(center.lon) },
+            zoom: clamp_zoom(zoom),
+            width: size(width),
+            height: size(height),
+        }
     }
 
     /// The same view, sanitized (fields are public, so a caller may have put anything there).
@@ -355,7 +360,11 @@ impl Bounds {
     pub fn contains(&self, p: LatLon) -> bool {
         let lon = wrap_lon(p.lon);
         let lat_ok = (self.south..=self.north).contains(&p.lat);
-        let lon_ok = if self.crosses_antimeridian() { lon >= self.west || lon <= self.east } else { (self.west..=self.east).contains(&lon) || (self.east == 180.0 && lon == -180.0) };
+        let lon_ok = if self.crosses_antimeridian() {
+            lon >= self.west || lon <= self.east
+        } else {
+            (self.west..=self.east).contains(&lon) || (self.east == 180.0 && lon == -180.0)
+        };
         lat_ok && lon_ok
     }
 

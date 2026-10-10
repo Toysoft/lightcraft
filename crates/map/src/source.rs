@@ -63,12 +63,24 @@ impl Default for TileSource {
 impl TileSource {
     /// OpenStreetMap's standard tiles (the default).
     pub fn openstreetmap() -> TileSource {
-        TileSource { id: OSM_ID.into(), url_template: OSM_TILE_URL.into(), attribution: OSM_ATTRIBUTION.into(), max_zoom: OSM_MAX_ZOOM, user_agent: user_agent() }
+        TileSource {
+            id: OSM_ID.into(),
+            url_template: OSM_TILE_URL.into(),
+            attribution: OSM_ATTRIBUTION.into(),
+            max_zoom: OSM_MAX_ZOOM,
+            user_agent: user_agent(),
+        }
     }
 
     /// No tiles and no network: the map shows only what is drawn on top of it (pins, tracks).
     pub fn offline() -> TileSource {
-        TileSource { id: OFFLINE_ID.into(), url_template: String::new(), attribution: String::new(), max_zoom: OSM_MAX_ZOOM, user_agent: user_agent() }
+        TileSource {
+            id: OFFLINE_ID.into(),
+            url_template: String::new(),
+            attribution: String::new(),
+            max_zoom: OSM_MAX_ZOOM,
+            user_agent: user_agent(),
+        }
     }
 
     /// A user-configured raster source, checked: the template must be an `https://` URL with
@@ -222,7 +234,11 @@ mod tests {
         let s = TileSource::custom(None, "https://tiles.example.org/base/{z}/{x}/{y}.png?key=1", Some("© Example"), Some(17)).unwrap();
         assert!(s.id.starts_with("custom-") && s.id.len() == 15, "{}", s.id);
         assert_eq!(s.url(TileKey::new(3, 1, 2).unwrap()).as_deref(), Some("https://tiles.example.org/base/3/1/2.png?key=1"));
-        assert_eq!(TileSource::custom(None, "https://tiles.example.org/base/{z}/{x}/{y}.png?key=1", Some("© Example"), None).unwrap().id, s.id, "stable id");
+        assert_eq!(
+            TileSource::custom(None, "https://tiles.example.org/base/{z}/{x}/{y}.png?key=1", Some("© Example"), None).unwrap().id,
+            s.id,
+            "stable id"
+        );
         let named = TileSource::custom(Some("my-tiles"), "https://a.example/{z}/{y}/{x}", Some("© A"), None).unwrap();
         assert_eq!((named.id.as_str(), named.max_zoom), ("my-tiles", 18));
         // OpenStreetMap's own template gets its attribution and id

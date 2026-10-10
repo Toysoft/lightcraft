@@ -23,6 +23,7 @@ pub mod keywords;
 pub mod library;
 pub mod lut_profiles;
 pub mod manage;
+mod map;
 mod masks;
 mod merge;
 pub mod metadata;
@@ -156,6 +157,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(face_detect::specs());
         v.extend(face_recognize::specs());
         v.extend(activity::specs());
+        v.extend(map::specs());
         v
     })
 }

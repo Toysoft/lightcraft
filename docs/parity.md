@@ -480,7 +480,7 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 | Id | Feature | Tier | Status | Evidence | Missing / notes |
 |---|---|---|---|---|---|
 | LR-MAP-INFO | Location in the info panel | P1 | 🟡 | `cmd:photo.setMeta` (`location`, `city`, `state`, `country`, `gps`), `crates/ui-egui/src/panels/right.rs` | location, city, state/province, country and GPS editable; Show on Map (OpenStreetMap in the browser); no map in the panel |
-| LR-MAP-MODULE | Map module [Classic] | P2 | ⬜ | | |
+| LR-MAP-MODULE | Map module [Classic] | P2 | ⬜ | `cmd:map.tileSource`, `cmd:map.cacheInfo`, `cmd:map.clearCache`, `crates/map`, `docs/map.md` | core in place, no view yet: Web Mercator tile maths, tile source (OpenStreetMap by default, custom or offline), on-disk tile cache and a viewport-only fetch queue; the map view, pins and Info panel map are still to come |
 
 ## V. Preferences (PREF)
 

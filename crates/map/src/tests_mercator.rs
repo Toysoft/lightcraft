@@ -16,7 +16,9 @@ fn close(a: f64, b: f64, eps: f64) -> bool {
 fn checked_points_reject_nan_and_out_of_range() {
     assert!(LatLon::new(51.5, -0.12).is_some());
     assert!(LatLon::new(90.0, 180.0).is_some() && LatLon::new(-90.0, -180.0).is_some());
-    for (lat, lon) in [(f64::NAN, 0.0), (0.0, f64::NAN), (f64::INFINITY, 0.0), (0.0, f64::NEG_INFINITY), (90.0001, 0.0), (-91.0, 0.0), (0.0, 180.5), (0.0, -720.0)] {
+    for (lat, lon) in
+        [(f64::NAN, 0.0), (0.0, f64::NAN), (f64::INFINITY, 0.0), (0.0, f64::NEG_INFINITY), (90.0001, 0.0), (-91.0, 0.0), (0.0, 180.5), (0.0, -720.0)]
+    {
         assert_eq!(LatLon::new(lat, lon), None, "{lat} {lon}");
     }
     assert_eq!(LatLon::from_gps(Some((1.0, 2.0))), Some(ll(1.0, 2.0)));

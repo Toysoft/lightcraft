@@ -106,7 +106,19 @@ mod tests {
 
     #[test]
     fn rejects_junk_without_panicking() {
-        for bad in ["", "0", "-1", "tomorrow", "Sun, 31 Feb 2026 00:00:00 GMT", "Sun, 06 Nov 1994 25:00:00 GMT", "Sun, 06 Foo 1994 08:49:37 GMT", "Sun, 06 Nov 1994 08:49:37 PST", "Sun, 06 Nov 99999999999999999999 08:49:37 GMT", "Sun, 06 Nov 1994 8:9:7 GMT", &"x".repeat(1000)] {
+        for bad in [
+            "",
+            "0",
+            "-1",
+            "tomorrow",
+            "Sun, 31 Feb 2026 00:00:00 GMT",
+            "Sun, 06 Nov 1994 25:00:00 GMT",
+            "Sun, 06 Foo 1994 08:49:37 GMT",
+            "Sun, 06 Nov 1994 08:49:37 PST",
+            "Sun, 06 Nov 99999999999999999999 08:49:37 GMT",
+            "Sun, 06 Nov 1994 8:9:7 GMT",
+            &"x".repeat(1000),
+        ] {
             assert_eq!(parse(bad), None, "{bad}");
         }
     }

@@ -295,7 +295,8 @@ impl TileService {
     pub fn with_transport(source: TileSource, cache: Option<TileCache>, transport: Option<Arc<dyn Transport>>) -> TileService {
         let transport = transport.filter(|_| !source.is_offline());
         let active = transport.is_some() || cache.is_some();
-        let shared = Arc::new(Shared { source, cache, transport, state: Mutex::new(State::default()), wake: Condvar::new(), cancel: AtomicBool::new(false) });
+        let shared =
+            Arc::new(Shared { source, cache, transport, state: Mutex::new(State::default()), wake: Condvar::new(), cancel: AtomicBool::new(false) });
         if active {
             for i in 0..WORKERS {
                 let s = Arc::clone(&shared);
@@ -435,7 +436,13 @@ fn next_job(sh: &Shared) -> Option<Job> {
         let limit = if st.errors_in_row > 0 { 1 } else { MAX_IN_FLIGHT };
         if sh.transport.is_some() && !st.net_q.is_empty() && st.net_in_flight < limit && !backing_off {
             // the most central tile of the newest view
-            let best = st.net_q.iter().enumerate().filter(|(_, k)| !st.busy.contains(k)).min_by_key(|(_, k)| st.rank.get(k).copied().unwrap_or(usize::MAX)).map(|(i, _)| i);
+            let best = st
+                .net_q
+                .iter()
+                .enumerate()
+                .filter(|(_, k)| !st.busy.contains(k))
+                .min_by_key(|(_, k)| st.rank.get(k).copied().unwrap_or(usize::MAX))
+                .map(|(i, _)| i);
             if let Some(i) = best {
                 let k = st.net_q.swap_remove(i);
                 if st.wanted(&k) {
@@ -569,7 +576,10 @@ fn net_job(sh: &Shared, k: TileKey) {
             match decoded {
                 Ok(img) => {
                     drop(st);
-                    if store && let Some(c) = &sh.cache && let Err(e) = c.write(k, &meta, &resp.body) {
+                    if store
+                        && let Some(c) = &sh.cache
+                        && let Err(e) = c.write(k, &meta, &resp.body)
+                    {
                         log::warn!("map: {e}");
                     }
                     let mut st = sh.lock();

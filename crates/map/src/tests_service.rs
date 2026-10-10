@@ -110,10 +110,13 @@ fn only_the_views_tiles_are_requested_with_our_user_agent() {
         let ua: Vec<_> = headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("user-agent")).collect();
         assert_eq!(ua.len(), 1);
         assert_eq!(ua[0].1, USER_AGENT);
-        assert!(!headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("pragma") || (k.eq_ignore_ascii_case("cache-control") && v.contains("no-cache"))));
+        assert!(
+            !headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("pragma") || (k.eq_ignore_ascii_case("cache-control") && v.contains("no-cache")))
+        );
     }
     let events = svc.poll();
-    let ready: HashSet<TileKey> = events.iter().filter_map(|e| if let TileEvent::Ready { key, stale: false, .. } = e { Some(*key) } else { None }).collect();
+    let ready: HashSet<TileKey> =
+        events.iter().filter_map(|e| if let TileEvent::Ready { key, stale: false, .. } = e { Some(*key) } else { None }).collect();
     assert_eq!(ready, want);
     let img = svc.get(*drawn.iter().next().unwrap()).unwrap();
     assert_eq!((img.width, img.height, img.rgba.len()), (256, 256, 256 * 256 * 4));
@@ -208,7 +211,12 @@ fn cached_tiles_need_no_request_and_stale_ones_are_revalidated() {
     let cache = TileCache::new(&root, "test", 100 << 20).unwrap();
     let now = crate::now_secs();
     cache.write(fresh_key, &TileMeta { fetched: now, expires: now + 3600, etag: Some("\"f\"".into()), last_modified: None }, &png(256, 256)).unwrap();
-    let old = TileMeta { fetched: now - 900_000, expires: now - 10, etag: Some("\"v1\"".into()), last_modified: Some("Sun, 06 Nov 1994 08:49:37 GMT".into()) };
+    let old = TileMeta {
+        fetched: now - 900_000,
+        expires: now - 10,
+        etag: Some("\"v1\"".into()),
+        last_modified: Some("Sun, 06 Nov 1994 08:49:37 GMT".into()),
+    };
     cache.write(stale_key, &old, &png(256, 256)).unwrap();
     let fake = Fake::new(|_, _| Ok(HttpResponse { status: 304, headers: vec![("Cache-Control".into(), "max-age=3600".into())], body: vec![] }));
     let svc = TileService::with_transport(source(), Some(TileCache::new(&root, "test", 100 << 20).unwrap()), Some(fake.clone()));
@@ -279,7 +287,8 @@ fn hostile_responses_fail_cleanly_and_are_not_retried() {
     let keys: Vec<TileKey> = (0..6).map(|x| TileKey::new(3, x, 0).unwrap()).collect();
     svc.want(&keys);
     wait_until("all answers", 10, || svc.is_idle() && fake.urls().len() == 6);
-    let failed: HashSet<TileKey> = svc.poll().into_iter().filter_map(|e| if let TileEvent::Failed { key, .. } = e { Some(key) } else { None }).collect();
+    let failed: HashSet<TileKey> =
+        svc.poll().into_iter().filter_map(|e| if let TileEvent::Failed { key, .. } = e { Some(key) } else { None }).collect();
     assert_eq!(failed, keys.iter().copied().collect());
     assert!(keys.iter().all(|k| svc.get(*k).is_none()));
     assert_eq!(svc.stats().backoff_ms, 0, "a refused tile is not the host's trouble");
@@ -330,7 +339,10 @@ fn the_http_transport_sends_the_right_headers_and_caps_bodies() {
             requests.push(head);
             match i {
                 0 => {
-                    s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nCache-Control: max-age=60\r\nETag: \"t\"\r\n\r\n", body.len()).as_bytes()).unwrap();
+                    s.write_all(
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nCache-Control: max-age=60\r\nETag: \"t\"\r\n\r\n", body.len()).as_bytes(),
+                    )
+                    .unwrap();
                     s.write_all(&body).unwrap();
                 }
                 1 => s.write_all(b"HTTP/1.1 304 Not Modified\r\nCache-Control: max-age=60\r\n\r\n").unwrap(),
@@ -340,7 +352,10 @@ fn the_http_transport_sends_the_right_headers_and_caps_bodies() {
                     s.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n").unwrap();
                     let chunk = vec![b'x'; 64 * 1024];
                     for _ in 0..40 {
-                        if s.write_all(format!("{:x}\r\n", chunk.len()).as_bytes()).is_err() || s.write_all(&chunk).is_err() || s.write_all(b"\r\n").is_err() {
+                        if s.write_all(format!("{:x}\r\n", chunk.len()).as_bytes()).is_err()
+                            || s.write_all(&chunk).is_err()
+                            || s.write_all(b"\r\n").is_err()
+                        {
                             break;
                         }
                     }
@@ -365,7 +380,10 @@ fn the_http_transport_sends_the_right_headers_and_caps_bodies() {
     for head in &requests {
         let agents: Vec<_> = head.iter().filter(|l| l.to_ascii_lowercase().starts_with("user-agent:")).collect();
         assert_eq!(agents, vec![&format!("User-Agent: {USER_AGENT}")], "{head:?}");
-        assert!(!head.iter().any(|l| l.to_ascii_lowercase().starts_with("pragma") || l.to_ascii_lowercase().starts_with("cache-control")), "{head:?}");
+        assert!(
+            !head.iter().any(|l| l.to_ascii_lowercase().starts_with("pragma") || l.to_ascii_lowercase().starts_with("cache-control")),
+            "{head:?}"
+        );
     }
     assert!(requests[1].contains(&"If-None-Match: \"t\"".to_string()));
 }
