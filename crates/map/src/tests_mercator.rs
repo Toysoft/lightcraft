@@ -227,3 +227,41 @@ fn fit_bounds_shows_every_point_with_the_margin() {
     let silly = fit_bounds(&Bounds::of(pts).unwrap(), f64::NAN, -5.0, f64::INFINITY, f64::NAN);
     assert!(silly.zoom.is_finite() && silly.center.lat.is_finite());
 }
+
+/// The area a view shows: its corners, across the antimeridian (east < west), the whole world
+/// when zoomed out past it, and the poles when the view reaches the square's edge.
+#[test]
+fn viewport_area_is_what_the_view_shows() {
+    let v = Viewport::new(ll(48.85, 2.35), 10.0, 800.0, 600.0);
+    let a = v.area();
+    let nw = v.to_lat_lon(Point::new(0.0, 0.0));
+    let se = v.to_lat_lon(Point::new(800.0, 600.0));
+    assert!(close(a.north, nw.lat, 1e-9) && close(a.west, nw.lon, 1e-9) && close(a.south, se.lat, 1e-9) && close(a.east, se.lon, 1e-9), "{a:?}");
+    assert!(a.contains(ll(48.85, 2.35)) && !a.contains(ll(51.5, -0.12)));
+    // centred on the antimeridian: the box wraps
+    let pacific = Viewport::new(ll(0.0, 180.0), 4.0, 800.0, 600.0).area();
+    assert!(pacific.east < pacific.west, "{pacific:?}");
+    assert!(close(pacific.west, 180.0 - 800.0 / 4096.0 * 360.0 / 2.0, 1e-9), "{pacific:?}");
+    for p in [ll(-17.7, 178.0), ll(-13.8, -172.0), ll(0.0, 180.0), ll(0.0, -180.0)] {
+        assert!(pacific.contains(p), "{p:?} in {pacific:?}");
+    }
+    assert!(!pacific.contains(ll(0.0, 0.0)) && !pacific.contains(ll(0.0, 120.0)));
+    // the right edge exactly on +180 isn't wrapped
+    let edge = Viewport::new(ll(0.0, 180.0 - 800.0 / 4096.0 * 360.0 / 2.0), 4.0, 800.0, 600.0).area();
+    assert!(edge.west < edge.east && close(edge.east, 180.0, 1e-6), "{edge:?}");
+    // zoomed out past the world: every longitude, and both poles
+    for z in [0.0, 1.0] {
+        let world = Viewport::new(ll(20.0, 100.0), z, 1400.0, 900.0).area();
+        assert_eq!((world.west, world.east, world.south, world.north), (-180.0, 180.0, -90.0, 90.0), "zoom {z}");
+        assert!(world.contains(ll(89.9, -179.0)) && world.contains(ll(-90.0, 180.0)));
+    }
+    // hostile viewports give finite areas
+    for v in [
+        Viewport { center: LatLon { lat: f64::NAN, lon: f64::INFINITY }, zoom: f64::NAN, width: f64::NAN, height: -1.0 },
+        Viewport { center: LatLon { lat: 1e300, lon: -1e300 }, zoom: 1e9, width: 1e12, height: 1e12 },
+    ] {
+        let a = v.area();
+        assert!([a.south, a.west, a.north, a.east].iter().all(|x| x.is_finite()), "{a:?}");
+        assert!(a.south <= a.north, "{a:?}");
+    }
+}

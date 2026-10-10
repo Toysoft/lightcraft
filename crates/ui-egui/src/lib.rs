@@ -67,6 +67,8 @@ mod tests_library_problem;
 #[cfg(test)]
 mod tests_map;
 #[cfg(test)]
+mod tests_map_filter;
+#[cfg(test)]
 mod tests_map_geotag;
 #[cfg(test)]
 mod tests_masking;
@@ -422,6 +424,8 @@ impl LightcraftApp {
             return result;
         }
         if let Some(r) = menus::run_ui_command(self, id, &params) {
+            // a view switch ends (or starts) the Map view's location filter at once
+            panels::map::sync_location_filter(self);
             return r;
         }
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
@@ -1022,6 +1026,8 @@ impl LightcraftApp {
             return;
         }
         let t0 = now_ms();
+        // the Map view's location filter holds only while the Map view is shown
+        panels::map::sync_location_filter(self);
         if std::mem::take(&mut self.ui.quit) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }

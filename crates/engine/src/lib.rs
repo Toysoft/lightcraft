@@ -161,6 +161,11 @@ pub struct Session {
     pub filter: Filter,
     pub sort: Sort,
     pub selection: Selection,
+    /// A view's own filter over the library's (the Map view's location filter: Tagged,
+    /// Untagged, Visible on Map): `visible` keeps only the photos these rules match. It is not
+    /// part of `filter` (never saved, not shown as filter chips, not in smart albums made from
+    /// the view); the view that sets it clears it when it is left.
+    pub narrow: Option<lightcraft_catalog::RuleSet>,
     /// The grid order for the current source/filter/sort (cached by catalog revision).
     /// Shared, so frontends can hold it across frames without copying ([`Session::visible_shared`]).
     visible: Arc<[PhotoId]>,
@@ -168,6 +173,11 @@ pub struct Session {
     /// Identifies the current `visible` list: a new value (unique in the process) every time it
     /// is recomputed, so frontends can key their per-view caches on it instead of hashing the ids.
     visible_gen: u64,
+    /// `visible` before [`Session::narrow`] (the same list when there is none), its generation,
+    /// and what `visible` was last narrowed from (base generation, narrow rules).
+    visible_base: Arc<[PhotoId]>,
+    visible_base_gen: u64,
+    narrow_key: Option<(u64, String)>,
     /// Photos in the current source with no filter on (cached like `visible`).
     total: Option<((u64, String), usize)>,
     pub undo: Vec<UndoEntry>,
@@ -306,9 +316,13 @@ impl Session {
             filter: Filter::default(),
             sort: Sort::default(),
             selection: Selection::default(),
+            narrow: None,
             visible: Vec::new().into(),
             visible_key: None,
             visible_gen: 0,
+            visible_base: Vec::new().into(),
+            visible_base_gen: 0,
+            narrow_key: None,
             total: None,
             undo: Vec::new(),
             commits: 0,
@@ -736,8 +750,34 @@ impl Session {
 
     // ---------------------------------------------------------------- library view
 
-    /// Photos shown in the grid/filmstrip for the current source, filter and sort.
+    /// Photos shown in the grid/filmstrip for the current source, filter and sort, narrowed by
+    /// [`Session::narrow`] when a view sets it.
     pub fn visible(&mut self) -> &[PhotoId] {
+        self.visible_base();
+        let key = (self.visible_base_gen, self.narrow.as_ref().map(|n| format!("{n:?}")).unwrap_or_default());
+        if self.narrow_key.as_ref() != Some(&key) {
+            self.visible = match &self.narrow {
+                None => self.visible_base.clone(),
+                Some(rules) => {
+                    lightcraft_catalog::rules::set_now(Some((self.clock)()));
+                    let cat = &self.catalog;
+                    self.visible_base.iter().copied().filter(|id| cat.photo(*id).is_some_and(|p| rules.matches(p, cat))).collect::<Vec<_>>().into()
+                }
+            };
+            self.visible_gen = VISIBLE_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.narrow_key = Some(key);
+        }
+        &self.visible
+    }
+
+    /// The photos for the current source, filter and sort before [`Session::narrow`], with their
+    /// generation (as [`Session::visible_shared`]): what the Map view counts and pins.
+    pub fn visible_base_shared(&mut self) -> (u64, Arc<[PhotoId]>) {
+        self.visible_base();
+        (self.visible_base_gen, self.visible_base.clone())
+    }
+
+    fn visible_base(&mut self) {
         let mut key =
             (self.catalog.revision, format!("{:?}|{:?}|{:?}|{:?}|{:?}", self.source, self.filter, self.sort, self.browse, self.library_folder));
         if self.source == LibrarySource::Missing && self.media.availability.is_background() {
@@ -764,7 +804,7 @@ impl Session {
                 // an empty grid under the name of a folder that is gone from the sidebar
                 self.source = LibrarySource::All;
                 self.library_folder = None;
-                return self.visible();
+                return self.visible_base();
             }
             if matches!(self.source, LibrarySource::Album(_))
                 && self.sort.key == lightcraft_catalog::SortKey::CaptureDate
@@ -795,11 +835,10 @@ impl Session {
             if self.source != LibrarySource::RecentlyDeleted {
                 visible = self.catalog.arrange_stacks(&visible);
             }
-            self.visible = visible.into();
-            self.visible_gen = VISIBLE_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.visible_base = visible.into();
+            self.visible_base_gen = VISIBLE_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.visible_key = Some(key);
         }
-        &self.visible
     }
 
     /// Whether the library still holds a photo imported from the folder a `LibraryFolder` source
@@ -901,6 +940,8 @@ mod tests_keyword_list;
 mod tests_libops;
 #[cfg(test)]
 mod tests_library;
+#[cfg(test)]
+mod tests_location;
 #[cfg(test)]
 mod tests_merge;
 #[cfg(test)]

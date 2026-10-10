@@ -68,6 +68,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("map.zoomOut", "Zoom Out on Map", None, ""),
     ("map.state", "Map State", None, ""),
     ("map.lockMarkers", "Lock Markers", None, ""),
+    ("map.locationFilter", "Location Filter", None, ""),
     ("view.person", "Show Person", None, ""),
     ("view.faceBoxes", "Face Boxes", None, "View"),
     ("view.reference", "Reference View", Some("Shift+R"), "View"),

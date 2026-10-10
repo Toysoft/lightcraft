@@ -1891,5 +1891,21 @@
   "Downloading model": "モデルをダウンロード中",
   "Finding faces": "顔を検索中",
   "Synchronizing folder": "フォルダを同期中",
-  "Looking for changes": "変更を確認中"
+  "Looking for changes": "変更を確認中",
+  "GPS Area": "GPS 範囲",
+  "is inside": "が範囲内",
+  "is outside": "が範囲外",
+  "needs south, west, north and east in degrees (latitude −90…90, longitude −180…180)": "南・西・北・東の度数が必要です（緯度 −90〜90、経度 −180〜180）",
+  "has its south edge north of its north edge": "南端が北端より北にあります",
+  "South": "南",
+  "West": "西",
+  "North": "北",
+  "East": "東",
+  "Location Filter:": "場所フィルター：",
+  "Visible on Map": "マップに表示",
+  "Tagged": "タグ付き",
+  "Untagged": "タグなし",
+  "Location Filter": "場所フィルター",
+  "Untagged: the filmstrip shows the photos without a location. Drag them onto the map to place them.": "タグなし：フィルムストリップには位置情報のない写真が表示されます。マップにドラッグして配置します。",
+  "No photos match the location filter": "場所フィルターに一致する写真はありません"
 }

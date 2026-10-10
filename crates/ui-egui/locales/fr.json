@@ -1889,5 +1889,21 @@
   "Downloading model": "Téléchargement du modèle",
   "Finding faces": "Recherche des visages",
   "Synchronizing folder": "Synchronisation du dossier",
-  "Looking for changes": "Recherche des modifications"
+  "Looking for changes": "Recherche des modifications",
+  "GPS Area": "Zone GPS",
+  "is inside": "est dans",
+  "is outside": "est hors de",
+  "needs south, west, north and east in degrees (latitude −90…90, longitude −180…180)": "demande sud, ouest, nord et est en degrés (latitude −90…90, longitude −180…180)",
+  "has its south edge north of its north edge": "a son bord sud au nord de son bord nord",
+  "South": "Sud",
+  "West": "Ouest",
+  "North": "Nord",
+  "East": "Est",
+  "Location Filter:": "Filtre de lieu :",
+  "Visible on Map": "Visibles sur la carte",
+  "Tagged": "Avec GPS",
+  "Untagged": "Sans GPS",
+  "Location Filter": "Filtre de lieu",
+  "Untagged: the filmstrip shows the photos without a location. Drag them onto the map to place them.": "Sans GPS : la pellicule montre les photos sans lieu. Faites-les glisser sur la carte pour les placer.",
+  "No photos match the location filter": "Aucune photo ne correspond au filtre de lieu"
 }

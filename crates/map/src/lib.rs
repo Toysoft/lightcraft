@@ -40,7 +40,7 @@ mod tests_service;
 
 pub use cache::{CacheInfo, CachedTile, DEFAULT_CACHE_BYTES, TileCache, TileMeta};
 pub use cluster::{CLUSTER_CELL, Cluster, MapPoint, cluster};
-pub use mercator::{Bounds, LatLon, MAX_LATITUDE, MAX_ZOOM, TILE_SIZE, TileKey, Viewport, VisibleTile, fit_bounds};
+pub use mercator::{Area, Bounds, LatLon, MAX_LATITUDE, MAX_ZOOM, TILE_SIZE, TileKey, Viewport, VisibleTile, fit_bounds};
 pub use service::{HttpResponse, ServiceStats, TileEvent, TileImage, TileService, Transport};
 pub use source::{OSM_ATTRIBUTION, OSM_TILE_URL, TileSource, USER_AGENT};
 

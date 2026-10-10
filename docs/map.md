@@ -5,8 +5,8 @@ fetches, from where, how it follows the tile provider's rules, what that means f
 off.
 
 Status: the Map view (below) shows the photos in view as pins and clusters over the tiles, you can drag photos onto it
-to set their location (and move or remove pins), and the Info panel shows a small map of the active photo's place.
-Still to come: the location filter bar, saved locations and track logs drawn on the map. Nothing is fetched until a
+to set their location (and move or remove pins), filter the filmstrip by location, and the Info panel shows a small map
+of the active photo's place. Still to come: saved locations and track logs drawn on the map. Nothing is fetched until a
 map is on screen.
 
 ## The Map view
@@ -72,6 +72,48 @@ lat, lon}` while photos are dragged over the map). Widgets: `map:lockMarkers`, `
 menu). Agents can hold a drag across requests with `ui.pointer {screen: true, events: [{kind: "down", …}, {kind:
 "drag", …}]}` and drop it with `{kind: "up"}` (see the control protocol).
 
+## The location filter
+
+The bar above the map, as Lightroom Classic's Location Filter, narrows the filmstrip by where the photos are:
+
+| Choice | The filmstrip shows |
+|---|---|
+| **Visible on Map** | the photos whose position is inside the map's view; it follows the map as you pan and zoom, once the view rests for a quarter of a second |
+| **Tagged** | the photos with a GPS position |
+| **Untagged** | the photos without one (the map shows no pins; drag them onto it to place them) |
+| **None** | every photo in view (the default) |
+
+- Each choice shows its count, of the photos in view (the current source, filter and sort); the one chosen is
+  highlighted. The counts follow the map as it moves (Visible on Map's at once; the filmstrip when the view rests).
+- It narrows on top of the library's filter and search, which it never changes: leaving the Map view (to the grid,
+  Detail, People…) brings back exactly the photos you had. Coming back to the map, the choice is still there (for the
+  session; it isn't saved with the layout). The selection, ⌘A and the arrow keys follow the filmstrip.
+- Pins come from every photo with a position in view, so in Visible on Map the pins on screen and the filmstrip are the
+  same photos.
+- Across the antimeridian (a view of the Pacific) the area wraps around ±180°; zoomed out past the whole world it holds
+  every longitude, and a view reaching the map's top or bottom edge reaches the pole. A photo whose position is invalid
+  (NaN, out of range) counts as untagged.
+- Counting is one pass over the positions already projected for the pins (20 000 photos: well under 1 ms); narrowing
+  the filmstrip is one pass over the photos in view, done only when the view rests or the choice changes.
+
+The bar is built on two smart-album rule fields that any filter or smart album can use (Location group of the rule
+editor; `library.filter {ruleSet}`, `album.createSmart`, `album.setRules`):
+
+| Field | Operators | Value |
+|---|---|---|
+| `hasGps` (Has GPS) | is | yes / no: the photo has a valid position |
+| `gpsArea` (GPS Area) | `inside`, `outside` | `{south, west, north, east}` in degrees: latitudes −90…90 (south not north of north), longitudes −180…180, all finite numbers; `east < west` wraps across ±180° (`{west: 170, east: -170}` is the 20° around it), `west: -180, east: 180` is every longitude. Edges count as inside. A photo without a position is neither inside nor outside |
+
+Anything else (a missing edge, text, NaN, out of range, south north of north) is refused by the commands and marked in
+the rule editor.
+
+| Command | Params | Result |
+|---|---|---|
+| `map.locationFilter` | `{mode?: "visible" \| "tagged" \| "untagged" \| "none"}` | Choose the filter (without `mode`: report) → `{mode, visible, tagged, untagged, all, area, countMs, shown}`: the counts, `area` (what Visible on Map narrows to, `{south, west, north, east}`; null otherwise) and `shown` (photos the filmstrip has) |
+
+`map.state` reports the same as `locationFilter`. Widgets: `map:filterBar`, `map:filter:visible`, `map:filter:tagged`,
+`map:filter:untagged`, `map:filter:none`.
+
 ## Map commands
 
 Commands (UI commands: they need the map's size, so the app, `lightcraft-cli snapshot` and `mcp --connect` have them):
@@ -82,7 +124,7 @@ Commands (UI commands: they need the map's size, so the app, `lightcraft-cli sna
 | `map.fit` | — | Fit the photos with a position (the world when there are none) → the map state |
 | `map.setView` | `{lat?, lon?, zoom?}` | Centre (degrees) and zoom (0 to the source's max zoom; fractional allowed); what is left out stays → the map state |
 | `map.zoomIn` / `map.zoomOut` | — | One zoom level in / out, around the centre → the map state |
-| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, lockMarkers, movingPin, drop, tiles: {drawn, missing, textures, uploads}, miniMap}` (`miniMap`: the Info panel's map, below); `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
+| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, lockMarkers, locationFilter, movingPin, drop, tiles: {drawn, missing, textures, uploads}, miniMap}` (`miniMap`: the Info panel's map, below); `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
 
 Widgets (`ui.widgets`): `map:canvas`, `map:pin:<first photo id>`, `map:fit`, `icon:mapZoomIn`, `icon:mapZoomOut`,
 `map:attribution`, `map:withoutGps`, `map:hoverThumb`.

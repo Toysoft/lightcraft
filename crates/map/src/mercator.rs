@@ -147,6 +147,27 @@ pub struct VisibleTile {
     pub rect: Rect,
 }
 
+/// A latitude / longitude box in degrees ([`Viewport::area`]): `east < west` when it crosses the
+/// antimeridian (±180°).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Area {
+    pub south: f64,
+    pub west: f64,
+    pub north: f64,
+    pub east: f64,
+}
+
+impl Area {
+    /// Whether `p` is inside, edges included (longitude ±180 is one meridian).
+    pub fn contains(&self, p: LatLon) -> bool {
+        if !(p.lat >= self.south && p.lat <= self.north) {
+            return false;
+        }
+        let within = |lon: f64| if self.west <= self.east { lon >= self.west && lon <= self.east } else { lon >= self.west || lon <= self.east };
+        within(p.lon) || (p.lon.abs() == 180.0 && within(-p.lon))
+    }
+}
+
 /// What a map view shows: a centre, a (fractional) zoom and a size in screen pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Viewport {
@@ -203,6 +224,29 @@ impl Viewport {
         let c = to_world(v.center, v.zoom);
         let (dx, dy) = (if sp.x.is_finite() { sp.x - v.width / 2.0 } else { 0.0 }, if sp.y.is_finite() { sp.y - v.height / 2.0 } else { 0.0 });
         from_world(Point::new(c.x + dx, c.y + dy), v.zoom)
+    }
+
+    /// The part of the Earth this view shows, edges in degrees ([`Area`]). A view wider than
+    /// the world spans every longitude (−180…180); one whose left and right edges sit either side
+    /// of the antimeridian has `east < west`. A view reaching the top (bottom) edge of the
+    /// Mercator square reaches the pole (±90°: positions beyond ±85.05° are drawn on that edge).
+    /// An empty view (no size) is the point at its centre.
+    pub fn area(&self) -> Area {
+        let v = self.safe();
+        let s = world_size(v.zoom);
+        let c = to_world(v.center, v.zoom);
+        let (top, bottom) = (c.y - v.height / 2.0, c.y + v.height / 2.0);
+        let north = if top <= 0.0 { 90.0 } else { lat_of_y_frac(top / s) };
+        let south = if bottom >= s { -90.0 } else { lat_of_y_frac(bottom / s) };
+        let (west, east) = if v.width >= s {
+            (-180.0, 180.0)
+        } else {
+            let span = v.width / s * 360.0;
+            let west = wrap_lon(v.center.lon - span / 2.0);
+            let east = west + span;
+            (west, if east > 180.0 { east - 360.0 } else { east })
+        };
+        Area { south, west, north, east }
     }
 
     /// The view moved by `(dx, dy)` screen pixels (content follows a drag of that amount).
