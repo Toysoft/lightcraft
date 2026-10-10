@@ -296,7 +296,7 @@ fn adjust_brush(app: &mut LightcraftApp, k: f32, df: f32) -> Value {
             if df != 0.0 {
                 p["feather"] = json!(app.ui.remove_feather);
             }
-            let _ = app.run("spot.update", p);
+            app.act("spot.update", p);
         }
         json!({"size": app.ui.remove_size, "feather": app.ui.remove_feather})
     } else {

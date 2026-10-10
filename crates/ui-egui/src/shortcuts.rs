@@ -538,7 +538,7 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
         } else {
             // in the full-screen preview (no panels) I cycles the info overlay instead
             if f == "panel.info" && app.ui.fullscreen {
-                let _ = app.run("view.infoOverlay", json!({}));
+                app.act("view.infoOverlay", json!({}));
                 continue;
             }
             // Delete acts on what's being edited: the active mask in the Masking panel; never the
@@ -548,13 +548,13 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
                 match app.ui.right {
                     R::Masking => {
                         if app.session.active_mask.is_some() {
-                            let _ = app.run("mask.delete", json!({}));
+                            app.act("mask.delete", json!({}));
                         }
                         continue;
                     }
                     R::Remove => {
                         if app.session.active_spot.is_some() {
-                            let _ = app.run("spot.delete", json!({}));
+                            app.act("spot.delete", json!({}));
                         }
                         continue;
                     }
@@ -589,7 +589,7 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
             }
             // X is both reject (library) and swap crop aspect (crop tool)
             if f == "photo.reject" && app.ui.right == crate::state::RightPanel::Crop {
-                let _ = app.run("crop.rotateAspect", json!({}));
+                app.act("crop.rotateAspect", json!({}));
                 continue;
             }
             if f == "crop.rotateAspect" && app.ui.right != crate::state::RightPanel::Crop {
@@ -597,12 +597,12 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
             }
             // / refreshes the selected spot's source in the Remove tool (the filmstrip elsewhere)
             if f == "view.filmstrip" && app.ui.right == crate::state::RightPanel::Remove && app.session.active_spot.is_some() {
-                let _ = app.run("spot.refreshSource", json!({}));
+                app.act("spot.refreshSource", json!({}));
                 continue;
             }
             // Shift+O cycles the mask overlay colour while masking (the crop overlay elsewhere)
             if f == "view.cropOverlay" && app.ui.right == crate::state::RightPanel::Masking {
-                let _ = app.run("view.maskOverlayColor", json!({}));
+                app.act("view.maskOverlayColor", json!({}));
                 continue;
             }
             // while cropping: O cycles the guides, Shift+O their orientation, A locks the aspect
@@ -614,7 +614,7 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
                     _ => None,
                 };
                 if let Some((cmd, p)) = crop_key {
-                    let _ = app.run(cmd, p);
+                    app.act(cmd, p);
                     continue;
                 }
             }
@@ -629,10 +629,10 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
                 match crate::panels::grid::row_distance(app, f == "library.down") {
                     Some(0) => {}
                     Some(rows) => {
-                        let _ = app.run(&f, json!({"rows": rows}));
+                        app.act(&f, json!({"rows": rows}));
                     }
                     None => {
-                        let _ = app.run(&f, json!({}));
+                        app.act(&f, json!({}));
                     }
                 }
                 continue;
