@@ -9,7 +9,7 @@ list is [gaps.md](gaps.md). Whoever lands a feature updates its row in the same 
 
 The rows are maintained by hand; the summary block is generated (`cargo xtask parity --write`), and
 `cargo xtask parity` (part of `cargo xtask ci`) checks that every command id, control id and path
-cited here still exists. Formerly `docs/parity.md`.
+cited here still exists. Formerly docs/parity.md.
 
 - **Ids** come from the (local, gitignored) reference in `plan/lightroom/`: `LR-…` = feature catalog (03),
   `MENU-…` = menu items (04), `KEY-…` / `KEYC-…` = keyboard shortcuts (06, desktop / Classic), `LRC-…` = Classic
