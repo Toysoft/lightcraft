@@ -222,6 +222,8 @@ pub struct Session {
     /// Tests: work the view out whole every time (what following has to equal).
     #[cfg(test)]
     never_follow: bool,
+    /// The catalog revision the view was last checked against ([`Session::reconcile_view`]).
+    view_checked: Option<u64>,
     /// Identifies the current `visible` list: a new value (unique in the process) every time it
     /// is recomputed, so frontends can key their per-view caches on it instead of hashing the ids.
     visible_gen: u64,
@@ -420,6 +422,7 @@ impl Session {
             view_worked_out: 0,
             #[cfg(test)]
             never_follow: false,
+            view_checked: None,
             visible_gen: 0,
             total: None,
             undo: Vec::new(),
@@ -559,6 +562,10 @@ impl Session {
             if r.is_ok() && !skip && self.xmp.auto_write && self.interaction.is_none() && self.pending_log.len() > log_start {
                 self.auto_write_sidecars_since(log_start);
             }
+        }
+        if self.depth == 0 {
+            // whatever the command changed, and however it ended: the view points at what is there
+            self.reconcile_view();
         }
         if self.depth == 0 && self.library.is_some() {
             // Make the command durable before reporting success. When the command's own records
@@ -735,6 +742,7 @@ impl Session {
             }
         };
         self.show_undone(&e.op);
+        self.reconcile_view();
         self.pending_log.push(e.op);
         self.redo.push(UndoEntry {
             label: e.label.clone(),
@@ -760,6 +768,7 @@ impl Session {
             }
         };
         self.show_undone(&e.op);
+        self.reconcile_view();
         self.pending_log.push(e.op);
         self.undo.push(UndoEntry {
             label: e.label.clone(),
@@ -962,8 +971,42 @@ impl Session {
 
     // ---------------------------------------------------------------- library view
 
+    /// Makes the view point only at what the library holds: an album that is gone is no longer the
+    /// source (All Photos is), the filter's album or the target album; photos that are gone are
+    /// no longer selected. THE place this is checked: commands, undo and redo, opening a library
+    /// and every look at the grid run it, so whatever removed an album or a photo (a command, an
+    /// undo, a background task) need not know what was showing it. Costs nothing until the
+    /// catalog changes.
+    ///
+    /// An album that comes back (its deletion undone) is not shown again by itself: ids are handed
+    /// out again after an undo, so a view kept waiting would open on whichever album came next.
+    pub fn reconcile_view(&mut self) {
+        if self.view_checked == Some(self.catalog.revision) {
+            return;
+        }
+        self.view_checked = Some(self.catalog.revision);
+        let cat = &self.catalog;
+        let gone = |a: &lightcraft_catalog::AlbumId| cat.album(*a).is_none();
+        if matches!(&self.source, LibrarySource::Album(a) if gone(a)) {
+            self.source = LibrarySource::All;
+        }
+        if self.filter.album.as_ref().is_some_and(gone) {
+            self.filter.album = None;
+        }
+        if self.target_album.as_ref().is_some_and(gone) {
+            self.target_album = None;
+        }
+        let sel = &mut self.selection;
+        if sel.ids.iter().chain(&sel.active).any(|id| cat.photo(*id).is_none()) {
+            sel.ids.retain(|id| cat.photo(*id).is_some());
+            // still a selected photo, when any is left
+            sel.active = sel.active.filter(|id| cat.photo(*id).is_some()).or_else(|| sel.ids.last().copied());
+        }
+    }
+
     /// Photos shown in the grid/filmstrip for the current source, filter and sort.
     pub fn visible(&mut self) -> &[PhotoId] {
+        self.reconcile_view();
         let mut key =
             (self.catalog.revision, format!("{:?}|{:?}|{:?}|{:?}|{:?}", self.source, self.filter, self.sort, self.browse, self.library_folder));
         // What a held view is told apart by: what is shown and how, and for a smart album its rules (rules that were
@@ -1137,6 +1180,7 @@ impl Session {
     /// Photos in the current source (folder, album, …) before the filter bar and search narrow
     /// them; `None` where that is not a separate number (Missing Photos).
     pub fn source_total(&mut self) -> Option<usize> {
+        self.reconcile_view();
         if self.source == LibrarySource::Missing {
             return None;
         }
@@ -1317,5 +1361,6 @@ mod tests_spots;
 mod tests_sync;
 #[cfg(test)]
 mod tests_view_follow;
+mod tests_view_reconcile;
 #[cfg(test)]
 mod tests_xmp;
