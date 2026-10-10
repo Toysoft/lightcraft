@@ -146,6 +146,8 @@ mod tests_quit_unsaved;
 #[cfg(test)]
 mod tests_recheck;
 #[cfg(test)]
+mod tests_refusals;
+#[cfg(test)]
 mod tests_rename_person;
 #[cfg(test)]
 mod tests_sam_setup;
@@ -190,6 +192,41 @@ pub use control::{ControlRequest, ControlResponse};
 pub use state::UiState;
 
 const TOAST_SECONDS: f64 = 1.4;
+/// How long a toast saying why a command was refused stays: a sentence to read, as
+/// [`LightcraftApp::toast_error`]'s.
+const REFUSAL_SECONDS: f64 = 6.0;
+
+/// A command that didn't run: the whole error (for agents, the log and the status) and what it
+/// says to the person who asked (the reason, without the command's id).
+struct Refusal {
+    error: String,
+    why: String,
+    /// What kind of error it is, for code that decides on it ([`LightcraftApp::run_typed`]).
+    kind: lightcraft_engine::ErrorKind,
+}
+
+impl Refusal {
+    /// An error that is already words for a person (the interface's own commands).
+    fn plain(error: String) -> Refusal {
+        Refusal { why: error.clone(), error, kind: lightcraft_engine::ErrorKind::Other }
+    }
+}
+
+impl From<lightcraft_engine::EngineError> for Refusal {
+    fn from(e: lightcraft_engine::EngineError) -> Refusal {
+        use lightcraft_engine::EngineError;
+        let why = match &e {
+            EngineError::Disabled(_, why) => why.clone(),
+            EngineError::BadParams { msg, .. } => msg.clone(),
+            other => other.to_string(),
+        };
+        // a sentence starts with a capital, whatever the command wrote
+        let mut letters = why.chars();
+        let why = letters.next().map(|first| first.to_uppercase().chain(letters).collect()).unwrap_or_default();
+        Refusal { error: e.to_string(), why, kind: e.kind() }
+    }
+}
+
 /// The `path` of a display profile read from the screen rather than chosen as a file.
 pub const SCREEN_PROFILE: &str = "screen";
 
@@ -591,22 +628,52 @@ impl LightcraftApp {
         }
     }
 
-    /// Run a UI or engine command by id. The single entry point for every frontend path.
+    /// Run a UI or engine command by id. The single entry point for every frontend path: the
+    /// error comes back in full and nothing is shown, for agents (the control channel) and for
+    /// code that deals with the answer itself. A widget acting for the person uses [`Self::act`].
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        self.run_typed(id, params).map_err(|e| e.message)
+        self.run_told(id, params).map_err(|refusal| refusal.error)
     }
 
     /// [`LightcraftApp::run`], keeping what kind of error a refusal is: for code that decides on it
     /// (offer a model's download, treat a cancel as one) instead of reading the message.
     pub fn run_typed(&mut self, id: &str, params: Value) -> Result<Value, CommandError> {
+        self.run_told(id, params).map_err(|refusal| CommandError { message: refusal.error, kind: refusal.kind })
+    }
+
+    /// Run a command for the person at the interface (a click, a drop, a key): when it is
+    /// refused, a toast says why, so no widget has to pass that on by hand (or forget to).
+    /// `None` when it was refused. `cargo xtask refusals` keeps `app.act(…)` out of the
+    /// interface: a widget says which of the three it means.
+    pub fn act(&mut self, id: &str, params: Value) -> Option<Value> {
+        match self.run_told(id, params) {
+            Ok(v) => Some(v),
+            Err(refusal) => {
+                // Native menu clicks can arrive before logic() updates last_time after an idle gap.
+                let now = self.tasks.repaint.as_ref().map(|ctx| ctx.input(|i| i.time)).unwrap_or(self.last_time);
+                self.ui.toast = Some((refusal.why, now + REFUSAL_SECONDS, None));
+                None
+            }
+        }
+    }
+
+    /// Run a command whose refusal is expected here and means nothing to the person (it is
+    /// tried on the off chance, or again on every frame of a gesture): nothing is shown. Say why
+    /// at the call. `None` when it was refused.
+    pub fn quiet(&mut self, id: &str, params: Value) -> Option<Value> {
+        self.run_told(id, params).ok()
+    }
+
+    /// [`Self::run`], keeping what a refusal says to a person apart from the whole error.
+    fn run_told(&mut self, id: &str, params: Value) -> Result<Value, Refusal> {
         if let Some(result) = model_setup::intercept(self, id, &params) {
-            return result.map_err(CommandError::from);
+            return result.map_err(Refusal::plain);
         }
         if let Some(r) = menus::run_ui_command(self, id, &params) {
             if r.is_ok() {
-                docking::reveal_command(self, id)?;
+                docking::reveal_command(self, id).map_err(Refusal::plain)?;
             }
-            return r.map_err(CommandError::from);
+            return r.map_err(Refusal::plain);
         }
         let params = if id == "crop.aspect"
             && params.get("aspect").and_then(Value::as_str) == Some("toggle")
@@ -617,7 +684,7 @@ impl LightcraftApp {
         } else {
             params
         };
-        let r = self.session.execute(id, &params).map_err(CommandError::from);
+        let r = self.session.execute(id, &params).map_err(Refusal::from);
         if r.is_ok() && matches!(id, "crop.aspect" | "crop.rotateAspect") {
             self.ui.crop_default_aspect = if id == "crop.aspect" && params.get("aspect").and_then(Value::as_str) == Some("original") {
                 Some(serde_json::json!("original"))
@@ -668,11 +735,11 @@ impl LightcraftApp {
             self.ui.toast = Some((text, now + TOAST_SECONDS, label));
         }
         match &r {
-            Err(e) => {
-                log::warn!("{id}: {e}");
-                self.ui.status = e.message.clone();
+            Err(refusal) => {
+                log::warn!("{id}: {}", refusal.error);
+                self.ui.status = refusal.error.clone();
                 // no detector yet: offer it (its terms first) instead of only saying so
-                if id == "faces.detect" && e.kind == ErrorKind::ModelMissing(AiModel::FaceDetector) {
+                if id == "faces.detect" && refusal.kind == ErrorKind::ModelMissing(AiModel::FaceDetector) {
                     panels::faces::offer_detector(self);
                 }
             }
@@ -1227,7 +1294,7 @@ impl LightcraftApp {
             }
             let (presets, photos) = split_presets(dropped);
             if !presets.is_empty() {
-                let _ = self.run("file.importPresets", serde_json::json!({"paths": presets}));
+                self.act("file.importPresets", serde_json::json!({"paths": presets}));
             }
             // read and added on a worker thread (dropped folders can be large, or on a slow drive)
             if !photos.is_empty() {
