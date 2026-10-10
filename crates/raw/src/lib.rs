@@ -173,7 +173,8 @@ pub fn probe(bytes: &[u8]) -> Option<RawFormat> {
     if make.starts_with("NIKON") && has_cfa {
         return Some(if t.all_ifds().len() > 1 { RawFormat::Nef } else { RawFormat::Nrw });
     }
-    if make.starts_with("SONY") && has_cfa {
+    // Sony's SRF and Minolta-derived ARW layouts carry none of the evidence `has_raw_ifd` reads (#702)
+    if make.starts_with("SONY") && (has_cfa || has_sony_raw_evidence(&t)) {
         return Some(RawFormat::Arw);
     }
     if (make.starts_with("PENTAX") || make.starts_with("RICOH")) && pentax_raw {
@@ -212,6 +213,17 @@ fn has_raw_ifd(t: &Tiff) -> bool {
             || i.contains(lightcraft_tiff::tags::CFA_PATTERN_EP)
             || i.contains(lightcraft_tiff::tags::CFA_REPEAT_PATTERN_DIM)
     })
+}
+
+/// Sony raw evidence for the two layouts that carry none of the tags [`has_raw_ifd`] reads (#702). The
+/// DSC-F828 SRF describes its raw as a 12- or 14-bit-per-sample RGB image in IFD0, where a camera- or
+/// exporter-authored TIFF image is 8 or 16 bits per sample; the Minolta-derived DSLR-A100 ARW points tag
+/// 330 (`SubIFDs`) at its raw data block instead of at an IFD, so the tag is present on IFD0 yet no child
+/// IFD under it describes an image (the raw block at that offset parses as a degenerate IFD with no entries).
+fn has_sony_raw_evidence(t: &Tiff) -> bool {
+    let Some(ifd0) = t.ifds.first() else { return false };
+    matches!(ifd0.u16(lightcraft_tiff::tags::BITS_PER_SAMPLE), Some(12 | 14))
+        || (ifd0.contains(lightcraft_tiff::tags::SUB_IFDS) && !ifd0.sub_ifds.iter().any(|s| s.image().is_ok()))
 }
 
 /// IFD0 that is not an image at all: no `ImageWidth` / `ImageLength`, but a JPEG preview pointer or
@@ -1168,6 +1180,81 @@ mod tests {
         // without raw evidence (an RGB image from such a body) neither reader claims it (#281)
         assert_eq!(probe(&with_note(b"AOC\0MM\0\x01\0\0\0\0\0\0", false)), None);
         assert_eq!(probe(&with_note(b"STMN100\0\0\0\0\0\0\0\0\0", false)), None);
+    }
+
+    // --- Sony raws that carry none of the evidence `has_raw_ifd` reads (#702) ---
+
+    /// The DSC-F828 SRF keeps its raw in Sony's SRF structure, not in a CFA IFD: IFD0 is a 14-bit-per-
+    /// sample RGB image (an ordinary camera or exporter TIFF image is 8 or 16 bits per sample), and that
+    /// bit depth is the raw evidence.
+    #[test]
+    fn sony_srf_14_bit_ifd0_is_arw() {
+        let mut ifd0 = rgb_ifd(64, 48);
+        ifd0.set(t::BITS_PER_SAMPLE, Value::Short(vec![14, 14, 14]));
+        ifd0.set(t::SAMPLES_PER_PIXEL, Value::Short(vec![3]));
+        ifd0.set(t::MAKE, Value::Ascii("SONY".into()));
+        ifd0.set(t::MODEL, Value::Ascii("DSC-F828".into()));
+        assert_eq!(probe(&write(&[ifd0])), Some(RawFormat::Arw));
+    }
+
+    /// The DSLR-A100 ARW's IFD0 is an old-JPEG thumbnail; its raw block is located by tag 330
+    /// (`SubIFDs`) used as a plain offset (exiftool's `A100DataOffset`), which resolves to no child IFD.
+    /// That tag on IFD0 with no child IFD is the raw evidence.
+    #[test]
+    fn sony_a100_sub_ifds_offset_is_arw() {
+        let mut ifd0 = IfdBuilder::new();
+        ifd0.set(t::NEW_SUBFILE_TYPE, Value::Long(vec![1]));
+        ifd0.set(t::IMAGE_WIDTH, Value::Long(vec![3872]));
+        ifd0.set(t::IMAGE_LENGTH, Value::Long(vec![2592]));
+        ifd0.set(t::COMPRESSION, Value::Short(vec![6]));
+        ifd0.set(t::MAKE, Value::Ascii("SONY".into()));
+        ifd0.set(t::MODEL, Value::Ascii("DSLR-A100".into()));
+        // tag 330 points at the raw block, not an IFD (the value is not a valid IFD offset)
+        ifd0.set(t::SUB_IFDS, Value::Long(vec![0xffff_ffff]));
+        assert_eq!(probe(&write(&[ifd0])), Some(RawFormat::Arw));
+    }
+
+    /// The real DSC0258.ARW: tag 330 points into the A100's Minolta raw block, which parses as a
+    /// degenerate child IFD with no entries and no image. `Ifd::image()` on it fails, so the tag still
+    /// counts as raw evidence even though a child IFD exists (#702).
+    #[test]
+    fn sony_a100_garbage_sub_ifd_is_arw() {
+        let mut ifd0 = IfdBuilder::new();
+        ifd0.set(t::NEW_SUBFILE_TYPE, Value::Long(vec![1]));
+        ifd0.set(t::IMAGE_WIDTH, Value::Long(vec![3872]));
+        ifd0.set(t::IMAGE_LENGTH, Value::Long(vec![2592]));
+        ifd0.set(t::COMPRESSION, Value::Short(vec![6]));
+        ifd0.set(t::MAKE, Value::Ascii("SONY".into()));
+        ifd0.set(t::MODEL, Value::Ascii("DSLR-A100".into()));
+        // tag 330 → an IFD that describes no image (no `ImageWidth`/`ImageLength`), as the raw block does
+        ifd0.add_sub_ifd(IfdBuilder::new());
+        assert_eq!(probe(&write(&[ifd0])), Some(RawFormat::Arw));
+    }
+
+    /// A plain 8-bit RGB TIFF from a Sony body (a camera JPEG rewrapped, or an export) carries no raw
+    /// evidence and stays unclaimed.
+    #[test]
+    fn plain_sony_rgb_tiff_is_not_a_raw() {
+        let mut ifd0 = rgb_ifd(64, 48);
+        ifd0.set(t::BITS_PER_SAMPLE, Value::Short(vec![8, 8, 8]));
+        ifd0.set(t::MAKE, Value::Ascii("SONY".into()));
+        ifd0.set(t::MODEL, Value::Ascii("DSC-F828".into()));
+        assert_eq!(probe(&write(&[ifd0])), None);
+    }
+
+    /// 16 bits per sample is an ordinary image, and a `SubIFDs` tag that resolves to a real child IFD is
+    /// not the A100's raw offset: neither is claimed.
+    #[test]
+    fn sony_tiff_without_raw_evidence_is_not_a_raw() {
+        let mut sixteen_bit = rgb_ifd(64, 48);
+        sixteen_bit.set(t::BITS_PER_SAMPLE, Value::Short(vec![16, 16, 16]));
+        sixteen_bit.set(t::MAKE, Value::Ascii("SONY".into()));
+        assert_eq!(probe(&write(&[sixteen_bit])), None);
+
+        let mut with_child = rgb_ifd(64, 48);
+        with_child.set(t::MAKE, Value::Ascii("SONY".into()));
+        with_child.add_sub_ifd(rgb_ifd(16, 12));
+        assert_eq!(probe(&write(&[with_child])), None);
     }
 
     #[test]
