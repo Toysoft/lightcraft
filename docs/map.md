@@ -4,9 +4,9 @@ LightCraft shows where photos were taken on a map drawn from raster map tiles. T
 fetches, from where, how it follows the tile provider's rules, what that means for your privacy, and how to turn it
 off.
 
-Status: the Map view (below) shows the photos in view as pins and clusters over the tiles. Still to come: dragging
-photos onto the map to geotag them, the location filter bar, saved locations, track logs drawn on the map, and the map
-in the Info panel. Nothing is fetched until the Map view is on screen.
+Status: the Map view (below) shows the photos in view as pins and clusters over the tiles, and the Info panel shows a
+small map of the active photo's place. Still to come: dragging photos onto the map to geotag them, the location filter
+bar, saved locations and track logs drawn on the map. Nothing is fetched until a map is on screen.
 
 ## The Map view
 
@@ -41,10 +41,32 @@ Commands (UI commands: they need the map's size, so the app, `lightcraft-cli sna
 | `map.fit` | — | Fit the photos with a position (the world when there are none) → the map state |
 | `map.setView` | `{lat?, lon?, zoom?}` | Centre (degrees) and zoom (0 to the source's max zoom; fractional allowed); what is left out stays → the map state |
 | `map.zoomIn` / `map.zoomOut` | — | One zoom level in / out, around the centre → the map state |
-| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, tiles: {drawn, missing, textures, uploads}}`; `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
+| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, tiles: {drawn, missing, textures, uploads}, miniMap}` (`miniMap`: the Info panel's map, below); `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
 
 Widgets (`ui.widgets`): `map:canvas`, `map:pin:<first photo id>`, `map:fit`, `icon:mapZoomIn`, `icon:mapZoomOut`,
 `map:attribution`, `map:withoutGps`, `map:hoverThumb`.
+
+## The map in the Info panel
+
+For a photo with a GPS position, the Info panel shows a small map under the location fields: the panel's width,
+160 px tall, centred on the photo at zoom 14 (or the tile source's deepest zoom if less), with the photo's pin and the
+tile source's attribution at its bottom right.
+
+- With several photos selected it shows the active photo's place (as Lightroom does), and fetches nothing for the
+  others. A photo without a position (or with an invalid one) has no map; its location fields stay as they are.
+- It doesn't pan or zoom, so a drag or a scroll over it scrolls the panel. A click opens the Map view centred on the
+  photo at the same zoom (`view.map`, then `map.setView`). **Open in Browser** below it shows the place on
+  openstreetmap.org instead.
+- It shares the Map view's tiles: one texture cache, one tile service. A tile one of them loaded is drawn by the
+  other without being fetched or uploaded again, and with both on screen neither cancels the other's tiles.
+- It fetches only while it is on screen: the Info panel open and the map scrolled into view. It asks for exactly the
+  tiles it draws (no ring around them, since it doesn't pan). Close the panel or scroll the map away and its tiles are
+  no longer asked for.
+- Offline it stays in place, grey, with the pin and the note "Map tiles are off", so the panel keeps its shape and the
+  click into the Map view (where the other photos' pins are) still works.
+
+`map.state` reports it as `miniMap` (`null` when it isn't drawn): `{photo, lat, lon, zoom, x, y, width, height,
+pin: {x, y}, tiles: {drawn, missing}}`, in screen points. Widgets: `info:miniMap`, `info:miniMapAttribution`.
 
 ## What is fetched, and when
 
@@ -52,7 +74,8 @@ Widgets (`ui.widgets`): `map:canvas`, `map:pin:<first photo id>`, `map:fit`, `ic
   (`https://tile.openstreetmap.org/{z}/{x}/{y}.png` by default). No photos, GPS positions, file names or account data
   are ever sent.
 - **Only while a map is on screen**, and **only the tiles you are looking at**: the tiles the view draws plus at most
-  one ring of tiles around them, at the zoom level shown. LightCraft never prefetches other zoom levels or areas, and
+  one ring of tiles around them (none around the Info panel's map), at the zoom level shown. When no map is on screen
+  any more, the tiles it asked for and that haven't started are dropped. LightCraft never prefetches other zoom levels or areas, and
   has no "download this area for offline use". Nothing is fetched at startup.
 - **Newest view first**: when you pan or zoom, tiles that left the view and haven't started are dropped; at most two
   requests run at once.

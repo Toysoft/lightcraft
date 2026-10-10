@@ -10,6 +10,9 @@
   The count of photos without GPS is shown bottom left.
 - The map uses OpenStreetMap's tiles (credited on the map) or a tile server you choose, only fetches what is on screen,
   and can be switched off (`map.tileSource {offline: true}`); see [Map](map.md) for what is sent where.
+- The Info panel shows a small map of the photo's place under its location fields (the active photo's, with several
+  selected). Click it to open the Map view there; **Open in Browser** (formerly Show on Map) still opens
+  OpenStreetMap's site.
 
 ### Activity stack
 - Long-running tasks show in one place, top left under the top bar, as in Lightroom Classic (issue #345): imports and

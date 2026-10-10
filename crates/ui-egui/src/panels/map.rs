@@ -2,11 +2,15 @@
 //! their GPS position on a slippy map, with the filmstrip below.
 //!
 //! - **Tiles** come from the session's tile service (`lightcraft-map`, see docs/map.md): every
-//!   frame the view tells it what it shows ([`TileService::show`], cheap), draws the tiles it has in
-//!   memory as egui textures, and polls it for arrivals (a repaint). Each tile is uploaded once and
-//!   kept by [`TileKey`] ([`MapView::uploads`] counts uploads); the least recently drawn are dropped
-//!   past [`MAX_TEXTURES`]. A tile not loaded yet is drawn from a lower zoom's texture when one is
-//!   at hand, else as a grey square. The source's attribution is always painted bottom right.
+//!   frame each map on screen ([`Surface`]: this view, the Info panel's [`mini_map`]) tells it what
+//!   it shows ([`TileService::want`], cheap; the maps drawn in this frame or the last one together,
+//!   so neither cancels the other's tiles, and nothing once no map is drawn: [`end_pass`]), draws
+//!   the tiles it has in memory as egui textures ([`draw_tiles`]), and polls it for arrivals (a
+//!   repaint). Each tile is uploaded once into one cache shared by both maps, kept by [`TileKey`]
+//!   ([`MapView::uploads`] counts uploads); the least recently drawn are dropped past
+//!   [`MAX_TEXTURES`]. A tile not loaded yet is drawn from a lower zoom's texture when one is at
+//!   hand, else as a grey square. The source's attribution is always painted bottom right
+//!   ([`draw_attribution`]).
 //! - **Pins**: each photo with a valid GPS position is projected once per change of the photo list
 //!   ([`MapPoint`]); clusters are recomputed only when the view moves ([`lightcraft_map::cluster`],
 //!   world-anchored cells of [`CLUSTER_CELL`] px). A click selects a pin's photos (⌘ / ⇧ adds),
@@ -45,6 +49,26 @@ const WHEEL_ZOOM: f64 = 0.5;
 /// Clusters reported by `map.state` and registered as widgets (the view draws them all).
 const MAX_LISTED: usize = 500;
 
+/// Zoom of the Info panel's mini-map (streets and their names), or the source's deepest if less.
+pub const MINI_ZOOM: f64 = 14.0;
+/// Height of the mini-map (points); it takes the panel's width.
+pub const MINI_HEIGHT: f32 = 160.0;
+
+/// The Info panel's mini-map as drawn (`map.state` → `miniMap`).
+#[derive(Clone, Debug)]
+pub struct MiniShown {
+    pub photo: PhotoId,
+    pub center: LatLon,
+    pub zoom: f64,
+    /// The map and its pin (screen points).
+    pub rect: Rect,
+    pub pin: egui::Pos2,
+    pub tiles_drawn: usize,
+    pub tiles_missing: usize,
+    /// The egui pass it was drawn in.
+    pass: u64,
+}
+
 /// The view's centre and zoom.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
@@ -54,8 +78,10 @@ pub struct Camera {
 
 struct TileTex {
     tex: egui::TextureHandle,
-    /// Frame it was last drawn in.
+    /// The egui pass it was last drawn in.
     used: u64,
+    /// The decoded tile it was made from (to tell a fresh copy from the same arrival).
+    from: std::sync::Weak<lightcraft_map::TileImage>,
 }
 
 /// The photos of the current list that have a position, projected once.
@@ -81,7 +107,12 @@ pub struct MapView {
     textures_source: String,
     /// Tile textures uploaded so far (each arrival once).
     pub uploads: u64,
-    frame: u64,
+    /// The tiles each map on screen (by [`Surface`]) last asked for, and the egui pass it drew in.
+    wanted: [(u64, Vec<TileKey>); 2],
+    /// The tile service was asked for tiles that no map may show any more.
+    wanting: bool,
+    /// The Info panel's mini-map as drawn in the last pass.
+    pub mini: Option<MiniShown>,
     points: Points,
     /// The clusters drawn last, in canvas coordinates, and what they were computed for.
     clusters: Vec<Cluster>,
@@ -99,6 +130,29 @@ impl MapView {
     pub fn textures(&self) -> usize {
         self.textures.len()
     }
+
+    /// The tiles that have a texture now.
+    pub fn texture_keys(&self) -> HashSet<TileKey> {
+        self.textures.keys().copied().collect()
+    }
+}
+
+/// A map drawn from the shared tile textures: each tells the tile service what it shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Surface {
+    /// The Info panel's mini-map (drawn first in a frame: its few tiles go first).
+    Mini = 0,
+    /// The Map view.
+    View = 1,
+}
+
+/// What [`draw_tiles`] drew.
+pub struct TilesDrawn {
+    /// Tiles drawn from their own texture, and those missing (a lower zoom's picture or grey).
+    pub drawn: usize,
+    pub missing: usize,
+    /// The tile source's credit to paint on the map ([`draw_attribution`]); empty offline.
+    pub attribution: String,
 }
 
 /// Deepest zoom the view goes to: the tile source's, or 19 offline.
@@ -191,8 +245,6 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
 fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     let t = Tokens::get(ui.ctx());
     let ctx = ui.ctx().clone();
-    let ppp = ctx.pixels_per_point();
-    app.map.frame += 1;
     app.map.rect = Some(canvas);
     refresh_points(app);
     let (w, h) = (f64::from(canvas.width()), f64::from(canvas.height()));
@@ -252,79 +304,9 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     let painter = ui.painter_at(canvas);
     painter.rect_filled(canvas, 0.0, OUTSIDE);
     let offline = app.session.map.source().is_offline();
-    let source_max = app.session.map.source().max_zoom;
-    let mut attribution = String::new();
-    if app.map.textures_source != app.session.map.source().id {
-        app.map.textures.clear();
-        app.map.textures_source = app.session.map.source().id.clone();
-    }
-    if !offline {
-        let svc = app.session.map_tiles();
-        svc.show(&vp);
-        let events = svc.poll();
-        let idle = svc.is_idle();
-        attribution = svc.source().attribution.clone();
-        for e in &events {
-            // a fresh copy replaces the texture (uploaded again when next drawn)
-            if let TileEvent::Ready { key, .. } = e {
-                app.map.textures.remove(key);
-            }
-        }
-        if !events.is_empty() {
-            ctx.request_repaint();
-        } else if !idle {
-            // the service doesn't wake the UI: look again soon while tiles are on their way
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-        }
-    }
-    let frame = app.map.frame;
-    let (mut drawn, mut missing) = (0, 0);
-    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-    for tile in vp.tiles(source_max) {
-        let r = &tile.rect;
-        let rect = snap(
-            Rect::from_min_max(
-                pos2(canvas.min.x + r.x0 as f32, canvas.min.y + r.y0 as f32),
-                pos2(canvas.min.x + r.x1 as f32, canvas.min.y + r.y1 as f32),
-            ),
-            ppp,
-        );
-        if !offline
-            && !app.map.textures.contains_key(&tile.key)
-            && let Some(img) = app.session.map_tiles().get(tile.key)
-            && let Some(tex) = upload(&ctx, tile.key, &img)
-        {
-            app.map.textures.insert(tile.key, TileTex { tex, used: frame });
-            app.map.uploads += 1;
-        }
-        if let Some(tt) = app.map.textures.get_mut(&tile.key) {
-            tt.used = frame;
-            painter.image(tt.tex.id(), rect, uv, Color32::WHITE);
-            drawn += 1;
-            continue;
-        }
-        missing += 1;
-        // a lower zoom's picture of the place, magnified, until the tile arrives
-        let mut stand_in = false;
-        for d in 1..=4u8.min(tile.key.z) {
-            let parent = TileKey { z: tile.key.z - d, x: tile.key.x >> d, y: tile.key.y >> d };
-            if let Some(tt) = app.map.textures.get_mut(&parent) {
-                tt.used = frame;
-                let n = f32::from(1u16 << d);
-                let (ox, oy) = ((tile.key.x & ((1 << d) - 1)) as f32 / n, (tile.key.y & ((1 << d) - 1)) as f32 / n);
-                painter.image(tt.tex.id(), rect, Rect::from_min_size(pos2(ox, oy), vec2(1.0 / n, 1.0 / n)), Color32::WHITE);
-                stand_in = true;
-                break;
-            }
-        }
-        if !stand_in {
-            painter.rect_filled(rect, 0.0, PLACEHOLDER);
-            painter.rect_stroke(rect, 0.0, Stroke::new(1.0, PLACEHOLDER_LINE), StrokeKind::Inside);
-        }
-    }
-    app.map.tiles_drawn = drawn;
-    app.map.tiles_missing = missing;
-    evict(&mut app.map);
+    let tiles = draw_tiles(app, &ctx, &painter, canvas, &vp, Surface::View);
+    app.map.tiles_drawn = tiles.drawn;
+    app.map.tiles_missing = tiles.missing;
 
     // ---- pins
     let key = (
@@ -418,15 +400,144 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
         painter.galley(r.min + vec2(6.0, 3.0), g, t.text_label);
         register(&ctx, "map:withoutGps", r);
     }
-    if !attribution.is_empty() {
-        // always visible, never behind a toggle (the tile provider's terms)
-        let g = painter.layout_no_wrap(attribution, t.font(11.0), Color32::from_gray(0x20));
-        let r = Rect::from_min_size(pos2(canvas.right() - g.size().x - 12.0, canvas.bottom() - g.size().y - 6.0), g.size() + vec2(8.0, 4.0));
-        painter.rect_filled(r, 2.0, Color32::from_white_alpha(200));
-        painter.galley(r.min + vec2(4.0, 2.0), g, Color32::from_gray(0x20));
-        register(&ctx, "map:attribution", r);
-    }
+    draw_attribution(&painter, &t, canvas, tiles.attribution, 11.0, "map:attribution");
     controls(app, ui, canvas);
+}
+
+/// Draw the tiles of `vp` on `canvas` from the shared texture cache, telling the tile service what
+/// this map shows (nothing offline). A tile not loaded yet is drawn from a lower zoom's texture
+/// when one is at hand, else as a grey square. Used by the Map view and the Info panel's mini-map:
+/// a tile one of them uploaded is drawn by the other without uploading it again.
+pub fn draw_tiles(
+    app: &mut LightcraftApp,
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    canvas: Rect,
+    vp: &Viewport,
+    surface: Surface,
+) -> TilesDrawn {
+    let ppp = ctx.pixels_per_point();
+    let pass = ctx.cumulative_pass_nr();
+    let offline = app.session.map.source().is_offline();
+    let source_max = app.session.map.source().max_zoom;
+    let mut attribution = String::new();
+    if app.map.textures_source != app.session.map.source().id {
+        app.map.textures.clear();
+        app.map.textures_source = app.session.map.source().id.clone();
+    }
+    if !offline {
+        // the Map view loads a ring of tiles around what it shows (it pans); the mini-map doesn't
+        let margin = if surface == Surface::Mini { 0 } else { 1 };
+        if let Some(w) = app.map.wanted.get_mut(surface as usize) {
+            *w = (pass, vp.tile_keys(source_max, margin));
+        }
+        // every map drawn in this pass or the last one: one doesn't cancel the other's tiles
+        let keys: Vec<TileKey> = app.map.wanted.iter().filter(|(p, _)| p.saturating_add(1) >= pass).flat_map(|(_, k)| k.iter().copied()).collect();
+        app.map.wanting = true;
+        let svc = app.session.map_tiles();
+        svc.want(&keys);
+        let events = svc.poll();
+        let idle = svc.is_idle();
+        attribution = svc.source().attribution.clone();
+        for e in &events {
+            // a fresh copy replaces the texture (uploaded again when next drawn); a texture already
+            // made from this very arrival (it landed between a poll and a draw) stays
+            if let TileEvent::Ready { key, .. } = e {
+                let same = app.map.textures.get(key).and_then(|tt| tt.from.upgrade()).zip(svc.get(*key)).is_some_and(|(a, b)| Arc::ptr_eq(&a, &b));
+                if !same {
+                    app.map.textures.remove(key);
+                }
+            }
+        }
+        if !events.is_empty() {
+            ctx.request_repaint();
+        } else if !idle {
+            // the service doesn't wake the UI: look again soon while tiles are on their way
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+    let (mut drawn, mut missing) = (0, 0);
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    for tile in vp.tiles(source_max) {
+        let r = &tile.rect;
+        let rect = snap(
+            Rect::from_min_max(
+                pos2(canvas.min.x + r.x0 as f32, canvas.min.y + r.y0 as f32),
+                pos2(canvas.min.x + r.x1 as f32, canvas.min.y + r.y1 as f32),
+            ),
+            ppp,
+        );
+        if !offline
+            && !app.map.textures.contains_key(&tile.key)
+            && let Some(img) = app.session.map_tiles().get(tile.key)
+            && let Some(tex) = upload(ctx, tile.key, &img)
+        {
+            app.map.textures.insert(tile.key, TileTex { tex, used: pass, from: Arc::downgrade(&img) });
+            app.map.uploads += 1;
+        }
+        if let Some(tt) = app.map.textures.get_mut(&tile.key) {
+            tt.used = pass;
+            painter.image(tt.tex.id(), rect, uv, Color32::WHITE);
+            drawn += 1;
+            continue;
+        }
+        missing += 1;
+        // a lower zoom's picture of the place, magnified, until the tile arrives
+        let mut stand_in = false;
+        for d in 1..=4u8.min(tile.key.z) {
+            let parent = TileKey { z: tile.key.z - d, x: tile.key.x >> d, y: tile.key.y >> d };
+            if let Some(tt) = app.map.textures.get_mut(&parent) {
+                tt.used = pass;
+                let n = f32::from(1u16 << d);
+                let (ox, oy) = ((tile.key.x & ((1 << d) - 1)) as f32 / n, (tile.key.y & ((1 << d) - 1)) as f32 / n);
+                painter.image(tt.tex.id(), rect, Rect::from_min_size(pos2(ox, oy), vec2(1.0 / n, 1.0 / n)), Color32::WHITE);
+                stand_in = true;
+                break;
+            }
+        }
+        if !stand_in {
+            painter.rect_filled(rect, 0.0, PLACEHOLDER);
+            painter.rect_stroke(rect, 0.0, Stroke::new(1.0, PLACEHOLDER_LINE), StrokeKind::Inside);
+        }
+    }
+    evict(&mut app.map);
+    TilesDrawn { drawn, missing, attribution }
+}
+
+/// Paint the tile source's credit at the bottom right of `canvas`, always visible (the tile
+/// provider's terms: never behind a toggle or off screen; wrapped on a map narrower than it), and
+/// register it as `widget`. Nothing for an empty credit (offline).
+pub fn draw_attribution(painter: &egui::Painter, t: &Tokens, canvas: Rect, text: String, size: f32, widget: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let ink = Color32::from_gray(0x20);
+    let g = painter.layout(text, t.font(size), ink, (canvas.width() - 16.0).max(40.0));
+    let r = Rect::from_min_size(
+        pos2((canvas.right() - g.size().x - 12.0).max(canvas.left()), canvas.bottom() - g.size().y - 6.0),
+        g.size() + vec2(8.0, 4.0),
+    );
+    painter.rect_filled(r, 2.0, Color32::from_white_alpha(200));
+    painter.galley(r.min + vec2(4.0, 2.0), g, ink);
+    register(painter.ctx(), widget, r);
+}
+
+/// At the end of a frame: when no map was drawn in it, stop loading the tiles the last one asked
+/// for (only the maps on screen fetch), and forget the mini-map.
+pub fn end_pass(app: &mut LightcraftApp, ctx: &egui::Context) {
+    let pass = ctx.cumulative_pass_nr();
+    if app.map.mini.as_ref().is_some_and(|m| m.pass != pass) {
+        app.map.mini = None;
+    }
+    if app.map.wanting && !app.map.wanted.iter().any(|(p, _)| *p == pass) {
+        app.map.wanting = false;
+        for w in &mut app.map.wanted {
+            w.1.clear();
+        }
+        if let Some(svc) = app.session.map.service() {
+            svc.want(&[]);
+        }
+    }
 }
 
 /// A centred box of lines (`(text, bold)`) on the map.
@@ -478,6 +589,66 @@ fn thumbnail(app: &mut LightcraftApp, ui: &egui::Ui, painter: &egui::Painter, at
         painter.text(pos2(frame.center().x, img.bottom() + 10.0), Align2::CENTER_CENTER, c, t.font(11.5), t.text_label);
     }
     register(ui.ctx(), "map:hoverThumb", frame);
+}
+
+/// The Info panel's map of the active photo's position `pos`: `width` wide (the panel's fields),
+/// centred on it at [`MINI_ZOOM`], with its pin and the tile source's credit. It doesn't pan (no
+/// stray drags in a scrolling panel); a click opens the Map view centred there. It shares the Map view's tiles and
+/// textures, and asks for tiles only while it is on screen (scrolled into view). Offline it is
+/// grey, with the pin and a one-line note: the panel keeps its shape and the click still works.
+pub fn mini_map(app: &mut LightcraftApp, ui: &mut egui::Ui, photo: PhotoId, pos: LatLon, width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let ctx = ui.ctx().clone();
+    let w = if width.is_finite() { width.clamp(0.0, ui.available_width().max(0.0)) } else { 0.0 };
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, MINI_HEIGHT), Sense::click());
+    if w < 1.0 || !ui.is_rect_visible(rect) {
+        return;
+    }
+    register(&ctx, "info:miniMap", rect);
+    let zoom = MINI_ZOOM.min(max_zoom(app));
+    let vp = Viewport::new(pos, zoom, f64::from(w), f64::from(MINI_HEIGHT));
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0.0, OUTSIDE);
+    let tiles = draw_tiles(app, &ctx, &painter, rect, &vp, Surface::Mini);
+    // the pin (where the photo is; near the poles the map stops short of it, so keep it on the map)
+    let p = vp.to_screen(pos);
+    let pin = pos2(rect.min.x + p.x as f32, rect.min.y + p.y as f32);
+    let pin = if pin.x.is_finite() && pin.y.is_finite() {
+        pin.clamp(rect.min + vec2(8.0, 8.0), (rect.max - vec2(8.0, 8.0)).max(rect.min))
+    } else {
+        rect.center()
+    };
+    painter.circle_filled(pin + vec2(0.0, 1.5), radius(1) + 1.0, Color32::from_black_alpha(90));
+    // drawn as the Map view draws the active photo's pin
+    painter.circle(pin, radius(1), t.accent, Stroke::new(3.0, Color32::WHITE));
+    if app.session.map.source().is_offline() {
+        let g = painter.layout(crate::i18n::tr("Map tiles are off").to_string(), t.font(11.5), t.text_label, (w - 16.0).max(40.0));
+        let r = Rect::from_center_size(pos2(rect.center().x, rect.top() + 8.0 + g.size().y / 2.0 + 3.0), g.size() + vec2(12.0, 6.0));
+        painter.rect_filled(r, 4.0, Color32::from_black_alpha(150));
+        painter.galley(r.min + vec2(6.0, 3.0), g, t.text_label);
+    }
+    draw_attribution(&painter, &t, rect, tiles.attribution, 10.0, "info:miniMapAttribution");
+    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, t.divider), StrokeKind::Inside);
+    app.map.mini = Some(MiniShown {
+        photo,
+        center: vp.center,
+        zoom,
+        rect,
+        pin,
+        tiles_drawn: tiles.drawn,
+        tiles_missing: tiles.missing,
+        pass: ctx.cumulative_pass_nr(),
+    });
+    if resp.hovered() {
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if resp.on_hover_text(crate::i18n::tr("Show in the Map view")).clicked() {
+        let shown = app.run("view.map", json!({}));
+        let centred = app.run("map.setView", json!({"lat": pos.lat, "lon": pos.lon, "zoom": zoom}));
+        if let Err(e) = shown.and(centred) {
+            app.toast(&ctx, e);
+        }
+    }
 }
 
 /// + / − and Fit to Photos, top right.
@@ -640,5 +811,17 @@ pub fn state(app: &mut LightcraftApp) -> Value {
         "clusterCount": app.map.clusters.len(),
         "clusterMs": app.map.cluster_ms,
         "tiles": {"drawn": app.map.tiles_drawn, "missing": app.map.tiles_missing, "textures": app.map.textures.len(), "uploads": app.map.uploads},
+        "miniMap": app.map.mini.as_ref().map(|m| json!({
+            "photo": m.photo.0,
+            "lat": m.center.lat,
+            "lon": m.center.lon,
+            "zoom": m.zoom,
+            "x": m.rect.min.x,
+            "y": m.rect.min.y,
+            "width": m.rect.width(),
+            "height": m.rect.height(),
+            "pin": {"x": m.pin.x, "y": m.pin.y},
+            "tiles": {"drawn": m.tiles_drawn, "missing": m.tiles_missing},
+        })),
     })
 }

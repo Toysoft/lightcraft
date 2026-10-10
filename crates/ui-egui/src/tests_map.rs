@@ -57,6 +57,10 @@ const PLACES: [(f64, f64); 6] =
 /// The demo library at 1400 × 900 with the fake tile server; the first six photos in view get
 /// [`PLACES`] (returned in that order).
 fn demo(tiles: Option<Arc<FakeTiles>>) -> (Headless, Vec<u64>) {
+    demo_sized(tiles, [1400.0, 900.0])
+}
+
+fn demo_sized(tiles: Option<Arc<FakeTiles>>, size: [f32; 2]) -> (Headless, Vec<u64>) {
     let services = Services { png: None, ..Default::default() };
     let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
     if let Some(f) = tiles {
@@ -64,7 +68,7 @@ fn demo(tiles: Option<Arc<FakeTiles>>) -> (Headless, Vec<u64>) {
     } else {
         app.session.map.set_source(TileSource::offline());
     }
-    let mut h = Headless::new(app, [1400.0, 900.0], 1.0);
+    let mut h = Headless::new(app, size, 1.0);
     h.settle(SETTLE);
     let ids: Vec<u64> = h.app.session.visible_cloned().iter().take(PLACES.len()).map(|p| p.0).collect();
     assert_eq!(ids.len(), PLACES.len(), "the demo library has enough photos");
@@ -332,4 +336,188 @@ fn hostile_positions_and_sizes_never_crash() {
     assert_eq!(s["withGps"], 0);
     frames(&mut h, 2);
     assert!(h.painted_text().join("\n").contains("No photos with a location"));
+}
+
+// ---- the Info panel's mini-map
+
+/// The demo library in a window tall enough for the whole Info panel, Info open on `ids[0]`.
+fn info(tiles: Option<Arc<FakeTiles>>) -> (Headless, Vec<u64>) {
+    let (mut h, ids) = demo_sized(tiles, [1400.0, 1700.0]);
+    run(&mut h, "library.select", json!({"ids": [ids[0]]}));
+    h.app.ui.right = crate::state::RightPanel::Info;
+    frames(&mut h, 3);
+    (h, ids)
+}
+
+fn mini(h: &mut Headless) -> Value {
+    state(h)["miniMap"].clone()
+}
+
+fn widget(h: &Headless, id: &str) -> Option<egui::Rect> {
+    h.app.widgets.iter().find(|(w, _)| w == id).map(|(_, r)| *r)
+}
+
+fn tiles_idle(h: &Headless) -> bool {
+    h.app.session.map.service().is_some_and(|s| s.is_idle())
+}
+
+#[test]
+fn the_info_panel_maps_the_active_photo_and_credits_the_tiles() {
+    let (mut h, ids) = info(Some(fake(false)));
+    assert!(
+        h.step_until(T, |h| h.app.map.mini.as_ref().is_some_and(|m| m.tiles_drawn > 0 && m.tiles_missing == 0) && tiles_idle(h)),
+        "the mini-map's tiles arrive from the fake server"
+    );
+    frames(&mut h, 2);
+    let m = mini(&mut h);
+    assert_eq!(m["photo"].as_u64(), Some(ids[0]), "{m}");
+    assert!(
+        (m["lat"].as_f64().unwrap() - PLACES[0].0).abs() < 1e-9 && (m["lon"].as_f64().unwrap() - PLACES[0].1).abs() < 1e-9,
+        "centred on the photo: {m}"
+    );
+    assert_eq!(m["zoom"].as_f64(), Some(crate::panels::map::MINI_ZOOM));
+    // the pin is in the middle of the map, which takes the panel's width
+    let r = widget(&h, "info:miniMap").expect("the mini-map is registered");
+    let (px, py) = (m["pin"]["x"].as_f64().unwrap() as f32, m["pin"]["y"].as_f64().unwrap() as f32);
+    assert!((px - r.center().x).abs() < 1.0 && (py - r.center().y).abs() < 1.0, "{m} {r:?}");
+    assert!(r.width() > 180.0 && (r.height() - crate::panels::map::MINI_HEIGHT).abs() < 0.5, "{r:?}");
+    // the provider is credited on the mini-map itself
+    let credit = widget(&h, "info:miniMapAttribution").expect("the attribution is registered");
+    assert!(r.contains_rect(credit), "{credit:?} inside {r:?}");
+    assert!(h.painted_text().join("\n").contains("© OpenStreetMap contributors"));
+    assert_ne!(h.app.ui.view, ViewMode::Map, "the view stays: only the panel shows a map");
+    // the tiles are painted: the fake tile's colour away from the pin
+    let img = h.snapshot(SETTLE);
+    let px = img.pixels[(r.top() as usize + 30) * img.size[0] + r.left() as usize + 30];
+    assert!(px.r() > 140 && px.g() > 150, "{px:?}");
+    // several selected: the active photo's place, nothing fetched for the others
+    run(&mut h, "library.select", json!({"ids": [ids[3], ids[0], ids[5]], "active": ids[3]}));
+    frames(&mut h, 3);
+    let m = mini(&mut h);
+    assert_eq!(m["photo"].as_u64(), Some(ids[3]), "{m}");
+    assert!((m["lat"].as_f64().unwrap() - PLACES[3].0).abs() < 1e-9, "{m}");
+    let wanted = h.app.session.map.service().map(|s| s.stats().wanted).unwrap_or(0);
+    assert!(wanted > 0 && wanted <= 12, "only the active photo's few tiles: {wanted}");
+    // a photo without GPS: no map, the location fields as before
+    let others: Vec<u64> = h.app.session.visible_cloned().iter().map(|p| p.0).filter(|id| !ids.contains(id)).collect();
+    run(&mut h, "library.select", json!({"ids": [others[0]]}));
+    frames(&mut h, 3);
+    assert!(mini(&mut h).is_null());
+    assert!(widget(&h, "info:miniMap").is_none());
+    assert!(widget(&h, "field:gps").is_some(), "the GPS field is still there");
+}
+
+#[test]
+fn clicking_the_mini_map_opens_the_map_view_there_with_the_same_tiles() {
+    let (mut h, ids) = info(Some(fake(false)));
+    assert!(h.step_until(T, |h| h.app.map.mini.as_ref().is_some_and(|m| m.tiles_missing == 0) && tiles_idle(h)));
+    frames(&mut h, 2);
+    let before = h.app.map.texture_keys();
+    let uploads = h.app.map.uploads;
+    assert!(!before.is_empty() && uploads as usize == before.len(), "{uploads} uploads for {} tiles", before.len());
+    let r = widget(&h, "info:miniMap").unwrap();
+    let c = h.request("ui.click", json!({"x": r.left() + 20.0, "y": r.top() + 20.0}), T);
+    assert_eq!(c["ok"], true, "{c}");
+    frames(&mut h, 3);
+    assert_eq!(h.app.ui.view, ViewMode::Map);
+    let s = state(&mut h);
+    assert!((s["lat"].as_f64().unwrap() - PLACES[0].0).abs() < 1e-9 && (s["lon"].as_f64().unwrap() - PLACES[0].1).abs() < 1e-9, "{s}");
+    assert_eq!(s["zoom"].as_f64(), Some(crate::panels::map::MINI_ZOOM), "{s}");
+    assert_eq!(h.app.session.active().map(|a| a.0), Some(ids[0]), "the selection is untouched");
+    // the Map view draws the tiles the mini-map uploaded without uploading them again
+    assert!(h.step_until(T, |h| h.app.map.tiles_drawn > 0 && h.app.map.tiles_missing == 0 && tiles_idle(h)));
+    frames(&mut h, 2);
+    let after = h.app.map.texture_keys();
+    assert!(before.is_subset(&after), "the mini-map's textures are kept");
+    let new = after.difference(&before).count() as u64;
+    assert!(new > 0, "the bigger view shows more tiles");
+    assert_eq!(h.app.map.uploads - uploads, new, "only the newly shown tiles are uploaded");
+    // the mini-map is still there next to the Map view, and both keep their tiles
+    assert!(!mini(&mut h).is_null());
+    let uploads = h.app.map.uploads;
+    run(&mut h, "view.photoGrid", json!({}));
+    frames(&mut h, 3);
+    run(&mut h, "view.map", json!({}));
+    frames(&mut h, 3);
+    assert_eq!(h.app.map.uploads, uploads, "switching views uploads nothing again");
+}
+
+#[test]
+fn the_mini_map_fetches_only_while_it_is_on_screen() {
+    let tiles = fake(false);
+    let services = Services { png: None, ..Default::default() };
+    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
+    app.session.map.set_service(TileService::with_transport(TileSource::openstreetmap(), None, Some(tiles.clone() as Arc<dyn Transport>)));
+    app.ui.right = crate::state::RightPanel::Edit;
+    let mut h = Headless::new(app, [1400.0, 1700.0], 1.0);
+    h.settle(SETTLE);
+    let ids: Vec<u64> = h.app.session.visible_cloned().iter().take(2).map(|p| p.0).collect();
+    h.app.run("photo.setMeta", json!({"ids": ids, "gps": [PLACES[0].0, PLACES[0].1]})).unwrap();
+    run(&mut h, "library.select", json!({"ids": [ids[0]]}));
+    frames(&mut h, 3);
+    // no map on screen: nothing asked for, nothing fetched
+    assert_eq!(tiles.requests.load(Ordering::SeqCst), 0);
+    assert_eq!(h.app.session.map.service().map(|s| s.stats().wanted), Some(0));
+    h.app.ui.right = crate::state::RightPanel::Info;
+    assert!(h.step_until(T, |h| h.app.map.mini.as_ref().is_some_and(|m| m.tiles_missing == 0) && tiles_idle(h)));
+    let svc = |h: &Headless| h.app.session.map.service().map(|s| s.stats()).unwrap();
+    assert!(svc(&h).wanted > 0);
+    // the panel closed (or another tool): the tiles it wanted are no longer asked for
+    h.app.ui.right = crate::state::RightPanel::Edit;
+    frames(&mut h, 3);
+    assert!(mini(&mut h).is_null());
+    assert_eq!((svc(&h).wanted, svc(&h).queued), (0, 0));
+    let requests = tiles.requests.load(Ordering::SeqCst);
+    // another photo while the panel is closed: nothing fetched for it
+    h.app.run("photo.setMeta", json!({"ids": [ids[1]], "gps": [PLACES[5].0, PLACES[5].1]})).unwrap();
+    run(&mut h, "library.select", json!({"ids": [ids[1]]}));
+    frames(&mut h, 10);
+    assert_eq!(tiles.requests.load(Ordering::SeqCst), requests);
+}
+
+#[test]
+fn offline_the_mini_map_is_grey_with_its_pin_and_a_note() {
+    let (mut h, _) = info(None);
+    let m = mini(&mut h);
+    assert!(!m.is_null(), "the map keeps its place in the panel");
+    assert_eq!(m["tiles"]["drawn"], 0);
+    let text = h.painted_text().join("\n");
+    assert!(text.contains("Map tiles are off"), "{text}");
+    assert!(!text.contains("OpenStreetMap contributors"));
+    assert!(widget(&h, "info:miniMapAttribution").is_none());
+    assert!(h.app.session.map.service().is_none(), "offline: no tile service, so no network");
+    // the click still opens the Map view there
+    let r = widget(&h, "info:miniMap").unwrap();
+    h.request("ui.click", json!({"x": r.center().x, "y": r.center().y}), T);
+    frames(&mut h, 3);
+    assert_eq!(h.app.ui.view, ViewMode::Map);
+    assert!((state(&mut h)["lat"].as_f64().unwrap() - PLACES[0].0).abs() < 1e-9);
+}
+
+#[test]
+fn hostile_positions_narrow_windows_and_a_changing_photo_never_crash_the_mini_map() {
+    let (mut h, ids) = info(Some(fake(false)));
+    for gps in [[90.0, 180.0], [-90.0, -180.0], [0.0, 180.0], [0.0, -180.0], [85.06, 0.0], [-89.9999, 179.9999]] {
+        h.app.run("photo.setMeta", json!({"ids": [ids[0]], "gps": gps})).unwrap();
+        frames(&mut h, 2);
+        let m = mini(&mut h);
+        assert!(m["lat"].as_f64().unwrap().is_finite() && m["lon"].as_f64().unwrap().is_finite(), "{gps:?}: {m}");
+        let r = widget(&h, "info:miniMap").unwrap();
+        assert!(r.contains(egui::pos2(m["pin"]["x"].as_f64().unwrap() as f32, m["pin"]["y"].as_f64().unwrap() as f32)), "{gps:?}: {m}");
+    }
+    // NaN never reaches the catalog, and an out-of-range position is refused
+    assert!(h.app.run("photo.setMeta", json!({"ids": [ids[0]], "gps": [95.0, 0.0]})).is_err());
+    // the photo changing while its tiles load: the map follows the active photo
+    for id in [ids[1], ids[5], ids[3], ids[5]] {
+        run(&mut h, "library.select", json!({"ids": [id]}));
+        h.step();
+    }
+    frames(&mut h, 3);
+    assert_eq!(mini(&mut h)["photo"].as_u64(), Some(ids[5]));
+    // a tiny window, a narrow one, then a usual one
+    for (w, hh) in [(120, 90), (300, 1700), (1400, 1700)] {
+        h.request("ui.resize", json!({"width": w, "height": hh}), T);
+        frames(&mut h, 3);
+    }
+    assert!(widget(&h, "info:miniMap").is_some());
 }
