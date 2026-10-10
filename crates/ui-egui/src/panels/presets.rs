@@ -101,14 +101,16 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 track: Track::Plain,
             };
             let out = slider(ui, &spec, last.amount, true, None);
+            // (`run`: when the undo is refused there is nothing to re-apply, and nothing to say)
             if let Some(v) = out.value
                 && app.run("edit.undo", json!({})).is_ok()
             {
                 // Only replace the most recent preset; never undo intervening edits.
-                if app.run("preset.apply", json!({"id": &last.id, "amount": v})).is_ok() {
+                if app.act("preset.apply", json!({"id": &last.id, "amount": v})).is_some() {
                     ui.data_mut(|d| d.insert_temp(amt_id, AppliedPreset::new(&app.session, last.id, v)));
                 } else {
-                    app.act("edit.redo", json!({}));
+                    // (quiet: it puts back the step just undone; `act` already said why the preset was refused)
+                    app.quiet("edit.redo", json!({}));
                     ui.data_mut(|d| d.remove::<AppliedPreset>(amt_id));
                 }
             }
