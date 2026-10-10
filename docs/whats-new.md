@@ -500,12 +500,17 @@
   A library of unedited photos takes about half the memory it did (1.4 kB per photo where it was 2.9 kB: 4.8 GB where
   it was 10 GB for 3.5 million photos) and opens faster.
 - File ▸ Back Up Library backs up the catalog (not the photos) to a folder named after the time (UTC) in Backups in
-  the library folder, while you go on working, and says where it went when it is done. A backup opens as a library of
-  its own. Each one shares with the one before it the files that didn't change, so a backup of a large library after a
+  the library folder, while you go on working, and says where it went when it is done. Each one shares with the one before it the files that didn't change, so a backup of a large library after a
   day's work copies a few megabytes, and removing an older backup takes nothing from a newer one. Agents:
   `library.backup` (`dir`; returns when the backup is made, or at once with `background`), `library.backupStatus`,
   `library.backupPreferences` (the folder a library's backups go to), `library.checkBackup` (reads a backup against
   the list of files it was made with, and names one that was edited or damaged since).
+- A backup can be put back: `library.restore` makes the open library what the backup holds and goes on in it, and
+  keeps what the library was, with every change up to that moment, in Replaced in the library folder. With `to` it
+  restores into another folder instead, to look at a backup without giving up the library. A backup that was edited
+  or damaged, or that a newer LightCraft made, is refused with the library untouched; a restore cut short is finished
+  when the library is next opened. A backup folder itself no longer opens as a library, so that it stays what it was.
+  `library.backups` lists a folder's backups. No menu item yet: agents, the command line and the control channel.
 - Libraries are upgraded when first opened (catalog format 11) and can't be opened by earlier versions afterwards. The
   photos are split into segments only once the segments written read back the same. Copy or back up the whole library
   folder: `catalog.snap` alone no longer holds the photos.
