@@ -11,6 +11,15 @@
 
 Requests are answered on the UI thread between frames (timeout 60 s).
 
+On Wayland (sway, wlroots), a request stalls for as long as the LightCraft surface is on an inactive
+workspace or fully covered: the compositor sends no frame callback for a surface that is not
+presented, so `App::logic` never runs and the queue drains only when the surface is shown again, at
+which point the waiting requests complete at once. The repaint fallback that covers this case
+elsewhere is gated on the window reporting itself hidden, and winit returns unknown visibility on
+Wayland, so it cannot fire there. When driving the app unattended, use headless rendering instead
+of the live window; Windows, macOS and X11 are not affected, and requests are served there whether
+or not the window is visible.
+
 **Only requests are read.** Every line must be a JSON object with a string `method` (`id` and `params` are
 optional; blank lines are skipped). Anything else — text that isn't JSON, a JSON array or number, an object without
 `method`, invalid UTF-8, or a line longer than 4 MiB — gets one error reply
