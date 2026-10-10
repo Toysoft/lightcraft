@@ -1,6 +1,6 @@
 # LightCraft roadmap
 
-**Stage: alpha** · next: beta, ~16 points and ~340–600 h away
+**Stage: alpha** · next: beta, ~14 points and ~340–600 h away
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (full re-measure against Lightroom Classic 15.5 and the installed Lightroom 9.6; restructured to the progress-docs standard) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
@@ -13,10 +13,10 @@ from [docs/gaps.md](docs/gaps.md). The full assessment, method and evidence are 
 | | Value | Kind |
 |---|---:|---|
 | **Feature breadth** (checklist) | **81.1%** of 517 rows (P0 98.0%, P1 95.1%, P2 46.9%) | measured: [parity-checklist.md](docs/parity-checklist.md) recount |
-| **Feature breadth** (weighted by use) | **~76%** | estimated |
-| **Ready for real work** (full target) | **~59%** (54–64%) | estimated: weighted sum over the dimensions |
-| **Mainstream practitioner** | **~51%** (46–56%) | estimated |
-| **Essentials user** | **~63%** (58–68%) | estimated |
+| **Feature breadth** (weighted by use) | **~77%** | estimated |
+| **Ready for real work** (full target) | **~61%** (56–66%) | estimated: weighted sum over the dimensions |
+| **Mainstream practitioner** | **~49%** (44–54%) | estimated |
+| **Essentials user** | **~64%** (59–69%) | estimated |
 | Remaining to **beta** | **~340–600 h** (Opus 5.5 agent hours, ~60% parallel) | estimated |
 | Remaining to **full parity** | **~1,000–1,800 h** (~70% parallel) | estimated |
 
@@ -24,9 +24,9 @@ Each audience with its own hours (Opus 5.5 agent wall-clock hours to ~95%):
 
 | Audience | Ready | Opus 5.5 agent wall-clock hours to ~95% | Work that dominates |
 |---|---:|---:|---|
-| Full target (ready for real work) | **~59%** | **1,000–1,800 h** (~70% parallelizes) | raw colour, lens and camera data; AI models; Classic output modules; localization; plug-in ecosystem |
-| Mainstream practitioner | **~51%** | **450–840 h** (~60% parallelizes) | camera colour and render fidelity; CR3 / ORF / HE NEF; lens database; subject / sky masks; Lightroom XMP exchange; stability |
-| Essentials user | **~63%** | **160–300 h** (~50% parallelizes) | default raw look for popular cameras; launch stability; basic-slider feel; opening CR3 / HEIC files people send |
+| Full target (ready for real work) | **~61%** | **1,000–1,800 h** (~70% parallelizes) | raw colour, lens and camera data; AI models; Classic output modules; localization; plug-in ecosystem |
+| Mainstream practitioner | **~49%** | **450–840 h** (~60% parallelizes) | camera colour and render fidelity; CR3 / ORF / HE NEF; lens database; subject / sky masks; Lightroom XMP exchange; stability |
+| Essentials user | **~64%** | **160–300 h** (~50% parallelizes) | default raw look for popular cameras; launch stability; basic-slider feel; opening CR3 / HEIC files people send |
 
 The gap between breadth and readiness is quality and coverage, not missing buttons: camera colour is
 estimated rather than measured, CR3 decodes on three verified Canon bodies, compressed ORF and HE NEF
@@ -44,8 +44,8 @@ Hours are calibrated on this repo's PR history; see
 
 | Dimension | Ready | Breadth | Remaining | Doc |
 |---|---:|---:|---:|---|
-| Features | ~57% | ~76% (checklist 81.1%) | 600–1,100 h | [target-app-parity](docs/target-app-parity.md#features) |
-| ↳ RAW cameras, colour, lens profiles | ~50% | ~72% | 240–450 h | [raw-parity](docs/raw-parity.md) |
+| Features | ~61% | ~77% (checklist 81.1%) | 600–1,100 h | [target-app-parity](docs/target-app-parity.md#features) |
+| ↳ RAW cameras, colour, lens profiles | ~56% | 81% of 1,446 Adobe models decode, 16% verified | 255–480 h | [raw-parity](docs/raw-parity.md) |
 | UI/UX fidelity | ~70% | ~85% | 40–70 h | [ui-parity](docs/ui-parity.md) |
 | File formats (non-raw) | ~70% | ~85% | 30–55 h | [file-format-parity](docs/file-format-parity.md) |
 | Hardware | ~40% | ~50% | 40–80 h | [hardware-parity](docs/hardware-parity.md) |
@@ -61,8 +61,8 @@ Hours are calibrated on this repo's PR history; see
 | Area | Ready | Breadth | Remaining |
 |---|---:|---:|---:|
 | Import and library | 80% | 90% | 25–45 h |
-| RAW decoding and camera coverage | 50% | 72% | 120–220 h |
-| Colour, camera profiles, render fidelity | 40% | 65% | 80–150 h |
+| RAW decoding and camera coverage | 76% | 81% | 120–220 h |
+| Colour, camera profiles, render fidelity | 35% | 65% | 80–150 h |
 | Global develop adjustments | 70% | 93% | 30–60 h |
 | Optics, lens profiles, crop and geometry | 50% | 80% | 40–80 h |
 | Masking | 45% | 67% | 60–110 h |
@@ -114,6 +114,9 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 ## Progress log
 
+- 2026-10-10 (RAW): RAW measured model by model against Adobe's 1,446-model list (234 verified, 943
+  unverified, 233 preview-only, 36 unsupported; ~84% of photographers' cameras decode, ~40% on a
+  verified body). Full ~61%, mainstream ~49%, essentials ~64%; beta ~14 points away.
 - 2026-10-10 (final): full ready is a weighted sum over the dimensions (~59%; method aligned with
   the standard); mainstream practitioner ~51% (450–840 h), essentials user ~63% (160–300 h);
   alpha gate passes.
@@ -153,6 +156,7 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-10 | minor | RAW measured model by model; RAW decode and colour as explicit rows: full 59% → 61%, mainstream 51% → 49%, essentials 63% → 64%; beta ~14 points |
 | 2026-10-10 | minor | Full ready restored to the additive weighted sum (~59%; method aligned with the standard, no new evidence); hours per audience; beta ~16 points away |
 | 2026-10-10 | minor | Mainstream practitioner and essentials user numbers; full ready 55% → 46% (method written down); beta 340–600 h |
 | 2026-10-10 | minor | Alpha gate added (core-workflow check): passes, stays alpha |

@@ -43,7 +43,7 @@ against the code, tests, issues and [gaps.md](gaps.md).
 
 **Result: passes.** Every core workflow runs end to end on macOS and the work survives quit and
 reopen; the partial rows degrade fidelity for some cameras and large files but don't stop the
-workflow, so LightCraft stays **alpha** (ready for real work ~59%, above the ~40% bar).
+workflow, so LightCraft stays **alpha** (ready for real work ~61%, above the ~40% bar).
 
 ## After beta
 
