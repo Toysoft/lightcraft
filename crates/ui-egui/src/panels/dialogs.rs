@@ -128,10 +128,17 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
     // rather than growing the window when the options below the grid get taller (e.g. Copy).
     let import = matches!(dlg, Dialog::Import { .. });
     let window_id = egui::Id::new(if import { "lightcraft-import-dialog" } else { "lightcraft-dialog" });
+    // #781: every dialog taller than the window (Export on a 1366×768 screen, with the new HDR
+    // output row) used to extend past the bottom and put its Cancel / Export buttons off-screen,
+    // with no way to scroll. Cap the height just inside the viewport and let the inner content
+    // scroll when it doesn't fit; short dialogs look as they do today.
+    let viewport = ctx.input(|i| i.viewport().inner_rect).map(|r| r.height()).unwrap_or(720.0);
+    let max_h = (viewport - 40.0).max(240.0);
     let shown = egui::Window::new(crate::i18n::tr(&title)).id(window_id)
         .collapsible(false)
-        .resizable(import)
-        .vscroll(import)
+        .resizable(true)
+        .vscroll(true)
+        .max_height(max_h)
         .resize(|r| if import { r.default_height(crate::import::DIALOG_SIZE[1]) } else { r })
         .frame(frame)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
