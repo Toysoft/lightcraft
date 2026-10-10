@@ -23,7 +23,9 @@ estimated rather than measured, CR3 decodes on three verified Canon bodies, comp
 open as previews, rendering is tuned by eye, AI masks are heuristics, there is no lens database, and
 tests run in CI on FreeBSD only. **Why alpha:** core workflows run end to end, but readiness is below
 the ~75% beta bar and Lightroom's main inputs, raw files, still have blocking gaps (Canon, ~30% of
-raw users, decodes CR3 on three verified bodies). Hours are calibrated on this repo's PR history; see
+raw users, decodes CR3 on three verified bodies). It passes the alpha gate: all six core workflows
+(import, cull, develop, save and reopen, batch looks, export) work end to end on macOS
+([docs/roadmap.md](docs/roadmap.md#alpha-gate)). Hours are calibrated on this repo's PR history; see
 [target-app-parity.md](docs/target-app-parity.md#how-hours-are-calibrated).
 
 ## By dimension
@@ -136,6 +138,7 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-10 | minor | Alpha gate added (core-workflow check): passes, stays alpha |
 | 2026-10-10 | major | Restructured to the progress-docs standard; re-measured; *Where we stand*, *Parity estimate* and *Totals* moved to docs/target-app-parity.md, milestones and risks to docs/roadmap.md, raw coverage to docs/raw-parity.md, catalog migration to docs/file-format-parity.md, CJK notes to docs/localization-parity.md |
 | 2026-10-08 | minor | *Where we stand* by dimension and by kind of user |
 | 2026-10-02 | major | Parity estimate and effort table |

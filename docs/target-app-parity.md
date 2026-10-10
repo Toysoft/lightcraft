@@ -111,6 +111,10 @@ but ready-for-real-work is ~55%, below the ~75% beta bar, and the main file form
 gaps: Canon CR3 decodes from sensor data on three verified bodies only, compressed ORF and HE NEF
 open as previews, and colour on every non-DNG raw is estimated rather than measured.
 
+**Alpha gate:** all six core workflows (import, cull, develop, save and reopen, batch looks, export)
+work end to end on macOS; see the table in [roadmap.md](roadmap.md#alpha-gate). The partial rows (CR3
+variants, compressed ORF, HE NEF as previews; capped 100% zoom) degrade but don't block a workflow.
+
 **To beta:** ~20 points of readiness, **~300–520 h**: the ten `B` gaps in [gaps.md](gaps.md)
 (~250–460 h) plus CI on the main platforms and stability work around them. Beta needs: CR3, ORF and
 HE NEF decoding from sensor data; measured colour for the popular models and a fidelity suite with
@@ -169,4 +173,5 @@ P2 items 12–25 h; look tuning, performance, packaging, hardening 25–45 h.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-10 | minor | Stage re-checked against the core-workflow alpha gate: passes, stays alpha |
 | 2026-10-10 | major | Created per the progress-docs standard: full re-measure (checklist recount, installed Lightroom 9.6 bundle listing, code counts, catalogs, CI), feature areas with weights, dimensions, AI, stage, calibration; merged ROADMAP's *Where we stand* and *Parity estimate* |
