@@ -23,7 +23,11 @@ pub mod camera_profiles;
 pub mod cmd;
 pub mod config;
 pub mod contact_sheet;
+#[cfg(not(target_arch = "wasm32"))]
+mod content_index;
 pub mod content_models;
+#[cfg(not(target_arch = "wasm32"))]
+mod content_worker;
 pub mod crs;
 pub mod crs_masks;
 pub mod demo;
@@ -213,6 +217,9 @@ pub struct Session {
     /// The loaded recognition model and the face embeddings made with it.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) faces: faces_index::FacesState,
+    /// Content indexing (search by what photos show): the index of the model in use and the background scan.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) content: content_worker::State,
     /// Copied develop settings (partial JSON) for Paste.
     pub clipboard: Option<Value>,
     /// The folder on disk the [`LibrarySource::Folder`] view browses.
@@ -355,6 +362,8 @@ impl Session {
             face_catalog: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             faces: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            content: Default::default(),
             clipboard: None,
             meta_clipboard: None,
             browse: None,
@@ -988,6 +997,8 @@ mod tests_album_order;
 mod tests_albums_local;
 #[cfg(test)]
 mod tests_color;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests_content_index;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests_content_models;
 #[cfg(test)]

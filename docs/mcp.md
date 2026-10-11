@@ -192,7 +192,8 @@ Everything is a command in LightCraft, so `tools/list` also contains one tool pe
 command registry (engine commands, plus the app's UI commands such as `view.detail` when
 connected): the id with `.` replaced by `_` and a `cmd_` prefix — `photo.rate` → `cmd_photo_rate`,
 `develop.set` → `cmd_develop_set`, `edit.undo` → `cmd_edit_undo`, `content.models.list` →
-`cmd_content_models_list` (content search models, docs/content-search.md). Arguments are the command's
+`cmd_content_models_list` (content search models, docs/content-search.md; `cmd_content_search {text}` finds photos by
+what they show once `cmd_content_enable {on: true}` and `cmd_content_pump {wait: true}` have indexed the library). Arguments are the command's
 JSON params (documented in each tool's description and by `list_commands`). Pass `--compact` to
 leave these per-command tools out when a client struggles with a large tool list; `run_command`
 still reaches every command.

@@ -2,6 +2,18 @@
 
 ## 2026-10-11
 
+### Search by content: indexing
+- With Settings ▸ Search ▸ **Index photo contents** on, LightCraft now looks at every photo of the library in the
+  background and remembers what it shows (an embedding per photo, in `content-embeddings-<model>.bin` beside the
+  catalog; about 1.5 KB a photo). It shows in the activity stack as *Indexing photo contents*; its ✕ stops it after the
+  photos it is on and keeps what is done, and turning the switch on again carries on. Quitting does not ask about it.
+- Settings ▸ Search shows how far it has got and the time left, a **Pace** (Low, Normal, Fast: how much of the computer
+  it may use) and **Clear Index**. New photos are indexed as they come in; edits never cause re-indexing (the unedited
+  photo is what is indexed), a replaced original does. Raws are indexed from their embedded preview.
+- Agents and the CLI can already search: `content.search {text: "kids on a beach"}` ranks the photos by how well they
+  match, `content.similar {id}` finds photos with similar contents, `content.status` reports progress
+  (docs/content-search.md). The search bar's Contents mode comes next.
+
 ### Search by content: the models
 - Settings ▸ Search (new) lists the models LightCraft will use to find photos by what they show (Google's SigLIP 2:
   base 256 px, recommended, 1.5 GB; base 384 px; So400m, 4.6 GB; all Apache-2.0). **Download** shows the licence first

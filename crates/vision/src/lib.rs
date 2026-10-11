@@ -63,7 +63,12 @@ pub trait ContentModel: Send + Sync {
     fn embed_texts(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
     /// How well an image embedding matches a text embedding. For a sigmoid model this is a
     /// probability (0..1) that a threshold can be applied to; for a softmax model it only ranks.
-    fn score(&self, image: &[f32], text: &[f32]) -> f32;
+    fn score(&self, image: &[f32], text: &[f32]) -> f32 {
+        self.score_cosine(dot(image, text))
+    }
+    /// [`ContentModel::score`] from the cosine of the two (normalised) embeddings, so an index
+    /// can compute the cosines itself (from f16 rows, in parallel) and score them after.
+    fn score_cosine(&self, cosine: f32) -> f32;
     fn manifest(&self) -> &Manifest;
 }
 

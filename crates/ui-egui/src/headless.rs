@@ -1168,6 +1168,81 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Settings ▸ Search: the "Index photo contents" switch starts indexing; the scan shows in the activity stack and in
+    /// the tab (progress, pace, Clear Index) and moves on frame by frame without blocking them (a small stand-in model).
+    #[test]
+    fn settings_search_switch_starts_indexing_and_the_activity_row_progresses() {
+        use lightcraft_vision::{ContentModel, Manifest, Rgb8, Towers};
+        struct Fake(Manifest);
+        impl ContentModel for Fake {
+            fn embed_images(&self, batch: &[Rgb8]) -> lightcraft_vision::Result<Vec<Vec<f32>>> {
+                std::thread::sleep(Duration::from_millis(15 * batch.len() as u64));
+                Ok(batch.iter().map(|i| vec![f32::from(i.data[0][0]) / 255.0 + 0.1, 0.5, 0.25, 0.1]).collect())
+            }
+            fn embed_texts(&self, texts: &[&str]) -> lightcraft_vision::Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0, 0.0, 0.0, 0.0]).collect())
+            }
+            fn score_cosine(&self, cosine: f32) -> f32 {
+                cosine
+            }
+            fn manifest(&self) -> &Manifest {
+                &self.0
+            }
+        }
+        let mut h = demo([1400.0, 900.0]);
+        let t = Duration::from_secs(10);
+        let dir = std::env::temp_dir().join(format!("lc-ui-contentindex-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let content = dir.join("content");
+        let mut m = lightcraft_vision::manifest::builtin_siglip2_b16_256();
+        m.id = "fake".into();
+        m.embedding.dim = 4;
+        let body = b"weights".to_vec();
+        m.files = vec![lightcraft_vision::manifest::FileSpec {
+            name: "model.safetensors".into(),
+            size: body.len() as u64,
+            sha256: lightcraft_faces::hash::sha256_hex(&body),
+        }];
+        let home = content.join("fake");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("model.safetensors"), &body).unwrap();
+        std::fs::write(home.join("content-model.json"), serde_json::to_vec(&m).unwrap()).unwrap();
+        std::fs::write(home.join("installed.json"), br#"{"acceptedAt": "2026-10-11T00:00:00Z"}"#).unwrap();
+        std::fs::write(content.join("settings.json"), br#"{"enabled": false, "model": "fake", "pace": "low"}"#).unwrap();
+        h.app.session.content_models_dir = Some(content.clone());
+        h.app.session.set_content_model_loader(std::sync::Arc::new(|_: &std::path::Path, m: &Manifest, _: Towers| {
+            Ok(Box::new(Fake(m.clone())) as Box<dyn ContentModel>)
+        }));
+        h.request("engine.execute", json!({"command": "app.settings", "params": {"tab": "search"}}), t);
+        h.settle(SETTLE);
+        h.step();
+        assert!(h.app.session.activity.list().iter().all(|r| r.kind != "content"), "nothing runs while it is off");
+        let r = h.request("ui.clickWidget", json!({"id": "check:settings.contentEnabled"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.step();
+        // the row appears, cancellable, and its count goes up frame by frame
+        let content_row = |h: &Headless| h.app.session.activity.list().into_iter().find(|r| r.kind == "content");
+        assert!(h.step_until(t, |h| content_row(h).is_some()), "no indexing row");
+        let row = content_row(&h).unwrap();
+        assert_eq!((row.label.as_str(), row.cancellable), ("Indexing photo contents", true));
+        let first = row.done;
+        assert!(h.step_until(Duration::from_secs(60), |h| content_row(h).is_some_and(|r| r.done > first)), "the row does not progress");
+        // the tab shows the progress, the pace and Clear Index
+        h.step();
+        let w = h.request("ui.widgets", json!({"filter": "content"}), t).to_string();
+        assert!(w.contains("content:indexProgress") && w.contains("content:clearIndex") && w.contains("button:contentPace-0"), "{w}");
+        // the pace can be changed from the tab
+        let r = h.request("ui.clickWidget", json!({"id": "button:contentPace-2"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.step();
+        assert!(std::fs::read_to_string(content.join("settings.json")).unwrap().contains("fast"));
+        // it finishes by itself and the row goes
+        assert!(h.step_until(Duration::from_secs(60), |h| content_row(h).is_none()), "the scan never finished");
+        let st = h.app.session.execute("content.status", &json!({})).unwrap();
+        assert_eq!(st["indexed"], st["total"], "{st}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Until face recognition is set up, the People view and the loupe's name box say so and offer the next step: with no
     /// model, a button that opens Settings ▸ Faces; with a model installed but recognition off, one that switches it on.
     #[test]

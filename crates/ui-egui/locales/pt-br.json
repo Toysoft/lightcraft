@@ -1978,5 +1978,14 @@
   "I have read these terms and accept them": "Li estes termos e os aceito",
   "The model stays on this computer. LightCraft never uploads your photos or what you search for.": "O modelo fica neste computador. O LightCraft nunca envia suas fotos nem o que você pesquisa.",
   "Checking model files": "Verificando os arquivos do modelo",
-  "Testing search model": "Testando o modelo de pesquisa"
+  "Testing search model": "Testando o modelo de pesquisa",
+  "less than a minute left": "menos de um minuto restante",
+  "Resume": "Retomar",
+  "Pace": "Ritmo",
+  "Normal": "Normal",
+  "Fast": "Rápido",
+  "Low barely slows the computer down; Fast uses most of it and finishes sooner.": "Baixo quase não deixa o computador lento; Rápido usa quase tudo e termina antes.",
+  "Clear Index": "Limpar índice",
+  "The index was cleared": "O índice foi limpo",
+  "Indexing photo contents": "Indexando o conteúdo das fotos"
 }

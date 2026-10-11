@@ -1,5 +1,6 @@
-//! Search by content: the Settings ▸ Search tab (the indexing switch and the list of content models) and the dialog
-//! that shows a model's licence before it is downloaded or used.
+//! Search by content: the Settings ▸ Search tab (the indexing switch, how far indexing has got, its pace, Clear Index,
+//! and the list of content models), the dialog that shows a model's licence before it is downloaded or used, and the
+//! per-frame pump that keeps indexing going.
 //!
 //! LightCraft fetches a model only when the user presses Download and ticks "I have read these terms and accept them"
 //! in the dialog (`content.models.download {acknowledged: true}`): from Hugging Face, checked against its recorded
@@ -108,11 +109,16 @@ pub fn settings_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             app.toast(ui.ctx(), e);
         }
         forget(ui.ctx());
+        forget_status(ui.ctx());
+        app.caches.content_next_pump = 0.0;
     }
     match in_use {
         Some(m) if runtime => hint(ui, t, &tr_format!("Model in use: {name}", name = m["name"].as_str().unwrap_or(""))),
         _ if !runtime => hint(ui, t, "This build cannot run content models."),
         _ => hint(ui, t, "No model in use yet: download one below."),
+    }
+    if runtime && in_use.is_some() {
+        index_section(app, ui, t, on);
     }
     heading(ui, t, "Models");
     for m in &all {
@@ -120,6 +126,141 @@ pub fn settings_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     }
     for e in list["catalog"]["errors"].as_array().into_iter().flatten().filter_map(Value::as_str).take(3) {
         ui.add(egui::Label::new(RichText::new(e).font(t.font(11.5)).color(t.caution)).wrap());
+    }
+}
+
+/// The index's status (`content.status`), re-read at most every [`REFRESH_SECS`] (the call also moves the scan along).
+fn index_status(app: &mut LightcraftApp, ctx: &egui::Context) -> Value {
+    let now = ctx.input(|i| i.time);
+    let id = egui::Id::new("content-index-status");
+    if let Some((at, v)) = ctx.data(|d| d.get_temp::<(f64, Value)>(id))
+        && now - at < REFRESH_SECS
+        && now >= at
+    {
+        return v;
+    }
+    let v = app.run("content.status", json!({})).unwrap_or(Value::Null);
+    ctx.data_mut(|d| d.insert_temp(id, (now, v.clone())));
+    v
+}
+
+fn forget_status(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<(f64, Value)>(egui::Id::new("content-index-status")));
+}
+
+/// "about 3 min", "about 2 h 10 min", "less than a minute".
+fn time_left(secs: f64) -> String {
+    let mins = (secs / 60.0).round() as u64;
+    match mins {
+        0 => tr("less than a minute left").to_string(),
+        m if m < 60 => tr_format!("about {m} min left", m = m),
+        m => tr_format!("about {h} h {m} min left", h = m / 60, m = m % 60),
+    }
+}
+
+/// How far indexing has got, the pace, and Clear Index.
+fn index_section(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, on: bool) {
+    let st = index_status(app, ui.ctx());
+    let (indexed, total) = (st["indexed"].as_u64().unwrap_or(0), st["total"].as_u64().unwrap_or(0));
+    if let Some(e) = st["error"].as_str() {
+        ui.add(egui::Label::new(RichText::new(sentence(e)).font(t.font(11.5)).color(t.caution)).wrap());
+    }
+    if on && st["indexing"] == true {
+        // the tab keeps moving while the scan runs
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(REFRESH_SECS));
+        let frac = if total > 0 { (indexed as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
+        let mut text = tr_format!("{n} of {total} photos indexed", n = indexed, total = total);
+        if let Some(eta) = st["etaSeconds"].as_f64() {
+            text = format!("{text} · {}", time_left(eta));
+        }
+        let bar = ui.add(egui::ProgressBar::new(frac).desired_width(320.0).text(RichText::new(text).font(t.font(11.5))));
+        register(ui.ctx(), "content:indexProgress", bar.rect);
+    } else if on && st["stopped"] == true {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr_format!("Stopped at {n} of {total} photos.", n = indexed, total = total)).font(t.font(11.5)).color(t.text_dim));
+            let r = ui.button(tr("Resume"));
+            register(ui.ctx(), "content:resume", r.rect);
+            if r.clicked() {
+                if let Err(e) = app.run("content.enable", json!({"on": true})) {
+                    app.toast(ui.ctx(), e);
+                }
+                forget_status(ui.ctx());
+            }
+        });
+    } else if total > 0 && st["indexed"].is_u64() {
+        let line = if indexed >= total {
+            tr_format!("All {total} photos are indexed.", total = total)
+        } else {
+            tr_format!("{n} of {total} photos indexed.", n = indexed, total = total)
+        };
+        ui.label(RichText::new(line).font(t.font(11.5)).color(t.text_dim));
+    }
+    let (failed, offline) = (st["failed"].as_u64().unwrap_or(0), st["offline"].as_u64().unwrap_or(0));
+    if failed > 0 {
+        ui.label(RichText::new(tr_format!("{n} photos could not be read.", n = failed)).font(t.font(11.5)).color(t.text_dim));
+    }
+    if offline > 0 {
+        ui.label(
+            RichText::new(tr_format!("{n} photos are offline: they are indexed when their drive is back.", n = offline))
+                .font(t.font(11.5))
+                .color(t.text_dim),
+        );
+    }
+    if let Some(e) = st["index"]["saveError"].as_str() {
+        ui.add(egui::Label::new(RichText::new(sentence(e)).font(t.font(11.5)).color(t.caution)).wrap());
+    }
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr("Pace")).color(t.text_label));
+        let mut pace = match st["pace"].as_str() {
+            Some("low") => 0,
+            Some("fast") => 2,
+            _ => 1,
+        };
+        if super::settings::choices(ui, "contentPace", &[(0, "Low"), (1, "Normal"), (2, "Fast")], &mut pace) {
+            let name = ["low", "normal", "fast"].get(pace).copied().unwrap_or("normal");
+            if let Err(e) = app.run("content.pace", json!({"pace": name})) {
+                app.toast(ui.ctx(), e);
+            }
+            forget_status(ui.ctx());
+        }
+    });
+    hint(ui, t, "Low barely slows the computer down; Fast uses most of it and finishes sooner.");
+    ui.horizontal(|ui| {
+        let r = ui.button(tr("Clear Index"));
+        register(ui.ctx(), "content:clearIndex", r.rect);
+        if r.clicked() {
+            match app.run("content.clearIndex", json!({})) {
+                Ok(_) => app.toast(ui.ctx(), tr("The index was cleared")),
+                Err(e) => app.toast(ui.ctx(), e),
+            }
+            forget_status(ui.ctx());
+        }
+        if let Some(bytes) = st["index"]["bytes"].as_u64() {
+            ui.label(RichText::new(tr_format!("Index: {size}", size = size(Some(bytes)))).font(t.font(11.5)).color(t.text_dim));
+        }
+    });
+}
+
+/// Called every frame: keeps content indexing going while it is on. The scan's work runs on its own thread; this only
+/// hands it the next photos and takes in what it finished, a few times a second while it runs (nothing new is started
+/// while the user drags, types or scrolls), and about once a second otherwise.
+pub fn pump(app: &mut LightcraftApp, ctx: &egui::Context) {
+    let now = ctx.input(|i| i.time);
+    if now < app.caches.content_next_pump {
+        return;
+    }
+    let pause = now - app.caches.last_input < 0.4;
+    let Ok(v) = app.session.execute("content.pump", &json!({"pause": pause})) else { return };
+    let indexing = v["indexing"] == true || v["inFlight"].as_u64().unwrap_or(0) > 0;
+    if indexing != app.caches.content_indexing {
+        // Settings ▸ Search shows the change at once
+        forget_status(ctx);
+    }
+    app.caches.content_indexing = indexing;
+    let wait = if indexing { 0.25 } else { 1.0 };
+    app.caches.content_next_pump = now + wait;
+    if indexing {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
     }
 }
 

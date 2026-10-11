@@ -49,12 +49,15 @@ pub const MAX_CATALOG_MODELS: usize = 32;
 /// Largest `settings.json` / `installed.json` read.
 const MAX_SMALL: usize = 64 * 1024;
 
-/// `settings.json`: whether photos are indexed (phase 3 runs it), and the model in use.
+/// `settings.json`: whether photos are indexed, the model in use and how hard indexing works.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub enabled: bool,
     pub model: Option<String>,
+    /// How hard indexing works: `low`, `normal` (the default) or `fast`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pace: Option<String>,
 }
 
 /// Read at most `max` bytes of a small file (`None` when it is missing, unreadable or larger).

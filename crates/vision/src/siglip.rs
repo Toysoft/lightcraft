@@ -437,8 +437,8 @@ impl ContentModel for Siglip {
         self.embed_tokens(&ids, texts.len())
     }
 
-    fn score(&self, image: &[f32], text: &[f32]) -> f32 {
-        let logit = self.scale * crate::dot(image, text);
+    fn score_cosine(&self, cosine: f32) -> f32 {
+        let logit = self.scale * cosine;
         match self.manifest.score.kind {
             ScoreKind::Sigmoid => 1.0 / (1.0 + (-(logit + self.bias)).exp()),
             ScoreKind::Softmax => logit,

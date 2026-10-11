@@ -1,7 +1,9 @@
 //! Content search commands (`content.*`): the models that let photos be searched by what they show (which exist,
-//! downloading, adding, checking, choosing, testing and removing them), the indexing setting, and the status.
+//! downloading, adding, checking, choosing, testing and removing them), indexing (on/off, pace, the status, the scan's
+//! pump, re-indexing and clearing the index) and the searches (`content.search`, `content.similar`).
 //!
-//! The folders and jobs are [`crate::content_models`]; this module is the commands over them. Model folders and
+//! The folders and jobs are [`crate::content_models`]; the index and the scan are [`super::content_scan`]; this module
+//! is the commands over them. Model folders and
 //! manifests are hostile input: ids are validated before they become folder names, every file is checked against its
 //! size and SHA-256 before a model is used, and nothing outside a model's own folder is ever touched.
 
@@ -58,7 +60,7 @@ impl View {
 }
 
 /// Act on downloads that have finished: a model that arrived is chosen when none is (or the chosen one is gone).
-fn settle(s: &mut Session) {
+pub(crate) fn settle(s: &mut Session) {
     let Some(dir) = s.content_models_dir.clone() else { return };
     let done = s.content_jobs.newly_installed();
     if done.is_empty() {
@@ -321,6 +323,8 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         st.model = Some(m.id.clone());
         write_settings(&dir, &st).map_err(|e| bad(C, e))?;
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    super::content_scan::refresh(s, true);
     let v = view(&dir);
     let installed = row(s, &v, &m, v.disk.iter().find(|d| d.manifest.id == m.id));
     Ok(json!({"installed": installed, "model": v.model().map(|d| d.manifest.id.clone())}))
@@ -344,6 +348,9 @@ fn select(s: &mut Session, p: &Value) -> Result<Value> {
     st.enabled &= id.is_some();
     st.model = id;
     write_settings(&dir, &st).map_err(|e| bad(C, e))?;
+    // a scan of the old model stops now, and indexing goes on with the new one's index
+    #[cfg(not(target_arch = "wasm32"))]
+    super::content_scan::refresh(s, true);
     Ok(json!({"model": st.model, "enabled": st.enabled}))
 }
 
@@ -373,6 +380,8 @@ fn remove(s: &mut Session, p: &Value) -> Result<Value> {
         write_settings(&dir, &st).map_err(|e| bad(C, e))?;
     }
     s.content_jobs.cancel(id);
+    #[cfg(not(target_arch = "wasm32"))]
+    super::content_scan::refresh(s, true);
     Ok(json!({"removed": id, "model": st.model, "enabled": st.enabled}))
 }
 
@@ -413,15 +422,40 @@ fn enable(s: &mut Session, p: &Value) -> Result<Value> {
     let mut st = v.settings;
     st.enabled = on;
     write_settings(&dir, &st).map_err(|e| bad(C, e))?;
+    // switched on: a scan the user stopped (or one a model error stopped) starts again; off: it stops at once
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if on {
+            super::content_scan::resume(s);
+        }
+        super::content_scan::refresh(s, true);
+        super::content_scan::step(s, false);
+    }
     Ok(json!({"enabled": st.enabled}))
 }
 
-/// `content.status`: the model in use and whether indexing is on.
+/// `content.pace {pace: low | normal | fast}`: how hard indexing works.
+fn pace(s: &mut Session, p: &Value) -> Result<Value> {
+    const C: &str = "content.pace";
+    let dir = models_dir(s, C)?;
+    let name = str_param(p, "pace").ok_or_else(|| bad(C, "missing `pace` (low, normal or fast)"))?;
+    if !matches!(name, "low" | "normal" | "fast") {
+        return Err(bad(C, "`pace` is low, normal or fast"));
+    }
+    let mut st = read_settings(&dir);
+    st.pace = (name != "normal").then(|| name.to_string());
+    write_settings(&dir, &st).map_err(|e| bad(C, e))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    super::content_scan::refresh(s, true);
+    Ok(json!({"pace": name}))
+}
+
+/// `content.status`: the model in use, whether indexing is on, and how far the index has got.
 fn status(s: &mut Session, _: &Value) -> Result<Value> {
     settle(s);
     let v = s.content_models_dir.as_deref().map(view);
     let model = v.as_ref().and_then(View::model);
-    Ok(json!({
+    let mut out = json!({
         "runtime": RUNTIME,
         "dir": v.as_ref().map(|v| v.dir.display().to_string()),
         "model": model.map(|d| d.manifest.id.clone()),
@@ -430,12 +464,116 @@ fn status(s: &mut Session, _: &Value) -> Result<Value> {
         "enabled": v.as_ref().is_some_and(|v| v.settings.enabled) && model.is_some(),
         "ready": RUNTIME && model.is_some(),
         "job": s.content_jobs.running().map(|(id, kind)| json!({"id": id, "kind": kind})),
-        // the index (phase 3): photos indexed, of all, stale ones, and whether a scan runs
-        "indexed": null,
-        "total": null,
-        "stale": null,
-        "indexing": false,
-    }))
+    });
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        super::content_scan::step(s, false);
+        let index = super::content_scan::report(s);
+        if let (Some(o), Value::Object(more)) = (out.as_object_mut(), index) {
+            o.extend(more);
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    if let Some(o) = out.as_object_mut() {
+        for k in ["indexed", "total", "stale", "etaSeconds", "msPerPhoto", "index", "error"] {
+            o.insert(k.into(), Value::Null);
+        }
+        o.insert("indexing".into(), json!(false));
+    }
+    Ok(out)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod scan {
+    use serde_json::Value;
+
+    use super::super::content_scan as cs;
+    use super::super::{bad, str_param};
+    use crate::{Result, Session};
+
+    fn limit(p: &Value, default: usize) -> usize {
+        p.get("limit").and_then(Value::as_u64).map_or(default, |n| usize::try_from(n).unwrap_or(cs::MAX_RESULTS)).clamp(1, cs::MAX_RESULTS)
+    }
+
+    fn min(p: &Value, c: &str) -> Result<f32> {
+        match p.get("min") {
+            None | Some(Value::Null) => Ok(f32::NEG_INFINITY),
+            Some(v) => v.as_f64().filter(|m| m.is_finite()).map(|m| m as f32).ok_or_else(|| bad(c, "`min` must be a number")),
+        }
+    }
+
+    pub fn search(s: &mut Session, p: &Value) -> Result<Value> {
+        const C: &str = "content.search";
+        let text = str_param(p, "text").map(str::trim).filter(|t| !t.is_empty()).ok_or_else(|| bad(C, "missing `text`"))?;
+        if text.chars().count() > 500 {
+            return Err(bad(C, "`text` is at most 500 characters"));
+        }
+        let (limit, min) = (limit(p, 100), min(p, C)?);
+        cs::search(s, text, limit, min)
+    }
+
+    pub fn similar(s: &mut Session, p: &Value) -> Result<Value> {
+        const C: &str = "content.similar";
+        let id = p.get("id").and_then(Value::as_u64).or_else(|| s.active().map(|a| a.0)).ok_or_else(|| bad(C, "missing `id`"))?;
+        let (limit, min) = (limit(p, 50), min(p, C)?);
+        cs::similar(s, id, limit, min)
+    }
+
+    pub fn pump(s: &mut Session, p: &Value) -> Result<Value> {
+        cs::pump(s, p)
+    }
+
+    pub fn reindex(s: &mut Session, p: &Value) -> Result<Value> {
+        const C: &str = "content.reindex";
+        let ids = match p.get("ids") {
+            None | Some(Value::Null) => None,
+            Some(Value::Array(a)) => {
+                Some(a.iter().map(|v| v.as_u64().ok_or_else(|| bad(C, "`ids` must be photo ids"))).collect::<Result<Vec<u64>>>()?)
+            }
+            Some(_) => return Err(bad(C, "`ids` must be a list of photo ids")),
+        };
+        let n = cs::reindex(s, ids);
+        cs::step(s, false);
+        Ok(serde_json::json!({"queued": n}))
+    }
+
+    pub fn clear(s: &mut Session, _: &Value) -> Result<Value> {
+        let r = cs::clear(s)?;
+        cs::step(s, false);
+        Ok(r)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod scan {
+    use serde_json::Value;
+
+    use super::super::bad;
+    use crate::{Result, Session};
+
+    fn unavailable(c: &str) -> Result<Value> {
+        Err(bad(c, "content search is not available in the web build"))
+    }
+
+    pub fn search(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.search")
+    }
+
+    pub fn similar(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.similar")
+    }
+
+    pub fn pump(_: &mut Session, _: &Value) -> Result<Value> {
+        Ok(serde_json::json!({"active": false, "indexing": false, "pending": 0}))
+    }
+
+    pub fn reindex(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.reindex")
+    }
+
+    pub fn clear(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.clearIndex")
+    }
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -447,7 +585,13 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(query "content.models.select", "Choose Content Model", [], None, "{id: installed model | null} → {model, enabled}", always, select),
         cmd!(query "content.models.remove", "Remove Content Model", [], None, "{id} → {removed, model, enabled} — delete a model's folder; another installed model takes over", always, remove),
         cmd!(query "content.models.test", "Test Content Model", [], None, "{id, wait?: false} → {started} | (wait) {ok, result: {device, loadMs, msPerImage, cpuMsPerImage, msPerText, checks}, error} — load an installed model and check it matches procedurally generated scenes to their descriptions; the result (and the speed) is kept in its installed.json", always, test),
-        cmd!(query "content.enable", "Index Photo Contents On/Off", [], None, "{on?: bool} (toggles when omitted) → {enabled} — needs a chosen, installed content model", always, enable),
-        cmd!(query "content.status", "Content Search Status", [], None, "{} → {runtime, dir, model, modelName, installed, enabled, ready, job, indexed, total, stale, indexing}", always, status),
+        cmd!(query "content.enable", "Index Photo Contents On/Off", [], None, "{on?: bool} (toggles when omitted) → {enabled} — needs a chosen, installed content model. On, the library is indexed in the background (an activity row, `content` kind, that can be cancelled); turning it on again resumes a cancelled scan", always, enable),
+        cmd!(query "content.status", "Content Search Status", [], None, "{} → {runtime, dir, model, modelName, installed, enabled, ready, job, indexed, total, stale, failed, offline, pending, indexing, stopped, pace: low|normal|fast, msPerPhoto, etaSeconds, embeddedThisSession, error, index{file, bytes, memoryBytes, records, deadRecords, note, saveError}} — `indexed` of `total` photos (videos are not indexed) are in the index of the model in use; `stale`: photos whose original changed since (queued again); `failed`: unreadable this session; `offline`: their file is missing (tried again later); `stopped`: the user cancelled the scan (content.enable on resumes it)", always, status),
+        cmd!(query "content.pace", "Indexing Pace", [], None, "{pace: low | normal | fast} → {pace} — how much of the computer indexing may use: low (a few threads), normal (half), fast (most)", always, pace),
+        cmd!(query "content.pump", "Run Content Indexing", [], None, "{pause?: bool, wait?: bool, timeoutMs?: 600000} → {active, indexing, pending, inFlight, indexed, total, stopped} — one step of the background scan (the app calls it a few times a second; `pause`: the user is busy, start no new batch). With `wait`, runs the scan to its end (or the timeout) and saves the index: what a headless session (CLI, MCP) uses to index a library", always, scan::pump),
+        cmd!(query "content.search", "Search Photo Contents", [], None, "{text, limit?: 100, min?} → {text, results: [{id, score}], model, indexed, total, complete, indexing, ms} — photos ranked by how well they show `text` (any language the model knows), best first; `score` is the model's match probability (SigLIP: sigmoid, so a threshold means something; around 0.01 and up is a match for the base model). Works on a partial index: `indexed` of `total` photos were searched. The text model is loaded on the first search (about half a second) and kept while searches come", always, scan::search),
+        cmd!(query "content.similar", "Find Similar Contents", [], None, "{id?: active photo, limit?: 50, min?} → {id, results: [{id, score}], model, indexed, total, complete} — the photos whose contents are most like this photo's (cosine similarity of their embeddings, 1 = the same), the photo itself left out; it must be indexed", always, scan::similar),
+        cmd!(query "content.reindex", "Index Photo Contents Again", [], None, "{ids?: [photo ids]} → {queued} — embed these photos (or every photo) again, failed ones included; also restarts a stopped scan. Indexing must be on for it to run", always, scan::reindex),
+        cmd!(query "content.clearIndex", "Clear Content Index", [], None, "{} → {cleared, file} — forget the index of the model in use for this library and delete its file; with indexing on it starts over", always, scan::clear),
     ]
 }
