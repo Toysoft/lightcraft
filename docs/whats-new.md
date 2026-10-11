@@ -2,6 +2,13 @@
 
 ## 2026-10-11
 
+### A folder or disk that moved
+- A library folder or disk that is now somewhere else (moved or renamed outside LightCraft, a USB disk or NAS back
+  at another drive letter or mount point, `/Volumes/tokyo` back as `/Volumes/TOKYO`) no longer needs Find Missing
+  Photos for every photo in it: `folder.updateLocation` (`path`, `to`) points the folder at its new place in one
+  undo step. Every photo in it and in the folders inside it follows, and so do their colour labels; no file is
+  touched. Agents and MCP only for now; the sidebar entry comes next (#1116).
+
 ### JPEG XL export
 - Export as JPEG XL (issue #247): Format ▸ JPEG XL in the Export dialog, `format: "jxl"` for agents and the CLI
   (`render in.raw -o out.jxl`). Quality as for JPEG, or Lossless; Effort (Fast / Normal) trades time for a

@@ -198,6 +198,15 @@ pub fn specs() -> Vec<CommandSpec> {
             }
         ),
         cmd!(
+            "folder.updateLocation",
+            "Update Folder Location",
+            [],
+            None,
+            "{path, to} — folder (or disk) `path` of the library is now at folder `to`: it was moved or renamed outside LightCraft, or its disk came back at another drive letter or mount point. The photos in it and in the folders inside it are relinked to the same places under `to`, and their colour labels and a chosen folder go along; no file is touched and `path` need not exist. Refused when one folder is inside the other or a photo would land on one the library already has. One undo step → {path, to, relinked}",
+            always,
+            update_location
+        ),
+        cmd!(
             "folder.create",
             "New Folder on Disk",
             [],
@@ -303,6 +312,86 @@ fn folder_param<'a>(p: &'a Value, key: &str) -> Option<&'a str> {
     str_param(p, key).map(|x| x.trim_end_matches(['/', '\\'])).filter(|x| !x.is_empty())
 }
 
+/// `folder.updateLocation`: the library's folder `path` is now at `to` (Lightroom Classic's Update
+/// Folder Location). Like Rename / Move Folder without touching the disk: the photos at or below
+/// `path` are relinked to the same names below `to`, the folder records follow, and undo and redo
+/// take the chosen folder along. Folders are compared by identity ([`folder_key`]), so `path` may
+/// be spelled with either separator, and a folder whose name only changed case
+/// (`/Volumes/tokyo` → `/Volumes/TOKYO`) can be pointed at its new spelling.
+///
+/// [`folder_key`]: lightcraft_catalog::query::folder_key
+fn update_location(s: &mut Session, p: &Value) -> Result<Value> {
+    const C: &str = "folder.updateLocation";
+    use lightcraft_catalog::query::{folder_key, folder_rest, folder_within};
+    let from = folder_param(p, "path").ok_or_else(|| bad(C, "missing path"))?.to_string();
+    let to_param = str_param(p, "to").map(str::trim).filter(|t| !t.is_empty()).ok_or_else(|| bad(C, "missing to"))?;
+    // joined onto as given (absolute): trimming `E:\` to `E:` would make `E:Photos` on Windows
+    let dest = std::path::absolute(to_param).map_err(|e| bad(C, format!("{to_param}: {e}")))?;
+    if !dest.is_dir() {
+        return Err(bad(C, format!("{to_param} is not a folder")));
+    }
+    let to = dest.to_string_lossy().trim_end_matches(['/', '\\']).to_string();
+    let to = if to.is_empty() { dest.to_string_lossy().to_string() } else { to };
+    if from == to {
+        return Ok(json!({"path": from, "to": to, "relinked": 0}));
+    }
+    // a case-only change (`tokyo` → `TOKYO`) is one folder on Windows and still worth spelling anew
+    if folder_key(&from) != folder_key(&to) && (folder_within(&to, &from) || folder_within(&from, &to)) {
+        return Err(bad(C, format!("{to} and {from} are inside one another: choose the folder's new place itself")));
+    }
+    if s.library.as_ref().is_some_and(|l| {
+        let dir = l.dir.to_string_lossy();
+        folder_within(&dir, &from) || folder_within(&from, &dir)
+    }) {
+        return Err(bad(C, "the library's own folders can't be relinked"));
+    }
+    let moved: Vec<(PhotoId, String, String)> = s
+        .catalog
+        .photos()
+        .filter_map(|ph| match &ph.source {
+            lightcraft_catalog::Source::File { path } => folder_rest(path, &from).map(|rest| {
+                let np = rest.iter().fold(dest.clone(), |d, name| d.join(name));
+                (ph.id, ph.file_name.clone(), np.to_string_lossy().to_string())
+            }),
+            _ => None,
+        })
+        .collect();
+    let records = s.catalog.folder_records_follow(&from, &to);
+    if moved.is_empty() && records.is_empty() {
+        return Err(bad(C, format!("the library has no photos in {from}")));
+    }
+    // never two photos of the library for one file: one already at a new place refuses the step
+    let moving: std::collections::HashSet<PhotoId> = moved.iter().map(|m| m.0).collect();
+    let mut taken: std::collections::HashMap<String, &str> = std::collections::HashMap::new();
+    for ph in s.catalog.photos().filter(|ph| !moving.contains(&ph.id)) {
+        if let lightcraft_catalog::Source::File { path } = &ph.source
+            && folder_within(path, &to)
+        {
+            taken.insert(folder_key(path), ph.file_name.as_str());
+        }
+    }
+    let clashes: Vec<&str> = moved.iter().filter_map(|(_, _, np)| taken.get(&folder_key(np)).copied()).take(5).collect();
+    if !clashes.is_empty() {
+        return Err(bad(
+            C,
+            format!(
+                "{} already in the library at {to}: nothing was relinked. Remove the copies there first (or use Find Missing Photos)",
+                clashes.join(", ")
+            ),
+        ));
+    }
+    let n = moved.len();
+    let mut ops: Vec<Op> = moved
+        .into_iter()
+        .map(|(id, file_name, path)| Op::Relink { id, file_name, source: lightcraft_catalog::Source::File { path }, format: None })
+        .collect();
+    ops.extend(records);
+    let undo = crate::FolderMove { from: to.clone(), to: from.clone(), on_disk: false };
+    s.commit_with_folder("Update Folder Location", Op::Batch { ops }, undo)?;
+    follow_folder(s, &from, &to);
+    Ok(json!({"path": from, "to": to, "relinked": n}))
+}
+
 /// `folder.create`: a new folder on disk inside `parent`; undo removes it while it is empty.
 fn create_folder(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "folder.create";
@@ -319,7 +408,7 @@ fn create_folder(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(C, format!("{path} already exists: choose another name")));
     }
     folder_on_disk("", &path).map_err(|e| bad(C, e))?;
-    let undo = crate::FolderMove { from: path.clone(), to: String::new() };
+    let undo = crate::FolderMove { from: path.clone(), to: String::new(), on_disk: true };
     if let Err(e) = s.commit_with_folder(&format!("Create Folder “{name}”"), Op::Batch { ops: vec![] }, undo) {
         let _ = remove_empty_folder(&path);
         return Err(e);
@@ -450,7 +539,7 @@ pub(crate) fn move_folder(s: &mut Session, from: &str, to: &str) -> std::result:
     let name = Path::new(to).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let renamed = src.parent() == dst.parent();
     let label = if renamed { format!("Rename Folder to “{name}”") } else { format!("Move Folder “{name}”") };
-    let folder = crate::FolderMove { from: to.to_string(), to: from.to_string() };
+    let folder = crate::FolderMove { from: to.to_string(), to: from.to_string(), on_disk: true };
     if let Err(e) = s.commit_with_folder(&label, Op::Batch { ops }, folder) {
         // the catalog didn't take it: put the folder back where the photos still point
         let back = rename_folder_on_disk(to, from).err().map(|b| format!("; moving it back failed too: {b}")).unwrap_or_default();

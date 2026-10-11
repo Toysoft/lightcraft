@@ -685,3 +685,114 @@ fn a_destination_without_write_permission_reports_an_error_and_keeps_everything(
     }
     std::fs::set_permissions(dir.0.join("ro"), std::fs::Permissions::from_mode(0o755)).unwrap();
 }
+
+// ---- folder.updateLocation: a folder or disk now somewhere else (moved outside LightCraft)
+
+fn add_at(s: &mut Session, path: &str) -> lightcraft_catalog::PhotoId {
+    let id = s.catalog.alloc_photo_id();
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path).to_string();
+    let p = Photo::new(id, Source::File { path: path.into() }, &name, "JPEG", 60, 40, "2026-01-01T10:00:00");
+    s.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    id
+}
+
+/// `rel` (with `/`) inside the scratch folder, spelled as the platform joins it.
+fn native(dir: &Scratch, rel: &str) -> String {
+    rel.split('/').fold(dir.0.clone(), |p, n| p.join(n)).to_string_lossy().to_string()
+}
+
+#[test]
+fn a_disk_that_came_back_elsewhere_is_one_step_and_its_labels_and_choice_follow() {
+    let dir = Scratch::new("relocate");
+    std::fs::create_dir_all(dir.0.join("new/day1")).unwrap();
+    // the old place is gone (an unplugged disk now mounted elsewhere): it is never looked at
+    let old = dir.path("old");
+    let mut s = Session::new();
+    let a = add_at(&mut s, &format!("{old}/a.jpg"));
+    let b = add_at(&mut s, &format!("{old}/day1/b.jpg"));
+    let other = add_at(&mut s, "/elsewhere/c.jpg");
+    s.execute("folder.label", &json!({"path": old, "label": "red"})).unwrap();
+    s.execute("folder.label", &json!({"path": format!("{old}/day1"), "label": "blue"})).unwrap();
+    s.execute("library.filter", &json!({"libraryFolder": format!("{old}/day1")})).unwrap();
+    let undo_before = s.undo.len();
+
+    let r = s.execute("folder.updateLocation", &json!({"path": old, "to": dir.path("new")})).unwrap();
+    assert_eq!(r["relinked"], 2, "{r}");
+    assert_eq!(s.undo.len(), undo_before + 1, "one undo step");
+    assert_eq!(s.undo.last().unwrap().label, "Update Folder Location");
+    assert_eq!(file_of(&s, a), native(&dir, "new/a.jpg"));
+    assert_eq!(file_of(&s, b), native(&dir, "new/day1/b.jpg"));
+    assert_eq!(file_of(&s, other), "/elsewhere/c.jpg", "photos elsewhere stay");
+    assert_eq!(listed_label(&mut s, &dir.path("new")).as_deref(), Some("red"));
+    assert_eq!(listed_label(&mut s, &dir.path("new/day1")).as_deref(), Some("blue"), "the folders inside go along");
+    assert_eq!(s.catalog.folder_record(&old), None, "nothing stays behind");
+    same_folder(s.filter.library_folder.as_deref(), &dir.path("new/day1"), "the chosen folder follows");
+    assert_eq!(s.visible().len(), 1);
+    assert!(!dir.0.join("old").exists() && dir.0.join("new/day1").is_dir(), "no folder made, moved or removed");
+
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!((file_of(&s, a), file_of(&s, b)), (format!("{old}/a.jpg"), format!("{old}/day1/b.jpg")));
+    assert_eq!(listed_label(&mut s, &old).as_deref(), Some("red"));
+    same_folder(s.filter.library_folder.as_deref(), &format!("{old}/day1"), "undo takes the choice back");
+    assert!(!dir.0.join("old").exists() && dir.0.join("new/day1").is_dir(), "undo touches no folder either");
+
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(file_of(&s, b), native(&dir, "new/day1/b.jpg"));
+    assert_eq!(listed_label(&mut s, &dir.path("new/day1")).as_deref(), Some("blue"), "redo carries them again");
+}
+
+#[test]
+fn a_folder_whose_name_only_changed_case_takes_its_new_spelling() {
+    // macOS: `/Volumes/tokyo` came back as `/Volumes/TOKYO` and listed as a second disk
+    let dir = Scratch::new("relocate-case");
+    std::fs::create_dir_all(dir.0.join("TOKYO")).unwrap();
+    let mut s = Session::new();
+    let a = add_at(&mut s, &format!("{}/2024/a.jpg", dir.path("tokyo")));
+    s.execute("folder.label", &json!({"path": dir.path("tokyo"), "label": "green"})).unwrap();
+    let r = s.execute("folder.updateLocation", &json!({"path": dir.path("tokyo"), "to": dir.path("TOKYO")})).unwrap();
+    assert_eq!(r["relinked"], 1);
+    assert_eq!(file_of(&s, a), native(&dir, "TOKYO/2024/a.jpg"));
+    assert_eq!(listed_label(&mut s, &dir.path("TOKYO")).as_deref(), Some("green"));
+}
+
+#[test]
+fn a_library_written_on_windows_follows_a_folder_here() {
+    // the photos were stored as `D:\Photos\…` (another machine, either separator); their folder is here now
+    let dir = Scratch::new("relocate-drive");
+    std::fs::create_dir_all(dir.0.join("Photos/2026")).unwrap();
+    let mut s = Session::new();
+    let a = add_at(&mut s, r"D:\Photos\2026\IMG_1.CR3");
+    let b = add_at(&mut s, "D:/Photos/IMG_2.CR3");
+    let r = s.execute("folder.updateLocation", &json!({"path": r"D:\Photos", "to": dir.path("Photos")})).unwrap();
+    assert_eq!(r["relinked"], 2, "{r}");
+    assert_eq!(file_of(&s, a), native(&dir, "Photos/2026/IMG_1.CR3"));
+    assert_eq!(file_of(&s, b), native(&dir, "Photos/IMG_2.CR3"));
+}
+
+#[test]
+fn update_folder_location_refuses_and_changes_nothing() {
+    let dir = Scratch::new("relocate-refuse");
+    std::fs::create_dir_all(dir.0.join("new/inner")).unwrap();
+    let mut s = Session::new();
+    add_at(&mut s, &format!("{}/a.jpg", dir.path("old")));
+    add_at(&mut s, &format!("{}/b.jpg", dir.path("new")));
+    add_at(&mut s, &format!("{}/b.jpg", dir.path("old")));
+    let before = s.catalog.to_snapshot();
+    let undo = s.undo.len();
+    for (p, why, says) in [
+        (json!({"to": dir.path("new")}), "no path", "missing path"),
+        (json!({"path": dir.path("old")}), "no destination", "missing to"),
+        (json!({"path": dir.path("old"), "to": dir.path("nope")}), "a destination that isn't a folder", "not a folder"),
+        (json!({"path": dir.path("old"), "to": dir.path("new")}), "a photo already there", "already in the library"),
+        (json!({"path": dir.path("new"), "to": dir.path("new/inner")}), "into itself", "inside one another"),
+        (json!({"path": dir.path("gone"), "to": dir.path("new")}), "a folder with no photos", "no photos"),
+    ] {
+        let e = s.execute("folder.updateLocation", &p).unwrap_err().to_string();
+        assert!(e.contains(says), "{why}: {e}");
+        assert_eq!(s.catalog.to_snapshot(), before, "{why}: the library is unchanged");
+        assert_eq!(s.undo.len(), undo, "{why}: no undo step");
+    }
+    let same = s.execute("folder.updateLocation", &json!({"path": dir.path("new"), "to": dir.path("new")})).unwrap();
+    assert_eq!(same["relinked"], 0, "the same place is nothing to do");
+    assert_eq!(s.undo.len(), undo);
+}

@@ -140,16 +140,18 @@ fn single_photo(op: &Op, depth: usize) -> Option<PhotoId> {
     }
 }
 
-/// A folder renamed or moved on disk as part of an undo step.
+/// A folder renamed or moved as part of an undo step: on disk, or (`on_disk: false`, Update Folder
+/// Location) only in the library, whose chosen folder still follows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FolderMove {
     pub from: String,
     pub to: String,
+    pub on_disk: bool,
 }
 
 impl FolderMove {
     fn reversed(&self) -> Self {
-        Self { from: self.to.clone(), to: self.from.clone() }
+        Self { from: self.to.clone(), to: self.from.clone(), on_disk: self.on_disk }
     }
 }
 
@@ -680,11 +682,11 @@ impl Session {
         rename::retry_sidecars(fs, &mut entry.retry_sidecars).map_err(|e| EngineError::Other(format!("can't move the files back: {e}")))?;
         let op = &entry.op;
         let folder = entry.folder.as_ref();
-        if let Some(f) = folder {
+        if let Some(f) = folder.filter(|f| f.on_disk) {
             cmd::browse::folder_on_disk(&f.from, &f.to).map_err(|e| EngineError::Other(format!("can't move the folder back: {e}")))?;
         }
         let undo_folder = || {
-            if let Some(f) = folder {
+            if let Some(f) = folder.filter(|f| f.on_disk) {
                 let _ = cmd::browse::folder_on_disk(&f.to, &f.from);
             }
         };
