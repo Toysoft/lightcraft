@@ -87,6 +87,10 @@ fn corpus_raw_is_routed() {
         return;
     }
     for p in files(&dir) {
+        // OS clutter such as Finder's .DS_Store is not corpus data
+        if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.')) {
+            continue;
+        }
         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
         if matches!(ext.as_str(), "txt" | "md" | "xmp" | "json") {
             continue;
