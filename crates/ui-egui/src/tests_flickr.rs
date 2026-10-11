@@ -1,0 +1,258 @@
+//! Flickr in the desktop app against a local stand-in for Flickr (never the internet): the
+//! Settings → Flickr sign-in in the background, File → Upload to Flickr… and its activity row.
+
+#![cfg(not(target_arch = "wasm32"))]
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use serde_json::json;
+
+use crate::headless::Headless;
+use crate::state::Dialog;
+use crate::{LightcraftApp, Services};
+
+const T: Duration = Duration::from_secs(30);
+
+/// A stand-in for Flickr; `delay` holds each answer back (to see an upload in progress).
+fn fake(delay: Duration) -> String {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", l.local_addr().unwrap());
+    std::thread::spawn(move || {
+        let mut n = 0u64;
+        for s in l.incoming() {
+            let Ok(mut s) = s else { break };
+            let mut got = Vec::new();
+            let mut buf = [0u8; 65536];
+            let head_end = loop {
+                let Ok(k) = s.read(&mut buf) else { break 0 };
+                if k == 0 {
+                    break 0;
+                }
+                got.extend_from_slice(&buf[..k]);
+                if let Some(i) = got.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break i + 4;
+                }
+            };
+            if head_end == 0 {
+                continue;
+            }
+            let head = String::from_utf8_lossy(&got[..head_end]).to_string();
+            let len: usize = head.lines().find_map(|l| l.strip_prefix("Content-Length: ")).map_or(0, |v| v.trim().parse().unwrap());
+            while got.len() < head_end + len {
+                let Ok(k) = s.read(&mut buf) else { break };
+                if k == 0 {
+                    break;
+                }
+                got.extend_from_slice(&buf[..k]);
+            }
+            std::thread::sleep(delay);
+            n += 1;
+            let body = if head.contains("/request_token") {
+                "oauth_callback_confirmed=true&oauth_token=req&oauth_token_secret=reqsecret".to_string()
+            } else if head.contains("/services/rest/") {
+                r#"{"photosets":{"page":1,"pages":1,"photoset":[{"id":"501","title":{"_content":"Portfolio"},"photos":"9"},{"id":"502","title":{"_content":"Travel"},"photos":4}]},"stat":"ok"}"#.to_string()
+            } else if head.contains("/access_token") {
+                "fullname=Ansel%20A&oauth_token=acc&oauth_token_secret=accsecret&user_nsid=7%40N01&username=ansel".to_string()
+            } else {
+                format!("<rsp stat=\"ok\"><photoid>{n}</photoid></rsp>")
+            };
+            let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+        }
+    });
+    base
+}
+
+/// The demo library with Flickr pointed at `base`; opened URLs are collected.
+fn app(base: &str) -> (Headless, Arc<Mutex<Vec<String>>>) {
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let log = opened.clone();
+    let services = Services {
+        png: None,
+        open_url: Some(Box::new(move |u: &str| {
+            log.lock().unwrap().push(u.to_string());
+            Ok(())
+        })),
+        ..Default::default()
+    };
+    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
+    app.session.flickr.endpoints = lightcraft_engine::flickr::Endpoints::all(base);
+    let mut h = Headless::new(app, [1200.0, 800.0], 1.0);
+    h.settle(T);
+    (h, opened)
+}
+
+fn has(h: &Headless, id: &str) -> bool {
+    h.app.widgets.iter().any(|(w, _)| w == id)
+}
+
+fn settings(h: &mut Headless) {
+    h.app.ui.dialog = Some(Dialog::Settings { tab: "flickr".into() });
+    h.step();
+    h.step();
+}
+
+#[test]
+fn settings_lead_from_the_api_key_through_the_sign_in() {
+    let base = fake(Duration::ZERO);
+    let (mut h, opened) = app(&base);
+    settings(&mut h);
+    // step 1 and 2: get a key, paste it; Continue waits for both halves
+    assert!(has(&h, "button:flickrGetKey") && has(&h, "field:flickrKey") && has(&h, "field:flickrSecret"), "the key steps");
+    assert!(!has(&h, "button:flickrSignIn"), "no sign-in button before there is a key");
+    h.request("ui.clickWidget", json!({"id": "button:flickrGetKey"}), T);
+    h.step();
+    assert_eq!(opened.lock().unwrap().last().map(String::as_str), Some(lightcraft_engine::flickr::API_KEY_PAGE));
+    h.app.flickr.key = "mykey".into();
+    h.app.flickr.secret = "mysecret".into();
+    h.step();
+    h.step();
+    // Continue saves the key and goes straight on to Flickr's approval page
+    assert_eq!(h.request("ui.clickWidget", json!({"id": "button:flickrContinue"}), T)["ok"], true);
+    assert!(h.step_until(T, |h| h.app.session.flickr_status()["pending"] == true && h.app.flickr.busy.is_none()), "step 1 of the sign-in finishes");
+    assert_eq!(h.app.session.flickr_status()["ownKey"], true);
+    assert!(h.app.flickr.secret.is_empty(), "the secret field empties once saved");
+    assert_eq!(
+        opened.lock().unwrap().last().map(String::as_str),
+        Some(format!("{base}/services/oauth/authorize?oauth_token=req&perms=write").as_str())
+    );
+    settings(&mut h);
+    assert!(has(&h, "field:flickrCode") && has(&h, "button:flickrFinishSignIn"), "waiting for the code");
+    assert!(h.app.run("flickr.completeSignIn", json!({"code": " "})).is_err(), "an empty code");
+
+    // a whole pasted code is sent by itself
+    h.app.flickr.code = "123-456-789".into();
+    h.step();
+    assert!(h.step_until(T, |h| h.app.session.flickr_status()["signedIn"] == true), "signed in without another click");
+    assert_eq!(h.app.session.flickr_status()["username"], "ansel");
+    settings(&mut h);
+    assert!(has(&h, "button:flickrSignOut") && has(&h, "button:flickrPhotostream"), "the signed-in tab");
+    h.request("ui.clickWidget", json!({"id": "button:flickrSignOut"}), T);
+    assert!(h.step_until(T, |h| h.app.session.flickr_status()["signedIn"] == false));
+    // with a key already there, the tab offers the sign-in at once
+    settings(&mut h);
+    assert!(has(&h, "button:flickrSignIn") && !has(&h, "field:flickrKey"), "the key is folded away");
+}
+
+#[test]
+fn a_refused_code_is_not_sent_again_until_it_changes() {
+    let (mut h, _) = app("http://127.0.0.1:9");
+    h.app.session.flickr_set_api_key("k", "s").unwrap();
+    h.app.session.flickr_begin_sign_in(lightcraft_engine::flickr::RequestToken { token: "t".into(), secret: "s".into() });
+    h.app.flickr.code = "111-222-333".into();
+    settings(&mut h);
+    assert!(h.step_until(T, |h| h.app.flickr.busy.is_none() && h.app.flickr.error.is_some()), "the refused code says why");
+    assert_eq!(h.app.flickr.submitted_code, "111-222-333");
+    h.app.flickr.error = None;
+    for _ in 0..5 {
+        h.step();
+    }
+    assert!(h.app.flickr.busy.is_none() && h.app.flickr.error.is_none(), "not sent again by itself");
+}
+
+fn signed_in(h: &mut Headless) {
+    h.app.session.flickr_set_api_key("k", "s").unwrap();
+    h.app
+        .session
+        .flickr_finish_sign_in(lightcraft_engine::flickr::Token {
+            token: "acc".into(),
+            secret: "accsecret".into(),
+            user_nsid: "7@N01".into(),
+            username: "ansel".into(),
+            fullname: String::new(),
+        })
+        .unwrap();
+}
+
+#[test]
+fn the_upload_dialog_needs_a_sign_in() {
+    let (mut h, _) = app("http://127.0.0.1:9");
+    assert!(h.app.run("dialog.flickrUpload", json!({})).is_err());
+    assert!(matches!(&h.app.ui.dialog, Some(Dialog::Settings { tab }) if tab == "flickr"), "Settings → Flickr opens instead");
+    signed_in(&mut h);
+    h.app.run("dialog.flickrUpload", json!({})).unwrap();
+    assert!(matches!(&h.app.ui.dialog, Some(Dialog::FlickrUpload { .. })));
+    h.step();
+    h.step();
+    assert!(has(&h, "combo:flickrPrivacy") && has(&h, "check:flickrRemoveLocation"));
+}
+
+#[test]
+fn uploads_in_the_background_with_a_row_and_remembers_the_choices() {
+    let base = fake(Duration::from_millis(300));
+    let (mut h, _) = app(&base);
+    signed_in(&mut h);
+    let ids: Vec<u64> = h.app.session.catalog.photos().take(3).map(|p| p.id.0).collect();
+    h.app.run("library.select", json!({"ids": ids, "active": ids[0]})).unwrap();
+    let opts = crate::flickr::UploadDialog { long_edge: 256, privacy: "private".into(), ..Default::default() };
+    h.app.ui.dialog = Some(Dialog::FlickrUpload { opts: opts.clone() });
+    let dialog = h.app.ui.dialog.take().unwrap();
+    crate::panels::dialogs::confirm_dialog(&mut h.app, &dialog).unwrap();
+    let rows = h.app.session.activity.list();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!((rows[0].kind, rows[0].label.as_str(), rows[0].total), ("upload", "Uploading to Flickr", 3));
+    assert!(rows[0].cancellable);
+    assert!(!crate::menus::ui_enabled(&h.app, "dialog.flickrUpload"), "one upload at a time");
+    assert!(h.step_until(T, |h| h.app.flickr.last_result.is_some()), "the upload finishes");
+    let r = h.app.flickr.last_result.clone().unwrap();
+    assert_eq!((r["uploaded"].as_u64(), r["failed"].as_u64()), (Some(3), Some(0)), "{r}");
+    assert!(h.app.session.activity.list().is_empty(), "the row goes with the upload");
+    assert_eq!(h.app.flickr.last_dialog, Some(opts), "the next dialog starts from these choices");
+    assert!(h.app.ui.toast.as_ref().is_some_and(|(t, _, _)| t.contains("3 of 3")), "{:?}", h.app.ui.toast);
+    let inspect = h.request("ui.inspect", json!({}), T);
+    assert_eq!(inspect["result"]["flickr"]["last"]["uploaded"], 3);
+}
+
+#[test]
+fn the_rows_cross_stops_an_upload() {
+    let base = fake(Duration::from_millis(400));
+    let (mut h, _) = app(&base);
+    signed_in(&mut h);
+    let ids: Vec<u64> = h.app.session.catalog.photos().take(6).map(|p| p.id.0).collect();
+    h.app.run("flickr.upload", json!({"ids": ids, "longEdge": 128})).unwrap();
+    let row = h.app.session.activity.list()[0].id;
+    h.app.session.activity.cancel(row).unwrap();
+    assert!(h.step_until(T, |h| h.app.flickr.last_result.is_some()));
+    let r = h.app.flickr.last_result.clone().unwrap();
+    assert_eq!(r["cancelled"], true, "{r}");
+    assert!(r["uploaded"].as_u64().unwrap() < 6);
+    assert!(h.app.session.activity.list().is_empty());
+}
+
+#[test]
+fn the_upload_dialog_lists_albums_and_starts_with_none() {
+    let base = fake(Duration::ZERO);
+    let (mut h, _) = app(&base);
+    signed_in(&mut h);
+    // the last upload went into an album: the next dialog still starts with none
+    h.app.flickr.last_dialog = Some(crate::flickr::UploadDialog { album: "502".into(), privacy: "friends".into(), ..Default::default() });
+    h.app.run("dialog.flickrUpload", json!({})).unwrap();
+    let Some(Dialog::FlickrUpload { opts }) = &h.app.ui.dialog else { panic!("no dialog") };
+    assert_eq!((opts.album.as_str(), opts.privacy.as_str()), ("", "friends"), "no album by default; the other choices remembered");
+    assert!(h.step_until(T, |h| h.app.flickr.albums.is_some()), "the albums load in the background");
+    assert_eq!(h.app.flickr.albums.clone().unwrap(), [("501".to_string(), "Portfolio".to_string(), 9), ("502".to_string(), "Travel".to_string(), 4)]);
+    h.step();
+    h.step();
+    assert!(has(&h, "combo:flickrAlbum"));
+    assert_eq!(crate::flickr::UploadDialog::default().params()["album"], serde_json::Value::Null);
+
+    // choose an album and upload: each photo joins it
+    let ids: Vec<u64> = h.app.session.catalog.photos().take(2).map(|p| p.id.0).collect();
+    h.app.run("library.select", json!({"ids": ids, "active": ids[0]})).unwrap();
+    let dialog = Dialog::FlickrUpload { opts: crate::flickr::UploadDialog { album: "501".into(), long_edge: 256, ..Default::default() } };
+    h.app.ui.dialog = None;
+    crate::panels::dialogs::confirm_dialog(&mut h.app, &dialog).unwrap();
+    assert!(h.step_until(T, |h| h.app.flickr.last_result.is_some()));
+    let r = h.app.flickr.last_result.clone().unwrap();
+    assert_eq!((r["uploaded"].as_u64(), r["albumFailed"].as_u64(), r["album"].as_str()), (Some(2), Some(0), Some("501")), "{r}");
+
+    // an album that disappeared from the list falls back to none
+    h.app.flickr.albums = Some(vec![("501".into(), "Portfolio".into(), 9)]);
+    h.app.ui.dialog = Some(Dialog::FlickrUpload { opts: crate::flickr::UploadDialog { album: "gone".into(), ..Default::default() } });
+    h.step();
+    h.step();
+    let Some(Dialog::FlickrUpload { opts }) = &h.app.ui.dialog else { panic!("no dialog") };
+    assert_eq!(opts.album, "");
+}

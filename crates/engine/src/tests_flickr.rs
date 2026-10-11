@@ -1,6 +1,8 @@
 //! Flickr commands against a local stand-in for Flickr (never the internet): sign-in, the saved
 //! account, and uploads of demo photos rendered with their edits.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -57,13 +59,17 @@ fn flickr_ok(_: usize, path: &str) -> (u16, String) {
         "/services/oauth/access_token" => {
             (200, "fullname=Dorothea%20L&oauth_token=acc&oauth_token_secret=accsecret&user_nsid=42%40N01&username=dorothea".into())
         }
+        // albums: the list, and adding a photo (both "ok")
+        "/services/rest/" => {
+            (200, r#"{"photosets":{"page":1,"pages":1,"photoset":[{"id":"111","title":{"_content":"Showcase"},"photos":2}]},"stat":"ok"}"#.into())
+        }
         _ => (200, format!("<rsp stat=\"ok\"><photoid>{}</photoid></rsp>", N.fetch_add(1, std::sync::atomic::Ordering::Relaxed))),
     }
 }
 
 fn session(base: &str) -> Session {
     let mut s = Session::with_demo();
-    s.flickr.endpoints = lightcraft_flickr::Endpoints { www: base.into(), upload: base.into() };
+    s.flickr.endpoints = lightcraft_flickr::Endpoints::all(base);
     s
 }
 
@@ -219,4 +225,46 @@ fn upload_options_render_like_an_export() {
     assert_eq!((d.format, d.color_space, d.remove_location), (crate::export::ExportFormat::Jpeg, crate::export::OutputSpace::Srgb, true));
     assert_eq!(d.resize.map(|r| r.value), Some(2048.0));
     crate::export::ExportOptions::validate("flickr.upload", &serde_json::to_value(&d).unwrap()).unwrap();
+}
+
+#[test]
+fn lists_albums_and_uploads_into_one() {
+    let (base, seen) = fake(flickr_ok);
+    let mut s = signed_in(&base);
+    let r = s.execute("flickr.albums", &json!({})).unwrap();
+    assert_eq!(r["albums"], json!([{"id": "111", "title": "Showcase", "photos": 2}]));
+    let ids: Vec<u64> = s.catalog.photos().take(2).map(|p| p.id.0).collect();
+    let r = s.execute("flickr.upload", &json!({"ids": ids, "longEdge": 128, "album": "111"})).unwrap();
+    assert_eq!((r["uploaded"].as_u64(), r["albumFailed"].as_u64(), r["album"].as_str()), (Some(2), Some(0), Some("111")), "{r}");
+    let seen = seen.lock().unwrap();
+    let adds: Vec<String> = seen
+        .iter()
+        .filter(|q| q.path == "/services/rest/" && String::from_utf8_lossy(&q.body).contains("addPhoto"))
+        .map(|q| String::from_utf8_lossy(&q.body).to_string())
+        .collect();
+    assert_eq!(adds.len(), 2, "each uploaded photo joins the album");
+    let photo_ids: Vec<String> = r["photos"].as_array().unwrap().iter().map(|p| p["photoId"].as_str().unwrap().to_string()).collect();
+    for (add, id) in adds.iter().zip(&photo_ids) {
+        assert!(add.contains("photoset_id=111") && add.contains(&format!("photo_id={id}")), "{add}");
+    }
+    drop(seen);
+    let r = s.execute("flickr.upload", &json!({"ids": [ids[0]], "longEdge": 128, "album": null})).unwrap();
+    assert_eq!(r["album"], Value::Null);
+}
+
+#[test]
+fn a_photo_that_cannot_join_the_album_still_counts_as_uploaded() {
+    let (base, _) = fake(|_, path| match path {
+        "/services/rest/" => (200, r#"{"stat":"fail","code":1,"message":"Photoset not found"}"#.into()),
+        _ => flickr_ok(0, path),
+    });
+    let mut s = signed_in(&base);
+    let ids: Vec<u64> = s.catalog.photos().take(2).map(|p| p.id.0).collect();
+    let r = s.execute("flickr.upload", &json!({"ids": ids, "longEdge": 128, "album": "999"})).unwrap();
+    assert_eq!((r["uploaded"].as_u64(), r["failed"].as_u64(), r["albumFailed"].as_u64()), (Some(2), Some(0), Some(2)), "{r}");
+    assert!(r["photos"][0]["albumError"].as_str().unwrap().contains("Photoset not found"));
+    for bad in [json!(12), json!("a b"), json!("x".repeat(65))] {
+        let e = s.execute("flickr.upload", &json!({"ids": ids, "album": bad})).unwrap_err().to_string();
+        assert!(e.contains("album"), "{e}");
+    }
 }

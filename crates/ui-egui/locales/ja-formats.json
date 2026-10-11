@@ -228,5 +228,10 @@
   "+{n} more": "ほか{n}件",
   "1 task is still running: {names}. Quitting stops it.": "1件のタスクが実行中です：{names}。終了すると停止します。",
   "{n} tasks are still running: {names}. Quitting stops them.": "{n}件のタスクが実行中です：{names}。終了すると停止します。",
-  "{what} merge cancelled": "{what}合成をキャンセルしました"
+  "{what} merge cancelled": "{what}合成をキャンセルしました",
+  "Signed in as {name}": "{name}としてサインイン中",
+  "Signed in to Flickr as {name}": "{name}としてFlickrにサインインしました",
+  "Upload {n} photo{} to Flickr as {name}": "{name}として{n}枚の写真をFlickrにアップロード{:.0}",
+  "Uploaded {ok} of {total} photo{} to Flickr": "{total}枚中{ok}枚をFlickrにアップロードしました{:.0}",
+  " · {} not added to the album": " · {}枚はアルバムに追加されませんでした"
 }

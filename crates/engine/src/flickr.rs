@@ -6,9 +6,9 @@
 //!   (`<config>/flickr.json`, [`Session::with_default_flickr`]), not in a library: it belongs to
 //!   the person at this computer. A session without that folder (tests, `--memory`) keeps it in
 //!   memory only.
-//! - **The API key**: Flickr gives one to every app (<https://www.flickr.com/services/apps/create/>).
+//! - **The API key**: Flickr gives one to every app (<https://www.flickr.com/services/apps/create/noncommercial/>).
 //!   A build may carry one (`LIGHTCRAFT_FLICKR_API_KEY` and `LIGHTCRAFT_FLICKR_API_SECRET` set when
-//!   compiling); otherwise, or to use their own, the user enters theirs in Settings ▸ Flickr.
+//!   compiling); otherwise, or to use their own, the user enters theirs in Settings → Flickr.
 //! - **Uploads** ([`prepare_upload`] on the session, then [`UploadJob::run`] anywhere) render each
 //!   photo as a JPEG through the export pipeline, then send it with its title, caption and
 //!   keywords. Location is left out unless asked for: a showcase upload is usually public.
@@ -22,14 +22,15 @@ use std::sync::atomic::AtomicBool;
 
 use lightcraft_catalog::PhotoId;
 use lightcraft_flickr::account::{self, Account};
-use lightcraft_flickr::{ApiKey, Client, Endpoints, PhotoInfo, Privacy, RequestToken, Token};
+pub use lightcraft_flickr::{Album, Endpoints, RequestToken, Token};
+use lightcraft_flickr::{ApiKey, Client, PhotoInfo, Privacy};
 use serde_json::{Value, json};
 
 use crate::Session;
 use crate::export::{ExportOptions, PreparedExport, Resize, SharpenFor};
 
 /// Where to get an API key.
-pub const API_KEY_PAGE: &str = "https://www.flickr.com/services/apps/create/";
+pub const API_KEY_PAGE: &str = "https://www.flickr.com/services/apps/create/noncommercial/";
 
 /// The API key built into this binary, if the build had one.
 fn builtin_key() -> Option<ApiKey> {
@@ -91,7 +92,7 @@ impl Session {
 
     /// A client for the API key in use: the user's own, else the build's.
     pub fn flickr_client(&self) -> Result<Client, String> {
-        let key = self.flickr.account.own_key().or_else(builtin_key).ok_or("enter a Flickr API key and its secret first (Settings ▸ Flickr)")?;
+        let key = self.flickr.account.own_key().or_else(builtin_key).ok_or("enter a Flickr API key and its secret first (Settings → Flickr)")?;
         let mut c = Client::new(key);
         c.endpoints = self.flickr.endpoints.clone();
         Ok(c)
@@ -161,6 +162,11 @@ impl Session {
         self.save_flickr()
     }
 
+    /// Drop a sign-in in progress (nothing on disk changes).
+    pub fn flickr_cancel_sign_in(&mut self) {
+        self.flickr.pending = None;
+    }
+
     /// Forget the sign-in (the API key stays).
     pub fn flickr_sign_out(&mut self) -> Result<(), String> {
         self.flickr.pending = None;
@@ -193,6 +199,8 @@ pub struct UploadOptions {
     pub description: bool,
     /// Leave GPS out of the file (Flickr would put the photo on its map).
     pub remove_location: bool,
+    /// The id of the account's album to put the photos in (`None`: no album).
+    pub album: Option<String>,
 }
 
 impl Default for UploadOptions {
@@ -205,6 +213,7 @@ impl Default for UploadOptions {
             tags: true,
             description: true,
             remove_location: true,
+            album: None,
         }
     }
 }
@@ -236,6 +245,14 @@ impl UploadOptions {
         o.tags = flag("tags", o.tags)?;
         o.description = flag("description", o.description)?;
         o.remove_location = flag("removeLocation", o.remove_location)?;
+        o.album = match p.get("album") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) if s.trim().is_empty() => None,
+            Some(Value::String(s)) if s.len() <= 64 && s.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') => {
+                Some(s.trim().to_string())
+            }
+            Some(_) => return Err("`album` must be an album id from flickr.albums (or null: no album)".into()),
+        };
         Ok(o)
     }
 
@@ -263,6 +280,7 @@ pub struct UploadJob {
     items: Vec<Item>,
     client: Client,
     token: Token,
+    album: Option<String>,
 }
 
 /// Set up the upload of the photos `p` names (`ids`; default: the selection) with the options in
@@ -270,7 +288,7 @@ pub struct UploadJob {
 pub fn prepare_upload(s: &mut Session, p: &Value) -> Result<UploadJob, String> {
     let opts = UploadOptions::from_json(p)?;
     let client = s.flickr_client()?;
-    let token = s.flickr_token().cloned().ok_or("sign in to Flickr first (Settings ▸ Flickr)")?;
+    let token = s.flickr_token().cloned().ok_or("sign in to Flickr first (Settings → Flickr)")?;
     let ids: Vec<PhotoId> = s.targets(p);
     if ids.is_empty() {
         return Err("no photos selected".into());
@@ -283,7 +301,19 @@ pub fn prepare_upload(s: &mut Session, p: &Value) -> Result<UploadJob, String> {
         ids.iter().map(|id| s.catalog.photo(*id).map(|ph| photo_info(ph, &opts)).ok_or(format!("no photo {}", id.0))).collect::<Result<_, _>>()?;
     let exports = crate::export::prepare_batch(s, &ids, &eo)?;
     let items = exports.into_iter().zip(infos).map(|(export, info)| Item { export, info }).collect();
-    Ok(UploadJob { items, client, token })
+    Ok(UploadJob { items, client, token, album: opts.album })
+}
+
+/// What [`list_albums`] needs, taken from the session: the client and the signed-in account.
+pub fn albums_request(s: &Session) -> Result<(Client, Token), String> {
+    let client = s.flickr_client()?;
+    let token = s.flickr_token().cloned().ok_or("sign in to Flickr first (Settings → Flickr)")?;
+    Ok((client, token))
+}
+
+/// The signed-in account's albums (runs without the session: a worker thread may call it).
+pub fn list_albums(client: &Client, token: &Token, cancel: &AtomicBool) -> Result<Vec<Album>, lightcraft_flickr::Error> {
+    client.list_albums(token, cancel)
 }
 
 /// Most photos one upload takes: it is for chosen photos, not a whole library.
@@ -315,13 +345,15 @@ impl UploadJob {
         self.items.is_empty()
     }
 
-    /// Render and upload each photo in order. `progress(done, file)` is called before each one;
-    /// it, or `cancel`, stops the rest. A refused sign-in stops the rest too (they would all
-    /// fail). → `{uploaded, failed, cancelled, signInNeeded, photos: [{photo, file, photoId, url} |
-    /// {photo, file, error}]}`
+    /// Render and upload each photo in order, then put it in the album, if one was chosen.
+    /// `progress(done, file)` is called before each one; it, or `cancel`, stops the rest. A refused
+    /// sign-in stops the rest too (they would all fail). A photo that went up but couldn't join
+    /// the album counts as uploaded, with `albumError`. → `{uploaded, failed, albumFailed,
+    /// cancelled, signInNeeded, album, photos: [{photo, file, photoId, url, albumError?} | {photo,
+    /// file, error}]}`
     pub fn run(self, progress: &mut dyn FnMut(usize, &str) -> bool, cancel: &AtomicBool) -> Value {
         let total = self.items.len();
-        let (mut photos, mut uploaded, mut failed) = (Vec::new(), 0usize, 0usize);
+        let (mut photos, mut uploaded, mut failed, mut album_failed) = (Vec::new(), 0usize, 0usize, 0usize);
         let (mut cancelled, mut sign_in) = (false, false);
         for (i, item) in self.items.into_iter().enumerate() {
             let name = item.export.file_name.clone();
@@ -346,8 +378,22 @@ impl UploadJob {
             match result {
                 Ok(id) => {
                     uploaded += 1;
-                    photos
-                        .push(json!({"photo": photo, "file": name, "photoId": id, "url": lightcraft_flickr::photo_url(&self.token.user_nsid, &id)}));
+                    let mut entry =
+                        json!({"photo": photo, "file": name, "photoId": id, "url": lightcraft_flickr::photo_url(&self.token.user_nsid, &id)});
+                    if let Some(album) = &self.album
+                        && let Err(e) = self.client.add_to_album(&self.token, album, &id, cancel)
+                    {
+                        if e.is_cancelled() {
+                            cancelled = true;
+                        }
+                        album_failed += 1;
+                        log::warn!("flickr: {name}: not added to album {album}: {e}");
+                        entry["albumError"] = json!(e.to_string());
+                    }
+                    photos.push(entry);
+                    if cancelled {
+                        break;
+                    }
                 }
                 Err(e) => {
                     if cancelled {
@@ -363,6 +409,15 @@ impl UploadJob {
             }
         }
         progress(total.min(uploaded + failed), "");
-        json!({"total": total, "uploaded": uploaded, "failed": failed, "cancelled": cancelled, "signInNeeded": sign_in, "photos": photos})
+        json!({
+            "total": total,
+            "uploaded": uploaded,
+            "failed": failed,
+            "albumFailed": album_failed,
+            "cancelled": cancelled,
+            "signInNeeded": sign_in,
+            "album": self.album,
+            "photos": photos,
+        })
     }
 }

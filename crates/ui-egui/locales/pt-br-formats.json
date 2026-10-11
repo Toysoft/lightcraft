@@ -228,5 +228,10 @@
   "+{n} more": "+{n} mais",
   "1 task is still running: {names}. Quitting stops it.": "1 tarefa ainda está em andamento: {names}. Sair a interrompe.",
   "{n} tasks are still running: {names}. Quitting stops them.": "{n} tarefas ainda estão em andamento: {names}. Sair as interrompe.",
-  "{what} merge cancelled": "{what} mesclagem cancelada"
+  "{what} merge cancelled": "{what} mesclagem cancelada",
+  "Signed in as {name}": "Conectado como {name}",
+  "Signed in to Flickr as {name}": "Conectado ao Flickr como {name}",
+  "Upload {n} photo{} to Flickr as {name}": "Enviar {n} foto{} ao Flickr como {name}",
+  "Uploaded {ok} of {total} photo{} to Flickr": "{ok} de {total} foto{} enviadas ao Flickr",
+  " · {} not added to the album": " · {} não adicionada(s) ao álbum"
 }

@@ -228,5 +228,10 @@
   "+{n} more": "还有 {n} 项",
   "1 task is still running: {names}. Quitting stops it.": "仍有 1 个任务在运行：{names}。退出将停止它。",
   "{n} tasks are still running: {names}. Quitting stops them.": "仍有 {n} 个任务在运行：{names}。退出将停止它们。",
-  "{what} merge cancelled": "已取消 {what} 合并"
+  "{what} merge cancelled": "已取消 {what} 合并",
+  "Signed in as {name}": "已登录：{name}",
+  "Signed in to Flickr as {name}": "已以 {name} 身份登录 Flickr",
+  "Upload {n} photo{} to Flickr as {name}": "以 {name} 身份上传 {n} 张照片到 Flickr{0:.0}",
+  "Uploaded {ok} of {total} photo{} to Flickr": "已上传 {total} 张中的 {ok} 张照片到 Flickr{0:.0}",
+  " · {} not added to the album": " · {} 张未加入相册"
 }

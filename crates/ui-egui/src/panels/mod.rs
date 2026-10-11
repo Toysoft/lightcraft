@@ -11,6 +11,7 @@ pub mod dialogs;
 pub mod edit;
 pub mod faces;
 pub mod filterbar;
+pub mod flickr;
 pub mod grid;
 pub mod keymap;
 pub mod keyword_list;

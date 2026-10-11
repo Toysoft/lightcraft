@@ -14,7 +14,7 @@
 //! thread never hangs.
 //!
 //! Every app that talks to Flickr needs an API key and its secret (the "consumer"), from
-//! <https://www.flickr.com/services/apps/create/>. An open-source app can't ship a secret, so the
+//! <https://www.flickr.com/services/apps/create/noncommercial/>. An open-source app can't ship a secret, so the
 //! host supplies it (see the engine's `flickr` module): the user's own, or one built in.
 //!
 //! Native only: on wasm32 this crate is empty.
@@ -148,12 +148,30 @@ pub struct Endpoints {
     pub www: String,
     /// Uploads: `https://up.flickr.com`.
     pub upload: String,
+    /// The REST API (albums): `https://api.flickr.com`.
+    pub api: String,
 }
 
 impl Default for Endpoints {
     fn default() -> Self {
-        Endpoints { www: "https://www.flickr.com".into(), upload: "https://up.flickr.com".into() }
+        Endpoints { www: "https://www.flickr.com".into(), upload: "https://up.flickr.com".into(), api: "https://api.flickr.com".into() }
     }
+}
+
+impl Endpoints {
+    /// Everything at one address (a local stand-in for Flickr in tests).
+    pub fn all(base: &str) -> Endpoints {
+        Endpoints { www: base.into(), upload: base.into(), api: base.into() }
+    }
+}
+
+/// One of the account's albums (Flickr calls them photosets).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Album {
+    pub id: String,
+    pub title: String,
+    /// Photos in it (as Flickr last counted).
+    pub photos: u64,
 }
 
 /// Who may see an uploaded photo.
@@ -220,8 +238,12 @@ pub fn photo_url(user_nsid: &str, photo_id: &str) -> String {
     format!("https://www.flickr.com/photos/{}/{}", oauth::encode(user_nsid), oauth::encode(photo_id))
 }
 
-/// Largest answer read from Flickr (they are a few hundred bytes).
+/// Largest answer read from Flickr's OAuth and upload endpoints (they are a few hundred bytes).
 const MAX_ANSWER: usize = 64 * 1024;
+/// Largest REST answer read (a page of 500 albums is a few hundred KB).
+const MAX_REST_ANSWER: usize = 8 << 20;
+/// Album pages read at most (500 albums each).
+const MAX_ALBUM_PAGES: u64 = 20;
 /// Attempts per upload when the failure is transient.
 const ATTEMPTS: usize = 3;
 
@@ -380,6 +402,67 @@ impl Client {
             return Err(Error::Status(r.status, answer));
         }
         reply::upload_answer(&answer)
+    }
+}
+
+impl Client {
+    /// A signed call of REST method `method` (`flickr.photosets.getList`…) for `token`'s account,
+    /// as a `GET` with the arguments in the query, or a form `POST` for a change. Its JSON answer,
+    /// or Flickr's error.
+    fn rest(&self, post: bool, token: &Token, method: &str, args: &[(&str, String)], cancel: &AtomicBool) -> Result<serde_json::Value, Error> {
+        if !self.key.is_set() {
+            return Err(Error::Protocol("no Flickr API key".into()));
+        }
+        let url = format!("{}/services/rest/", self.endpoints.api.trim_end_matches('/'));
+        let mut extra: Vec<(&str, String)> = vec![("method", method.to_string()), ("format", "json".into()), ("nojsoncallback", "1".into())];
+        extra.extend(args.iter().cloned());
+        let mut p = self.params(Some(&token.token), &extra);
+        let verb = if post { "POST" } else { "GET" };
+        let sig = oauth::sign(verb, &url, &p, self.key.secret.trim(), &token.secret).map_err(Error::Protocol)?;
+        p.push(("oauth_signature".to_string(), sig));
+        let form = p.iter().map(|(k, v)| format!("{}={}", oauth::encode(k), oauth::encode(v))).collect::<Vec<_>>().join("&");
+        let limits = self.limits(cancel);
+        let mut r = if post {
+            http::post(&Url::parse(&url)?, &[("Content-Type", "application/x-www-form-urlencoded".into())], form.as_bytes(), &limits)?
+        } else {
+            http::get(&Url::parse(&format!("{url}?{form}"))?, &[], &limits)?
+        };
+        let body = r.read_to_end(MAX_REST_ANSWER, &limits)?;
+        if r.status != 200 {
+            return Err(Error::Status(r.status, String::from_utf8_lossy(&body).into_owned()));
+        }
+        reply::rest_answer(&body)
+    }
+
+    /// The albums of `token`'s account, in Flickr's order (as arranged on the account).
+    pub fn list_albums(&self, token: &Token, cancel: &AtomicBool) -> Result<Vec<Album>, Error> {
+        let mut out = Vec::new();
+        let mut page = 1u64;
+        loop {
+            let v = self.rest(false, token, "flickr.photosets.getList", &[("per_page", "500".into()), ("page", page.to_string())], cancel)?;
+            let sets = &v["photosets"];
+            for s in sets["photoset"].as_array().into_iter().flatten() {
+                let Some(id) = reply::text(&s["id"]).filter(|id| !id.is_empty()) else { continue };
+                let title = reply::text(&s["title"]["_content"]).or_else(|| reply::text(&s["title"])).unwrap_or_default();
+                let photos = reply::number(&s["photos"]).or_else(|| reply::number(&s["count_photos"])).unwrap_or(0);
+                out.push(Album { id, title, photos });
+            }
+            let pages = reply::number(&sets["pages"]).unwrap_or(1);
+            if page >= pages || page >= MAX_ALBUM_PAGES {
+                return Ok(out);
+            }
+            page += 1;
+        }
+    }
+
+    /// Put photo `photo_id` in album `album_id`. A photo already there is fine.
+    pub fn add_to_album(&self, token: &Token, album_id: &str, photo_id: &str, cancel: &AtomicBool) -> Result<(), Error> {
+        let args = [("photoset_id", album_id.to_string()), ("photo_id", photo_id.to_string())];
+        match self.rest(true, token, "flickr.photosets.addPhoto", &args, cancel) {
+            // 3: "Photo already in set"
+            Err(Error::Flickr { code: 3, .. }) | Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 }
 

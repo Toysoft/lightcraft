@@ -228,5 +228,10 @@
   "+{n} more": "+{n} ще",
   "1 task is still running: {names}. Quitting stops it.": "1 завдання ще виконується: {names}. Вихід зупинить його.",
   "{n} tasks are still running: {names}. Quitting stops them.": "Ще виконуються завдання ({n}): {names}. Вихід зупинить їх.",
-  "{what} merge cancelled": "Об’єднання {what} скасовано"
+  "{what} merge cancelled": "Об’єднання {what} скасовано",
+  "Signed in as {name}": "Ви увійшли як {name}",
+  "Signed in to Flickr as {name}": "Ви увійшли у Flickr як {name}",
+  "Upload {n} photo{} to Flickr as {name}": "Завантажити у Flickr фото ({n}) як {name}{:.0}",
+  "Uploaded {ok} of {total} photo{} to Flickr": "Завантажено у Flickr фото: {ok} із {total}{:.0}",
+  " · {} not added to the album": " · не додано до альбому: {}"
 }

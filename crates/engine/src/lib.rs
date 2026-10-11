@@ -884,7 +884,7 @@ mod tests_face_models;
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 mod tests_face_recognize;
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests_flickr;
 #[cfg(test)]
 mod tests_folders;

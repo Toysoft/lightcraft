@@ -112,6 +112,39 @@ pub fn upload_answer(xml: &str) -> Result<String, Error> {
     }
 }
 
+/// A REST answer (`format=json&nojsoncallback=1`): the JSON when `stat` is `ok`, else Flickr's
+/// error (`{"stat":"fail","code":1,"message":"…"}`).
+pub fn rest_answer(body: &[u8]) -> Result<serde_json::Value, Error> {
+    let v: serde_json::Value =
+        serde_json::from_slice(body).map_err(|_| Error::Protocol(snippet("not a Flickr answer", &String::from_utf8_lossy(body))))?;
+    match v["stat"].as_str() {
+        Some("ok") => Ok(v),
+        Some(_) => Err(Error::Flickr {
+            code: number(&v["code"]).and_then(|c| u32::try_from(c).ok()).unwrap_or(0),
+            message: text(&v["message"]).unwrap_or_else(|| "unknown error".into()),
+        }),
+        None => Err(Error::Protocol(snippet("an answer without a status", &String::from_utf8_lossy(body)))),
+    }
+}
+
+/// A JSON string, or a number written as text (Flickr writes some ids either way).
+pub fn text(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.trim().to_string()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// A JSON count, or one written as text.
+pub fn number(v: &serde_json::Value) -> Option<u64> {
+    match v {
+        serde_json::Value::Number(n) => n.as_u64(),
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
 /// `what: <the first 120 characters>` for an error message.
 pub fn snippet(what: &str, body: &str) -> String {
     let text: String = body.chars().filter(|c| !c.is_control()).take(120).collect();
@@ -146,6 +179,20 @@ mod tests {
         }
         assert!(matches!(upload_answer("<html>502 Bad Gateway</html>"), Err(Error::Protocol(_))));
         assert!(matches!(upload_answer("<rsp stat=\"ok\"></rsp>"), Err(Error::Protocol(_))));
+    }
+
+    #[test]
+    fn reads_rest_answers() {
+        let ok = rest_answer(br#"{"photosets":{"page":1},"stat":"ok"}"#).unwrap();
+        assert_eq!(number(&ok["photosets"]["page"]), Some(1));
+        match rest_answer(br#"{"stat":"fail","code":1,"message":"Photoset not found"}"#) {
+            Err(Error::Flickr { code, message }) => assert_eq!((code, message.as_str()), (1, "Photoset not found")),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(rest_answer(b"<html>"), Err(Error::Protocol(_))));
+        assert!(matches!(rest_answer(b"{}"), Err(Error::Protocol(_))));
+        assert_eq!((text(&serde_json::json!(721)), number(&serde_json::json!("12"))), (Some("721".into()), Some(12)));
+        assert_eq!((text(&serde_json::json!(null)), number(&serde_json::json!(-1))), (None, None));
     }
 
     #[test]

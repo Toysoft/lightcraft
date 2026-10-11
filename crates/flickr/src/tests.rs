@@ -69,6 +69,9 @@ fn read_request(s: &mut std::net::TcpStream) -> Seen {
     let target = first.next().unwrap().to_string();
     let (path, query) = target.split_once('?').unwrap_or((&target, ""));
     let mut seen = Seen { method, path: path.to_string(), params: reply::form(query), photo: None };
+    if head.contains("Content-Type: application/x-www-form-urlencoded") {
+        seen.params.extend(reply::form(&String::from_utf8_lossy(&body)));
+    }
     if let Some(b) = head.lines().find_map(|l| l.strip_prefix("Content-Type: multipart/form-data; boundary=")) {
         let sep = format!("--{}", b.trim());
         let text = body.clone();
@@ -106,7 +109,7 @@ fn signed_ok(base: &str, req: &Seen, token_secret: &str) -> bool {
 
 fn client(f: &Fake) -> Client {
     let mut c = Client::new(ApiKey { key: KEY.into(), secret: SECRET.into() });
-    c.endpoints = Endpoints { www: f.base.clone(), upload: f.base.clone() };
+    c.endpoints = Endpoints::all(&f.base);
     c.connect_timeout = Duration::from_secs(5);
     c.stall_timeout = Duration::from_secs(5);
     c.retry_pause = Duration::from_millis(10);
@@ -227,4 +230,52 @@ fn tag_and_file_name_edge_cases() {
     assert!(String::from_utf8_lossy(&body).contains("filename=\"photo.jpg\""));
     assert_eq!(Privacy::parse("friendsAndFamily"), Some(Privacy::FriendsAndFamily));
     assert_eq!(Privacy::parse("everyone"), None);
+}
+
+#[test]
+fn lists_the_accounts_albums_across_pages() {
+    let f = fake(|_, req| {
+        let page = reply::field(&req.params, "page").unwrap_or("1").to_string();
+        let body = if page == "1" {
+            r#"{"photosets":{"page":1,"pages":2,"perpage":500,"total":3,"photoset":[
+                {"id":"72157600000000001","title":{"_content":"Grand Teton"},"photos":"12","count_photos":12},
+                {"id":72157600000000002,"title":{"_content":"Dunes & Deserts"},"photos":3},
+                {"title":{"_content":"no id: skipped"},"photos":1}]},"stat":"ok"}"#
+        } else {
+            r#"{"photosets":{"page":"2","pages":"2","photoset":[{"id":"72157600000000003","title":"Plain title","count_photos":"0"}]},"stat":"ok"}"#
+        };
+        (200, body.to_string())
+    });
+    let albums = client(&f).list_albums(&token(), &AtomicBool::new(false)).unwrap();
+    let got: Vec<(&str, &str, u64)> = albums.iter().map(|a| (a.id.as_str(), a.title.as_str(), a.photos)).collect();
+    assert_eq!(got, [("72157600000000001", "Grand Teton", 12), ("72157600000000002", "Dunes & Deserts", 3), ("72157600000000003", "Plain title", 0)]);
+    let seen = f.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    for r in seen.iter() {
+        assert_eq!((r.method.as_str(), r.path.as_str()), ("GET", "/services/rest/"));
+        assert_eq!(reply::field(&r.params, "method"), Some("flickr.photosets.getList"));
+        assert_eq!(reply::field(&r.params, "nojsoncallback"), Some("1"));
+        assert!(signed_ok(&f.base, r, "access-secret"));
+    }
+}
+
+#[test]
+fn adds_a_photo_to_an_album() {
+    let f = fake(|i, _| match i {
+        0 => (200, r#"{"stat":"ok"}"#.into()),
+        1 => (200, r#"{"stat":"fail","code":3,"message":"Photo already in set"}"#.into()),
+        _ => (200, r#"{"stat":"fail","code":1,"message":"Photoset not found"}"#.into()),
+    });
+    let c = client(&f);
+    let cancel = AtomicBool::new(false);
+    c.add_to_album(&token(), "72157600000000001", "987654", &cancel).unwrap();
+    c.add_to_album(&token(), "72157600000000001", "987654", &cancel).expect("already in the album is fine");
+    let e = c.add_to_album(&token(), "gone", "987654", &cancel).unwrap_err();
+    assert!(e.to_string().contains("Photoset not found"), "{e}");
+    let seen = f.seen.lock().unwrap();
+    let r = &seen[0];
+    assert_eq!((r.method.as_str(), r.path.as_str()), ("POST", "/services/rest/"));
+    assert_eq!(reply::field(&r.params, "method"), Some("flickr.photosets.addPhoto"));
+    assert_eq!((reply::field(&r.params, "photoset_id"), reply::field(&r.params, "photo_id")), (Some("72157600000000001"), Some("987654")));
+    assert!(signed_ok(&f.base, r, "access-secret"), "a change is a signed form POST");
 }
