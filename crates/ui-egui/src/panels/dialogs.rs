@@ -950,7 +950,8 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 // a model file LightCraft cannot use has nothing to confirm
                 let unusable_model = matches!(&dlg, Dialog::DenoiseModel { info, .. } | Dialog::FaceModel { info, .. } if info["kind"] == "unsupported");
-                let informational = unusable_model || matches!(dlg, Dialog::About | Dialog::Shortcuts | Dialog::Settings { .. });
+                let informational = unusable_model
+                    || matches!(dlg, Dialog::About | Dialog::Shortcuts | Dialog::Settings { .. } | Dialog::AllMetadata { .. } | Dialog::SystemInfo { .. } | Dialog::WhatsNew);
                 let sam = &app.session.segmenter;
                 let (sam_installed, sam_running, sam_failed) = (sam.installed(), sam.download_status().running, sam.download_status().error.is_some());
                 // no download location in this build: nothing to offer but the manual install

@@ -46,6 +46,7 @@ mod tests_crop_rotate;
 mod tests_curve;
 #[cfg(test)]
 mod tests_date_picker;
+mod tests_dialog_footer;
 #[cfg(test)]
 mod tests_filmstrip;
 #[cfg(test)]
