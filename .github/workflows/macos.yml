@@ -1,13 +1,19 @@
-# Runs the full quality gate (`cargo xtask ci`) on macOS: the platform most of the app's users and
-# agents work on, and the only one where `cfg(target_os = "macos")` code (native menu, Apple Photos
-# export) compiles and APFS's case-insensitive, UTF-8-only file names apply. No corpus: the corpus
-# tests skip themselves.
+# Runs the full quality gate (`cargo xtask ci`) on macOS: the only place `cfg(target_os = "macos")`
+# code (native menu, Apple Photos export) compiles and APFS's case-insensitive, UTF-8-only file
+# names apply (#989). No corpus: the corpus tests skip themselves.
 name: macOS
 
+# Slow, so like the other platform jobs it runs nightly on main and on pushes to `release`, not on
+# every PR: a macOS break shows up within a day, and always before a release ships. PRs that change
+# this workflow still run it.
 on:
+  schedule:
+    - cron: "51 4 * * *"
   push:
-    branches: [main]
+    branches: [release]
   pull_request:
+    paths:
+      - .github/workflows/macos.yml
   workflow_dispatch:
 
 concurrency:
