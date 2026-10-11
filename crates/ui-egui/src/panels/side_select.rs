@@ -39,6 +39,8 @@ pub struct SideState {
     keys_at: u64,
     /// The library all of this is about (its generation): another library starts afresh.
     library: Option<u64>,
+    /// The catalog revision the Keyword List's picks were last checked against.
+    picks_at: u64,
     pub albums: ListRows<u64>,
     pub folders: ListRows<String>,
     pub keywords: ListRows<String>,
@@ -108,7 +110,9 @@ fn keys_mark(app: &LightcraftApp) -> u64 {
     let (s, ui) = (&app.session, &app.ui);
     let mut h = std::collections::hash_map::DefaultHasher::new();
     format!("{:?}|{:?}|{:?}|{:?}", s.source, s.library_folder, ui.view, ui.right).hash(&mut h);
-    (&s.also_albums, &s.also_library_folders, &s.filter.keyword, &s.filter.keywords, &s.selection.ids, s.selection.active).hash(&mut h);
+    (&s.also_albums, &s.also_library_folders, &s.filter.keyword, &s.filter.keywords).hash(&mut h);
+    // (the selection by its size and ends: it can be every photo of a large library, each frame)
+    (s.selection.ids.len(), s.selection.ids.first(), s.selection.ids.last(), s.selection.active).hash(&mut h);
     (&ui.keyword_list_selected, &ui.side.keyword_list_also, ui.left_panel, s.library_generation()).hash(&mut h);
     h.finish()
 }
@@ -125,6 +129,19 @@ pub(crate) fn keys_frame(app: &mut LightcraftApp, ctx: &egui::Context) {
     if app.ui.side.keys.is_some() && (ctx.input(|i| i.pointer.any_pressed()) || app.ui.side.keys_at != keys_mark(app)) {
         app.ui.side.keys = None;
     }
+    // a keyword picked in the Keyword List that is gone since (deleted, merged away, undone) is
+    // not picked any more. Looked up in the cached keyword tree, once per change to the library
+    // and only while several are picked: never a pass over the photos per frame.
+    let revision = app.session.catalog.revision;
+    if app.ui.side.picks_at != revision && !app.ui.side.keyword_list_also.is_empty() {
+        let tree = app.caches.keyword_tree(&app.session.catalog);
+        let there = |k: &String| super::keyword_list::in_tree(&tree, k);
+        app.ui.side.keyword_list_also.retain(there);
+        if app.ui.keyword_list_selected.as_ref().is_some_and(|k| !there(k)) {
+            app.ui.keyword_list_selected = app.ui.side.keyword_list_also.pop();
+        }
+    }
+    app.ui.side.picks_at = revision;
 }
 
 /// Delete (the photos' delete shortcut, whatever key it is on), when a sidebar list has the key
@@ -404,15 +421,13 @@ pub(crate) fn keyword_clicked(app: &mut LightcraftApp, ui: &egui::Ui, path: &str
     } else {
         app.ui.side.keywords.click(&chosen, &path.to_string(), how, &same_kw)
     };
-    let filtered = match keys.as_slice() {
+    // (All Photos first, then the filter: the order a plain click always had)
+    super::left::browse_all_photos(app, !keys.is_empty());
+    match keys.as_slice() {
         [] => app.act("library.filter", json!({"keyword": null, "keywords": []})),
         [one] => app.act("library.filter", json!({"keyword": one, "keywords": []})),
         many => app.act("library.filter", json!({"keyword": null, "keywords": many})),
     };
-    // (only once the filter is set: a refused one leaves the source where it was)
-    if filtered.is_some() {
-        super::left::browse_all_photos(app, !keys.is_empty());
-    }
     take_keys(app, SideList::Keywords, how, app.session.filter.keywords_wanted().len());
 }
 
@@ -438,14 +453,12 @@ pub(crate) fn date_clicked(app: &mut LightcraftApp, ui: &egui::Ui, key: &str) {
     } else {
         app.ui.side.dates.click(&chosen, &key.to_string(), how, &same_date)
     };
-    let filtered = match keys.as_slice() {
+    super::left::browse_all_photos(app, !keys.is_empty());
+    match keys.as_slice() {
         [] => app.act("library.filter", json!({"date": null, "dates": []})),
         [one] => app.act("library.filter", json!({"date": one, "dates": []})),
         many => app.act("library.filter", json!({"date": null, "dates": many})),
     };
-    if filtered.is_some() {
-        super::left::browse_all_photos(app, !keys.is_empty());
-    }
 }
 
 /// The context menu for several keywords chosen at once, in the left panel's Keywords or in the
@@ -500,8 +513,8 @@ pub(crate) fn delete_keywords_dialog(app: &LightcraftApp, keywords: &[String]) -
 /// The keywords picked in the Keyword List, in the order picked (the last is the one Edit takes).
 pub(crate) fn list_picked(app: &LightcraftApp) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    // (one that is gone since, deleted or merged away, is not picked any more)
-    for k in app.ui.side.keyword_list_also.iter().chain(&app.ui.keyword_list_selected).filter(|k| app.session.catalog.has_keyword(k)) {
+    // (those that are gone, deleted or merged away, were let go of by `keys_frame`)
+    for k in app.ui.side.keyword_list_also.iter().chain(&app.ui.keyword_list_selected) {
         if !out.iter().any(|o| same_keyword(o, k)) {
             out.push(k.clone());
         }

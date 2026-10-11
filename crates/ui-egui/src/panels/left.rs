@@ -1367,7 +1367,9 @@ fn place_album(app: &mut LightcraftApp, ui: &egui::Ui, dragged: AlbumId, parent:
     // picked up as one of several albums chosen: they all go into that folder (one step); a
     // place by hand is one album's
     let several = super::side_select::albums_dragged(app, dragged);
-    let r = if several.len() > 1 {
+    // (all of them there already: nothing to move, and the one dragged is placed)
+    let there = several.iter().all(|id| app.session.catalog.album(AlbumId(*id)).is_some_and(|a| a.parent == parent));
+    let r = if several.len() > 1 && !there {
         app.run("album.move", json!({"ids": several, "parent": parent.map(|p| p.0)}))
     } else {
         app.run("album.reorder", json!({"id": dragged.0, "parent": parent.map(|p| p.0), "before": before.map(|b| b.0)}))

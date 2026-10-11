@@ -338,6 +338,13 @@ fn albums_in_the_filter_show_as_a_chip_and_are_refused_beside_an_album_source() 
     let e = s.execute("library.filter", &json!({"albums": [b]})).unwrap_err().to_string();
     assert!(e.contains("already shown"), "{e}");
     assert!(s.filter.albums.is_empty());
+    // albums left in the filter go when an album becomes the source, and other filters still work
+    s.execute("library.source", &json!({"kind": "all"})).unwrap();
+    s.execute("library.filter", &json!({"albums": [b]})).unwrap();
+    s.execute("library.source", &json!({"kind": "album", "id": a})).unwrap();
+    assert!(s.filter.albums.is_empty());
+    s.execute("library.filter", &json!({"rating": 0})).unwrap();
+    assert_eq!(shown(&mut s), vec![ids[0], ids[1]]);
 }
 
 #[test]

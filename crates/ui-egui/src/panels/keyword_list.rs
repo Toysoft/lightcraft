@@ -568,7 +568,7 @@ impl Ticks {
 }
 
 /// The keyword is in the tree (any case).
-fn in_tree(tree: &[KeywordNode], path: &str) -> bool {
+pub(crate) fn in_tree(tree: &[KeywordNode], path: &str) -> bool {
     tree.iter().any(|n| same(&n.path, path) || (lightcraft_catalog::keywords::is_under(path, &n.path) && in_tree(&n.children, path)))
 }
 

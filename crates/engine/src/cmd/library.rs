@@ -608,6 +608,8 @@ pub fn specs() -> Vec<CommandSpec> {
                         }
                         // the last one named is the one a single-album action takes
                         let Some(own) = albums.pop() else { return Err(bad(C, "`ids` names no album")) };
+                        // the albums of the source: albums left over in the filter would be ignored
+                        s.filter.albums.clear();
                         (LibrarySource::Album(own), albums, Vec::new())
                     }
                     "libraryFolder" => {
@@ -656,7 +658,8 @@ pub fn specs() -> Vec<CommandSpec> {
                     ));
                 }
                 // (the source's albums are what is shown: albums in the filter would be ignored)
-                if !f.albums.is_empty() && matches!(s.source, LibrarySource::Album(_)) {
+                let sets_albums = p.get("albums").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
+                if sets_albums && matches!(s.source, LibrarySource::Album(_)) {
                     return Err(bad("library.filter", "albums are already shown (library.source): show another source first"));
                 }
                 if (f.library_folder.is_some() || !f.library_folders.is_empty()) && s.source == LibrarySource::LibraryFolder {
