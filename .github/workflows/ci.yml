@@ -1,0 +1,70 @@
+# Continuous integration: run the test suite on Linux x64 (ubuntu-latest).
+# Only FreeBSD runs `cargo test` today; this adds the main platform.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - .github/workflows/ci.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  RUST_TEST_THREADS: "4"
+
+jobs:
+  linux-x64:
+    name: Linux x86_64 (build + test)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          retry: 3
+      # Optional font build input so Japanese/Chinese font tests run (they skip without it).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: 8dcdacd5153e64560d109541a47d806f26f048c0
+          path: craft-fonts
+          retry: 3
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          retry: 3
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ci-linux-x64-${{ hashFiles('Cargo.lock') }}
+      - name: Cache apt packages
+        uses: actions/cache@0400d5f644914a3c2c8c16d6b72f5c0a3a9b7c1e # v4.2.1
+        with:
+          path: |
+            /var/cache/apt
+            /usr/lib
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            desktop-file-utils appstream python3-yaml zsync \
+            pkg-config libfontconfig1-dev libfreetype6-dev
+      - name: Run cargo xtask ci
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target
+        run: cargo xtask ci
