@@ -104,7 +104,7 @@ fn double_click_in_the_search_field_does_not_zoom() {
     assert!(h.window_commands.is_empty(), "{:?}", h.window_commands);
 }
 
-// Scenario: a window with its native title bar (Windows, Linux) leaves the bar alone
+// Scenario: a window with its native title bar (macOS or opt-out) leaves the bar alone
 #[test]
 fn without_the_integrated_title_bar_the_bar_is_not_a_window_handle() {
     let services = Services { png: None, ..Default::default() };
@@ -114,4 +114,20 @@ fn without_the_integrated_title_bar_the_bar_is_not_a_window_handle() {
     assert!(!h.app.integrated_titlebar);
     let bar = h.app.widgets.iter().find(|(w, _)| w == "region:titlebar");
     assert!(bar.is_none());
+}
+
+// Scenario: custom title bar provides caption buttons and drag area
+#[test]
+fn custom_titlebar_provides_caption_buttons() {
+    let services = Services { png: None, ..Default::default() };
+    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
+    app.custom_titlebar = true;
+    let mut h = Headless::new(app, [1200.0, 800.0], 1.0);
+    h.settle(Duration::from_secs(120));
+    assert!(h.app.custom_titlebar);
+    for c in crate::titlebar::CAPTIONS {
+        let id = crate::titlebar::caption_id(c);
+        let resp = h.view.ctx.read_response(id);
+        assert!(resp.is_some(), "missing caption button {:?}", c);
+    }
 }
