@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::{CommandSpec, always, bad, bool_or, cmd, has_active, has_library_selection, has_selection, ok, str_param};
 use crate::{LibrarySource, Result, Selection, Session};
 
-fn select_after_deletion(s: &mut Session, before: &[PhotoId]) {
+pub(crate) fn select_after_deletion(s: &mut Session, before: &[PhotoId]) {
     let at = before.iter().position(|id| Some(*id) == s.selection.active);
     let remaining: std::collections::HashSet<_> = s.visible_cloned().into_iter().collect();
     s.selection.ids.retain(|id| remaining.contains(id));
@@ -898,12 +898,27 @@ pub fn specs() -> Vec<CommandSpec> {
             "Empty Recently Deleted",
             ["Photo"],
             None,
-            "{} → {deleted} — removes every photo in Recently Deleted from the library (files on disk stay)",
+            "{files?: keep|trash, noTrash?: keep|delete} → {deleted} — removes every photo in Recently Deleted from the library (files on disk stay). With `files: \"trash\"` their files go to the system Trash as photo.trashFiles does it (→ its answer as well, `deleted` = `removed`)",
             always,
-            |s, _| {
+            |s, p| {
+                const C: &str = "library.emptyRecentlyDeleted";
+                let trash = match p.get("files") {
+                    None | Some(Value::Null) => false,
+                    Some(v) => match v.as_str() {
+                        Some("keep") => false,
+                        Some("trash") => true,
+                        _ => return Err(bad(C, "`files` is \"keep\" (the default) or \"trash\"")),
+                    },
+                };
                 let ids: Vec<PhotoId> = s.catalog.photos().filter(|p| p.deleted).map(|p| p.id).collect();
                 if ids.is_empty() {
                     return Ok(json!({"deleted": 0}));
+                }
+                if trash {
+                    let no_trash = super::trash::NoTrashParam::read(p, C)?;
+                    let mut r = super::trash::trash_files(s, &ids, no_trash, C)?;
+                    r["deleted"] = r["removed"].clone();
+                    return Ok(r);
                 }
                 let op = s.catalog.delete_photos_permanently_ops(&ids);
                 s.commit("Empty Recently Deleted", op)?;
