@@ -1598,5 +1598,8 @@
   "Finding faces": "Поиск лиц",
   "Quit Anyway": "Всё равно выйти",
   "Synchronizing folder": "Синхронизация папки",
-  "Looking for changes": "Поиск изменений"
+  "Looking for changes": "Поиск изменений",
+  "Dock to panel": "Закрепить в правой панели",
+  "Mask Adjustments": "Коррекция маски",
+  "Drag to reorder": "Перетащите для изменения порядка"
 }

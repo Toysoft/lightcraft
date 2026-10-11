@@ -1886,5 +1886,8 @@
   "Downloading model": "モデルをダウンロード中",
   "Finding faces": "顔を検索中",
   "Synchronizing folder": "フォルダを同期中",
-  "Looking for changes": "変更を確認中"
+  "Looking for changes": "変更を確認中",
+  "Dock to panel": "右パネルに固定",
+  "Mask Adjustments": "マスク調整",
+  "Drag to reorder": "ドラッグして並べ替え"
 }

@@ -1884,5 +1884,8 @@
   "Downloading model": "Descargando modelo",
   "Finding faces": "Buscando caras",
   "Synchronizing folder": "Sincronizando carpeta",
-  "Looking for changes": "Buscando cambios"
+  "Looking for changes": "Buscando cambios",
+  "Dock to panel": "Acoplar al panel derecho",
+  "Mask Adjustments": "Ajustes de máscara",
+  "Drag to reorder": "Arrastrar para reordenar"
 }

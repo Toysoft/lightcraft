@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; shortcut notes moved here from the checklist) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (mask workspace layout and component targeting) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 How LightCraft's interaction compares with Lightroom's: views, panels, tools and handles, modifier
 keys, shortcuts, zoom, context menus and feel. Rows for individual menu items and shortcuts live in
@@ -40,6 +40,47 @@ Remaining: **40–70 h** (zoom detail 8–15 h, brush and masking feel 8–12 h,
 h, Classic keymap layer 4–8 h, context-menu audit 4–8 h, text-field and IME polish 4–8 h). Output
 modules and AI tools are counted with their features in [target-app-parity.md](target-app-parity.md).
 
+## Masking workspace (#450)
+
+The mask/component list is embedded above the right-side settings by default. Its panel icon
+floats it beside those settings; drag the title to move it, resize its corner, and use the panel
+icon or **Dock to panel** to embed it again. Placement and overlay preferences are saved. With no
+masks, creation choices remain directly visible in the right panel; subsequent creation uses +.
+
+Selecting a component highlights its row and shows its tool controls on the right. Backspace/Delete
+removes only that component; selecting the parent mask row makes deletion remove the whole mask.
+Deleting the last component removes its empty mask, and each deletion can be undone. Component
+menus also offer Move Up/Down, disabled at the list boundaries. Moving changes the actual
+composition order while preserving the component’s contents and selection, including undo/redo. Brush strokes,
+Object clicks and colour sampling target that component; brush Size, Feather, Flow, Density,
+Add/Erase and Auto Mask apply to subsequent strokes. Add/Subtract occupy equal halves of the
+selected mask’s action row, with larger hit areas and spacing above. Component settings lead
+into the local adjustment sliders under a small **Mask Adjustments** heading, without a
+duplicate mask-name/invert row. Add, Subtract and Intersect with offer the same ten types as
+new-mask creation, with localized labels. Both mask and component right-click/ellipsis menus
+offer Intersect with and Subtract; choosing a type targets the menu’s mask, including an
+unselected mask, and selects its new component. Opening the menu preserves selection and edits.
+An intersection brush keeps only painted overlap;
+Erase removes paint from that brush component. Color Range samples the selected component
+when clicking the photo in the Masking panel; Shift-click adds a sample. Subtract and Intersect
+indicators use separate rounded-square badges before the component name, with descriptive hover text.
+Renaming a mask or component replaces only its name with an input. Mask thumbnails and
+visibility/menu buttons, component icons and operation badges, and row heights stay in place.
+The list footer contains the overlay checkbox and colour/options popups (custom colour, opacity,
+visualization mode and pins). Mode choices and the custom colour picker are child menus, so
+opening or using them preserves the settings popup; Escape or an outside click dismisses it.
+These display/layout preferences do not add photo undo steps.
+
+Mask rows show the actual composite coverage as white on black, with grey feathered edges,
+fitted to the edited photo’s aspect ratio. Background renders share the canvas mask pipeline
+(add/subtract/intersect, inversion, range and AI masks), use a separate thumbnail cache, and
+refresh after edits and undo/redo. Hidden masks retain their range preview, independent of
+overlay colour/opacity. Component rows keep their original type icons. Six-dot grips to the right
+of each ellipsis reorder masks or components within their mask, with an insertion line and edge
+scrolling. A drop is one undo step and preserves selection/tool targeting; Escape, outside drops
+and stale drags do not reorder. A/B brushes, pressure, live preview and
+broader gesture parity remain open.
+
 ## Shortcuts
 
 Compared `plan/lightroom/06-shortcuts.md` (desktop part) with our bindings: command specs in `crates/engine/src/cmd/`,
@@ -78,4 +119,8 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | #450: parent mask menus expose Intersect with/Subtract and target the clicked mask |
+| 2026-10-11 | minor | #450: mask/component drag handles, insertion feedback, edge scrolling and one-step undo |
+| 2026-10-11 | minor | #450: fix overlay mode/custom-colour submenus closing the settings popup; verify both launchers and layouts |
+| 2026-10-11 | minor | #450: embedded/floating list, selected-component settings, overlay footer and remaining masking gaps |
 | 2026-10-10 | major | Created: measured command and shortcut counts, assessment by area, estimates; moved the shortcut conflicts section here from the checklist |

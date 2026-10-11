@@ -2039,5 +2039,8 @@
   "Downloading model": "Modell wird heruntergeladen",
   "Finding faces": "Gesichter werden gesucht",
   "Synchronizing folder": "Ordner wird synchronisiert",
-  "Looking for changes": "Änderungen werden gesucht"
+  "Looking for changes": "Änderungen werden gesucht",
+  "Dock to panel": "Im rechten Bedienfeld andocken",
+  "Mask Adjustments": "Maskenanpassungen",
+  "Drag to reorder": "Zum Neuordnen ziehen"
 }

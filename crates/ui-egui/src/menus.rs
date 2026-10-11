@@ -51,6 +51,9 @@ pub fn language_from_command(id: &str) -> Option<crate::i18n::Locale> {
 }
 
 pub const UI_COMMANDS: &[UiCommand] = &[
+    ("ui.maskPanel", "Arrange Masks Panel", None, ""),
+    ("mask.selectComponent", "Select Mask Component", None, ""),
+    ("mask.brushSettings", "Brush Settings", None, ""),
     ("ui.dock", "Arrange Panel", None, ""),
     ("ui.dock.reset", "Reset Panel Layout", None, "Window"),
     ("modelSetup.cancel", "Cancel Pending Photo Action", None, ""),
@@ -269,6 +272,9 @@ pub fn parse_rgb(v: &Value) -> Option<[u8; 3]> {
 
 /// Handle UI commands; `None` means "not a UI command — send it to the engine".
 pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Result<Value, String>> {
+    if matches!(id, "ui.maskPanel" | "mask.selectComponent" | "mask.brushSettings") {
+        return Some(crate::panels::masking::workspace_command(app, id, p));
+    }
     if matches!(id, "ui.dock" | "ui.dock.reset") {
         return Some(crate::docking::command(app, id == "ui.dock.reset", p));
     }
@@ -858,7 +864,7 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                     app.ui.tool = "guidedUpright".into();
                 }
                 "brush" => {
-                    // A new mask and Add/Subtract are selection operations, not the brush's
+                    // A new mask and Add/Subtract/Intersect are selection operations, not the brush's
                     // Erase mode. Paint positively into a component with the requested op.
                     let create = if p.get("new").and_then(Value::as_bool) == Some(true) {
                         Some(app.run("mask.add", json!({"kind": "brush"})))
@@ -880,7 +886,7 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                     app.ui.right = RightPanel::Masking;
                     app.ui.view = ViewMode::Detail;
                     app.ui.tool = tool.into();
-                    return Some(app.session.execute("mask.add", &json!({"kind": tool})).map_err(|e| e.to_string()));
+                    return Some(app.run("mask.add", json!({"kind": tool})));
                 }
                 "wbPicker" => {
                     app.ui.right = RightPanel::Edit;
