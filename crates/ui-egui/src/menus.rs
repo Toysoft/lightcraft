@@ -1939,23 +1939,23 @@ fn edit_in(app: &mut LightcraftApp, ctx: &egui::Context, p: &Value, photocraft: 
         }
     }
     let r = app.session.execute("photo.editExternal", &params).map_err(|e| e.to_string())?;
-    // every selected photo got a copy (#920); each opens in the editor
+    // every selected photo got a copy (#920); each is watched (a save comes back without a focus
+    // change: modification-time poll) and opens in the editor
     let copies: Vec<(String, Option<u64>)> = r["copies"]
         .as_array()
         .map(|c| c.iter().map(|c| (c["path"].as_str().unwrap_or_default().to_string(), c["id"].as_u64())).collect())
         .unwrap_or_else(|| vec![(r["path"].as_str().unwrap_or_default().to_string(), r["id"].as_u64())]);
-    let mut failed = None;
+    // the program PhotoCraft runs as, where the host found it: asked for `--wait` support and run
+    // with it on a worker thread; anything else (or no program file) opens through `open_with`
+    let exe = if photocraft { app.services.locate_editor.as_ref().and_then(|f| f(&editor)) } else { None };
     for (path, id) in &copies {
         if let Some(id) = id {
-            app.ui.external_edits.push(*id);
+            crate::external_edit::watch(app, std::path::Path::new(path), *id);
         }
-        if let Some(Err(e)) = app.services.open_with.as_mut().map(|f| f(path, &editor)) {
-            failed = Some(e);
-        }
+        crate::external_edit::open(app, ctx, std::path::Path::new(path), editor.trim(), exe.as_deref());
     }
-    match (failed, copies.as_slice()) {
-        (Some(e), _) => app.toast(ctx, crate::i18n::tr_format!("Couldn't open the editor: {e}", e = e)),
-        (None, [(path, _)]) => {
+    match copies.as_slice() {
+        [(path, _)] => {
             let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             app.toast(ctx, crate::i18n::tr_format!("{name} opened for editing; it is stacked with the original", name = name));
         }
