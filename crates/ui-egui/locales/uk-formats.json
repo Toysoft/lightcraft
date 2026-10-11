@@ -247,5 +247,8 @@
   "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом",
   "{name} opened in the other editor": "{name} відкрито в іншому редакторі",
   "{n} originals opened in the other editor": "Відкрито оригіналів в іншому редакторі: {n}",
-  "· {in_source} identical copies": "· ідентичних копій: {in_source}"
+  "· {in_source} identical copies": "· ідентичних копій: {in_source}",
+  "Changes found: {n}": "Знайдено змін: {n}",
+  "“{name}” is still being scanned: wait for it, or stop it with ✕ on its row": "«{name}» ще переглядається: дочекайтеся завершення або зупиніть пошук кнопкою ✕ у його рядку",
+  "Look at the changes found in “{name}” first, or dismiss them": "Спершу перегляньте зміни, знайдені в «{name}», або сховайте їх"
 }

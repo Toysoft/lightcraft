@@ -247,5 +247,8 @@
   "{n} photos opened for editing; each is stacked with its original": "{n}枚の写真を編集用に開きました。それぞれ元の写真とスタックされています",
   "{name} opened in the other editor": "{name}を別のエディタで開きました",
   "{n} originals opened in the other editor": "{n}個の元ファイルを別のエディタで開きました",
-  "· {in_source} identical copies": "・同一のコピー {in_source} 件"
+  "· {in_source} identical copies": "・同一のコピー {in_source} 件",
+  "Changes found: {n}": "見つかった変更: {n}",
+  "“{name}” is still being scanned: wait for it, or stop it with ✕ on its row": "「{name}」はまだスキャン中です。終わるまで待つか、その行の ✕ で停止してください",
+  "Look at the changes found in “{name}” first, or dismiss them": "先に「{name}」で見つかった変更を確認するか、閉じてください"
 }

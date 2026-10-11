@@ -247,5 +247,8 @@
   "{n} photos opened for editing; each is stacked with its original": "{n} fotos abiertas para editar; cada una está apilada con su original",
   "{name} opened in the other editor": "{name} abierto en el otro editor",
   "{n} originals opened in the other editor": "{n} originales abiertos en el otro editor",
-  "· {in_source} identical copies": "· {in_source} copias idénticas"
+  "· {in_source} identical copies": "· {in_source} copias idénticas",
+  "Changes found: {n}": "Cambios encontrados: {n}",
+  "“{name}” is still being scanned: wait for it, or stop it with ✕ on its row": "“{name}” aún se está analizando: espera a que termine o detenlo con ✕ en su fila",
+  "Look at the changes found in “{name}” first, or dismiss them": "Revisa primero los cambios encontrados en “{name}” o descártalos"
 }

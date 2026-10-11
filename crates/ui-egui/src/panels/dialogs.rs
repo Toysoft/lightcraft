@@ -1241,6 +1241,8 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     Dialog::KeywordTag { .. } => "Save",
                     Dialog::RemoveFolder { .. } => "Remove",
                     Dialog::LightroomCatalog { .. } => "Import Lightroom Catalog…",
+                    // the scan need not be waited for
+                    Dialog::SynchronizeFolder { counts: None, .. } => "Continue in Background",
                     Dialog::SynchronizeFolder { .. } => "Synchronize",
                     Dialog::SamModel { then: Some(_), .. } if sam_installed => "Continue",
                     Dialog::SamModel { .. } if sam_installed || sam_running || sam_nowhere => "",
@@ -1250,12 +1252,10 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     _ => "OK",
                 };
                 // installing waits for the licence to be accepted
-                // (and Synchronize waits for the scan)
                 let can_confirm = informational
-                    || !matches!(
-                        &dlg,
-                        Dialog::DenoiseModel { accepted: false, .. } | Dialog::FaceModel { accepted: false, .. } | Dialog::SynchronizeFolder { counts: None, .. }
-                    )
+                    || !matches!(&dlg, Dialog::DenoiseModel { accepted: false, .. } | Dialog::FaceModel { accepted: false, .. })
+                        // (Synchronize, just after its button stopped being Continue in Background)
+                        && !(matches!(&dlg, Dialog::SynchronizeFolder { counts: Some(_), .. }) && !crate::sync::settled(app, ui.ctx()))
                         // smart-album rules that can't mean anything wait to be fixed
                         && !matches!(&dlg, Dialog::SmartRules { id, rules, .. } if !rules.check_for(&app.session.catalog, id.map(lightcraft_catalog::AlbumId)).is_empty());
                 let r = (!ok.is_empty()).then(|| ui.add_enabled(can_confirm, egui::Button::new(crate::i18n::tr(ok))));
