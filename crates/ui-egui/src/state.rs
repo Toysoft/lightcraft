@@ -735,6 +735,9 @@ pub struct UiState {
     pub status: String,
     #[serde(skip)]
     pub dialog: Option<Dialog>,
+    /// A Settings section to bring into view once (`app.settings {section}`), e.g. `lensProfiles`.
+    #[serde(skip)]
+    pub settings_section: Option<String>,
 }
 
 /// Settings group ids (`SettingsGroup` serde names) a new preset includes by default: everything
@@ -1133,6 +1136,7 @@ impl Default for UiState {
             last_find_missing: None,
             status: String::new(),
             dialog: None,
+            settings_section: None,
         }
     }
 }

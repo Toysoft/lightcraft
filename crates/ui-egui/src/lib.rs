@@ -84,6 +84,8 @@ mod tests_keywording;
 #[cfg(test)]
 mod tests_labels;
 #[cfg(test)]
+mod tests_lens_db;
+#[cfg(test)]
 mod tests_library_problem;
 #[cfg(test)]
 mod tests_lights_out;

@@ -7,12 +7,30 @@ stays a separate download. Adobe LCP profiles are never used.
 
 ## Setup
 
-1. Get the lensfun database (the `data/db/*.xml` files of <https://github.com/lensfun/lensfun>, or the copy a Linux
-   distribution installs under `/usr/share/lensfun/version_1/`).
-2. Point `LIGHTCRAFT_LENSFUN_DIR` at that directory and start the app (or the CLI).
+**Settings ▸ Import ▸ Lens profiles** shows the database in use (its folder, how many lenses and cameras, when its
+files were last updated) and offers:
 
-Files are read once per process. Invalid files are skipped with a warning in the log. Without the variable nothing
-changes.
+- **Choose Folder…**: a folder of lensfun-format `*.xml` files, e.g. the `data/db` folder of
+  <https://github.com/lensfun/lensfun> or the copy a Linux distribution installs under `/usr/share/lensfun/version_1/`.
+- **Download** (**Update** once downloaded): fetches lensfun's database, only when you ask, from the project's source
+  archive (`https://github.com/lensfun/lensfun/archive/master.tar.gz`, about 3 MB). Only its `data/db/*.xml` files are
+  kept, in `lensfun/db` in the settings folder; the archive is size-capped, file names are checked so nothing is written
+  outside that folder, and the old database stays until the new one has been read and holds lenses. The download
+  shows in the activity stack and can be cancelled there; a failure (no network, a 404, a damaged archive) is shown
+  in the section. The section names lensfun and its licence (CC-BY-SA 3.0).
+- **Remove**: stop using the database (a downloaded one is deleted).
+
+The folder is an app setting (`lens-profiles.json` in the settings folder), shared by every library, the CLI and the
+MCP server. A change takes effect at once, without a restart: the database is reloaded and the photo open in Develop
+is looked up again (other photos when they are next opened in Develop, or with `lens.db.refresh`).
+`LIGHTCRAFT_LENSFUN_DIR` still works and overrides the folder chosen in Settings (the section says so).
+
+Develop ▸ Optics says why **Enable Lens Corrections** has nothing to apply to a raw without its own correction: no
+lens database (a link to the Settings section), no lens named in the photo's metadata, or no profile for its lens.
+
+Commands: `lens.db.status`, `lens.db.setDir {dir}`, `lens.db.download {wait?}`, `lens.db.downloadCancel`,
+`lens.db.remove`, `lens.db.refresh {ids}`, `lens.db.photo {id}`; `app.settings {section: "lensProfiles"}` opens the
+section. Invalid files are skipped with a warning in the log.
 
 ## What is applied
 

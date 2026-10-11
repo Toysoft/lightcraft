@@ -1,39 +1,144 @@
 //! Lens profile corrections from a lens database the user supplies ([`lightcraft_lensdb`]).
 //!
 //! When a raw carries no lens correction of its own (DNG opcodes, or a camera correction a raw reader converts,
-//! [`crate::files::embedded_lens`]), the lens named in its EXIF is looked up in a lensfun-format database: the
-//! directory in `LIGHTCRAFT_LENSFUN_DIR` (e.g. lensfun's `data/db`, CC-BY-SA, which is never bundled with the app).
-//! The profile is converted to the same [`lightcraft_develop::EmbeddedLens`] form, so "Enable Profile Corrections", its
-//! amount sliders, the GPU path and DNG export treat both alike. Without the variable nothing changes.
-use std::path::PathBuf;
-use std::sync::OnceLock;
+//! [`crate::files::embedded_lens`]), the lens named in its EXIF is looked up in a lensfun-format database (e.g.
+//! lensfun's `data/db`, CC-BY-SA 3.0, which is never bundled with the app). Where it comes from, first match wins:
+//! the directory in `LIGHTCRAFT_LENSFUN_DIR`, else the folder chosen in Settings ▸ Lens profiles (or downloaded
+//! there on request, [`crate::lens_download`]). The profile is converted to the same [`lightcraft_develop::EmbeddedLens`]
+//! form, so "Enable Profile Corrections", its amount sliders, the GPU path and DNG export treat both alike.
+//!
+//! The loaded database is cached process-wide and swapped when the folder changes ([`set_dir`], [`reload`]): each
+//! change bumps [`generation`], so sessions know to look their photos' lenses up again.
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use lightcraft_develop::EmbeddedLens;
 use lightcraft_lensdb::{LensDb, Shot};
 
-/// The environment variable naming the lens database directory.
+/// The environment variable (after the app prefix) naming the lens database directory. It overrides the folder
+/// chosen in Settings.
 pub const ENV: &str = "LIGHTCRAFT_LENSFUN_DIR";
 
-/// The configured database, read once per process; `None` when none is configured or it holds no lenses.
-pub fn database() -> Option<&'static LensDb> {
-    static DB: OnceLock<Option<LensDb>> = OnceLock::new();
-    DB.get_or_init(|| {
-        let dir = PathBuf::from(std::env::var_os(ENV)?);
-        match LensDb::load_dir(&dir) {
-            Ok((db, errors)) => {
-                for (file, e) in errors {
-                    log::warn!("lens database: skipped {file}: {e}");
-                }
-                (!db.lenses.is_empty()).then_some(db)
-            }
-            Err(e) => {
-                log::warn!("{e}");
-                None
-            }
-        }
-    })
-    .as_ref()
+/// Where the database in use comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Origin {
+    /// `LIGHTCRAFT_LENSFUN_DIR`.
+    Env,
+    /// The folder chosen (or downloaded into) in Settings.
+    Folder,
 }
+
+struct Cache {
+    /// The folder chosen in Settings.
+    dir: Option<PathBuf>,
+    /// The database loaded for the current source (`Some(None)`: none configured, or it holds no lenses).
+    loaded: Option<Option<Arc<LensDb>>>,
+    /// Bumped on every change of source or contents.
+    generation: u64,
+}
+
+static CACHE: Mutex<Cache> = Mutex::new(Cache { dir: None, loaded: None, generation: 0 });
+
+fn cache() -> std::sync::MutexGuard<'static, Cache> {
+    CACHE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The environment override, when set and nonempty.
+fn env_dir() -> Option<PathBuf> {
+    std::env::var_os(ENV).filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
+/// The database folder in use and where it comes from (the environment wins over Settings).
+pub fn source() -> Option<(PathBuf, Origin)> {
+    env_dir().map(|d| (d, Origin::Env)).or_else(|| cache().dir.clone().map(|d| (d, Origin::Folder)))
+}
+
+/// The folder chosen in Settings (whether or not the environment overrides it).
+pub fn configured_dir() -> Option<PathBuf> {
+    cache().dir.clone()
+}
+
+/// Use `dir` (or no folder) as the Settings database; the next lookup loads it.
+pub fn set_dir(dir: Option<PathBuf>) {
+    let mut c = cache();
+    c.dir = dir;
+    c.loaded = None;
+    c.generation = c.generation.wrapping_add(1);
+}
+
+/// Read the database again (its files changed, e.g. after a download).
+pub fn reload() {
+    let mut c = cache();
+    c.loaded = None;
+    c.generation = c.generation.wrapping_add(1);
+}
+
+/// Changes with every [`set_dir`] / [`reload`].
+pub fn generation() -> u64 {
+    cache().generation
+}
+
+/// Load the lensfun-format files in `dir`; `None` when it can't be read or holds no lenses.
+pub fn load(dir: &Path) -> Option<LensDb> {
+    match LensDb::load_dir(dir) {
+        Ok((db, errors)) => {
+            for (file, e) in errors {
+                log::warn!("lens database: skipped {file}: {e}");
+            }
+            (!db.lenses.is_empty()).then_some(db)
+        }
+        Err(e) => {
+            log::warn!("lens database: {e}");
+            None
+        }
+    }
+}
+
+/// The database in use, loaded on first use after a change; `None` when none is configured or it holds no lenses.
+pub fn database() -> Option<Arc<LensDb>> {
+    let env = env_dir();
+    let mut c = cache();
+    if let Some(db) = &c.loaded {
+        return db.clone();
+    }
+    let dir = env.or_else(|| c.dir.clone());
+    // loaded under the lock: a second caller waits for this load instead of repeating it
+    let db = dir.as_deref().and_then(load).map(Arc::new);
+    c.loaded = Some(db.clone());
+    db
+}
+
+/// What the lens database says about a photo's lens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Match {
+    /// No database is set up (or it holds no lenses).
+    NoDatabase,
+    /// Lens profiles apply to raw photos only.
+    NotRaw,
+    /// The photo's metadata names no lens.
+    NoLensName,
+    /// The database has no profile for the lens (its name).
+    NotFound(String),
+    /// The database's profile (its name).
+    Found(String),
+}
+
+/// Look `lens_model` (and its maker, when known) up in the database in use.
+pub fn match_lens(lens_make: Option<&str>, lens_model: &str) -> Match {
+    let Some(db) = database() else { return Match::NoDatabase };
+    if lens_model.trim().is_empty() {
+        return Match::NoLensName;
+    }
+    match db.find_lens(lens_make, lens_model, None) {
+        Some(p) => Match::Found(p.models.first().cloned().unwrap_or_else(|| lens_model.trim().to_string())),
+        None => Match::NotFound(lens_model.trim().to_string()),
+    }
+}
+
+/// Serialises the tests (here and elsewhere in the crate) that change the process-wide database.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// The database profile for a photo with metadata `m`, for its `w × h` (unoriented, default-cropped) image,
 /// re-expressed after `orientation`. `None` without a database, lens name, focal length or matching profile.
@@ -55,7 +160,7 @@ pub fn for_raw(raw: &lightcraft_raw::RawInfo, meta: impl FnOnce() -> lightcraft_
         let db = database()?;
         let c = raw.crop.clipped(raw.active_area.width, raw.active_area.height);
         let (w, h) = if c.width == 0 || c.height == 0 { (raw.active_area.width, raw.active_area.height) } else { (c.width, c.height) };
-        lookup(db, &meta(), w as f64, h as f64, raw.orientation)
+        lookup(&db, &meta(), w as f64, h as f64, raw.orientation)
     })
 }
 
@@ -82,6 +187,44 @@ mod tests {
             f_number: Some(3.5),
             ..Default::default()
         }
+    }
+
+    /// Setting the folder, changing its files and clearing it take effect at once, without a restart.
+    #[test]
+    fn database_is_swapped_at_runtime() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        if env_dir().is_some() {
+            return;
+        }
+        let before = configured_dir();
+        let dir = std::env::temp_dir().join(format!("lens-profiles-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        set_dir(None);
+        assert!(database().is_none());
+        assert_eq!(match_lens(None, "18-55mm F3.5-5.6"), Match::NoDatabase);
+        let g0 = generation();
+        set_dir(Some(dir.clone()));
+        assert_ne!(generation(), g0);
+        // an empty folder is no database
+        assert!(database().is_none());
+        std::fs::write(dir.join("t.xml"), DB).unwrap();
+        // cached until told
+        assert!(database().is_none());
+        reload();
+        assert_eq!(database().unwrap().lenses.len(), 1);
+        assert!(matches!(match_lens(Some("Testcam"), "18-55mm F3.5-5.6"), Match::Found(_)));
+        assert_eq!(match_lens(None, "70-200mm F4"), Match::NotFound("70-200mm F4".into()));
+        assert_eq!(match_lens(None, "  "), Match::NoLensName);
+        // malformed XML next to it is skipped, never a panic
+        std::fs::write(dir.join("bad.xml"), "<lensdatabase><lens><model>x</lens").unwrap();
+        reload();
+        assert_eq!(database().unwrap().lenses.len(), 1);
+        assert_eq!(source(), Some((dir.clone(), Origin::Folder)));
+        set_dir(None);
+        assert!(database().is_none() && source().is_none());
+        set_dir(before);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
