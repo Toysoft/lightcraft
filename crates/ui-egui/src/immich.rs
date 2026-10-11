@@ -805,24 +805,12 @@ fn take_flag(ctx: &egui::Context, flag: &str) -> bool {
 /// The Cancel button sets this; [`tick`] (which owns the task) takes it.
 const CANCEL_FLAG: &str = "immich-cancel-requested";
 
-/// The import phase of the dialog: the progress bar, the failures, and Cancel.
+/// The import phase of the dialog: a status line, the failures, and Cancel. The progress bar
+/// itself lives in the activity stack (the engine holds a row for the run, docs/background-tasks.md),
+/// so the dialog does not draw its own.
 fn import_progress(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(task) = &app.immich_task else { return };
-    // the engine's job is the live progress: the current file, and how much of it has arrived
-    let (file_frac, file_line) = app.session.immich_import.as_ref().map_or((0.0, None), |j| {
-        let line = if j.current_file.is_empty() {
-            None
-        } else if j.file_total > 0 {
-            Some(format!("{} — {:.1} of {:.1} MB", j.current_file, j.file_done as f64 / 1e6, j.file_total as f64 / 1e6))
-        } else {
-            Some(format!("{} — {:.1} MB", j.current_file, j.file_done as f64 / 1e6))
-        };
-        (j.file_fraction(), line)
-    });
-    // photos finished, plus the fraction of the one downloading now — the bar moves inside a
-    // single photo, which is the whole point when there is only one
-    let frac = ((task.done as f32) + if task.import_done { 0.0 } else { file_frac }) / task.total.max(1) as f32;
     let head: String = if task.import_done {
         crate::i18n::tr("Done.").to_string()
     } else if task.cancelled {
@@ -832,14 +820,6 @@ fn import_progress(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     };
     let r = ui.label(egui::RichText::new(head).color(t.text));
     register(ui.ctx(), "label:immichProgressHead", r.rect);
-    if !task.import_done {
-        let r = ui.add(egui::ProgressBar::new(frac).desired_width(420.0));
-        register(ui.ctx(), "bar:immichProgress", r.rect);
-        if let Some(line) = file_line {
-            let r = ui.label(egui::RichText::new(line).color(t.text_dim).small());
-            register(ui.ctx(), "label:immichProgressFile", r.rect);
-        }
-    }
     let summary = crate::i18n::tr_format!("Imported {} · {} already in the library · {} failed", task.imported, task.skipped, task.failed.len());
     let r = ui.label(egui::RichText::new(summary).color(t.text_dim));
     register(ui.ctx(), "label:immichSummary", r.rect);

@@ -2070,5 +2070,6 @@
   "Downloading model": "Завантаження моделі",
   "Finding faces": "Пошук облич",
   "Synchronizing folder": "Синхронізація папки",
-  "Looking for changes": "Пошук змін"
+  "Looking for changes": "Пошук змін",
+  "Importing from Immich": "Імпорт із Immich"
 }

@@ -46,7 +46,12 @@ pub fn redirect(status: u16, location: &str) -> Reply {
 /// Serve `replies`, one per connection, and capture what arrived. The thread exits after that many
 /// connections, so the join at the end of a test cannot hang.
 pub fn start(replies: Vec<Reply>) -> (String, Arc<Mutex<Vec<Captured>>>, std::thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    serve_on(TcpListener::bind("127.0.0.1:0").unwrap(), replies)
+}
+
+/// Like [`start`], on a listener the test bound itself (so it knows the host and port before
+/// building the replies — e.g. a redirect that must point at the same host but another port).
+pub fn serve_on(listener: TcpListener, replies: Vec<Reply>) -> (String, Arc<Mutex<Vec<Captured>>>, std::thread::JoinHandle<()>) {
     let base = format!("http://{}", listener.local_addr().unwrap());
     let total = replies.len();
     let queue = Arc::new(Mutex::new(VecDeque::from(replies)));
@@ -188,10 +193,36 @@ fn a_redirect_to_another_host_is_refused() {
     let (base, seen, h) = start(vec![redirect(302, "https://elsewhere.example/api/server/ping")]);
     let client = Client::new(&base, "s3cr3t", Limits::default()).unwrap();
     let e = client.ping().unwrap_err().to_string();
-    assert!(e.contains("different host") && e.contains("elsewhere.example"), "{e}");
+    assert!(e.contains("different scheme, host or port") && e.contains("elsewhere.example"), "{e}");
     let got = take(&seen);
     h.join().unwrap();
     assert_eq!(got.len(), 1, "nothing was sent to the other host");
+}
+
+#[test]
+fn a_redirect_to_another_scheme_or_port_is_refused() {
+    // the base mock listens on http; a hop to another scheme or another port must not carry the key
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let hp = format!("{}", listener.local_addr().unwrap());
+    let (base, seen, h) = serve_on(listener, vec![redirect(302, &format!("https://{hp}/api/server/ping"))]);
+    let client = Client::new(&base, "s3cr3t", Limits::default()).unwrap();
+    let e = client.ping().unwrap_err().to_string();
+    assert!(e.contains("different scheme, host or port"), "scheme: {e}");
+    let got = take(&seen);
+    h.join().unwrap();
+    assert_eq!(got.len(), 1, "scheme: nothing was sent to the other origin");
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let hp = format!("{}", listener.local_addr().unwrap());
+    let port = hp.rsplit_once(':').unwrap().1.parse::<u16>().unwrap();
+    let other = format!("127.0.0.1:{}", port.wrapping_add(1));
+    let (base, seen, h) = serve_on(listener, vec![redirect(302, &format!("http://{other}/api/server/ping"))]);
+    let client = Client::new(&base, "s3cr3t", Limits::default()).unwrap();
+    let e = client.ping().unwrap_err().to_string();
+    assert!(e.contains("different scheme, host or port"), "port: {e}");
+    let got = take(&seen);
+    h.join().unwrap();
+    assert_eq!(got.len(), 1, "port: nothing was sent to the other origin");
 }
 
 #[test]
@@ -368,6 +399,17 @@ fn a_thumbnail_over_the_cap_is_refused() {
     let e = client.thumbnail("a1", "preview", &mut sink, |_| {}).unwrap_err();
     assert!(matches!(e, Error::Limit(_)), "{e:?}");
     h.join().unwrap();
+}
+
+#[test]
+fn a_dot_or_dotdot_id_is_refused_without_a_request() {
+    // an id of `.` or `..` would step out of the API path on the server: it must be refused
+    // before anything is sent (the base is bogus; the refusal happens before any connect)
+    for id in [".", ".."] {
+        let client = Client::new("http://127.0.0.1:1", "k", Limits::default()).unwrap();
+        let e = client.asset(id).unwrap_err().to_string();
+        assert!(e.contains("not a valid id"), "{id}: {e}");
+    }
 }
 
 #[test]

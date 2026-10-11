@@ -1876,5 +1876,6 @@
   "Downloading model": "Téléchargement du modèle",
   "Finding faces": "Recherche des visages",
   "Synchronizing folder": "Synchronisation du dossier",
-  "Looking for changes": "Recherche des modifications"
+  "Looking for changes": "Recherche des modifications",
+  "Importing from Immich": "Importation depuis Immich"
 }

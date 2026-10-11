@@ -268,6 +268,39 @@ fn import_downloads_then_runs_the_library_import_pipeline() {
 }
 
 #[test]
+fn a_background_import_registers_an_activity_row_and_releases_it() {
+    // the dialog's path runs as one activity-stack task (docs/background-tasks.md): a row while
+    // it runs, cancellable through the stack, gone once the run ends
+    let lib = temp_dir("impact");
+    let (base, _seen, h) =
+        start(vec![reply_json(200, r#"{"id":"a1","checksum":"c1","originalFileName":"ACT_1.JPG"}"#), reply_bytes(200, "image/png", png(5))]);
+    let mut s = Session::new().with_fs();
+    s.immich_store = Some(lib.join("immich.json"));
+    s.open_library(&lib, false).unwrap();
+    add_server(&mut s, &base);
+    let r = s.execute("immich.import", &json!({"server": "Home", "ids": ["a1"], "background": true})).unwrap();
+    assert_eq!(r["importing"], 1, "{r}");
+    let rows: Vec<_> = s.activity.list().into_iter().filter(|t| t.kind == "import").collect();
+    assert_eq!(rows.len(), 1, "one activity row while the import runs: {:?}", s.activity.list());
+    assert_eq!(rows[0].label, "Importing from Immich");
+    assert_eq!(rows[0].total, 1);
+    assert!(rows[0].cancellable, "the row can be cancelled (its ✕ sets the client's flag)");
+    // poll the run to completion, then the row must be gone
+    for _ in 0..1000 {
+        s.poll_immich_import();
+        if s.immich_import.as_ref().is_some_and(|j| j.finished.is_some()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(s.immich_import.as_ref().is_some_and(|j| j.finished.is_some()), "the import finished");
+    assert!(!s.activity.list().iter().any(|t| t.kind == "import"), "the row is released at the end: {:?}", s.activity.list());
+    assert_eq!(s.catalog.len(), 1);
+    h.join().unwrap();
+    let _ = std::fs::remove_dir_all(&lib);
+}
+
+#[test]
 fn import_staging_is_a_fresh_private_folder_per_run() {
     // `add` keeps the staged files (and their folder) in place, so the folder is inspectable
     // afterwards: one per import, named beyond the bare pid, and 0700 on Unix.

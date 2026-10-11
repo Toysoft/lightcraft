@@ -20,7 +20,6 @@ use serde_json::{Value, json};
 
 use super::{CommandSpec, always, bad, cmd, str_param};
 use crate::{EngineError, Result, Session};
-
 /// One Immich server the user configured: where it is, what to call it, and the key they created
 /// in Immich's Settings ▸ API keys. `verified` is set when a test reached the server and it
 /// answered — the UI keeps File ▸ Import from Immich disabled until some server has it.
@@ -143,6 +142,9 @@ pub struct ImmichImportJob {
     client: std::sync::Arc<lightcraft_immich::Client>,
     staging: std::path::PathBuf,
     mode: String,
+    /// The activity-stack row for this run (docs/background-tasks.md). Held for exactly as long
+    /// as the job runs; `None` once it ended (the row is gone).
+    activity: Option<crate::activity::TaskGuard>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -211,10 +213,19 @@ impl ImmichImportJob {
                 ImportMsg::Done { paths, failed } => done = Some((paths, failed)),
             }
         }
+        // the activity row mirrors the run: the photo count as progress, the current file as detail
+        if let Some(row) = self.activity.as_ref() {
+            row.progress(self.done as u64, self.total as u64);
+            if !self.current_file.is_empty() {
+                row.detail(&self.current_file);
+            }
+        }
         if done.is_some() {
             self.rx = None;
             self.current_file.clear();
             self.done = self.total;
+            // the run is over: the row goes away with the guard
+            self.activity = None;
         }
         done
     }
@@ -579,6 +590,11 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
         if s.immich_import.as_ref().is_some_and(|job| job.finished.is_none()) {
             return Err(EngineError::Other("immich.import: an import is already running".to_string()));
         }
+        // one activity-stack row for the whole run (docs/background-tasks.md): the row's ✕,
+        // `activity.cancel` and the dialog's Cancel all set the client's cancel flag, which the
+        // worker checks between files and mid-transfer
+        let activity = s.activity.start("import", "Importing from Immich", crate::activity::Cancel::Flag(client.cancel_flag()));
+        activity.progress(0, ids.len() as u64);
         let staging = staging_dir()?;
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = std::thread::Builder::new()
@@ -603,6 +619,7 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
             client,
             staging,
             mode: mode.to_string(),
+            activity: Some(activity),
         });
         let _ = worker; // a dead worker simply never answers; its sends fail and the job ends empty
         return Ok(json!({ "importing": ids.len() }));

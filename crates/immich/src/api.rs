@@ -7,6 +7,7 @@
 //! read becomes [`Error::Api { status: 0, .. }`], because the server did answer.
 
 use std::io::Write;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -207,11 +208,12 @@ pub struct Client {
     base: Url,
     api_key: String,
     limits: Limits,
-    cancel: AtomicBool,
+    cancel: Arc<AtomicBool>,
 }
 
-/// How many same-host redirects one call may follow (an added `/api`, a trailing slash, an
-/// http → https upgrade) before the server is asked to mean one address.
+/// How many same-origin redirects one call may follow (an added `/api`, a trailing slash) before
+/// the server is asked to mean one address. The origin — scheme, host and port — must stay the
+/// same, so the API key never travels in cleartext or to a server the user did not name.
 const MAX_REDIRECTS: usize = 4;
 
 impl std::fmt::Debug for Client {
@@ -229,7 +231,13 @@ impl Client {
         if api_key.is_empty() || api_key.len() > 200 || api_key.chars().any(|c| c.is_control()) {
             return Err(Error::Unauthorized);
         }
-        Ok(Client { base, api_key: api_key.to_string(), limits, cancel: AtomicBool::new(false) })
+        Ok(Client { base, api_key: api_key.to_string(), limits, cancel: Arc::new(AtomicBool::new(false)) })
+    }
+
+    /// The cancel flag the client checks on every transfer; a long-running job adopts it into the
+    /// activity stack, so the stack's ✕, `activity.cancel` and `set_cancelled` all set one flag.
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancel.clone()
     }
 
     /// The base URL, without the key.
@@ -276,8 +284,9 @@ impl Client {
         loop {
             let mut resp = http::request(method, &url, &self.headers(content_type), body, &self.limits())?;
             // A proxied Immich often answers with a redirect: an added /api prefix, a missing
-            // trailing slash, http → https. Follow it — same host only, so the API key never
-            // travels to a server the user did not name.
+            // trailing slash. Follow it — but only to the exact same origin (scheme, host and
+            // port): an https → http downgrade or a hop to another port would re-send the API
+            // key in cleartext or to a server the user did not name.
             let location = match resp.status {
                 301 | 302 | 303 | 307 | 308 => resp.header("location").map(str::to_string),
                 _ => None,
@@ -293,10 +302,12 @@ impl Client {
             }
             redirects += 1;
             let next = url.join(&location)?;
-            if next.host != url.host {
+            if next.tls != url.tls || next.host != url.host || next.port != url.port {
                 return Err(Error::Api {
                     status: resp.status,
-                    message: format!("the server redirected to {location}, a different host — add the server with its final address instead"),
+                    message: format!(
+                        "the server redirected to {location}, a different scheme, host or port — add the server with its final address instead"
+                    ),
                 });
             }
             url = next;
@@ -366,14 +377,14 @@ impl Client {
 
     /// The assets of one album (`GET /albums/{id}/assets`).
     pub fn album_assets(&self, album_id: &str) -> Result<Vec<Asset>, Error> {
-        self.get_json(&format!("/albums/{}/assets", encode_segment(album_id)))
+        self.get_json(&format!("/albums/{}/assets", encode_segment(album_id)?))
     }
 
     /// `GET /assets/{id}/original` into `out`, at most `max_download` bytes, reporting bytes so far
     /// and the announced total (0 when the server did not say) to `progress`. Returns the number
     /// of bytes written.
     pub fn download_original<W: Write>(&self, asset_id: &str, out: &mut W, mut progress: impl FnMut(u64, u64)) -> Result<u64, Error> {
-        let rest = format!("/assets/{}/original", encode_segment(asset_id));
+        let rest = format!("/assets/{}/original", encode_segment(asset_id)?);
         let mut resp = self.send("GET", &rest, None, None)?;
         if let Some(n) = resp.content_length().filter(|n| *n > self.limits.max_download) {
             return Err(Error::Limit(format!("this photo is {n} bytes, over the {}-byte limit", self.limits.max_download)));
@@ -399,13 +410,13 @@ impl Client {
     /// `GET /assets/{id}` — one asset's record (name, creation date, rating): the cheap way to
     /// label an asset id that came from a search done earlier or from elsewhere.
     pub fn asset(&self, id: &str) -> Result<Asset, Error> {
-        self.get_json(&format!("/assets/{}", encode_segment(id)))
+        self.get_json(&format!("/assets/{}", encode_segment(id)?))
     }
 
     /// `GET /assets/{id}/thumbnail?size=…` into `out`, capped by `max_thumb`. `size` is one of
     /// the server's sizes (e.g. `"preview"`); an unknown one is the server's `Api` error, not ours.
     pub fn thumbnail<W: Write>(&self, id: &str, size: &str, out: &mut W, mut progress: impl FnMut(u64)) -> Result<u64, Error> {
-        let rest = format!("/assets/{}/thumbnail?size={}", encode_segment(id), encode_segment(size));
+        let rest = format!("/assets/{}/thumbnail?size={}", encode_segment(id)?, encode_segment(size)?);
         let mut resp = self.send("GET", &rest, None, None)?;
         if let Some(n) = resp.content_length().filter(|n| *n > self.limits.max_thumb) {
             return Err(Error::Limit(format!("this thumbnail is {n} bytes, over the {}-byte limit", self.limits.max_thumb)));
@@ -434,8 +445,12 @@ fn is_message(text: &str) -> bool {
     !t.is_empty() && t.len() < 300 && !t.starts_with('<')
 }
 
-/// Percent-encode one path segment (ids come from a server, names from users).
-fn encode_segment(s: &str) -> String {
+/// Percent-encode one path segment (ids come from a server, names from users). A segment that is
+/// exactly `.` or `..` is refused — it would step out of the API path on the server.
+fn encode_segment(s: &str) -> Result<String, Error> {
+    if s == "." || s == ".." {
+        return Err(Error::Api { status: 0, message: format!("`{s}` is not a valid id") });
+    }
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
@@ -445,7 +460,7 @@ fn encode_segment(s: &str) -> String {
         }
     }
     if out.is_empty() {
-        return "~".to_string();
+        return Ok("~".to_string());
     }
-    out
+    Ok(out)
 }
