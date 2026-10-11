@@ -103,8 +103,20 @@ when a region has no dedicated entry.
 
 ## Release notes
 
-Help ▸ What's New shows `docs/whats-new.md`, and each of its lines (a heading, or one wrapped line of a
-bullet, without the `- ` or `### `) is looked up like any message, so a catalog can translate the notes
+The release pipeline generates `docs/release-history.md` from GitHub's published releases
+once, then embeds the same snapshot in every platform build. Drafts and prereleases are
+excluded; dates are the UTC publication dates, not build dates. The running app needs no
+network access. A release being built has no publication date yet, so it appears in the
+history of later builds after it is published.
+
+For local builds, the checked-in snapshot works offline. Refresh it with
+`python3 packaging/release-history.py`, or pass `--input releases.json` to use a saved API
+response. Do not edit the generated file by hand. The highlights in `docs/whats-new.md`
+keep their development dates, which can precede publication.
+
+Help ▸ What's New shows `docs/release-history.md` followed by `docs/whats-new.md`, and each
+of its lines (a heading, or one wrapped line of a bullet, without the `- ` or `### `) is
+looked up like any message, so a catalog can translate the notes
 line by line (German does). A line that is re-wrapped or edited no longer matches its translation and
 shows in English until the catalog is updated; untranslated lines are reported by
 `display_label_gaps_are_reported`, never failed.
