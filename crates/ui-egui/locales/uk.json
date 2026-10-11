@@ -2078,5 +2078,13 @@
   "No photos yet": "Фотографій ще немає",
   "No imported folders yet": "Імпортованих тек ще немає",
   "Show Sidebar Section": "Показати розділ бічної панелі",
-  "Move Sidebar Section": "Перемістити розділ бічної панелі"
+  "Move Sidebar Section": "Перемістити розділ бічної панелі",
+  "Arrange Panel": "Arrange Panel",
+  "Close panel": "Close panel",
+  "Float panel": "Float panel",
+  "Move to group": "Move to group",
+  "Panels": "Panels",
+  "Reset Panel Layout": "Reset Panel Layout",
+  "Resize panel window": "Resize panel window",
+  "Resize panels": "Resize panels"
 }

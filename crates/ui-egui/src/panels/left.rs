@@ -561,8 +561,7 @@ fn new_album_menu(app: &mut LightcraftApp, ui: &mut egui::Ui) {
 pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let frame = egui::Frame::NONE.fill(t.chrome).stroke(egui::Stroke::new(1.0, t.divider));
-    let width = app.ui.left_width;
-    let resized = super::resizable_side(ui, true, "left_panel", frame, width, crate::state::LEFT_WIDTH, 0.0, |ui| {
+    frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         // the title offers the sections' menu too: where hidden sections come back from
         let (hr, title) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
@@ -668,9 +667,6 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             }
         });
     });
-    if let Some(w) = resized {
-        app.ui.left_width = w;
-    }
 }
 
 /// Albums: the tree of albums and the folders they are sorted into. `reveal`: an album just made,
@@ -1178,7 +1174,7 @@ fn albums_tree(app: &mut LightcraftApp, ui: &mut egui::Ui, all: &AlbumKids, pare
 /// Whether the pointer is over `rect` and over what the panel shows of it (a row scrolled out of
 /// sight is not a drop target).
 fn pointer_over(ui: &egui::Ui, rect: Rect) -> bool {
-    ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| rect.contains(p) && ui.clip_rect().contains(p))
+    crate::docking::drop_target(ui, rect, ui.input(|i| i.pointer.latest_pos()))
 }
 
 /// [`pointer_over`] for a row: a row scrolled beneath the pinned header is covered by it, so the
