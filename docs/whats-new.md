@@ -217,6 +217,13 @@
   files, the same files as `library.import` (issue #1080). They used to be skipped without a word.
 - Compare and Reference View panes say "Rendering…" (or that the photo can't be opened) the same way, so a
   magnified preview isn't taken for the photo when checking focus at 1:1.
+### Import from cameras that don't show up as a drive (Windows)
+- Cameras and phones that connect over USB without appearing as a drive (they talk PTP or MTP: a Fujifilm X100T,
+  a Leica M11, most phones) are listed in File ▸ Import from Device next to memory cards (issue #1005). Choosing
+  one copies the photos the library doesn't have yet off the camera, with progress and ✕ in the activity stack,
+  then opens the import review with **Move** checked. Photos already imported (same file name, size and capture
+  time) are not read again, and a cancelled copy carries on where it stopped. Nothing on the camera is changed.
+  Windows only so far; agents use `library.fetchCamera`.
 
 ### JPEG XL export
 - Export as JPEG XL (issue #247): Format ▸ JPEG XL in the Export dialog, `format: "jxl"` for agents and the CLI

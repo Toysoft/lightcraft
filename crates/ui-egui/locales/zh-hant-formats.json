@@ -247,5 +247,9 @@
   "{n} photos opened for editing; each is stacked with its original": "已開啟 {n} 張相片進行編輯；每張都與其原始相片堆疊在一起",
   "{name} opened in the other editor": "已在其他編輯器中開啟 {name}",
   "{n} originals opened in the other editor": "已在其他編輯器中開啟 {n} 個原始檔案",
-  "· {in_source} identical copies": "· {in_source} 個相同副本"
+  "· {in_source} identical copies": "· {in_source} 個相同副本",
+  "Couldn't read {name}: {error}": "無法讀取 {name}：{error}",
+  "Couldn't read {n} photo{s} from {name}": "{name}：有 {n} 張照片無法讀取{s:.0}",
+  "No new photos on {name} ({n} already in the library)": "{name} 上沒有新照片（{n} 張已在照片庫中）",
+  "No photos found on {name}": "在 {name} 上找不到照片"
 }
