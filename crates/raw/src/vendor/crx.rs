@@ -335,8 +335,10 @@ fn tile_qp(sample: &[u8], tile: &Tile) -> Result<Option<QpMap>> {
 
 fn quant_step(value: u8) -> Result<i32> {
     // Measured independently with an external decoder after modifying only the
-    // quantValue field: all forty values 4..43 follow this integer sequence.
-    if !(4..=43).contains(&value) {
+    // quantValue field: all forty values 4..43 follow this integer sequence. Value 44 (QP 168)
+    // continues it (step 102); it was checked against a measured step of about 100 on an EOS R50
+    // C-RAW file. Nothing above 44 has been seen, so it stays rejected.
+    if !(4..=44).contains(&value) {
         return Err(RawError::Unsupported(format!("Canon CRX quantization value {value}")));
     }
     let scale = [40i32, 45, 51, 57, 64, 72].get(usize::from(value % 6)).copied().ok_or_else(|| corrupt("quantization table index"))?;
@@ -764,7 +766,7 @@ fn qp_map(src: &[u8], width: usize, height: usize) -> Result<QpMap> {
             // The map opens with its first symbol as a 32-bit literal; every later one is Rice coded.
             let symbol = if x == 0 && y == 0 { (bits.take(16)? << 16) | bits.take(16)? } else { bits.qp_rice(k)? };
             let value = median(left, above, corner).checked_add(signed(symbol)).ok_or_else(|| corrupt("QP prediction overflow"))?;
-            if !(131..=167).contains(&value) {
+            if !(131..=168).contains(&value) {
                 return Err(RawError::Unsupported(format!("Canon CRX adaptive QP value {value}")));
             }
             *current.get_mut(x).ok_or_else(|| corrupt("QP outside row"))? = value;
@@ -978,11 +980,11 @@ mod tests {
 
     #[test]
     fn measured_quantization_and_allocation_limits() {
-        for (quant, expected) in [(4, 1), (9, 1), (10, 2), (16, 4), (22, 8), (26, 12), (32, 25), (36, 40), (41, 72), (42, 80), (43, 90)] {
+        for (quant, expected) in [(4, 1), (9, 1), (10, 2), (16, 4), (22, 8), (26, 12), (32, 25), (36, 40), (41, 72), (42, 80), (43, 90), (44, 102)] {
             assert_eq!(quant_step(quant).unwrap(), expected);
         }
         assert!(matches!(quant_step(3), Err(RawError::Unsupported(_))));
-        assert!(matches!(quant_step(44), Err(RawError::Unsupported(_))));
+        assert!(matches!(quant_step(45), Err(RawError::Unsupported(_))));
         for (width, height) in [(20_000, 20_000), (65_538, 2), (2, 65_538)] {
             let mut config = coding();
             config.width = width;
@@ -1029,6 +1031,12 @@ mod tests {
         for end in 0..src.len() {
             assert!(qp_map(&src[..end], 7, 1).is_err());
         }
+    }
+
+    #[test]
+    fn qp_168_is_accepted_and_169_is_not() {
+        assert_eq!(qp_map(&[0, 0, 1, 0x50, 0x94], 1, 4).unwrap().data, [168; 4]);
+        assert!(matches!(qp_map(&[0, 0, 1, 0x52, 0x94], 1, 4), Err(RawError::Unsupported(_))));
     }
 
     #[test]
