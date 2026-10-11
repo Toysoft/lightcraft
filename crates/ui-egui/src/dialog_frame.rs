@@ -62,16 +62,31 @@ impl ModalLayout {
     }
 
     /// The middle of the dialog: scrolls vertically once it is taller than the room left.
+    ///
+    /// While the content fits (as measured on the previous frame) it is laid out directly, so the
+    /// dialog has its exact height from the first frame (a scroll area sizes itself from the
+    /// previous frame's content, which would make a just-opened dialog jump). Once it doesn't fit,
+    /// a scroll area exactly the room left holds it.
     pub fn body<R>(&mut self, ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         let max = self.body_max_height(ui);
-        let out = egui::ScrollArea::vertical()
-            .id_salt(self.id.with("dialog-body"))
-            .max_height(max)
-            // full width (no reflow when the scrollbar appears), own height (no empty space)
-            .auto_shrink([false, true])
-            .show(ui, add)
-            .inner;
+        let key = self.id.with("dialog-body-height");
+        let last = ui.ctx().data(|d| d.get_temp::<f32>(key));
+        let (out, height) = if last.is_some_and(|h| h > max) {
+            let out = egui::ScrollArea::vertical()
+                .id_salt(self.id.with("dialog-body"))
+                .max_height(max)
+                .min_scrolled_height(max)
+                // full width: no reflow when the scrollbar appears
+                .auto_shrink([false, false])
+                .show(ui, add);
+            (out.inner, out.content_size.y)
+        } else {
+            let top = ui.cursor().top();
+            let out = ui.scope(add).inner;
+            (out, ui.min_rect().bottom() - top)
+        };
         self.body_bottom = Some(ui.cursor().top());
+        remember(ui.ctx(), key, height);
         out
     }
 
@@ -81,10 +96,8 @@ impl ModalLayout {
         let out = add(ui);
         let end = ui.min_rect().bottom();
         let (id, content) = (self.id, end - self.top);
-        ui.ctx().data_mut(|d| {
-            d.insert_temp(id.with("dialog-footer"), (end - start).max(0.0));
-            d.insert_temp(id.with("dialog-content"), content.max(0.0));
-        });
+        remember(ui.ctx(), id.with("dialog-footer"), (end - start).max(0.0));
+        ui.ctx().data_mut(|d| d.insert_temp(id.with("dialog-content"), content.max(0.0)));
         out
     }
 
@@ -94,7 +107,16 @@ impl ModalLayout {
         let Some(content) = ctx.data(|d| d.get_temp::<f32>(id.with("dialog-content"))) else { return };
         let chrome = (rect.height() - content).max(0.0);
         if chrome.is_finite() {
-            ctx.data_mut(|d| d.insert_temp(id.with("dialog-chrome"), chrome));
+            remember(ctx, id.with("dialog-chrome"), chrome);
         }
+    }
+}
+
+/// Stores a measured height; a change lays the frame out again (no window jumping a frame later).
+fn remember(ctx: &egui::Context, key: Id, value: f32) {
+    let value = (value * 2.0).round() / 2.0;
+    if ctx.data(|d| d.get_temp::<f32>(key)) != Some(value) {
+        ctx.data_mut(|d| d.insert_temp(key, value));
+        ctx.request_discard("dialog layout measured");
     }
 }
