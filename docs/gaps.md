@@ -1,6 +1,6 @@
 # Gaps: where LightCraft falls short of Lightroom
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V3 noise improvements; render fidelity remains open) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V4 Nikon tone refinement; render fidelity remains open) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 Every known shortfall, one entry each, ranked by user impact (how many Lightroom users hit it, and
 how hard it blocks them), then by effort. **Agents pick work from the top** (the first entry nobody is
@@ -17,7 +17,7 @@ Hours are Opus 5.5 agent wall-clock hours (see [target-app-parity.md](target-app
 |---:|---|---|---|---:|---|
 | 1 B | **Camera colour is estimated, not measured** (LR-PROF-CAMERACOLOR). Raws start from a per-file fit to the camera JPEG, 4 bundled profiles or 52 spectral matrices; others use a neutral matrix | ΔE vs camera JPEG 2.9–10 after fitting (raw-parity.md); 0 chart-calibrated models vs 1,500 Adobe Standard profiles | every raw shooter sees colour that is close but not Lightroom's; some get neutral-matrix colour | 50–90 | [raw-parity](raw-parity.md#colour) |
 | 2 B | **CR3 beyond three verified bodies** (LR-IMP-FORMATS): CRX variants other than those verified on M50 / R100 / R8 fall back to the preview; CR3 sRAW / mRAW and HEIF CR3 too | measured: Canon is the largest bucket (33% of photographers) and its share whose camera fully works is the lowest of the big four, 72%; 17 of 22 popular Canon bodies write CR3, 2 verified (raw-parity.md) | +6.5 points of photographers whose camera works, the biggest single raw gain | 25–45 | [raw-parity](raw-parity.md#remaining-work-ranked-by-photographers-unlocked-per-hour) |
-| 3 B | **Render fidelity unmeasured** (LR-BEHAV-RENDER-FIDELITY): tone, highlights, texture / clarity / dehaze, NR and sharpening are tuned by eye | V2 fixes sharpening Radius/Detail and colour NR; V3 adds noise-aware luminance NR; no Lightroom fidelity suite, and luminance-NR Contrast remains ineffective | edits imported from Lightroom look different; Nikon starting tone still differs visibly | 30–60 | [raw-parity](raw-parity.md), [process-versions](process-versions.md), [detail-processing](detail-processing.md) |
+| 3 B | **Render fidelity unmeasured** (LR-BEHAV-RENDER-FIDELITY): tone, highlights, texture / clarity / dehaze, NR and sharpening are tuned by eye | V2 fixes sharpening Radius/Detail and colour NR; V3 adds noise-aware luminance NR and V4 validates finer Nikon tone fits; no Lightroom fidelity suite, and luminance-NR Contrast remains ineffective | edits imported from Lightroom look different; Nikon starting tone still differs visibly | 30–60 | [raw-parity](raw-parity.md), [process-versions](process-versions.md), [detail-processing](detail-processing.md) |
 | 4 B | **Original-pixel detail at 100%** (LR-VIEW-ZOOM, P0): the whole-image preview is capped (2,560 px default); compare, overlays and soft proofing lack sharp zoom windows (#323) | checklist row 🟡 | checking focus, the first thing culling needs, isn't reliable on large files | 8–15 | [ui-parity](ui-parity.md) |
 | 5 B | **AI masks: Subject, Sky, People, Background, Landscape** are heuristics; Object / Describe run SAM 3 but its download has no mirror configured | `crates/segment`; ai-masks.md; MASK rows 67% | masking is how most Lightroom users edit today | 40–70 + model decision | [target-app-parity](target-app-parity.md#ai) |
 | 6 B | **Compressed ORF** (every Olympus / OM body since ~2008) | measured: 66 of 78 Olympus / OM models preview-only; `orf.rs` refuses; OM bucket 3% of photographers, 3% of them fully work | +2.6 points; best gain per hour of any raw gap (~0.2) | 8–15 | [raw-parity](raw-parity.md) |
@@ -72,6 +72,7 @@ Beta-blocking gaps (B) total **~230–430 h**; with the stability and platform w
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Record V4 guarded Nikon tone refinement; Lightroom fidelity and measured colour remain open |
 | 2026-10-11 | minor | Record V3 adaptive noise reduction; camera colour/tone and Lightroom fidelity remain open |
 | 2026-10-11 | minor | Record V2 detail improvements and remaining Nikon baseline / luminance-NR Contrast gaps; render-fidelity gap stays open |
 | 2026-10-10 | minor | Nikon HE gap narrowed to profile/body coverage: native decoding and exact sensor references for Z50 II and Z6 III; headline coverage totals unchanged pending re-measurement |

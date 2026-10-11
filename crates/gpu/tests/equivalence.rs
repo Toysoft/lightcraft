@@ -25,7 +25,7 @@ fn fine_sharpening_radius_detail_masking_and_legacy_match_cpu() {
     }));
     let req = RenderRequest::fit(6000, 24);
     let info = SourceInfo::default();
-    for process in [1, 2, 3] {
+    for process in [1, 2, 3, 4] {
         for (radius, detail, masking, texture) in [(0.5, 0.0, 0.0, 0.0), (1.0, 25.0, 50.0, 0.0), (3.0, 100.0, 0.0, 30.0)] {
             let mut s = DevelopSettings { process: lightcraft_develop::ProcessVersion(process), ..Default::default() };
             s.detail.sharpen_amount = 80.0;
@@ -92,8 +92,13 @@ fn camera_tone_and_relative_wb() {
         [x, 1.0 - (-2.0 * x).exp()]
     }))
     .unwrap();
+    let curve = curve.with_refined_knots(curve.knots().map(|[x, y]| [x, y * 0.87])).unwrap();
     let info = SourceInfo { raw: true, relative_wb: true, camera_tone: Some(curve), ..Default::default() };
     let mut s = DevelopSettings::default();
+    for process in 1..=4 {
+        s.process = lightcraft_develop::ProcessVersion(process);
+        check(&format!("camera tone process {process}"), &src, &info, &s, &RenderRequest::fit(320, 240));
+    }
     check("camera tone neutral", &src, &info, &s, &RenderRequest::fit(320, 240));
     s.light.exposure = 1.0;
     s.light.contrast = 40.0;

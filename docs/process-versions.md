@@ -1,13 +1,19 @@
 # Process versions
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V3 noise-aware luminance reduction)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V4 validated Nikon starting tone)
 
 Every photo's develop settings record the **rendering process** they are interpreted by
 (`DevelopSettings::process`, a `ProcessVersion` in `crates/develop/src/settings.rs`). Lightroom calls
 this the process version. It lets the look of LightCraft improve (a new default tone curve, issue #146;
 stronger Light sliders, issue #196) without changing a single photo someone has already edited.
 
-**V3** is the current process. It adds noise-aware luminance reduction and starts new RAW imports
+**V4** is the current process. It uses a higher-resolution Nikon camera tone fit when
+matching image regions verify an improvement. The original curve travels alongside the
+refinement in smart previews; V1–V3 keep their original curve. Missing/rejected refinements
+retain the original rendering. Colour calibration and HDR tone are unchanged. See
+[camera-preview colour](camera-preview-colour.md#nikon-tone-refinement-v4).
+
+**V3** adds noise-aware luminance reduction and starts new RAW imports
 at Amount 25. Existing photos keep their process and settings; Update Process alone does not
 change slider values. Reset uses current RAW defaults unless an import preset was recorded.
 
@@ -87,5 +93,6 @@ states the process.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Add V4 guarded Nikon tone refinement while retaining legacy curves and proxy compatibility |
 | 2026-10-11 | minor | Add V3 adaptive luminance NR; preserve V1/V2 rendering and defaults |
 | 2026-10-11 | minor | Add V2 detail processing; preserve V1 edits and restore RAW capture defaults on Reset |

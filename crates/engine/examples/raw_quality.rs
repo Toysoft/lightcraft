@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let edge = if full { usize::MAX } else { 2560 };
     let (source, info) = lightcraft_engine::files::load_vec(std::fs::read(input)?, edge)?;
     let request = if full { RenderRequest::fit(source.width, source.height) } else { RenderRequest::fit(1400, 1400) };
-    for process in [1, 2, 3] {
+    for process in [1, 2, 3, 4] {
         let mut settings = DevelopSettings { process: ProcessVersion(process), ..Default::default() };
         settings.detail.sharpen_amount = 40.0;
         settings.detail.nr_color = 25.0;

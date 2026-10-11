@@ -26,6 +26,9 @@ const NO_CHROMA: [f32; CHROMA_N] = [1.0; CHROMA_N];
 pub struct CameraTone {
     knots: [[f32; 2]; 32],
     chroma: [f32; CHROMA_N],
+    /// Optional higher-resolution fit. Older processes continue to use `knots`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refined_knots: Option<[[f32; 2]; 32]>,
 }
 
 impl<'de> serde::Deserialize<'de> for CameraTone {
@@ -36,11 +39,17 @@ impl<'de> serde::Deserialize<'de> for CameraTone {
             // absent in smart previews written before the chroma curve existed
             #[serde(default)]
             chroma: Option<[f32; CHROMA_N]>,
+            #[serde(default)]
+            refined_knots: Option<[[f32; 2]; 32]>,
         }
         let w = Wire::deserialize(d)?;
         let tone = Self::new(w.knots).ok_or_else(|| serde::de::Error::custom("invalid camera tone curve"))?;
-        match w.chroma {
+        let tone = match w.chroma {
             Some(c) => tone.with_chroma(c).ok_or_else(|| serde::de::Error::custom("invalid camera chroma curve")),
+            None => Ok(tone),
+        }?;
+        match w.refined_knots {
+            Some(k) => tone.with_refined_knots(k).ok_or_else(|| serde::de::Error::custom("invalid refined camera tone curve")),
             None => Ok(tone),
         }
     }
@@ -55,7 +64,18 @@ impl CameraTone {
             }
             previous = p;
         }
-        Some(Self { knots, chroma: NO_CHROMA })
+        Some(Self { knots, chroma: NO_CHROMA, refined_knots: None })
+    }
+
+    /// Attach a validated refinement without changing legacy rendering or chroma.
+    pub fn with_refined_knots(self, knots: [[f32; 2]; 32]) -> Option<Self> {
+        Self::new(knots)?;
+        Some(Self { refined_knots: Some(knots), ..self })
+    }
+
+    /// The newer fit, when available, or the original curve. Only current processes opt in.
+    pub fn refined(&self) -> Self {
+        Self { knots: self.refined_knots.unwrap_or(self.knots), refined_knots: None, ..*self }
     }
 
     /// The curve with chroma scales at display luminance 0, 1/7 … 1 (each finite, 0..=4).
@@ -259,6 +279,35 @@ mod tests {
             let x = 0.004 * 1.18f32.powi(i as i32);
             [x, 1.0 - (-2.0 * x).exp()]
         })
+    }
+
+    #[test]
+    fn refined_curve_round_trips_and_only_new_processes_use_it() {
+        use lightcraft_develop::{DevelopSettings, ProcessVersion};
+        let legacy = CameraTone::new(knots()).unwrap().with_chroma([1.1; CHROMA_N]).unwrap();
+        let refined = legacy.with_refined_knots(knots().map(|[x, y]| [x, y * 0.8])).unwrap();
+        assert_eq!(legacy.knots(), refined.knots());
+        assert_eq!(legacy.chroma(), refined.refined().chroma());
+        let back: CameraTone = serde_json::from_value(serde_json::to_value(refined).unwrap()).unwrap();
+        assert_eq!(back, refined);
+        let info = crate::SourceInfo { raw: true, camera_tone: Some(refined), ..Default::default() };
+        let old_info = crate::SourceInfo { camera_tone: Some(legacy), ..info.clone() };
+        for process in 1..=4 {
+            let s = DevelopSettings { process: ProcessVersion(process), ..Default::default() };
+            let a = crate::finish::base_tone(&s, &info, 1.0);
+            let b = crate::finish::base_tone(&s, &old_info, 1.0);
+            for x in [0.002, 0.03, 0.1, 0.3, 0.5] {
+                if process < 4 {
+                    assert_eq!(a.apply(x), b.apply(x));
+                } else {
+                    assert!(a.apply(x) < b.apply(x));
+                }
+            }
+        }
+        let mut bad = serde_json::to_value(refined).unwrap();
+        bad["refined_knots"][2][0] = serde_json::json!(-1);
+        assert!(serde_json::from_value::<CameraTone>(bad).is_err());
+        assert!(legacy.with_refined_knots([[f32::NAN; 2]; 32]).is_none());
     }
 
     #[test]

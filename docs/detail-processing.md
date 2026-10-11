@@ -1,6 +1,6 @@
 # Detail processing
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** major (V3 noise-aware luminance reduction) · **Target:** useful RAW detail, not measured Adobe equivalence
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V4 inherits V3 detail and refines Nikon tone) · **Target:** useful RAW detail, not measured Adobe equivalence
 
 Process V1 sharpens from the same Gaussian log-luminance band as Texture, with sigma
 0.0018 of the output's full-frame long edge. On a 5568 px image that is about 10 px.
@@ -22,7 +22,8 @@ factor. This makes the default Amount useful while preserving zero and full-stre
 endpoints. This is our own retune, not a reproduction of Adobe's noise reduction.
 
 Existing photos retain their saved process. Update to Current Process changes selected photos in one
-undoable step. New imports and Reset use V3. Reset restores RAW capture sharpening, luminance/colour NR and
+undoable step. New imports and Reset use the current process (V4, which retains V3 detail).
+Reset restores RAW capture sharpening, luminance/colour NR and
 embedded lens corrections instead of clearing them to the rendered-image defaults. Presets continue to set their ordinary
 controls and preserve the receiving photo's process. Process is part of the noise-reduction
 stage cache key; Radius is part of the sharpening-plane cache key.
@@ -52,7 +53,7 @@ is not an exact model of every demosaic or lens warp. Colour/tone calibration is
 
 Synthetic regressions check effective Radius and Detail, unchanged flat fields, reduced
 broad edge halos, preserved legacy rendering, cache invalidation, and colour-speckle
-reduction without altering luminance. GPU equivalence cases cover all three processes, Radius,
+reduction without altering luminance. GPU equivalence cases cover the supported processes, Radius,
 Detail, Masking, and simultaneous Texture. A real-file diagnostic uses the actual loader:
 
 ```
@@ -83,11 +84,14 @@ outputs remain byte-identical to the earlier diagnostic renders of the same phot
 
 Luminance NR remains a separate control. Its Contrast control is still
 unimplemented. The Gaussian colour filter is not an edge-aware or learned denoiser, and
-the camera colour/tone fit is unchanged. These remain quality limitations.
+camera colour calibration is unchanged. V4 adds a guarded Nikon tone refinement (see
+[camera-preview colour](camera-preview-colour.md#nikon-tone-refinement-v4)); measured Lightroom
+fidelity remains open.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | V4 inherits V3 detail and adds a separate Nikon tone refinement |
 | 2026-10-11 | major | Add V3 adaptive luminance reduction, current RAW defaults and limitations |
 | 2026-10-11 | major | Describe V2 detail processing, legacy preservation, validation method and unresolved quality gaps |

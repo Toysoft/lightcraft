@@ -145,7 +145,7 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
     let lum = (s.detail.nr_luminance / 100.0) as f32;
     let col = (s.detail.nr_color / 100.0) as f32;
     let scale = (out_long as f32 / src_long.max(1) as f32).clamp(0.05, 1.0);
-    let l = (lum > 0.0 && s.process.process() != Process::V3).then(|| {
+    let l = (lum > 0.0 && s.process.process() < Process::V3).then(|| {
         let detail = (s.detail.nr_detail / 100.0) as f32;
         NrLum { sigma: (1.0 + 2.5 * lum) * scale.max(0.4), eps: 0.002 + lum * lum * 0.25 * (1.0 - 0.7 * detail), k: lum.sqrt() }
     });
@@ -157,7 +157,7 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
         // and the Detail control's retained chroma. Luminance is unchanged.
         let amount = match s.process.process() {
             Process::V1 => col,
-            Process::V2 | Process::V3 => (1.0 - (-8.0 * col).exp()) / (1.0 - (-8.0f32).exp()),
+            Process::V2 | Process::V3 | Process::V4 => (1.0 - (-8.0 * col).exp()) / (1.0 - (-8.0f32).exp()),
         };
         NrColor { sigma, t: amount * (1.0 - keep) }
     });

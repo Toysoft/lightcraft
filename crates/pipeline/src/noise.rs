@@ -9,7 +9,7 @@ use lightcraft_raster::{Rgb32f, blur::gaussian, par_join};
 
 /// Whether this rendering needs a source noise estimate.
 pub fn enabled(s: &DevelopSettings) -> bool {
-    s.process.process() == Process::V3 && s.section_enabled("detail") && s.detail.nr_luminance > 0.0
+    s.process.process() >= Process::V3 && s.section_enabled("detail") && s.detail.nr_luminance > 0.0
 }
 
 /// Robust, bounded estimate in sqrt(scene-linear luminance), before exposure. Sampling is

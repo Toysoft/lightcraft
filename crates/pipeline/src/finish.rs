@@ -287,6 +287,11 @@ pub fn base_tone(s: &DevelopSettings, info: &SourceInfo, peak: f32) -> ToneMap {
             None if info.raw => ToneMap::hdr(l.contrast, l.whites, l.blacks, peak),
             None => ToneMap::display_hdr(l.contrast, l.whites, l.blacks, peak),
         },
+        Process::V4 => match info.camera_tone.as_ref().filter(|_| info.raw && peak <= 1.0) {
+            Some(curve) => ToneMap::camera(&curve.refined(), l.contrast, l.whites, l.blacks),
+            None if info.raw => ToneMap::hdr(l.contrast, l.whites, l.blacks, peak),
+            None => ToneMap::display_hdr(l.contrast, l.whites, l.blacks, peak),
+        },
     }
 }
 
