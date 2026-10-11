@@ -387,3 +387,22 @@ fn several_albums_are_duplicated_into_a_folder_as_one_step() {
     assert!(s.execute("album.duplicate", &json!({"ids": []})).is_err());
     assert_eq!(s.catalog.albums().count(), count);
 }
+
+#[test]
+fn a_copied_folder_keeps_the_order_inside_it_and_its_smart_albums_go_by_the_copies() {
+    let mut s = Session::new();
+    photos(&mut s, 1);
+    let folder = album(&mut s, json!({"name": "Trips", "folder": true}));
+    let x = album(&mut s, json!({"name": "X", "parent": folder}));
+    let y = album(&mut s, json!({"name": "Y", "parent": folder}));
+    // by hand: Y before X
+    s.execute("album.reorder", &json!({"id": y, "before": x})).unwrap();
+    let smart = s.execute("album.createSmart", &json!({"name": "S", "rules": {"album": x}})).unwrap()["id"].as_u64().unwrap();
+    s.execute("album.move", &json!({"id": smart, "parent": folder})).unwrap();
+    let copy = s.execute("album.duplicate", &json!({"id": folder})).unwrap()["ids"][0].as_u64().unwrap();
+    let inside = |s: &Session, name: &str| s.catalog.albums().find(|a| a.name == name && a.parent == Some(AlbumId(copy))).cloned().unwrap();
+    let (cx, cy, cs) = (inside(&s, "X"), inside(&s, "Y"), inside(&s, "S"));
+    assert!(cy.order.is_some() && cy.order < cx.order, "Y is still before X: {:?} {:?}", cy.order, cx.order);
+    assert_eq!(cs.smart.as_ref().and_then(|r| r.album), Some(cx.id), "limited to the copy of X, not to X");
+    assert_eq!(s.catalog.album(AlbumId(copy)).unwrap().order, None, "the copy itself is listed by name");
+}

@@ -474,9 +474,11 @@
   them, or delete them; give folders a colour label or remove them from the library; give keywords to the selected
   photos, take them away, merge them or delete them. Deleting or removing several asks first and says what goes.
   Right-click a row that is not among them and you get that row's own menu; the others stay chosen.
-- Dragging one of several albums or keywords moves them all.
-- Right after choosing several rows with Cmd or Shift, the Delete key asks about those rows. Click anywhere else
-  and Delete is about the photos again; after a plain click on an album it always was.
+- Dragging one of several albums or keywords moves them all (albums go into the folder they are dropped in or
+  beside; placing by hand among its neighbours stays one album's).
+- Right after choosing several rows with Cmd or Shift, the Delete key asks about those rows. Click anywhere else,
+  or select photos or change what is shown in any other way, and Delete is about the photos again; after a plain
+  click on an album it always was.
 - Cut, Copy and Paste in the albums' and keywords' menus: cut albums move into the folder where you choose Paste
   (the Albums + menu pastes at the top level), copied albums are duplicated there with their photos; cut keywords
   are nested inside the keyword where you choose Paste; copied keywords are text you can paste in a keyword box.

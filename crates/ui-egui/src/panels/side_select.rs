@@ -35,6 +35,10 @@ pub struct SideState {
     /// Cmd/Ctrl or Shift, until the next click anywhere. A plain click never sets it, so after
     /// choosing an album the usual way the keys stay with the photos.
     pub keys: Option<SideList>,
+    /// What the key was taken over ([`keys_mark`]): any change to it gives the key back.
+    keys_at: u64,
+    /// The library all of this is about (its generation): another library starts afresh.
+    library: Option<u64>,
     pub albums: ListRows<u64>,
     pub folders: ListRows<String>,
     pub keywords: ListRows<String>,
@@ -94,27 +98,40 @@ fn how(ui: &egui::Ui) -> Click {
 /// were chosen with Cmd/Ctrl or Shift.
 fn take_keys(app: &mut LightcraftApp, list: SideList, how: Click, chosen: usize) {
     app.ui.side.keys = (how != Click::Plain && chosen > 1).then_some(list);
+    app.ui.side.keys_at = keys_mark(app);
 }
 
-/// Each frame, before the panels and the shortcuts: a press anywhere gives the keys back to the
-/// photos (a Cmd/Shift+click in a list takes them again when it is released).
+/// What the Delete key was taken over: what is shown, chosen and selected, and where. When any of
+/// it changes (a key, a menu, an agent), the key is the photos' again.
+fn keys_mark(app: &LightcraftApp) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let (s, ui) = (&app.session, &app.ui);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    format!("{:?}|{:?}|{:?}|{:?}", s.source, s.library_folder, ui.view, ui.right).hash(&mut h);
+    (&s.also_albums, &s.also_library_folders, &s.filter.keyword, &s.filter.keywords, &s.selection.ids, s.selection.active).hash(&mut h);
+    (&ui.keyword_list_selected, &ui.side.keyword_list_also, ui.left_panel, s.library_generation()).hash(&mut h);
+    h.finish()
+}
+
+/// Each frame, before the panels and the shortcuts: a press anywhere, or any change to what the
+/// key was taken over, gives the keys back to the photos (a Cmd/Shift+click in a list takes them
+/// again when it is released). A library that was switched forgets everything kept here: its
+/// rows are another library's.
 pub(crate) fn keys_frame(app: &mut LightcraftApp, ctx: &egui::Context) {
-    if app.ui.side.keys.is_some() && ctx.input(|i| i.pointer.any_pressed()) {
+    let library = app.session.library_generation();
+    if app.ui.side.library != Some(library) {
+        app.ui.side = SideState { library: Some(library), ..Default::default() };
+    }
+    if app.ui.side.keys.is_some() && (ctx.input(|i| i.pointer.any_pressed()) || app.ui.side.keys_at != keys_mark(app)) {
         app.ui.side.keys = None;
     }
 }
 
-/// The Delete key, when a sidebar list has it ([`SideState::keys`]): asks before deleting (or
-/// removing from the library) the rows chosen there. Returns whether the key was taken.
-pub(crate) fn delete_key(app: &mut LightcraftApp, ctx: &egui::Context) -> bool {
+/// Delete (the photos' delete shortcut, whatever key it is on), when a sidebar list has the key
+/// ([`SideState::keys`]): asks before deleting (or removing from the library) the rows chosen
+/// there. Returns whether it was about those rows; `false` leaves it to the photos.
+pub(crate) fn delete_asked(app: &mut LightcraftApp, ctx: &egui::Context) -> bool {
     let Some(list) = app.ui.side.keys else { return false };
-    let pressed = ctx.input_mut(|i| {
-        let back = i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace);
-        i.consume_key(egui::Modifiers::NONE, egui::Key::Delete) || back
-    });
-    if !pressed {
-        return false;
-    }
     let dialog = match list {
         SideList::Albums => Some(albums_shown(app)).filter(|ids| ids.len() > 1).map(|ids| delete_albums_dialog(app, &ids)),
         SideList::Keywords => Some(app.session.filter.keywords_wanted()).filter(|k| k.len() > 1).map(|k| delete_keywords_dialog(app, &k)),
@@ -129,11 +146,16 @@ pub(crate) fn delete_key(app: &mut LightcraftApp, ctx: &egui::Context) -> bool {
         }
     };
     match dialog {
-        Some(d) => app.ui.dialog = Some(d),
-        // what was chosen is not there any more: the key is the photos' again
-        None => app.ui.side.keys = None,
+        Some(d) => {
+            app.ui.dialog = Some(d);
+            true
+        }
+        // what was chosen is not there any more: the key is the photos' again, this press too
+        None => {
+            app.ui.side.keys = None;
+            false
+        }
     }
-    true
 }
 
 /// Whether the rows chosen in `list` are what the Delete key acts on now (they are outlined).
@@ -246,7 +268,13 @@ pub(crate) fn albums_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, ids: &[u64
         }
         false
     };
-    let mut folders: Vec<(u64, String)> = cat.albums().filter(|f| f.folder && !inside_chosen(f.id)).map(|f| (f.id.0, f.name.clone())).collect();
+    // …nor one a smart album among them shows (it would include itself), nor where they all are
+    let all_in = |folder: AlbumId| chosen.iter().all(|a| cat.album(*a).is_some_and(|a| a.parent == Some(folder)));
+    let mut folders: Vec<(u64, String)> = cat
+        .albums()
+        .filter(|f| f.folder && !inside_chosen(f.id) && !all_in(f.id) && chosen.iter().all(|a| cat.album_move_would_loop(*a, f.id).is_none()))
+        .map(|f| (f.id.0, f.name.clone()))
+        .collect();
     folders.sort_by_key(|(_, name)| name.to_lowercase());
     let any_nested = chosen.iter().any(|a| cat.album(*a).is_some_and(|a| a.parent.is_some()));
     ui.menu_button(crate::i18n::tr_format!("Move {n} Albums to", n = n), |ui| {
@@ -360,7 +388,7 @@ pub(crate) fn folders_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, paths: &[
 /// Whether keyword `path` is one the grid is filtered by.
 pub(crate) fn keyword_shown(app: &LightcraftApp, path: &str) -> bool {
     let f = &app.session.filter;
-    f.keyword.iter().chain(&f.keywords).any(|k| k.eq_ignore_ascii_case(path))
+    f.keyword.iter().chain(&f.keywords).any(|k| same_keyword(k, path))
 }
 
 /// A click on the Keywords row `path`: the grid shows the photos with it (again: every photo),
@@ -369,19 +397,22 @@ pub(crate) fn keyword_clicked(app: &mut LightcraftApp, ui: &egui::Ui, path: &str
     let chosen = app.session.filter.keywords_wanted();
     let how = how(ui);
     // a plain click on the one keyword shown clears it, as it always did
-    let clears = how == Click::Plain && chosen.len() == 1 && chosen.iter().any(|k| k.eq_ignore_ascii_case(path));
+    let clears = how == Click::Plain && chosen.len() == 1 && chosen.iter().any(|k| same_keyword(k, path));
     let keys = if clears {
         app.ui.side.keywords.anchor = None;
         Vec::new()
     } else {
         app.ui.side.keywords.click(&chosen, &path.to_string(), how, &same_kw)
     };
-    super::left::browse_all_photos(app, !keys.is_empty());
-    match keys.as_slice() {
+    let filtered = match keys.as_slice() {
         [] => app.act("library.filter", json!({"keyword": null, "keywords": []})),
         [one] => app.act("library.filter", json!({"keyword": one, "keywords": []})),
         many => app.act("library.filter", json!({"keyword": null, "keywords": many})),
     };
+    // (only once the filter is set: a refused one leaves the source where it was)
+    if filtered.is_some() {
+        super::left::browse_all_photos(app, !keys.is_empty());
+    }
     take_keys(app, SideList::Keywords, how, app.session.filter.keywords_wanted().len());
 }
 
@@ -407,12 +438,14 @@ pub(crate) fn date_clicked(app: &mut LightcraftApp, ui: &egui::Ui, key: &str) {
     } else {
         app.ui.side.dates.click(&chosen, &key.to_string(), how, &same_date)
     };
-    super::left::browse_all_photos(app, !keys.is_empty());
-    match keys.as_slice() {
+    let filtered = match keys.as_slice() {
         [] => app.act("library.filter", json!({"date": null, "dates": []})),
         [one] => app.act("library.filter", json!({"date": one, "dates": []})),
         many => app.act("library.filter", json!({"date": null, "dates": many})),
     };
+    if filtered.is_some() {
+        super::left::browse_all_photos(app, !keys.is_empty());
+    }
 }
 
 /// The context menu for several keywords chosen at once, in the left panel's Keywords or in the
@@ -467,7 +500,8 @@ pub(crate) fn delete_keywords_dialog(app: &LightcraftApp, keywords: &[String]) -
 /// The keywords picked in the Keyword List, in the order picked (the last is the one Edit takes).
 pub(crate) fn list_picked(app: &LightcraftApp) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for k in app.ui.side.keyword_list_also.iter().chain(&app.ui.keyword_list_selected) {
+    // (one that is gone since, deleted or merged away, is not picked any more)
+    for k in app.ui.side.keyword_list_also.iter().chain(&app.ui.keyword_list_selected).filter(|k| app.session.catalog.has_keyword(k)) {
         if !out.iter().any(|o| same_keyword(o, k)) {
             out.push(k.clone());
         }
@@ -491,8 +525,9 @@ pub(crate) fn list_clicked(app: &mut LightcraftApp, ui: &egui::Ui, path: &str) {
     let chosen = list_picked(app);
     let how = how(ui);
     let keys = app.ui.side.keyword_list.click(&chosen, &path.to_string(), how, &same_kw);
-    take_keys(app, SideList::KeywordList, how, keys.len());
+    let chosen = keys.len();
     list_pick(app, keys);
+    take_keys(app, SideList::KeywordList, how, chosen);
 }
 
 /// The keywords a context menu opened on the Keyword List's row `path` acts on, or a drag that
@@ -529,7 +564,24 @@ pub(crate) fn album_paste_item(app: &mut LightcraftApp, ui: &mut egui::Ui, paren
     // what is still there
     let ids: Vec<u64> = ids.into_iter().filter(|i| app.session.catalog.album(AlbumId(*i)).is_some()).collect();
     let label = if parent.is_some() { "Paste Into This Folder" } else { "Paste at Top Level" };
-    if !item(ui, "clip:paste", crate::i18n::tr(label).to_string(), !ids.is_empty()).clicked() {
+    // cut albums can't move into one of themselves, or into a folder inside one
+    let cat = &app.session.catalog;
+    let inside_itself = cut
+        && parent.is_some_and(|mut at| {
+            for _ in 0..=cat.albums().count() {
+                if ids.contains(&at.0) {
+                    return true;
+                }
+                match cat.album(at).and_then(|a| a.parent) {
+                    Some(p) => at = p,
+                    None => break,
+                }
+            }
+            false
+        });
+    let paste = item(ui, "clip:paste", crate::i18n::tr(label).to_string(), !ids.is_empty() && !inside_itself)
+        .on_disabled_hover_text(crate::i18n::tr("A folder can't go inside itself"));
+    if !paste.clicked() {
         return;
     }
     let to = parent.map(|p| p.0);

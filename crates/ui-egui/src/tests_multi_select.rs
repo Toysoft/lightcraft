@@ -569,3 +569,109 @@ fn cut_and_paste_nests_keywords_and_copy_puts_them_on_the_clipboard() {
     assert_eq!(h.app.ui.side.clip, None);
     assert_eq!(picked(&h), vec!["Sel Parent|Sel K1", "Sel Parent|Sel K3"], "still picked, where they are now");
 }
+
+// ---- What two independent reviews found
+
+/// A range starts from a row that is chosen: not from an album clicked before All Photos was shown.
+#[test]
+fn shift_click_does_not_start_from_an_album_that_is_no_longer_shown() {
+    let mut h = app("info");
+    let ([a, _, c, d], _) = four_albums(&mut h);
+    click(&mut h, &row(a));
+    click(&mut h, "source:all");
+    shift_click(&mut h, &row(d));
+    assert_eq!(shown(&h), vec![d], "nothing was chosen: the row alone");
+    // chosen by a command, not a click: the range starts from it
+    run(&mut h, "library.source", json!({"kind": "album", "id": c}));
+    shift_click(&mut h, &row(a));
+    assert_eq!(shown(&h).first(), Some(&c));
+    assert_eq!(shown(&h).last(), Some(&a));
+    assert_eq!(shown(&h).len(), 3);
+}
+
+/// The Delete key goes back to the photos when anything else changes what is shown or selected.
+#[test]
+fn delete_is_the_photos_again_after_a_change_made_without_the_pointer() {
+    let mut h = app("info");
+    let ([a, _, c, _], ids) = four_albums(&mut h);
+    click(&mut h, &row(a));
+    cmd_click(&mut h, &row(c));
+    assert!(h.app.ui.side.keys.is_some());
+    // a key, a menu or an agent selects photos
+    run(&mut h, "library.select", json!({"ids": [ids[0]]}));
+    ask(&mut h, "ui.key", json!({"key": "Backspace"}));
+    assert!(!several_dialog(&h), "{:?}", h.app.ui.dialog);
+    assert!(h.app.ui.side.keys.is_none());
+}
+
+/// A confirmation for several rows that is refused says why.
+#[test]
+fn a_refused_question_about_several_albums_says_why() {
+    let mut h = app("info");
+    let ([a, _, c, _], _) = four_albums(&mut h);
+    click(&mut h, &row(a));
+    cmd_click(&mut h, &row(c));
+    right_click(&mut h, &row(c));
+    click(&mut h, "sideMenu:albums:delete");
+    // one of them goes while the question is up
+    h.app.session.execute("album.delete", &json!({"id": c})).unwrap();
+    click(&mut h, "button:dialogOk");
+    assert!(h.app.session.catalog.album(AlbumId(a)).is_some(), "refused as a whole");
+    let said = h.app.ui.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(said.contains(&c.to_string()), "the toast names the album that is gone: {said:?}");
+}
+
+/// A keyword that is gone is not picked any more: the row left alone has its own menu.
+#[test]
+fn a_keyword_that_is_gone_is_not_picked_any_more() {
+    let (mut h, _) = keyword_list();
+    click(&mut h, "keywordRow:Sel K1");
+    cmd_click(&mut h, "keywordRow:Sel K3");
+    run(&mut h, "keyword.delete", json!({"keyword": "Sel K3"}));
+    assert_eq!(picked(&h), vec!["Sel K1"]);
+    right_click(&mut h, "keywordRow:Sel K1");
+    assert!(has(&h, "keywordMenu:delete") && !has(&h, "sideMenu:keywords:delete"), "one keyword's menu");
+}
+
+/// Cut albums are not pasted into one of themselves.
+#[test]
+fn cut_albums_are_not_pasted_into_themselves() {
+    let mut h = app("info");
+    let folder = run(&mut h, "album.create", json!({"name": "Sel Folder", "folder": true}))["id"].as_u64().unwrap();
+    let inner = run(&mut h, "album.create", json!({"name": "Sel Inner", "folder": true, "parent": folder}))["id"].as_u64().unwrap();
+    right_click(&mut h, &format!("source:folder:{folder}"));
+    click(&mut h, "sideMenu:clip:cut");
+    let undo = h.app.session.undo.len();
+    for target in [folder, inner] {
+        right_click(&mut h, &format!("source:folder:{target}"));
+        assert!(has(&h, "sideMenu:clip:paste"));
+        click(&mut h, "sideMenu:clip:paste");
+        assert_eq!(h.app.session.undo.len(), undo, "greyed out: nothing happens");
+        assert!(h.app.ui.side.clip.is_some());
+        ask(&mut h, "ui.key", json!({"key": "Escape"}));
+    }
+}
+
+/// Another library's albums are not what was cut in this one.
+#[test]
+fn what_was_cut_is_forgotten_when_another_library_opens() {
+    /// Gone with the test, however it ends.
+    struct Scratch(std::path::PathBuf);
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let mut h = app("keywords");
+    let ([a, _, c, _], _) = four_albums(&mut h);
+    click(&mut h, &row(a));
+    cmd_click(&mut h, &row(c));
+    right_click(&mut h, &row(c));
+    click(&mut h, "sideMenu:clip:cut");
+    assert!(h.app.ui.side.clip.is_some());
+    let dir = Scratch(std::env::temp_dir().join(format!("lc-multi-select-switch-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    h.app.session.open_library(&dir.0, false).unwrap();
+    h.settle(SETTLE);
+    assert!(h.app.ui.side.clip.is_none() && h.app.ui.side.keys.is_none());
+}

@@ -312,7 +312,8 @@ fn row(app: &mut LightcraftApp, ui: &mut egui::Ui, r: &Row, selection: &[PhotoId
     if resp.clicked() {
         super::side_select::list_clicked(app, ui, &r.path);
     }
-    if resp.double_clicked() {
+    // (not with Cmd or Shift held: those clicks pick rows)
+    if resp.double_clicked() && ui.input(|i| !i.modifiers.command && !i.modifiers.shift) {
         app.ui.dialog = Some(edit_dialog(app, &r.path));
     }
     resp.context_menu(|ui| menu(app, ui, &r.path, selection));
