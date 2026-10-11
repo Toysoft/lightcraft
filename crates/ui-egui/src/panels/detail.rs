@@ -734,17 +734,17 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             RightPanel::Remove => remove_overlay(app, ui, &resp, &map, &d),
             RightPanel::RedEye => eye_overlay(app, ui, &resp, &map, &d),
             _ => {
-                // side by side / stacked: Before shows the same frame, so a click in its view (white
-                // balance, colour samples, targeted adjustment) means the same point of the photo.
-                // Zoomed in, a view's image reaches past its pane: what counts is the pane clicked.
+                // Side by side / stacked: Before has the same frame, but its own image and pane.
+                // Use that pane for picking, click-zoom and pan; a zoomed image can extend past it.
                 let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
-                let map = match (split, areas.first(), pointer) {
+                let (map, interaction_img, interaction_area) = match (split, areas.first(), pointer) {
                     (true, Some(before), Some(q)) if before.contains(q) => {
-                        CanvasMap::new(&frame, fit_rect(*before, aspect, app.ui.zoom, native, ppp, app.ui.pan))
+                        let before_img = fit_rect(*before, aspect, app.ui.zoom, native, ppp, app.ui.pan);
+                        (CanvasMap::new(&frame, before_img), before_img, *before)
                     }
-                    _ => map,
+                    _ => (map, img_rect, main_area),
                 };
-                general_interaction(app, ui, &resp, &map, img_rect, main_area, native, aspect)
+                general_interaction(app, ui, &resp, &map, interaction_img, interaction_area, native, aspect)
             }
         }
     }
