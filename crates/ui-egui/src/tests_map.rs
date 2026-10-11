@@ -140,6 +140,10 @@ fn the_map_view_fits_the_photos_with_gps_and_credits_the_tiles() {
     }
     // the menu and the bottom bar know the view
     assert_eq!(crate::menubar::checked(&h.app, "view.map"), Some(true));
+    assert!(w.contains("\"icon:map\""), "the bottom bar has the Map button: {w}");
+    // the map draws in the docking canvas, beside (not under) the docked Tools panel
+    let tools = h.app.widgets.iter().find(|(id, _)| id == "panel:right_panel").map(|(_, r)| *r).expect("Tools is docked by default");
+    assert!(!canvas.intersect(tools).is_positive(), "map {canvas:?} overlaps Tools {tools:?}");
     // the view is kept for the session: leaving and coming back doesn't refit
     run(&mut h, "map.setView", json!({"lat": 10.0, "lon": 20.0, "zoom": 7}));
     run(&mut h, "view.photoGrid", json!({}));
@@ -378,6 +382,8 @@ fn the_info_panel_maps_the_active_photo_and_credits_the_tiles() {
     assert_eq!(m["zoom"].as_f64(), Some(crate::panels::map::MINI_ZOOM));
     // the pin is in the middle of the map, which takes the panel's width
     let r = widget(&h, "info:miniMap").expect("the mini-map is registered");
+    let tools = widget(&h, "panel:right_panel").expect("the Info panel is docked in Tools");
+    assert!(tools.contains_rect(r), "the mini-map {r:?} draws inside the docked Tools panel {tools:?}");
     let (px, py) = (m["pin"]["x"].as_f64().unwrap() as f32, m["pin"]["y"].as_f64().unwrap() as f32);
     assert!((px - r.center().x).abs() < 1.0 && (py - r.center().y).abs() < 1.0, "{m} {r:?}");
     assert!(r.width() > 180.0 && (r.height() - crate::panels::map::MINI_HEIGHT).abs() < 0.5, "{r:?}");
