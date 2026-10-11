@@ -2,13 +2,17 @@
 //! panel's "All Metadata"). Names follow the public TIFF 6.0 / EXIF 2.3 / DNG specifications;
 //! common enumerations are spelled out, everything else is shown as stored. Maker notes and
 //! binary blobs are summarised by size.
+//!
+//! In a raw file IFD0 describes the built-in preview, not the sensor data, so the TIFF group's
+//! Compression row is rewritten from the main image IFD (#830), and Nikon NEFs get their maker
+//! note's NEFCompression as a word (the public tag table) in a "Maker note" group.
 
-use lightcraft_tiff::{Ifd, Tiff, Value};
+use lightcraft_tiff::{Ifd, Tiff, Value, makernote, tags as t};
 
 /// One metadata row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TagRow {
-    /// `TIFF`, `EXIF`, `GPS`, `Interop`.
+    /// `TIFF`, `EXIF`, `GPS`, `Interop`, `Maker note`.
     pub group: &'static str,
     pub tag: u16,
     pub name: String,
@@ -170,6 +174,9 @@ fn enumerated(group: &str, tag: u16, v: i64) -> Option<&'static str> {
         (0x0103, 8) => "Deflate",
         (0x0103, 32773) => "PackBits",
         (0x0103, 34892) => "Lossy JPEG",
+        (0x0103, 34713) => "Nikon NEF (Huffman compressed)",
+        (0x0103, 32767) => "Sony ARW (lossy)",
+        (0x0103, 5) => "LZW",
         (0x0106, 0) => "WhiteIsZero",
         (0x0106, 1) => "BlackIsZero",
         (0x0106, 2) => "RGB",
@@ -288,13 +295,70 @@ pub fn tag_rows(tiff: &Tiff) -> Vec<TagRow> {
     out
 }
 
+/// The main raw image IFD: full-resolution (NewSubfileType 0) CFA or LinearRaw data with the
+/// most pixels — the same rule the raw decoder uses to find the sensor image.
+fn main_image_ifd(tiff: &Tiff) -> Option<&Ifd> {
+    tiff.all_ifds()
+        .into_iter()
+        .filter(|i| i.u32(t::NEW_SUBFILE_TYPE).unwrap_or(0) == 0)
+        .filter(|i| matches!(i.u16(t::PHOTOMETRIC), Some(t::photometric::CFA) | Some(t::photometric::LINEAR_RAW)))
+        .max_by_key(|i| i.u64(t::IMAGE_WIDTH).unwrap_or(0).saturating_mul(i.u64(t::IMAGE_LENGTH).unwrap_or(0)))
+}
+
+/// The word for a Nikon maker note's NEFCompression (tag 0x0093), per the published Nikon tag
+/// table; the raw value when unknown. `None` for non-Nikon files or notes without the tag.
+fn nef_compression(bytes: &[u8], tiff: &Tiff) -> Option<String> {
+    let make = tiff.ifds.first()?.string(t::MAKE).unwrap_or_default();
+    if !make.to_ascii_uppercase().starts_with("NIKON") {
+        return None;
+    }
+    let exif = tiff.exif()?;
+    let note = exif.entries.iter().find(|e| e.tag == t::MAKER_NOTE)?;
+    let note = makernote::parse_makernote(bytes, note.offset, note.count() as u64, tiff.order, &make)?;
+    let v = note.ifd.u16(0x0093)?;
+    Some(
+        match v {
+            1 => "Lossy (type 1)",
+            2 => "Uncompressed",
+            3 => "Lossless",
+            4 => "Lossy (type 2)",
+            5 => "Striped packed 12 bits",
+            6 => "Uncompressed (reduced to 12 bits)",
+            7 => "Unpacked 12 bits",
+            8 => "Small",
+            9 => "Packed 12 bits",
+            10 => "Packed 14 bits",
+            13 => "High Efficiency",
+            14 => "High Efficiency (Z-series)",
+            _ => return Some(v.to_string()),
+        }
+        .to_string(),
+    )
+}
+
 /// [`tag_rows`] of a file's bytes: a TIFF-based file directly, else its embedded EXIF block
 /// (JPEG, PNG, WebP, HEIF…). Empty when there is none.
 pub fn file_tag_rows(bytes: &[u8]) -> Vec<TagRow> {
     if Tiff::sniff(bytes).is_some()
         && let Ok(t) = Tiff::parse(bytes)
     {
-        return tag_rows(&t);
+        let mut rows = tag_rows(&t);
+        // #830: IFD0's Compression describes its preview, not the sensor data; show the main
+        // image's compression the way Lightroom and the camera's own menus do.
+        if let Some(raw) = main_image_ifd(&t)
+            && let Some(c) = raw.u16(t::COMPRESSION)
+        {
+            let text = value_text("TIFF", t::COMPRESSION, &Value::Short(vec![c]));
+            match rows.iter_mut().find(|r| r.group == "TIFF" && r.tag == t::COMPRESSION) {
+                Some(r) if r.value != text => r.value = text,
+                Some(_) => {}
+                None => rows.push(TagRow { group: "TIFF", tag: t::COMPRESSION, name: "Compression".into(), value: text }),
+            }
+        }
+        if let Some(nef) = nef_compression(bytes, &t) {
+            rows.push(TagRow { group: "Maker note", tag: 0x0093, name: "NEF Compression".into(), value: nef });
+        }
+        return rows;
     }
     let Some(exif) = crate::embedded(bytes).exif else { return Vec::new() };
     Tiff::parse(crate::strip_exif_header(&exif)).map(|t| tag_rows(&t)).unwrap_or_default()
@@ -327,5 +391,87 @@ mod tests {
         assert_eq!(get("ISO Speed").as_deref(), Some("400"));
         assert!(rows.iter().any(|r| r.group == "GPS" && r.name == "GPS Latitude"), "{rows:?}");
         assert!(!rows.iter().any(|r| r.tag == 0x8769), "IFD pointers are left out");
+    }
+
+    use lightcraft_tiff::ByteOrder;
+    use lightcraft_tiff::writer::{IfdBuilder, ImageData, TiffWriter};
+
+    /// An NEF-shaped file: IFD0 holds the 160×120 preview with `preview_compression`, a
+    /// sub-IFD holds the 6016×4016 CFA data with `raw_compression`, and the Nikon maker note
+    /// carries NEFCompression (0x0093) = `nef`.
+    fn nef_like(preview_compression: u16, raw_compression: u16, nef: u16) -> Vec<u8> {
+        let mut raw = IfdBuilder::new();
+        raw.set(t::NEW_SUBFILE_TYPE, Value::Long(vec![0]));
+        raw.set(t::IMAGE_WIDTH, Value::Long(vec![6016]));
+        raw.set(t::IMAGE_LENGTH, Value::Long(vec![4016]));
+        raw.set(t::BITS_PER_SAMPLE, Value::Short(vec![14]));
+        raw.set(t::COMPRESSION, Value::Short(vec![raw_compression]));
+        raw.set(t::PHOTOMETRIC, Value::Short(vec![t::photometric::CFA]));
+        raw.set_image(ImageData::Strips { rows_per_strip: 4016, strips: vec![vec![0u8; 16]] });
+        let mut note = IfdBuilder::new();
+        note.set(0x0093, Value::Short(vec![nef]));
+        let mut bytes = b"Nikon\0\x02\x10\0\0".to_vec();
+        bytes.extend(TiffWriter::new(ByteOrder::Little, false).write(&[note]).unwrap());
+        let mut exif = IfdBuilder::new();
+        exif.set(t::MAKER_NOTE, Value::Undefined(bytes));
+        let mut ifd0 = IfdBuilder::new();
+        ifd0.set(t::MAKE, Value::Ascii("NIKON CORPORATION".into()));
+        ifd0.set(t::MODEL, Value::Ascii("NIKON Z 6_7".into()));
+        ifd0.set(t::IMAGE_WIDTH, Value::Long(vec![160]));
+        ifd0.set(t::IMAGE_LENGTH, Value::Long(vec![120]));
+        ifd0.set(t::COMPRESSION, Value::Short(vec![preview_compression]));
+        ifd0.set_child(t::EXIF_IFD, exif);
+        ifd0.add_sub_ifd(raw);
+        TiffWriter::new(ByteOrder::Little, false).write(&[ifd0]).unwrap()
+    }
+
+    #[test]
+    fn compression_row_follows_the_raw_image_not_the_preview() {
+        for (preview, raw_c, nef, want_row, want_nef) in [
+            (1, 34713, 3u16, "Nikon NEF (Huffman compressed)", "Lossless"),
+            (1, 1, 2, "Uncompressed", "Uncompressed"),
+            (7, 34713, 14, "Nikon NEF (Huffman compressed)", "High Efficiency (Z-series)"),
+        ] {
+            let rows = file_tag_rows(&nef_like(preview, raw_c, nef));
+            let comp = rows.iter().find(|r| r.group == "TIFF" && r.tag == 0x0103).unwrap();
+            assert_eq!(comp.value, want_row, "compression row");
+            let note = rows.iter().find(|r| r.group == "Maker note").unwrap();
+            assert_eq!((note.name.as_str(), note.value.as_str()), ("NEF Compression", want_nef));
+        }
+    }
+
+    #[test]
+    fn maker_note_word_falls_back_to_the_raw_value_and_stays_nikon_only() {
+        // an unknown NEFCompression prints as stored
+        let rows = file_tag_rows(&nef_like(1, 1, 99));
+        assert_eq!(rows.iter().find(|r| r.group == "Maker note").unwrap().value, "99");
+        // a plain uncompressed TIFF with no CFA sub-IFD keeps its own Compression row and no note
+        let mut ifd0 = IfdBuilder::new();
+        ifd0.set(t::MAKE, Value::Ascii("NIKON CORPORATION".into()));
+        ifd0.set(t::COMPRESSION, Value::Short(vec![1]));
+        let bytes = TiffWriter::new(ByteOrder::Little, false).write(&[ifd0]).unwrap();
+        let rows = file_tag_rows(&bytes);
+        assert_eq!(rows.iter().filter(|r| r.tag == 0x0103).count(), 1);
+        assert_eq!(rows.iter().filter(|r| r.group == "Maker note").count(), 0);
+    }
+
+    #[test]
+    fn no_maker_note_row_without_a_nikon_make() {
+        // Sony ARW-style: compressed CFA sub-IFD, but no Nikon note
+        let mut raw = IfdBuilder::new();
+        raw.set(t::NEW_SUBFILE_TYPE, Value::Long(vec![0]));
+        raw.set(t::IMAGE_WIDTH, Value::Long(vec![7008]));
+        raw.set(t::IMAGE_LENGTH, Value::Long(vec![4672]));
+        raw.set(t::COMPRESSION, Value::Short(vec![32767]));
+        raw.set(t::PHOTOMETRIC, Value::Short(vec![t::photometric::CFA]));
+        raw.set_image(ImageData::Strips { rows_per_strip: 4672, strips: vec![vec![0u8; 16]] });
+        let mut ifd0 = IfdBuilder::new();
+        ifd0.set(t::MAKE, Value::Ascii("SONY".into()));
+        ifd0.set(t::COMPRESSION, Value::Short(vec![1]));
+        ifd0.add_sub_ifd(raw);
+        let rows = file_tag_rows(&TiffWriter::new(ByteOrder::Little, false).write(&[ifd0]).unwrap());
+        let comp = rows.iter().find(|r| r.group == "TIFF" && r.tag == 0x0103).unwrap();
+        assert_eq!(comp.value, "Sony ARW (lossy)");
+        assert!(!rows.iter().any(|r| r.group == "Maker note"), "no NEF row for Sony");
     }
 }
