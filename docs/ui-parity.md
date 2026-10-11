@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (accessibility audit: test over the AccessKit tree; fields, sliders and dialogs named) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (accessibility audit; budgeted native-original reuse for RAW browsing; Compare/Reference zoom windows preserved) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 How LightCraft's interaction compares with Lightroom's: views, panels, tools and handles, modifier
 keys, shortcuts, zoom, context menus and feel. Rows for individual menu items and shortcuts live in
@@ -101,10 +101,57 @@ handles, placing a spot or a brush stroke, and moving a mask pin on the canvas. 
 with a real screen reader on each platform, and focus order (egui follows drawing order: top bar,
 left panel, canvas, right panel, which is sensible but not tuned).
 
+## Budgeted native RAW browsing
+
+Detail, Compare and Reference reuse decoded originals within the existing shared cache byte
+budget instead of discarding them at one-/two-original count limits. Source pixels, decoder
+facts and denoised twins stay together. The current original is protected from late background
+completion; while its decode is pending, the newest original remains the single oversize fallback.
+The foreground's pinned bytes are excluded from the eviction budget, preserving the merged
+large-RAW fix without displacing its previews and thumbnails. Leaving Detail releases originals
+that cannot fit the budget; recent originals that fit remain reusable across views.
+
+Detail prepares adjacent native sources only when a sharp zoom window is needed and the cache
+budget can accommodate the current photo, neighbours and preview rendering. Prefetched views
+remain preview-sized, and tight crops cannot force native preparation at Fit or a low budget.
+The memory settings and automatic budget policy are unchanged. This improves prepared/revisited
+photos, not first uncached RAW development or uninterrupted rapid scrolling.
+
+### Cache-only native measurement (2026-10-11)
+
+Unmodified upstream `76b5377868d912db69a777bda253a5b1b96b22bd` and the cache-only branch were
+run sequentially with the same isolated three-photo catalog and fresh preferences on Windows:
+Sony ILCE-7RM4 9504 × 6336 RAWs, RTX 5080 DX12, 8192 MiB budget, 100% zoom, 1600 × 1000 window.
+The selection order was A, B, C, A, B, C, B, A, with 5 seconds idle after each selection. Timing
+ends when `ui.inspect` reports the selected photo's loupe and native window are no longer pending;
+the full decode counts come from `LIGHTCRAFT_PROFILE=1` native RAW-source log entries.
+
+| Five revisits after A/B/C | Unmodified upstream | Cache-only branch |
+|---|---:|---:|
+| Median selection to settled native window | 2563 ms | 494 ms |
+| Full RAW decodes on revisits | 5 | 0 |
+| Originals retained after the sequence | 1 | 3 |
+
+The cache-only first selection took 6788 ms versus 2516 ms upstream in this run: this is not a
+cold-load improvement. Latency varies with background work; decoded-source reuse is the invariant.
+At 1536 MiB only one original fit and all eight selections decoded. Fit browsing decoded no
+native originals. Compare and Reference panning each reused both native originals without another
+full decode. No personal RAW files or source paths are part of the contribution.
+
+Verification covers engine source reuse, cross-cache eviction, budget shrink, late completion,
+denoise-twin accounting, content reload rejection and preview-only preparation boundaries, plus
+the existing preview/window and Compare interaction regressions. Native Windows smoke used the
+running app and control channel with an isolated library; window captures did not fall back to
+headless rendering. Formatting, parity references, layers and asset attribution checks passed.
+`cargo xtask ci` stops at unchanged upstream clippy findings on Rust 1.99.0 / Windows:
+`pipeline/src/spots.rs:250` (`chunks_exact_to_as_chunks`) and the test-only unused
+`catalog/src/lock.rs:140` `descriptor_copy`. Full workspace tests, HEIF CI and WASM were not reached.
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-12 | minor | Accessibility: an AccessKit tree audit test over every view, Develop tool and 13 dialogs; unnamed fields, slider ranges and the Auto Stack slider fixed; 30% → 55%; UI remaining 40–70 h → 34–58 h |
+| 2026-10-11 | minor | Native sources share the cache byte budget; sharp-zoom neighbour preparation is budget-qualified, with Fit and cold-load limits unchanged |
 | 2026-10-11 | minor | Zoom row: Compare and Reference get zoom windows; what remains of LR-VIEW-ZOOM is overlays and soft proofing |
 | 2026-10-10 | major | Created: measured command and shortcut counts, assessment by area, estimates; moved the shortcut conflicts section here from the checklist |

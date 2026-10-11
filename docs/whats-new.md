@@ -102,6 +102,14 @@
 - Compare and Reference View panes say "Rendering…" (or that the photo can't be opened) the same way, so a
   magnified preview isn't taken for the photo when checking focus at 1:1.
 
+### Revisit large RAW photos without decoding them again
+- Full-resolution originals now share the memory cache's byte budget instead of being limited to
+  one in Detail or two in Compare/Reference. Recent originals remain reusable while they fit;
+  a late background result cannot evict the current photo's original.
+- When Detail needs a sharp zoom window and the budget has room, it prepares native sources for
+  adjacent filmstrip photos. Fit browsing and insufficient-budget preparation stay at preview
+  resolution. First uncached loads and low-memory cache misses still require RAW development.
+
 ### JPEG XL export
 - Export as JPEG XL (issue #247): Format ▸ JPEG XL in the Export dialog, `format: "jxl"` for agents and the CLI
   (`render in.raw -o out.jxl`). Quality as for JPEG, or Lossless; Effort (Fast / Normal) trades time for a
