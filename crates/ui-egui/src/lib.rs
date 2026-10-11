@@ -172,6 +172,8 @@ mod tests_titlebar;
 #[cfg(test)]
 mod tests_tool_overlay;
 #[cfg(test)]
+mod tests_trash_files;
+#[cfg(test)]
 mod tests_unsaved;
 #[cfg(test)]
 mod tests_view_cost;
@@ -890,6 +892,12 @@ impl LightcraftApp {
 
     pub fn toast(&mut self, ctx: &egui::Context, text: impl Into<String>) {
         self.toast_for(ctx, text, TOAST_SECONDS);
+    }
+
+    /// A notice from code that has no frame at hand (a dialog's action): shown for `secs` seconds.
+    pub fn say(&mut self, text: impl Into<String>, secs: f64) {
+        let now = self.tasks.repaint.as_ref().map(|ctx| ctx.input(|i| i.time)).unwrap_or(self.last_time);
+        self.ui.toast = Some((text.into(), now + secs, None));
     }
 
     /// A toast that stays `secs` seconds (messages that say where to look or what to do next).

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use lightcraft_catalog::{PhotoId, Source};
 use serde_json::{Value, json};
 
-use super::{CommandSpec, bad, cmd, has_selection, str_param};
+use super::{CommandSpec, always, bad, cmd};
 use crate::rename::MoveFs;
 use crate::trash::{BinError, TrashStep, Trashed, Whereabouts};
 use crate::{Result, Session};
@@ -216,7 +216,9 @@ pub fn specs() -> Vec<CommandSpec> {
         [],
         None,
         "{ids?, noTrash?: keep|delete} → {removed, trashed, erased, missing, shared, noTrash: [ids], failed: [{id, path, why}], skipped} — the photos (the selection, or `ids`; in the library or in Recently Deleted) leave the library for good and their files, with their XMP sidecars, go to the system Trash; one undo step, and undo moves the files back when the Trash says where they are. `trashed` and `erased` count files. A file other photos of the library are (copies) stays with them (`shared`), as does a sidecar a photo beside it still uses; a file already gone is `missing`. Photos on a disk without a Trash stay, file and all, and are named in `noTrash`: only a second call with `noTrash: \"delete\"` erases their files for good (undo then brings the photos back as missing). A photo whose file can't be moved stays and is in `failed`; when nothing could go, that is the error. Photos only browsed in Local are skipped. Not available on Windows or in the browser yet. Delete, Delete Permanently, Empty Recently Deleted and Remove Folder from Library never touch a file",
-        has_selection,
+        // (not `has_selection`: the photos are named by `ids` as often as selected, and what is
+        // there to do is decided, and said, below)
+        always,
         |s, p| {
             const C: &str = "photo.trashFiles";
             let no_trash = NoTrashParam::read(p, C)?;
@@ -226,7 +228,6 @@ pub fn specs() -> Vec<CommandSpec> {
                     return Err(bad(C, format!("`ids` must be a list of photo ids, not {x}")));
                 }
             }
-            let _ = str_param(p, "noTrash");
             let ids = s.targets(p);
             trash_files(s, &ids, no_trash, C)
         }

@@ -13,6 +13,11 @@
 
 use std::path::{Path, PathBuf};
 
+/// Whether this build has a Trash to move files to (not on Windows or in the browser yet).
+pub fn available() -> bool {
+    cfg!(all(unix, not(target_arch = "wasm32")))
+}
+
 /// Why a file did not go to the Trash.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinError {

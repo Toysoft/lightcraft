@@ -220,6 +220,7 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "photo.delete",
             "photo.restore",
             "photo.deletePermanently",
+            "dialog.trashFiles",
         ],
     ),
     (

@@ -259,6 +259,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("app.showInFinder", "Show in Finder", Some("Cmd+R"), "Photo"),
     ("app.openSamModelFolder", "Show in File Manager", None, ""),
     ("dialog.rename", "Rename Photos…", Some("F2"), "Photo"),
+    ("dialog.trashFiles", "Move Files to Trash…", None, "Photo"),
     ("dialog.labelNames", "Edit Color Label Names…", None, ""),
     ("dialog.captureTime", "Edit Capture Time…", None, "Photo"),
     ("photo.tagFromTracklog", "Auto-Tag from Tracklog…", None, "Photo"),
@@ -1328,6 +1329,7 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             app.ui.dialog = Some(Dialog::LabelNames { names, save_as: String::new() });
             Ok(Value::Null)
         }
+        "dialog.trashFiles" => crate::panels::trash_files::open(app, p),
         "dialog.rename" => {
             let template = p.get("template").and_then(Value::as_str).unwrap_or("{name}").to_string();
             app.ui.dialog = Some(Dialog::Rename { template, start: p.get("start").and_then(Value::as_u64).unwrap_or(1) as u32 });
@@ -2141,6 +2143,11 @@ pub fn ui_enabled(app: &LightcraftApp, id: &str) -> bool {
             app.session.active().is_some()
         }
         "photo.tagFromTracklog" => app.session.active().is_some() && app.services.pick_tracklog.is_some(),
+        // (photos of the library, on a system that has a Trash to move files to)
+        "dialog.trashFiles" => {
+            crate::panels::trash_files::available()
+                && app.session.targets(&json!({})).iter().any(|id| app.session.catalog.photo(*id).is_some_and(|p| !p.local))
+        }
         "photo.editInPhotoCraft" | "photo.editInExternal" => app.session.active().is_some() && app.services.open_with.is_some(),
         "app.exportPrevious" => app.session.active().is_some() && app.session.last_export.is_some(),
         "dialog.pasteSettings" => app.session.active().is_some() && app.session.clipboard.is_some(),

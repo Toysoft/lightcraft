@@ -1262,6 +1262,14 @@ pub fn context_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             crate::menubar::act_item(app, "photo.delete", json!({}));
         }
     }
+    // the files too: always asks first, in the library and in Recently Deleted alike
+    if crate::menus::ui_enabled(app, "dialog.trashFiles") {
+        let r = ui.button(crate::i18n::tr("Move Files to Trash…"));
+        register(ui.ctx(), "button:contextTrashFiles", r.rect);
+        if r.clicked() {
+            app.act("dialog.trashFiles", json!({}));
+        }
+    }
 }
 
 #[cfg(test)]
