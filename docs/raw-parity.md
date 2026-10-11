@@ -270,3 +270,7 @@ Beyond decoding:
 | 2026-10-11 | minor | EOS R5 Mark II verified (CRX QP-map first literal and limited-length escape, odd-height Bayer planes; 4 CC0 files pinned, QP maps of 33,665 private files): 235 verified, 942 unverified; use-weighted 85% (42% on verified bodies); decoding 77%, RAW readiness unchanged at ~56% |
 | 2026-10-10 (later) | major | Model-by-model measurement against Adobe's published list (1,446 models: 234 verified, 943 unverified, 233 preview, 36 unsupported); `docs/raw/` data and re-measure script; use-weighted share 84% (40% on verified bodies); variant matrix; colour and lens sections with scores; ranked next cameras; RAW readiness ~56% from written parts |
 | 2026-10-10 | major | Created: formats, makers, demosaic, colour and lens checklists; target counts from the installed Lightroom 9.6 bundle listing |
+
+### DNG normalization follow-up (2026-10-11)
+
+The normalizer now subtracts the computed black and scales each DNG sample plane by its own white-to-maximum-black range, respecting the repeat-pattern phase and active-area deltas. Binned and full development share these scales. Synthetic and property regressions cover per-plane white levels, clipping, negative shadow noise, and retained highlight headroom. Empty areas or non-finite/unusable ranges get unit scales; empty pixel areas still return validation errors. Non-DNG vendor normalization is preserved. See [DNG normalization](dng-normalization.md). This does not establish Lightroom colour/render fidelity or wider camera coverage.
