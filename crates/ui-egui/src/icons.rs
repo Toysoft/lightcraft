@@ -1,12 +1,27 @@
 //! Vector icons drawn in code on a 20×20 design grid (1.5 px strokes, rounded caps).
-//! Most are our own work. The arms that call `pen.svg` stroke path data adapted from Lucide
+//! Most are our own work. The arms that call `lucide!` stroke path data adapted from Lucide
 //! (https://lucide.dev, ISC, `assets/licenses/ISC-Lucide.txt`), each commented with the Lucide icon name.
 //! See assets/ATTRIBUTION.md. Never trace icons from Adobe (or any non-permissive) products.
 
+use egui::epaint::{CubicBezierShape, QuadraticBezierShape};
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Icon {
+/// Declares [`Icon`] and [`Icon::ALL`] from one list, so a new icon cannot be left out of `ALL`.
+macro_rules! icons {
+    ($($(#[$doc:meta])* $name:ident,)*) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+        pub enum Icon {
+            $($(#[$doc])* $name,)*
+        }
+
+        impl Icon {
+            /// Every icon, in declaration order (contact sheets, tests).
+            pub const ALL: &[Icon] = &[$(Icon::$name),*];
+        }
+    };
+}
+
+icons! {
     Sidebar,
     Back,
     Forward,
@@ -50,7 +65,6 @@ pub enum Icon {
     ChevronDoubleLeft,
     ChevronDoubleRight,
     Plus,
-    Minus,
     Album,
     SmartAlbum,
     Stack,
@@ -71,15 +85,8 @@ pub enum Icon {
     Sky,
     Subject,
     Picker,
-    Rotate,
     /// A curved line with an arrow at both ends: drag to rotate, either way (the crop tool's pointer).
     RotateDrag,
-    Flip,
-    Invert,
-    Dots,
-    Video,
-    Heart,
-    Edited,
     /// Targeted adjustment: a ring with a centre dot and up/down arrows (drag vertically).
     Target,
     /// Community chat (opens the ArtCraft Discord): a speech bubble with three dots. Our own
@@ -125,99 +132,6 @@ pub enum Icon {
     Depth,
 }
 
-impl Icon {
-    /// Every icon, in declaration order (contact sheets, tests).
-    pub const ALL: [Icon; 87] = [
-        Icon::Sidebar,
-        Icon::Back,
-        Icon::Forward,
-        Icon::Search,
-        Icon::Filter,
-        Icon::Bell,
-        Icon::Share,
-        Icon::Help,
-        Icon::Cloud,
-        Icon::Sliders,
-        Icon::Crop,
-        Icon::Eraser,
-        Icon::Mask,
-        Icon::Eye,
-        Icon::EyeOff,
-        Icon::Presets,
-        Icon::Versions,
-        Icon::Activity,
-        Icon::More,
-        Icon::Tag,
-        Icon::Info,
-        Icon::GridPhoto,
-        Icon::GridSquare,
-        Icon::Single,
-        Icon::Compare,
-        Icon::Survey,
-        Icon::Sort,
-        Icon::Star,
-        Icon::StarFilled,
-        Icon::Circle,
-        Icon::FlagPick,
-        Icon::FlagReject,
-        Icon::Gear,
-        Icon::Filmstrip,
-        Icon::BeforeAfter,
-        Icon::ChevronDown,
-        Icon::ChevronRight,
-        Icon::ChevronLeft,
-        Icon::TriangleLeft,
-        Icon::Plus,
-        Icon::Minus,
-        Icon::Album,
-        Icon::SmartAlbum,
-        Icon::Stack,
-        Icon::Folder,
-        Icon::Pencil,
-        Icon::Photos,
-        Icon::Clock,
-        Icon::Calendar,
-        Icon::Trash,
-        Icon::Curve,
-        Icon::ProfileGrid,
-        Icon::Close,
-        Icon::Check,
-        Icon::Brush,
-        Icon::Linear,
-        Icon::Radial,
-        Icon::Sky,
-        Icon::Subject,
-        Icon::Picker,
-        Icon::Rotate,
-        Icon::RotateDrag,
-        Icon::Flip,
-        Icon::Invert,
-        Icon::Dots,
-        Icon::Video,
-        Icon::Heart,
-        Icon::Edited,
-        Icon::Target,
-        Icon::Chat,
-        Icon::FaceBox,
-        Icon::GradeAll,
-        Icon::GradeShadows,
-        Icon::GradeMidtones,
-        Icon::GradeHighlights,
-        Icon::Monitor,
-        Icon::Sun,
-        Icon::Moon,
-        Icon::RedEye,
-        Icon::Palette,
-        Icon::Object,
-        Icon::Describe,
-        Icon::Background,
-        Icon::People,
-        Icon::Landscape,
-        Icon::Luminance,
-        Icon::Depth,
-    ];
-}
-
 struct Pen<'a> {
     p: &'a Painter,
     r: Rect,
@@ -235,17 +149,36 @@ impl Pen<'_> {
         };
         pos2(self.r.min.x + x * self.k, self.r.min.y + y * self.k)
     }
+    /// An open polyline. egui ends strokes square; where a stroke is wide enough on screen for that to
+    /// show (2 px), its ends are rounded with a dot — opaque colours only, as a translucent dot would
+    /// darken where it overlaps the line.
     fn line(&self, pts: &[(f32, f32)]) {
         let v: Vec<Pos2> = pts.iter().map(|(x, y)| self.pt(*x, *y)).collect();
+        if self.s.color.is_opaque() && self.s.width * self.p.pixels_per_point() >= 2.0 {
+            for end in [v.first(), v.last()].into_iter().flatten() {
+                self.p.circle_filled(*end, self.s.width / 2.0, self.s.color);
+            }
+        }
         self.p.add(Shape::line(v, self.s));
     }
     fn closed(&self, pts: &[(f32, f32)]) {
         let v: Vec<Pos2> = pts.iter().map(|(x, y)| self.pt(*x, *y)).collect();
         self.p.add(Shape::closed_line(v, self.s));
     }
-    fn fill(&self, pts: &[(f32, f32)], c: Color32) {
+    /// Fill a convex polygon (a non-convex one needs [`Self::fill_star_shaped`]).
+    fn fill(&self, pts: &[(f32, f32)]) {
         let v: Vec<Pos2> = pts.iter().map(|(x, y)| self.pt(*x, *y)).collect();
-        self.p.add(Shape::convex_polygon(v, c, Stroke::NONE));
+        self.p.add(Shape::convex_polygon(v, self.s.color, Stroke::NONE));
+    }
+    /// Fill the half of the disc at (`cx`, `cy`) that starts at `from_deg` and runs clockwise for 180°.
+    fn half_disc(&self, cx: f32, cy: f32, r: f32, from_deg: f32) {
+        let half: Vec<(f32, f32)> = (0..=16)
+            .map(|i| {
+                let a = (from_deg + 180.0 * i as f32 / 16.0).to_radians();
+                (cx + r * a.cos(), cy + r * a.sin())
+            })
+            .collect();
+        self.fill(&half);
     }
     fn circle(&self, x: f32, y: f32, r: f32) {
         self.p.circle_stroke(self.pt(x, y), r * self.k, self.s);
@@ -259,28 +192,14 @@ impl Pen<'_> {
     fn rect_fill(&self, x0: f32, y0: f32, x1: f32, y1: f32, round: f32) {
         self.p.rect_filled(Rect::from_min_max(self.pt(x0, y0), self.pt(x1, y1)), round * self.k, self.s.color);
     }
-    /// Stroke SVG path data (`d` attributes) drawn on a 24×24 grid, scaled onto ours. Open subpaths get round
-    /// caps, near-zero-length ones (`h.01`) become dots. Malformed data draws what parsed before the error.
-    fn svg(&self, paths: &[&str]) {
-        let k24 = 20.0 / 24.0;
-        let cap = self.s.width / 2.0 / self.k;
-        for d in paths {
-            for (pts, closed) in svg_subpaths(d) {
-                let pts: Vec<(f32, f32)> = pts.iter().map(|(x, y)| (x * k24, y * k24)).collect();
-                let (Some(&first), Some(&last)) = (pts.first(), pts.last()) else { continue };
-                let (lo, hi) = pts
-                    .iter()
-                    .fold(((f32::MAX, f32::MAX), (f32::MIN, f32::MIN)), |(lo, hi), &(x, y)| ((lo.0.min(x), lo.1.min(y)), (hi.0.max(x), hi.1.max(y))));
-                if hi.0 - lo.0 < 0.2 && hi.1 - lo.1 < 0.2 {
-                    self.dot(first.0, first.1, cap * 1.15);
-                } else if closed {
-                    let n = if pts.len() > 2 && (first.0 - last.0).hypot(first.1 - last.1) < 1e-3 { pts.len() - 1 } else { pts.len() };
-                    self.closed(pts.get(..n).unwrap_or(&pts));
-                } else {
-                    self.line(&pts);
-                    self.dot(first.0, first.1, cap);
-                    self.dot(last.0, last.1, cap);
-                }
+    /// Stroke subpaths from [`lucide_subpaths`] (see [`lucide!`]).
+    fn subpaths(&self, subs: &[Sub]) {
+        for sub in subs {
+            match sub {
+                // a dot reads at the stroke's weight, a touch rounder than a bare cap
+                Sub::Dot(x, y) => self.dot(*x, *y, self.s.width / 2.0 / self.k * 1.15),
+                Sub::Open(pts) => self.line(pts),
+                Sub::Closed(pts) => self.closed(pts),
             }
         }
     }
@@ -392,7 +311,7 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         Filter => pen.closed(&[(3.0, 4.0), (17.0, 4.0), (11.5, 10.5), (11.5, 16.0), (8.5, 14.5), (8.5, 10.5)]),
         Bell => {
             // Lucide `bell`
-            pen.svg(&["M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9", "M10.3 21a1.94 1.94 0 0 0 3.4 0"]);
+            lucide!(pen, ["M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9", "M10.3 21a1.94 1.94 0 0 0 3.4 0"]);
         }
         Share => {
             pen.line(&[(6.0, 8.0), (4.0, 8.0), (4.0, 17.0), (16.0, 17.0), (16.0, 8.0), (14.0, 8.0)]);
@@ -407,7 +326,7 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         }
         Cloud => {
             // Lucide `cloud`
-            pen.svg(&["M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"]);
+            lucide!(pen, ["M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"]);
         }
         Sliders => {
             for (y, x) in [(5.0, 12.0), (10.0, 7.0), (15.0, 13.0)] {
@@ -418,21 +337,25 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         }
         Crop => {
             // Lucide `crop`
-            pen.svg(&["M6 2v14a2 2 0 0 0 2 2h14", "M18 22V8a2 2 0 0 0-2-2H2"]);
+            lucide!(pen, ["M6 2v14a2 2 0 0 0 2 2h14", "M18 22V8a2 2 0 0 0-2-2H2"]);
         }
         Eraser => {
             // Lucide `eraser`
-            pen.svg(&["m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21", "M22 21H7", "m5 11 9 9"]);
+            lucide!(pen, ["m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21", "M22 21H7", "m5 11 9 9"]);
         }
         Mask => {
             // a solid region inside a dashed selection ring
             pen.dashed_circle(10.0, 10.0, 7.5, 10);
             pen.dot(10.0, 10.0, 3.6);
         }
-        Eye => {
-            // Lucide `eye`
-            pen.svg(&["M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"]);
-            pen.circle(10.0, 10.0, 2.5);
+        Eye | RedEye => {
+            // Lucide `eye`; Red Eye fills the pupil
+            lucide!(pen, ["M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"]);
+            if icon == RedEye {
+                pen.dot(10.0, 10.0, 3.0);
+            } else {
+                pen.circle(10.0, 10.0, 2.5);
+            }
         }
         GradeAll => {
             pen.circle(10.0, 6.0, 3.2);
@@ -445,13 +368,7 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         }
         GradeMidtones => {
             pen.circle(10.0, 10.0, 6.0);
-            let half: Vec<(f32, f32)> = (0..=12)
-                .map(|i| {
-                    let a = (90.0 + 180.0 * i as f32 / 12.0).to_radians();
-                    (10.0 + 6.0 * a.cos(), 10.0 + 6.0 * a.sin())
-                })
-                .collect();
-            pen.fill(&half, pen.s.color);
+            pen.half_disc(10.0, 10.0, 6.0, 90.0);
         }
         GradeHighlights => {
             pen.circle(10.0, 10.0, 4.0);
@@ -462,31 +379,37 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         }
         EyeOff => {
             // Lucide `eye-off`
-            pen.svg(&[
-                "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49",
-                "M14.084 14.158a3 3 0 0 1-4.242-4.242",
-                "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143",
-                "m2 2 20 20",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49",
+                    "M14.084 14.158a3 3 0 0 1-4.242-4.242",
+                    "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143",
+                    "m2 2 20 20",
+                ]
+            );
         }
         Presets => {
             // a fan of swatches (Lucide `swatch-book`)
-            pen.svg(&[
-                "M11 17a4 4 0 0 1-8 0V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2Z",
-                "M16.7 13H19a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H7",
-                "M7 17h.01",
-                "m11 8 2.3-2.3a2.4 2.4 0 0 1 3.404.004L18.6 7.6a2.4 2.4 0 0 1 .026 3.434L9.9 19.8",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "M11 17a4 4 0 0 1-8 0V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2Z",
+                    "M16.7 13H19a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H7",
+                    "M7 17h.01",
+                    "m11 8 2.3-2.3a2.4 2.4 0 0 1 3.404.004L18.6 7.6a2.4 2.4 0 0 1 .026 3.434L9.9 19.8",
+                ]
+            );
         }
         Versions => {
             // a card with older ones stacked behind (Lucide `gallery-vertical-end`)
-            pen.svg(&["M7 2h10", "M5 6h14", "M5 10h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"]);
+            lucide!(pen, ["M7 2h10", "M5 6h14", "M5 10h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"]);
         }
         Activity => {
             // History & Activity: a clock with a turn-back arrow (Lucide `history`)
-            pen.svg(&["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M12 7v5l4 2"]);
+            lucide!(pen, ["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M12 7v5l4 2"]);
         }
-        More | Dots => {
+        More => {
             for x in [5.0, 10.0, 15.0] {
                 pen.dot(x, 10.0, 1.3);
             }
@@ -533,31 +456,37 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         Circle => pen.circle(10.0, 10.0, 6.0),
         FlagPick => {
             // Lucide `flag`
-            pen.svg(&["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z", "M4 22v-7"]);
+            lucide!(pen, ["M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z", "M4 22v-7"]);
         }
         FlagReject => {
             // the flag struck through (Lucide `flag-off`)
-            pen.svg(&["M8 2c3 0 5 2 8 2s4-1 4-1v11", "M4 22V4", "M4 15s1-1 4-1 5 2 8 2", "m2 2 20 20"]);
+            lucide!(pen, ["M8 2c3 0 5 2 8 2s4-1 4-1v11", "M4 22V4", "M4 15s1-1 4-1 5 2 8 2", "m2 2 20 20"]);
         }
         Gear => {
             // a toothed cog (Lucide `settings`), so it no longer reads as a sun
-            pen.svg(&[
-                "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+                ]
+            );
             pen.circle(10.0, 10.0, 2.5);
         }
         Filmstrip => {
             // Lucide `film`
-            pen.svg(&[
-                "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
-                "M7 3v18",
-                "M3 7.5h4",
-                "M3 12h18",
-                "M3 16.5h4",
-                "M17 3v18",
-                "M17 7.5h4",
-                "M17 16.5h4",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
+                    "M7 3v18",
+                    "M3 7.5h4",
+                    "M3 12h18",
+                    "M3 16.5h4",
+                    "M17 3v18",
+                    "M17 7.5h4",
+                    "M17 16.5h4",
+                ]
+            );
         }
         BeforeAfter => {
             pen.rect(3.0, 4.0, 17.0, 16.0, 1.0);
@@ -580,7 +509,6 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
             pen.line(&[(10.0, 4.0), (10.0, 16.0)]);
             pen.line(&[(4.0, 10.0), (16.0, 10.0)]);
         }
-        Minus => pen.line(&[(4.0, 10.0), (16.0, 10.0)]),
         Album => {
             pen.rect(3.0, 5.0, 15.0, 17.0, 1.0);
             pen.line(&[(6.0, 2.5), (17.5, 2.5), (17.5, 14.0)]);
@@ -648,17 +576,20 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         Check => pen.line(&[(4.0, 10.5), (8.5, 15.0), (16.0, 5.5)]),
         Brush => {
             // Lucide `brush`
-            pen.svg(&[
-                "m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08",
-                "M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08",
+                    "M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z",
+                ]
+            );
         }
         Linear => {
             // the gradient's guides as drawn on the photo: start and end lines, a dashed centre line and its pin
             pen.line(&[(2.5, 4.0), (17.5, 4.0)]);
             pen.line(&[(2.5, 16.0), (17.5, 16.0)]);
-            for x in [2.5, 6.5, 13.5] {
-                pen.line(&[(x, 10.0), (x + 2.0, 10.0)]);
+            for (x0, x1) in [(2.5, 4.5), (6.0, 7.2), (12.8, 14.0), (15.5, 17.5)] {
+                pen.line(&[(x0, 10.0), (x1, 10.0)]);
             }
             pen.circle(10.0, 10.0, 1.6);
         }
@@ -670,21 +601,24 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         }
         Sky => {
             // a cloud in front of the sun (Lucide `cloud-sun`)
-            pen.svg(&[
-                "M12 2v2",
-                "m4.93 4.93 1.41 1.41",
-                "M20 12h2",
-                "m19.07 4.93-1.41 1.41",
-                "M15.947 12.65a4 4 0 0 0-5.925-4.128",
-                "M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "M12 2v2",
+                    "m4.93 4.93 1.41 1.41",
+                    "M20 12h2",
+                    "m19.07 4.93-1.41 1.41",
+                    "M15.947 12.65a4 4 0 0 0-5.925-4.128",
+                    "M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z",
+                ]
+            );
         }
         Subject => {
             pen.circle(10.0, 7.0, 3.0);
             pen.arc(10.0, 18.0, 6.5, 200.0, 340.0);
             pen.rect(2.5, 2.5, 17.5, 17.5, 2.0);
         }
-        Play => pen.fill(&[(6.0, 4.0), (6.0, 16.0), (16.0, 10.0)], color),
+        Play => pen.fill(&[(6.0, 4.0), (6.0, 16.0), (16.0, 10.0)]),
         Pause => {
             pen.rect_fill(5.0, 4.0, 8.5, 16.0, 0.5);
             pen.rect_fill(11.5, 4.0, 15.0, 16.0, 0.5);
@@ -699,58 +633,16 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         }
         Picker => {
             // an eyedropper (Lucide `pipette`)
-            pen.svg(&[
-                "m2 22 1-1h3l9-9",
-                "M3 21v-3l9-9",
-                "m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z",
-            ]);
-        }
-        Rotate => {
-            // Lucide `rotate-ccw`
-            pen.svg(&["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5"]);
+            lucide!(
+                pen,
+                ["m2 22 1-1h3l9-9", "M3 21v-3l9-9", "m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z",]
+            );
         }
         RotateDrag => {
             // the upper arc of a circle, an arrowhead at each end pointing along it
             pen.arc(10.0, 14.0, 7.5, 200.0, 340.0);
             pen.line(&[(0.8, 9.6), (3.0, 11.9), (6.1, 11.0)]);
             pen.line(&[(19.2, 9.6), (17.0, 11.9), (13.9, 11.0)]);
-        }
-        Flip => {
-            pen.line(&[(10.0, 2.5), (10.0, 17.5)]);
-            pen.closed(&[(8.0, 5.0), (8.0, 15.0), (3.0, 15.0)]);
-            pen.fill(&[(12.0, 5.0), (12.0, 15.0), (17.0, 15.0)], color);
-        }
-        Invert => {
-            pen.circle(10.0, 10.0, 7.0);
-            pen.p.add(Shape::convex_polygon(
-                (0..=16)
-                    .map(|i| {
-                        pen.pt(
-                            10.0 + 7.0 * ((90.0 + i as f32 * 180.0 / 16.0f32).to_radians()).cos(),
-                            10.0 + 7.0 * ((90.0 + i as f32 * 180.0 / 16.0f32).to_radians()).sin(),
-                        )
-                    })
-                    .collect(),
-                color,
-                Stroke::NONE,
-            ));
-        }
-        Video => {
-            pen.rect(2.5, 5.0, 13.0, 15.0, 1.5);
-            pen.closed(&[(13.0, 8.5), (17.5, 6.0), (17.5, 14.0), (13.0, 11.5)]);
-        }
-        Heart => {
-            // Lucide `heart`
-            pen.svg(&[
-                "M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z",
-            ]);
-        }
-        Edited => {
-            // Lucide `square-pen`
-            pen.svg(&[
-                "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7",
-                "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z",
-            ]);
         }
         Target => {
             pen.circle(8.0, 10.0, 5.0);
@@ -780,22 +672,25 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         }
         Object => {
             // Lucide `square-dashed-mouse-pointer`
-            pen.svg(&[
-                "M12.034 12.681a.498.498 0 0 1 .647-.647l9 3.5a.5.5 0 0 1-.033.943l-3.444 1.068a1 1 0 0 0-.66.66l-1.067 3.443a.5.5 0 0 1-.943.033z",
-                "M5 3a2 2 0 0 0-2 2",
-                "M19 3a2 2 0 0 1 2 2",
-                "M5 21a2 2 0 0 1-2-2",
-                "M9 3h1",
-                "M9 21h2",
-                "M14 3h1",
-                "M3 9v1",
-                "M21 9v2",
-                "M3 14v1",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "M12.034 12.681a.498.498 0 0 1 .647-.647l9 3.5a.5.5 0 0 1-.033.943l-3.444 1.068a1 1 0 0 0-.66.66l-1.067 3.443a.5.5 0 0 1-.943.033z",
+                    "M5 3a2 2 0 0 0-2 2",
+                    "M19 3a2 2 0 0 1 2 2",
+                    "M5 21a2 2 0 0 1-2-2",
+                    "M9 3h1",
+                    "M9 21h2",
+                    "M14 3h1",
+                    "M3 9v1",
+                    "M21 9v2",
+                    "M3 14v1",
+                ]
+            );
         }
         Describe => {
             // Lucide `message-square-text`
-            pen.svg(&["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z", "M13 8H7", "M17 12H7"]);
+            lucide!(pen, ["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z", "M13 8H7", "M17 12H7"]);
         }
         Background => {
             // our own: the Subject frame with a ridge behind the person
@@ -807,165 +702,227 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         }
         People => {
             // Lucide `users`
-            pen.svg(&[
-                "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
-                "M5 7a4 4 0 1 0 8 0a4 4 0 1 0 -8 0Z",
-                "M22 21v-2a4 4 0 0 0-3-3.87",
-                "M16 3.13a4 4 0 0 1 0 7.75",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2",
+                    "M5 7a4 4 0 1 0 8 0a4 4 0 1 0 -8 0Z",
+                    "M22 21v-2a4 4 0 0 0-3-3.87",
+                    "M16 3.13a4 4 0 0 1 0 7.75",
+                ]
+            );
         }
         Landscape => {
             // Lucide `mountain-snow`
-            pen.svg(&["m8 3 4 8 5-5 5 15H2L8 3z", "M4.14 15.08c2.62-1.57 5.24-1.43 7.86.42 2.74 1.94 5.49 2 8.23.19"]);
+            lucide!(pen, ["m8 3 4 8 5-5 5 15H2L8 3z", "M4.14 15.08c2.62-1.57 5.24-1.43 7.86.42 2.74 1.94 5.49 2 8.23.19"]);
         }
         Luminance => {
             // a disc, its right half solid (as Lucide `contrast`, filled)
             pen.circle(10.0, 10.0, 7.5);
-            let half: Vec<(f32, f32)> = (0..=16)
-                .map(|i| {
-                    let a = (-90.0 + 180.0 * i as f32 / 16.0f32).to_radians();
-                    (10.0 + 5.0 * a.cos(), 10.0 + 5.0 * a.sin())
-                })
-                .collect();
-            pen.fill(&half, color);
+            pen.half_disc(10.0, 10.0, 5.0, -90.0);
         }
         Depth => {
             // Lucide `layers`
-            pen.svg(&[
-                "m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z",
-                "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65",
-                "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65",
-            ]);
-        }
-        RedEye => {
-            // the eye of Lucide `eye` with a solid pupil
-            pen.svg(&["M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"]);
-            pen.dot(10.0, 10.0, 3.0);
+            lucide!(
+                pen,
+                [
+                    "m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z",
+                    "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65",
+                    "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65",
+                ]
+            );
         }
         Palette => {
             // Lucide `palette`
-            pen.svg(&[
-                "M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z",
-                "M13.5 6.5h.01",
-                "M17.5 10.5h.01",
-                "M8.5 7.5h.01",
-                "M6.5 12.5h.01",
-            ]);
+            lucide!(
+                pen,
+                [
+                    "M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z",
+                    "M13.5 6.5h.01",
+                    "M17.5 10.5h.01",
+                    "M8.5 7.5h.01",
+                    "M6.5 12.5h.01",
+                ]
+            );
         }
     }
+}
+
+/// Stroke Lucide path data (24×24 grid), parsed once per call site and kept for the life of the app.
+macro_rules! lucide {
+    ($pen:expr, [$($d:expr),* $(,)?]) => {{
+        static PARSED: std::sync::OnceLock<Vec<Sub>> = std::sync::OnceLock::new();
+        $pen.subpaths(PARSED.get_or_init(|| lucide_subpaths(&[$($d),*])))
+    }};
+}
+use lucide;
+
+/// One subpath of an icon, on our 20-unit grid.
+enum Sub {
+    /// A zero-length subpath (`M9 9h.01`): a round dot.
+    Dot(f32, f32),
+    Open(Vec<(f32, f32)>),
+    Closed(Vec<(f32, f32)>),
+}
+
+/// Lucide path data, scaled from its 24-unit grid onto ours, closed subpaths without a repeated end point.
+fn lucide_subpaths(paths: &[&str]) -> Vec<Sub> {
+    const K: f32 = 20.0 / 24.0;
+    let mut out = Vec::new();
+    for (pts, closed) in paths.iter().flat_map(|d| svg_subpaths(d)) {
+        let mut pts: Vec<(f32, f32)> = pts.into_iter().map(|(x, y)| (x * K, y * K)).collect();
+        let Some(&(x0, y0)) = pts.first() else { continue };
+        if pts.iter().all(|&(x, y)| (x - x0).abs() < 0.2 && (y - y0).abs() < 0.2) {
+            out.push(Sub::Dot(x0, y0));
+        } else if closed {
+            if pts.len() > 2 && pts.last().is_some_and(|&(x, y)| (x - x0).hypot(y - y0) < 1e-3) {
+                pts.pop();
+            }
+            out.push(Sub::Closed(pts));
+        } else {
+            out.push(Sub::Open(pts));
+        }
+    }
+    out
 }
 
 /// A tiny SVG path-data reader: `M L H V C S Q T A Z` (absolute and relative), curves flattened to polylines.
 /// Returns each subpath's points and whether it was closed. Never panics; stops at the first malformed token.
 fn svg_subpaths(d: &str) -> Vec<(Vec<(f32, f32)>, bool)> {
-    const STEPS: usize = 12;
-    let mut lex = Lex { b: d.as_bytes(), i: 0 };
-    let mut out: Vec<(Vec<(f32, f32)>, bool)> = Vec::new();
-    let mut cur: Vec<(f32, f32)> = Vec::new();
-    let (mut x, mut y, mut sx, mut sy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-    // the previous curve's kind and last control point, for S / T reflection
-    let mut last_ctrl: Option<(u8, f32, f32)> = None;
+    let mut r =
+        PathReader { lex: Lex { b: d.as_bytes(), i: 0 }, out: Vec::new(), cur: Vec::new(), at: (0.0, 0.0), start: (0.0, 0.0), last_ctrl: None };
     let mut cmd = 0u8;
     loop {
-        if let Some(c) = lex.cmd() {
+        if let Some(c) = r.lex.cmd() {
             cmd = c;
-        } else if !lex.at_number() || cmd == 0 || cmd.eq_ignore_ascii_case(&b'z') {
+        } else if cmd == 0 || cmd.eq_ignore_ascii_case(&b'z') || !r.lex.at_number() {
             break;
         }
-        let rel = cmd.is_ascii_lowercase();
-        let (ox, oy) = if rel { (x, y) } else { (0.0, 0.0) };
-        let mut ctrl = None;
-        // a drawing command right after `Z` starts a new subpath at the closed one's start
-        if cur.is_empty() && !cmd.eq_ignore_ascii_case(&b'm') && !cmd.eq_ignore_ascii_case(&b'z') {
-            cur.push((x, y));
-        }
-        let step = (|| -> Option<()> {
-            match cmd.to_ascii_uppercase() {
-                b'M' => {
-                    let (nx, ny) = (lex.num()? + ox, lex.num()? + oy);
-                    if !cur.is_empty() {
-                        out.push((std::mem::take(&mut cur), false));
-                    }
-                    cur.push((nx, ny));
-                    (x, y, sx, sy) = (nx, ny, nx, ny);
-                    // further coordinate pairs after a moveto are linetos
-                    cmd = if rel { b'l' } else { b'L' };
+        let fresh = r.cur.is_empty();
+        match r.step(cmd) {
+            Some(next) => cmd = next,
+            None => {
+                // drop the start point a failed command after `Z` opened, rather than leave a stray dot
+                if fresh {
+                    r.cur.clear();
                 }
-                b'L' => {
-                    (x, y) = (lex.num()? + ox, lex.num()? + oy);
-                    cur.push((x, y));
-                }
-                b'H' => {
-                    x = lex.num()? + ox;
-                    cur.push((x, y));
-                }
-                b'V' => {
-                    y = lex.num()? + oy;
-                    cur.push((x, y));
-                }
-                b'C' | b'S' => {
-                    let (x1, y1) = if cmd.eq_ignore_ascii_case(&b'C') {
-                        (lex.num()? + ox, lex.num()? + oy)
-                    } else {
-                        match last_ctrl {
-                            Some((b'C', cx, cy)) => (2.0 * x - cx, 2.0 * y - cy),
-                            _ => (x, y),
-                        }
-                    };
-                    let (x2, y2, ex, ey) = (lex.num()? + ox, lex.num()? + oy, lex.num()? + ox, lex.num()? + oy);
-                    for i in 1..=STEPS {
-                        let t = i as f32 / STEPS as f32;
-                        let u = 1.0 - t;
-                        let (a, b, c, e) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
-                        cur.push((a * x + b * x1 + c * x2 + e * ex, a * y + b * y1 + c * y2 + e * ey));
-                    }
-                    ctrl = Some((b'C', x2, y2));
-                    (x, y) = (ex, ey);
-                }
-                b'Q' | b'T' => {
-                    let (x1, y1) = if cmd.eq_ignore_ascii_case(&b'Q') {
-                        (lex.num()? + ox, lex.num()? + oy)
-                    } else {
-                        match last_ctrl {
-                            Some((b'Q', cx, cy)) => (2.0 * x - cx, 2.0 * y - cy),
-                            _ => (x, y),
-                        }
-                    };
-                    let (ex, ey) = (lex.num()? + ox, lex.num()? + oy);
-                    for i in 1..=STEPS {
-                        let t = i as f32 / STEPS as f32;
-                        let u = 1.0 - t;
-                        cur.push((u * u * x + 2.0 * u * t * x1 + t * t * ex, u * u * y + 2.0 * u * t * y1 + t * t * ey));
-                    }
-                    ctrl = Some((b'Q', x1, y1));
-                    (x, y) = (ex, ey);
-                }
-                b'A' => {
-                    let (rx, ry, rot) = (lex.num()?, lex.num()?, lex.num()?);
-                    let (large, sweep) = (lex.flag()?, lex.flag()?);
-                    let (ex, ey) = (lex.num()? + ox, lex.num()? + oy);
-                    arc_to(&mut cur, (x, y), (rx, ry), rot, large, sweep, (ex, ey));
-                    (x, y) = (ex, ey);
-                }
-                b'Z' => {
-                    if !cur.is_empty() {
-                        out.push((std::mem::take(&mut cur), true));
-                    }
-                    (x, y) = (sx, sy);
-                }
-                _ => return None,
+                break;
             }
-            Some(())
-        })();
-        if step.is_none() {
-            break;
         }
-        last_ctrl = ctrl;
     }
-    if !cur.is_empty() {
-        out.push((cur, false));
+    if !r.cur.is_empty() {
+        r.out.push((r.cur, false));
     }
-    out
+    r.out
+}
+
+/// [`svg_subpaths`]' state between commands.
+struct PathReader<'a> {
+    lex: Lex<'a>,
+    out: Vec<(Vec<(f32, f32)>, bool)>,
+    cur: Vec<(f32, f32)>,
+    /// The pen position, and where the current subpath started.
+    at: (f32, f32),
+    start: (f32, f32),
+    /// The previous curve's kind (`C` or `Q`) and last control point, which `S` / `T` reflect.
+    last_ctrl: Option<(u8, (f32, f32))>,
+}
+
+impl PathReader<'_> {
+    /// Read a point; relative commands offset it from the pen.
+    fn point(&mut self, rel: bool) -> Option<(f32, f32)> {
+        let (ox, oy) = if rel { self.at } else { (0.0, 0.0) };
+        Some((self.lex.num()? + ox, self.lex.num()? + oy))
+    }
+    /// `S` / `T`'s first control point: the previous `kind` curve's last one mirrored through the pen.
+    fn reflected(&self, kind: u8) -> (f32, f32) {
+        match self.last_ctrl {
+            Some((k, (cx, cy))) if k == kind => (2.0 * self.at.0 - cx, 2.0 * self.at.1 - cy),
+            _ => self.at,
+        }
+    }
+    fn to(&mut self, p: (f32, f32)) {
+        self.cur.push(p);
+        self.at = p;
+    }
+    /// A Bézier from the pen through `ctrl` to `end`, flattened by epaint.
+    fn curve(&mut self, ctrl: &[(f32, f32)], end: (f32, f32)) {
+        let p = |(x, y): (f32, f32)| pos2(x, y);
+        // in grid units: 0.05 of 24 is invisible at any icon size
+        let flat = match *ctrl {
+            [c1, c2] => CubicBezierShape::from_points_stroke([p(self.at), p(c1), p(c2), p(end)], false, Color32::TRANSPARENT, Stroke::NONE)
+                .flatten(Some(0.05)),
+            [c] => {
+                QuadraticBezierShape::from_points_stroke([p(self.at), p(c), p(end)], false, Color32::TRANSPARENT, Stroke::NONE).flatten(Some(0.05))
+            }
+            _ => Vec::new(),
+        };
+        self.cur.extend(flat.iter().skip(1).map(|q| (q.x, q.y)));
+        self.to(end);
+    }
+    /// Read one command's arguments and draw it. Returns the command an implicit repeat runs (a moveto's
+    /// extra pairs are linetos), or `None` on malformed data.
+    fn step(&mut self, cmd: u8) -> Option<u8> {
+        let rel = cmd.is_ascii_lowercase();
+        let upper = cmd.to_ascii_uppercase();
+        // a drawing command right after `Z` starts a new subpath at the closed one's start
+        if self.cur.is_empty() && upper != b'M' && upper != b'Z' {
+            self.cur.push(self.at);
+        }
+        let mut ctrl = None;
+        match upper {
+            b'M' => {
+                let p = self.point(rel)?;
+                if !self.cur.is_empty() {
+                    self.out.push((std::mem::take(&mut self.cur), false));
+                }
+                self.to(p);
+                self.start = p;
+                self.last_ctrl = None;
+                return Some(if rel { b'l' } else { b'L' });
+            }
+            b'L' => {
+                let p = self.point(rel)?;
+                self.to(p);
+            }
+            b'H' => {
+                let x = self.lex.num()? + if rel { self.at.0 } else { 0.0 };
+                self.to((x, self.at.1));
+            }
+            b'V' => {
+                let y = self.lex.num()? + if rel { self.at.1 } else { 0.0 };
+                self.to((self.at.0, y));
+            }
+            b'C' | b'S' => {
+                let c1 = if upper == b'C' { self.point(rel)? } else { self.reflected(b'C') };
+                let (c2, end) = (self.point(rel)?, self.point(rel)?);
+                self.curve(&[c1, c2], end);
+                ctrl = Some((b'C', c2));
+            }
+            b'Q' | b'T' => {
+                let c = if upper == b'Q' { self.point(rel)? } else { self.reflected(b'Q') };
+                let end = self.point(rel)?;
+                self.curve(&[c], end);
+                ctrl = Some((b'Q', c));
+            }
+            b'A' => {
+                let (rx, ry, rot) = (self.lex.num()?, self.lex.num()?, self.lex.num()?);
+                let (large, sweep) = (self.lex.flag()?, self.lex.flag()?);
+                let end = self.point(rel)?;
+                arc_to(&mut self.cur, self.at, (rx, ry), rot, large, sweep, end);
+                self.at = end;
+            }
+            b'Z' => {
+                if !self.cur.is_empty() {
+                    self.out.push((std::mem::take(&mut self.cur), true));
+                }
+                self.at = self.start;
+            }
+            _ => return None,
+        }
+        self.last_ctrl = ctrl;
+        Some(cmd)
+    }
 }
 
 /// The path-data tokenizer behind [`svg_subpaths`].
@@ -999,13 +956,14 @@ impl Lex<'_> {
         if matches!(self.b.get(self.i), Some(b'-' | b'+')) {
             self.i += 1;
         }
-        let mut dot = false;
+        let (mut dot, mut exp) = (false, false);
         while let Some(c) = self.b.get(self.i) {
             match c {
                 b'0'..=b'9' => {}
-                // a second `.` starts the next number (`.4.4`)
-                b'.' if !dot => dot = true,
-                b'e' | b'E' if self.i > start => {
+                // a second `.`, or one in the exponent, starts the next number (`.4.4`, `1e2.5`)
+                b'.' if !dot && !exp => dot = true,
+                b'e' | b'E' if self.i > start && !exp => {
+                    exp = true;
                     self.i += 1;
                     if matches!(self.b.get(self.i), Some(b'-' | b'+')) {
                         self.i += 1;
@@ -1115,6 +1073,15 @@ mod tests {
         let subs = svg_subpaths("M2 2h4v4zl1 1");
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[1].0[0], (2.0, 2.0));
+        // a bad command after `Z` leaves no stray one-point subpath behind
+        assert_eq!(svg_subpaths("M2 2h4v4zX").len(), 1);
+        // a `.` after an exponent starts the next number: `1e1.5` is 10 and 0.5
+        assert_eq!(svg_subpaths("M1e1.5L3 4")[0].0[0], (10.0, 0.5));
+        // a cubic is flattened from the pen to its end point, with its control points honoured
+        let (pts, _) = &svg_subpaths("M0 0C0 10 10 10 10 0")[0];
+        assert!(pts.len() > 4);
+        assert_eq!(pts.last(), Some(&(10.0, 0.0)));
+        assert!(pts.iter().any(|(_, y)| *y > 7.0), "bulges towards the control points");
     }
 
     #[test]
@@ -1157,7 +1124,7 @@ mod tests {
 
     #[test]
     fn every_icon_draws_something() {
-        for icon in Icon::ALL {
+        for &icon in Icon::ALL {
             let mut view = crate::headless::HeadlessView::new();
             let raw = crate::headless::HeadlessView::raw_input(vec2(32.0, 32.0), 1.0, 0.0, vec![]);
             view.run(raw, |ui| {
@@ -1170,7 +1137,7 @@ mod tests {
         }
     }
 
-    /// `ICON_SHEET=out.ppm cargo test -p lightcraft-ui-egui icon_contact_sheet -- --ignored` writes every icon, labelled,
+    /// `ICON_SHEET=out.png cargo test -p lightcraft-ui-egui icon_contact_sheet -- --ignored` writes every icon, labelled,
     /// at 16 pt and 1×/2× plus 48 pt, light on dark, for reviewing the set by eye.
     #[test]
     #[ignore]
@@ -1193,10 +1160,8 @@ mod tests {
             }
         });
         let img = view.paint(&Default::default());
-        let mut out = format!("P6 {} {} 255\n", img.size[0], img.size[1]).into_bytes();
-        for px in &img.pixels {
-            out.extend([px.r(), px.g(), px.b()]);
-        }
-        std::fs::write(path, out).expect("write sheet");
+        let image = lightcraft_raster::Rgba8 { width: img.size[0], height: img.size[1], data: img.pixels.iter().map(|c| c.to_array()).collect() };
+        let png = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&image), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+        std::fs::write(path, png).unwrap();
     }
 }
