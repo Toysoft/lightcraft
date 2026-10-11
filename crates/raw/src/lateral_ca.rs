@@ -8,8 +8,11 @@
 //! demosaics (AHD, PPG) borrow green's edges for red and blue, so the picture shows only part of the mosaic's CA.
 //!
 //! - **Where it runs:** [`crate::RawImage::normalized`], right after `OpcodeList2`, so every demosaic and the AI
-//!   denoiser see the corrected mosaic. The map rides in [`crate::OpcodeLists::lateral_ca`] next to the DNG opcode
-//!   lists, but it is not a DNG opcode and is never written to a DNG.
+//!   denoiser see the corrected mosaic. Binned developments ([`crate::RawImage::develop_binned`]) bin the mosaic
+//!   without it and resample the binned image's red and blue instead (same kernel; the clip mask stands in for the
+//!   clip level), so previews match full-size developments and no path corrects twice. The map rides in
+//!   [`crate::OpcodeLists::lateral_ca`] next to the DNG opcode lists, but it is not a DNG opcode and is never
+//!   written to a DNG.
 //! - **Kernel:** Catmull-Rom (cubic convolution, a = −0.5), 4 × 4 taps on the colour's half-resolution plane, the
 //!   result clamped to the [min, max] of the central 2 × 2 taps (no ringing, no new extremes). It interpolates, so
 //!   where the map is 0 a site keeps its value. The radial scale comes from a 4097-entry table over ρ²: no square
@@ -20,10 +23,12 @@
 //!   site's own cell only for shifts under two plane cells (4 sensor px); the check on the site itself covers
 //!   larger ones.
 //! - **Never crash:** a map that fails validation, a non-Bayer or multi-plane mosaic, one under 4 × 4 or with a data
-//!   length that does not match its size is left alone.
-//! - **Memory:** one colour at a time: its plane is copied (¼ of the mosaic) and dropped before the next.
+//!   length that does not match its size is left alone; so is a binned image with k == 0 or a mask of the wrong
+//!   length.
+//! - **Memory:** one colour at a time: its plane is copied (¼ of the mosaic, or the binned image's size) and dropped
+//!   before the next.
 
-use crate::{Normalized, highlight};
+use crate::{Normalized, Rect, Rgb32f, highlight};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +117,49 @@ impl LateralCa {
                         let dx = x as f64 - cx;
                         if let Some(c) = plane.sample((x / 2) as f64 + dx * s / 2.0, v + dy * s / 2.0) {
                             *site = c;
+                        }
+                    }
+                },
+            );
+        }
+    }
+
+    /// The map on a binned image ([`crate::RawImage::develop_binned`]): pixel (bx, by) sits at active-area position
+    /// (crop.x + bx·k + (k − 1)/2, crop.y + by·k + (k − 1)/2); its red and blue channels are resampled with the
+    /// mosaic's kernel at (bx, by) + d / k (the colours' sub-block offsets are ignored, as binning does). A pixel that
+    /// has that colour's bit in `mask` ([`crate::highlight::CLIPPED_R`] / `_B`) or is not finite, or whose support
+    /// holds such a pixel, keeps its value (the first rule covers shifts that take the pixel's own cell out of its
+    /// support). No-op for k == 0, an empty image, a mask or data length that doesn't match the image, or a map that
+    /// doesn't apply.
+    pub(crate) fn correct_binned(&self, img: &mut Rgb32f, mask: &[u8], k: usize, crop: Rect) {
+        let (w, h, kf) = (img.width, img.height, k as f64);
+        let (x0, y0) = (crop.x as f64, crop.y as f64);
+        let (x1, y1) = (x0 + w as f64 * kf, y0 + h as f64 * kf);
+        if k == 0 || w == 0 || h == 0 || mask.len() != img.data.len() || img.data.len() != w.saturating_mul(h) || !self.applies_to(x0, y0, x1, y1) {
+            return;
+        }
+        let [cx, cy] = self.center;
+        let (xm, ym) = ((x0 - cx).abs().max((x1 - cx).abs()), (y0 - cy).abs().max((y1 - cy).abs()));
+        let (half, inv_k) = ((kf - 1.0) / 2.0, 1.0 / kf);
+        let dx: Vec<f64> = (0..w).map(|bx| x0 + bx as f64 * kf + half - cx).collect();
+        for (ch, bit, knots) in [(0, highlight::CLIPPED_R, &self.red), (2, highlight::CLIPPED_B, &self.blue)] {
+            let v = img.data.par_iter().zip(mask).map(|(p, &m)| if m & bit == 0 && p[ch].is_finite() { p[ch] } else { f32::INFINITY }).collect();
+            let plane = Plane { w, h, v };
+            let radial = Radial::new(knots, self.spacing, xm * xm + ym * ym);
+            img.data.par_chunks_mut(w).enumerate().for_each_init(
+                || vec![0.0; w],
+                |scales, (by, row)| {
+                    let dy = y0 + by as f64 * kf + half - cy;
+                    for (s, d) in scales.iter_mut().zip(&dx) {
+                        *s = radial.at(d * d + dy * dy);
+                    }
+                    for (bx, ((p, d), s)) in row.iter_mut().zip(&dx).zip(scales.iter()).enumerate() {
+                        // a clipped pixel stays (its own cell leaves the support beyond two binned px of shift)
+                        if !plane.v.get(by * w + bx).is_some_and(|o| o.is_finite()) {
+                            continue;
+                        }
+                        if let Some(c) = plane.sample(bx as f64 + d * s * inv_k, by as f64 + dy * s * inv_k) {
+                            p[ch] = c;
                         }
                     }
                 },
@@ -251,7 +299,7 @@ mod tests {
     use crate::binned::tests::raw_from;
     use crate::demosaic::mosaic_from_rgb;
     use crate::opcodes::Area;
-    use crate::{Cfa, Method, Opcode, Rgb32f, highlight};
+    use crate::{Cfa, Method, Opcode, RawImage, Rect, Rgb32f, highlight};
 
     /// A smooth field (periods ≥ 140 px).
     fn field(x: f64, y: f64) -> f64 {
@@ -557,6 +605,152 @@ mod tests {
         }
     }
 
+    #[test]
+    fn binned_matches_corrected_then_binned() {
+        let (w, h, c) = (1200, 800, [599.5, 399.5]);
+        let mosaic = mosaic_from_rgb(&smooth(w, h, c, MAX_SCALE, -1.5e-3), &Cfa::bayer("RGGB").unwrap());
+        // a constant map, and one that varies with the radius (the binned table's domain must match the mosaic's)
+        let constant = LateralCa::new(c, 400.0, vec![MAX_SCALE; 2], vec![-1.5e-3; 2]).unwrap();
+        let radial = LateralCa::new(c, 300.0, vec![MAX_SCALE, 1e-3, 0.0, -1e-3, -MAX_SCALE], vec![-MAX_SCALE, -5e-4, 1e-3, MAX_SCALE, MAX_SCALE]);
+        for ca in [constant, radial.unwrap()] {
+            let mut corrected = mosaic.clone();
+            ca.correct_mosaic(&mut corrected);
+            for k in [2, 4] {
+                let (want, _) = raw_from(&corrected, 0.0, 4095.0).develop_binned_masked(k, 0.99).unwrap().unwrap();
+                let (mut got, mask) = raw_from(&mosaic, 0.0, 4095.0).develop_binned_masked(k, 0.99).unwrap().unwrap();
+                let plain = got.clone();
+                ca.correct_binned(&mut got, &mask, k, Rect::new(0, 0, w, h));
+                let (mut worst, mut moved) = (0f32, 0f32);
+                for y in 3..got.height - 3 {
+                    for x in 3..got.width - 3 {
+                        for ch in 0..3 {
+                            worst = worst.max((got.get(x, y)[ch] - want.get(x, y)[ch]).abs());
+                            moved = moved.max((plain.get(x, y)[ch] - want.get(x, y)[ch]).abs());
+                        }
+                    }
+                }
+                assert!(worst < 2e-3 && moved > 5.0 * worst, "{} knots, k {k}: {worst} after, {moved} before", ca.red.len());
+            }
+        }
+    }
+
+    /// A default crop that doesn't start at the active area's corner (16:9 and DNG default crops): the binned image's
+    /// origin is the crop's, the map's centre stays in active-area coordinates.
+    #[test]
+    fn binned_crop_origin_matches_corrected_then_binned() {
+        let (w, h, crop) = (1200, 800, Rect::new(240, 160, 800, 520));
+        let c = [crop.x as f64 + (crop.width as f64 - 1.0) / 2.0, crop.y as f64 + (crop.height as f64 - 1.0) / 2.0];
+        let ca =
+            LateralCa::new(c, 300.0, vec![MAX_SCALE, 1e-3, 0.0, -1e-3, -MAX_SCALE], vec![-MAX_SCALE, -5e-4, 1e-3, MAX_SCALE, MAX_SCALE]).unwrap();
+        let mosaic = mosaic_from_rgb(&smooth(w, h, c, 0.0, 0.0), &Cfa::bayer("RGGB").unwrap());
+        let mut corrected = mosaic.clone();
+        ca.correct_mosaic(&mut corrected);
+        for k in [2, 4] {
+            let mut want = raw_from(&corrected, 0.0, 4095.0);
+            want.crop = crop;
+            let (want, _) = want.develop_binned_masked(k, 0.99).unwrap().unwrap();
+            let mut raw = raw_from(&mosaic, 0.0, 4095.0);
+            raw.crop = crop;
+            let (plain, _) = raw.develop_binned_masked(k, 0.99).unwrap().unwrap();
+            raw.opcodes.lateral_ca = Some(ca.clone());
+            let (got, _) = raw.develop_binned_masked(k, 0.99).unwrap().unwrap();
+            let (mut worst, mut moved) = (0f32, 0f32);
+            for y in 3..got.height - 3 {
+                for x in 3..got.width - 3 {
+                    for ch in 0..3 {
+                        worst = worst.max((got.get(x, y)[ch] - want.get(x, y)[ch]).abs());
+                        moved = moved.max((plain.get(x, y)[ch] - want.get(x, y)[ch]).abs());
+                    }
+                }
+            }
+            assert!(worst < 2e-3 && moved > 5.0 * worst, "k {k}: {worst} after, {moved} before");
+        }
+    }
+
+    #[test]
+    fn clipped_binned_pixels_keep_their_value() {
+        let mut img = Rgb32f::from_fn(40, 30, |x, y| [0.2 + 0.01 * x as f32, 0.3, 0.1 + 0.01 * y as f32]);
+        let mut mask = vec![0u8; 40 * 30];
+        mask[15 * 40 + 30] = highlight::CLIPPED_R;
+        let before = img.clone();
+        let ca = LateralCa::new([0.0, 0.0], 4.0, vec![MAX_SCALE; 2], vec![MAX_SCALE; 2]).unwrap();
+        ca.correct_binned(&mut img, &mask, 2, Rect::new(0, 0, 80, 60));
+        for (x, y) in [(30, 15), (31, 15), (30, 16), (29, 14)] {
+            assert_eq!(img.get(x, y)[0], before.get(x, y)[0], "red at ({x}, {y}): its support holds the clipped pixel");
+        }
+        assert_ne!(img.get(10, 10)[0], before.get(10, 10)[0], "elsewhere red moved");
+        assert_ne!(img.get(30, 15)[2], before.get(30, 15)[2], "blue isn't clipped there");
+        assert!(img.data.iter().zip(&before.data).all(|(a, b)| a[1].to_bits() == b[1].to_bits()), "green untouched");
+        // about 2.5 binned px of shift at x = 1250 (5 sensor px at a 2500 px radius): its own cell is outside its support
+        let mut far = Rgb32f::from_fn(1500, 4, |x, _| [0.2 + 1e-4 * x as f32; 3]);
+        let mut mask = vec![0u8; 1500 * 4];
+        mask[1500 + 1250] = highlight::CLIPPED_R;
+        let before = far.clone();
+        ca.correct_binned(&mut far, &mask, 2, Rect::new(0, 0, 3000, 8));
+        assert_eq!(far.get(1250, 1)[0], before.get(1250, 1)[0], "a far clipped pixel keeps its red");
+        assert_ne!(far.get(1250, 1)[2], before.get(1250, 1)[2], "and its blue moves");
+    }
+
+    #[test]
+    fn binned_no_op_cases() {
+        let ca = LateralCa::new([20.0, 15.0], 4.0, vec![MAX_SCALE; 2], vec![MAX_SCALE; 2]).unwrap();
+        let before = Rgb32f::from_fn(40, 30, |x, y| [0.01 * (x + y) as f32; 3]);
+        for (what, mask, k) in [("k 0", vec![0u8; 1200], 0), ("short mask", vec![0u8; 1199], 2)] {
+            let mut img = before.clone();
+            ca.correct_binned(&mut img, &mask, k, Rect::new(0, 0, 80, 60));
+            assert_eq!(img, before, "{what}");
+        }
+        let mut img = before.clone();
+        LateralCa { blue: vec![f64::NAN; 2], ..ca.clone() }.correct_binned(&mut img, &[0u8; 1200], 2, Rect::new(0, 0, 80, 60));
+        assert_eq!(img, before, "invalid map");
+        let mut one = Rgb32f::new(1, 1);
+        ca.correct_binned(&mut one, &[0], 2, Rect::new(0, 0, 2, 2)); // no panic
+        let mut empty = Rgb32f::new(0, 3);
+        ca.correct_binned(&mut empty, &[], 2, Rect::new(0, 0, 0, 6)); // no panic
+        // X-Trans: the full-size development leaves it alone (`correct_mosaic`), so its binned previews do too
+        let mut x = raw_from(&mosaic_from_rgb(&smooth(96, 72, [47.5, 35.5], 0.0, 0.0), &Cfa::xtrans()), 0.0, 4095.0);
+        let plain = x.develop_binned_masked(3, 0.99).unwrap().unwrap();
+        x.opcodes.lateral_ca = Some(ca);
+        assert_eq!(x.develop_binned_masked(3, 0.99).unwrap().unwrap(), plain, "X-Trans");
+    }
+
+    /// No path corrects twice: with an `OpcodeList2` the binning reads the normalised mosaic (without the map) and
+    /// corrects the binned image, exactly as without one.
+    #[test]
+    fn binning_corrects_once() {
+        let (w, h, c) = (96, 64, [47.5, 31.5]);
+        let mut raw = raw_from(&mosaic_from_rgb(&smooth(w, h, c, 0.0, 0.0), &Cfa::bayer("RGGB").unwrap()), 0.0, 4095.0);
+        let (plain, _) = raw.develop_binned_masked(2, 0.99).unwrap().unwrap();
+        raw.opcodes.lateral_ca = LateralCa::new(c, 8.0, vec![MAX_SCALE; 2], vec![-MAX_SCALE; 2]);
+        let (a, _) = raw.develop_binned_masked(2, 0.99).unwrap().unwrap();
+        assert_ne!(a, plain, "the map applies to binned images");
+        let area = Area { top: 0, left: 0, bottom: h as u32, right: w as u32, plane: 0, planes: 1, row_pitch: 1, col_pitch: 1 };
+        raw.opcodes.list2 = vec![Opcode::ScalePerRow { area, scales: vec![1.0; h] }];
+        let (b, _) = raw.develop_binned_masked(2, 0.99).unwrap().unwrap();
+        assert!(a.data.iter().zip(&b.data).all(|(p, q)| (0..3).all(|i| (p[i] - q[i]).abs() < 1e-6)));
+    }
+
+    /// Spec criterion 2 in miniature: the binned preview shows the full lens CA (binning borrows nothing) and is
+    /// corrected like the full-size development.
+    #[test]
+    fn binned_previews_are_corrected_too() {
+        let (w, h, c) = (1200, 800, [599.5, 399.5]);
+        let (ar, ab) = (1.5e-3, -1.2e-3);
+        let mut raw = raw_from(&mosaic_from_rgb(&discs(w, h, c, ar, ab), &Cfa::bayer("RGGB").unwrap()), 0.0, 4095.0);
+        let k = 2;
+        // binned pixel b sits at sensor position b·k + (k − 1)/2: the centre in binned px, shifts back in sensor px
+        let cb = [(c[0] - 0.5) / 2.0, (c[1] - 0.5) / 2.0];
+        let shift = |raw: &RawImage, ch| radial_shift(&raw.develop_binned_masked(k, 0.99).unwrap().unwrap().0, ch, cb, 8) * k as f64;
+        let (r0, b0) = (shift(&raw, 0), shift(&raw, 2));
+        assert!(r0 > 0.5 && b0 < -0.4, "uncorrected: red {r0}, blue {b0} px");
+        raw.opcodes.lateral_ca = LateralCa::new(c, 400.0, vec![ar; 2], vec![ab; 2]);
+        let (r1, b1) = (shift(&raw, 0), shift(&raw, 2));
+        assert!(r1.abs() < 0.05 && b1.abs() < 0.05, "corrected: red {r1}, blue {b1} px");
+        let full = raw.develop(Method::Ahd).unwrap();
+        let (rf, bf) = (radial_shift(&full, 0, c, 16), radial_shift(&full, 2, c, 16));
+        assert!((r1 - rf).abs() < 0.05 && (b1 - bf).abs() < 0.05, "binned {r1}, {b1} vs full {rf}, {bf}");
+    }
+
     /// `cargo test --release -p lightcraft-raw --lib lateral_ca::tests::timing_24mp -- --ignored --nocapture`
     #[test]
     #[ignore = "timing, run by hand"]
@@ -574,5 +768,34 @@ mod tests {
             })
             .collect();
         eprintln!("correct_mosaic on 24 MP: min {:?} of {runs:?}", runs.iter().min().unwrap());
+        // the Preview path: 4× binning without and with the map, and the map alone on 24 MP and the ILCE-7RM6 binned 4×
+        let mut raw = raw_from(&mosaic, 0.0, 4095.0);
+        let bin = |raw: &RawImage| {
+            (0..5)
+                .map(|_| {
+                    let t = std::time::Instant::now();
+                    raw.develop_binned_masked(4, 0.99).unwrap().unwrap();
+                    t.elapsed()
+                })
+                .min()
+                .unwrap()
+        };
+        let plain = bin(&raw);
+        raw.opcodes.lateral_ca = Some(ca.clone());
+        eprintln!("develop_binned_masked(4) on 24 MP: min {plain:?} without the map, {:?} with", bin(&raw));
+        for (w, h) in [(1500, 1000), (2496, 1664)] {
+            let img = Rgb32f::from_fn(w, h, |x, y| [((x * 7 + y * 3) % 977) as f32 / 1000.0; 3]);
+            let mask = vec![0u8; w * h];
+            let ca = LateralCa { center: [(4 * w) as f64 / 2.0 - 0.5, (4 * h) as f64 / 2.0 - 0.5], ..ca.clone() };
+            let runs: Vec<_> = (0..5)
+                .map(|_| {
+                    let mut img = img.clone();
+                    let t = std::time::Instant::now();
+                    ca.correct_binned(&mut img, &mask, 4, Rect::new(0, 0, 4 * w, 4 * h));
+                    t.elapsed()
+                })
+                .collect();
+            eprintln!("correct_binned on {w} × {h} (k 4): min {:?} of {runs:?}", runs.iter().min().unwrap());
+        }
     }
 }

@@ -15,6 +15,9 @@
 //! partly clipped without the block's green jumping to the clip level, which would read as a green
 //! speckle once reconstructed. [`RawImage::develop_binned`] instead gives such a channel the block's
 //! maximum sample of the colour, so that plain value thresholds see it as clipped.
+//!
+//! A lateral CA map ([`crate::LateralCa`], Bayer only) is applied to the binned image's red and blue, not to the
+//! mosaic, with the clip mask keeping clipped pixels as they are.
 
 use crate::{Normalized, RawData, RawImage, Result, Rgb32f};
 use rayon::prelude::*;
@@ -123,6 +126,12 @@ impl RawImage {
                 }
             }
         });
+        // the lateral CA map, once: `norm` above was normalised without it (Bayer only, as on the full mosaic)
+        if let Some(ca) = &self.opcodes.lateral_ca
+            && cfa.is_bayer()
+        {
+            ca.correct_binned(&mut out, &mask, k, c);
+        }
         Ok(Some((out, mask)))
     }
 }
