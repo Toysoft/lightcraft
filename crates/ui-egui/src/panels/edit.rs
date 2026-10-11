@@ -541,7 +541,7 @@ fn histogram(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         let total: f32 = chans[1].0.iter().sum::<f32>().max(1.0);
         if spread / total < 0.02 {
             let pts: Vec<Pos2> = (0..256).map(|i| to(i, chans[1].0[i])).collect();
-            p.add(egui::Shape::line(pts, Stroke::new(1.5, Color32::from_gray(200))));
+            p.add(egui::Shape::line(pts, Stroke::new(1.5, if ui.visuals().dark_mode { Color32::from_gray(200) } else { t.text })));
         } else {
             for (v, c) in &chans {
                 let pts: Vec<Pos2> = (0..256).map(|i| to(i, v[i])).collect();
@@ -551,8 +551,29 @@ fn histogram(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         let (lo, hi) = h.clipping();
         for (on, x, active) in [(lo > 0.003, plot.left() + 12.0, app.ui.show_clipping), (hi > 0.003, plot.right() - 12.0, app.ui.show_clipping)] {
             let tri = Rect::from_center_size(pos2(x, plot.top() + 10.0), vec2(14.0, 12.0));
-            p.rect_filled(tri, 2.0, if active { t.hover } else { Color32::from_gray(60) });
-            paint(p, tri.shrink(2.0), Icon::ChevronDown, if on { Color32::WHITE } else { Color32::from_gray(130) });
+            p.rect_filled(
+                tri,
+                2.0,
+                if active {
+                    t.hover
+                } else if ui.visuals().dark_mode {
+                    Color32::from_gray(60)
+                } else {
+                    t.inset
+                },
+            );
+            paint(
+                p,
+                tri.shrink(2.0),
+                Icon::ChevronDown,
+                if ui.visuals().dark_mode {
+                    if on { Color32::WHITE } else { Color32::from_gray(130) }
+                } else if on {
+                    t.text
+                } else {
+                    t.icon
+                },
+            );
         }
     }
     if resp.clicked() {
@@ -636,8 +657,8 @@ fn curve_editor(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, d: &Dev
     egui::Frame::NONE.inner_margin(egui::Margin { left: 24, right: 22, top: 6, bottom: 4 }).show(ui, |ui| {
         ui.horizontal(|ui| {
             for (ch, c) in [
-                ("parametric", Color32::from_gray(200)),
-                ("master", Color32::WHITE),
+                ("parametric", if ui.visuals().dark_mode { Color32::from_gray(200) } else { t.text }),
+                ("master", if ui.visuals().dark_mode { Color32::WHITE } else { t.text }),
                 ("red", hex("#dd3333")),
                 ("green", hex("#33bb55")),
                 ("blue", hex("#3377ee")),
@@ -690,14 +711,14 @@ fn curve_editor(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, d: &Dev
         let f = i as f32 / 4.0;
         p.line_segment(
             [pos2(r.left() + r.width() * f, r.top()), pos2(r.left() + r.width() * f, r.bottom())],
-            Stroke::new(1.0, Color32::from_gray(52)),
+            Stroke::new(1.0, if ui.visuals().dark_mode { Color32::from_gray(52) } else { t.divider }),
         );
         p.line_segment(
             [pos2(r.left(), r.top() + r.height() * f), pos2(r.right(), r.top() + r.height() * f)],
-            Stroke::new(1.0, Color32::from_gray(52)),
+            Stroke::new(1.0, if ui.visuals().dark_mode { Color32::from_gray(52) } else { t.divider }),
         );
     }
-    p.line_segment([r.left_bottom(), r.right_top()], Stroke::new(1.0, Color32::from_gray(70)));
+    p.line_segment([r.left_bottom(), r.right_top()], Stroke::new(1.0, if ui.visuals().dark_mode { Color32::from_gray(70) } else { t.track }));
     let to_screen = |x: f64, y: f64| pos2(r.left() + x as f32 * r.width(), r.bottom() - y as f32 * r.height());
     let from_screen = |q: Pos2| (((q.x - r.left()) / r.width()).clamp(0.0, 1.0) as f64, ((r.bottom() - q.y) / r.height()).clamp(0.0, 1.0) as f64);
     if ch == "parametric" {
@@ -721,7 +742,7 @@ fn curve_editor(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, d: &Dev
                 to_screen(x, (x + dd * 4.0 * x * (1.0 - x)).clamp(0.0, 1.0))
             })
             .collect();
-        p.add(egui::Shape::line(pts, Stroke::new(2.0, Color32::from_gray(220))));
+        p.add(egui::Shape::line(pts, Stroke::new(2.0, if ui.visuals().dark_mode { Color32::from_gray(220) } else { t.text })));
         curve_footer(app, ui, d);
         for c in ["curve.highlights", "curve.lights", "curve.darks", "curve.shadows"] {
             control(app, ui, d, c, true);
@@ -744,7 +765,13 @@ fn curve_editor(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, d: &Dev
         "red" => hex("#dd3333"),
         "green" => hex("#33bb55"),
         "blue" => hex("#3377ee"),
-        _ => Color32::from_gray(225),
+        _ => {
+            if ui.visuals().dark_mode {
+                Color32::from_gray(225)
+            } else {
+                t.text
+            }
+        }
     };
     let line: Vec<Pos2> = (0..=96).map(|i| to_screen(i as f64 / 96.0, curve.eval(i as f64 / 96.0).clamp(0.0, 1.0))).collect();
     p.add(egui::Shape::line(line, Stroke::new(2.0, color)));

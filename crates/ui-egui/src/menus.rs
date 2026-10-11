@@ -51,6 +51,8 @@ pub fn language_from_command(id: &str) -> Option<crate::i18n::Locale> {
 }
 
 pub const UI_COMMANDS: &[UiCommand] = &[
+    // {mode: system | light | dark}; all appearance controls dispatch this command.
+    ("view.appearance", "Interface Theme", None, ""),
     ("modelSetup.cancel", "Cancel Pending Photo Action", None, ""),
     ("view.photoGrid", "Photo Grid", None, "View"),
     ("view.squareGrid", "Square Grid", None, "View"),
@@ -323,6 +325,16 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
         "view.photoCounts" => {
             app.ui.show_counts = p.get("show").and_then(Value::as_bool).unwrap_or(!app.ui.show_counts);
             Ok(json!({"show": app.ui.show_counts}))
+        }
+        "view.appearance" => {
+            let mode = p.get("mode").and_then(Value::as_str);
+            match crate::state::AppearanceMode::ALL.into_iter().find(|(m, _)| Some(m.id()) == mode) {
+                Some((m, _)) => {
+                    app.ui.settings.appearance_mode = m;
+                    Ok(json!({"mode": m.id()}))
+                }
+                None => Err("view.appearance: mode must be system, light or dark".into()),
+            }
         }
         "view.gridToggle" => {
             app.ui.view = if app.ui.view == ViewMode::PhotoGrid { ViewMode::SquareGrid } else { ViewMode::PhotoGrid };

@@ -130,6 +130,7 @@ const LAYOUT: &[(&str, &[&str])] = &[
             "view.histogram",
             "view.navigator",
             "view.infoOverlay",
+            "@Appearance",
             "---",
             "view.fullScreenPreview",
             "view.enterFullScreen",
@@ -460,6 +461,12 @@ fn expanded(app: &LightcraftApp, name: &str) -> Option<Vec<MenuNode>> {
             v.push(item("dialog.labelNames", Value::Null, "Edit Label Names…", None, true, None));
             v
         }
+        "Appearance" => crate::state::AppearanceMode::ALL
+            .into_iter()
+            .map(|(mode, label)| {
+                item("view.appearance", json!({"mode": mode.id()}), label, None, true, Some(app.ui.settings.appearance_mode == mode))
+            })
+            .collect(),
         "Grid Info" => ["filename", "exposure", "date"]
             .into_iter()
             .zip(["File Name", "Exposure (shutter · aperture · ISO)", "Capture Date"])

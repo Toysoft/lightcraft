@@ -778,3 +778,11 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 |---|---|---|
 | 2026-10-10 | minor | Renamed from `parity.md` (progress-docs standard); Top gaps moved to gaps.md (its duplicated items 1–2 from a bad merge resolved there), shortcut notes moved to ui-parity.md. Rows unchanged; a recount of the rows gives 81.1% of 517 in-scope rows (P0 98.0%, P1 95.1%, P2 46.9%), so the generated summary above is due a `cargo xtask parity --write` |
 | 2026-09-30 – 2026-10-10 | — | Rows added and updated with each feature (see `git log -- docs/parity.md docs/parity-checklist.md`) |
+
+## Interface appearance extension
+
+Issue #589 adds an opt-in System/Light/Dark interface setting beyond the target's dark
+interface. `cmd:view.appearance`, `crates/ui-egui/src/panels/settings.rs` and
+[interface-theme.md](interface-theme.md) cover controls, persistence and supported platform
+events. Dark and photo surrounds retain their existing colours. This extension does not
+change the target-parity row count or completion estimate.

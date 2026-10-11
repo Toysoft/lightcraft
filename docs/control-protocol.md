@@ -127,3 +127,11 @@ one pixel.
   renders are in flight. Each request runs frames until it is answered and its injected input
   (clicks, keys, drags) has played out. Widget ids for `ui.clickWidget` come from `ui.widgets`
   (e.g. `button:upright-auto`). A 1600×1000 demo snapshot takes ~1–2 s (debug build).
+
+## Interface appearance
+
+`engine.execute {"command":"view.appearance","params":{"mode":"system"}}` selects
+System; `light` and `dark` select fixed interface themes. Settings and View > Appearance
+use the same command. The saved choice stays independent of the displayed palette. Dark
+remains the default and the unknown-OS fallback; photo colours and the loupe surround stay
+unchanged. Platform details are in [interface-theme.md](interface-theme.md).

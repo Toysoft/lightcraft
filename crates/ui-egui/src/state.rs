@@ -127,6 +127,37 @@ impl InfoOverlay {
     }
 }
 
+/// Saved interface choice. OS changes only affect the resolved palette.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AppearanceMode {
+    System,
+    Light,
+    #[default]
+    Dark,
+}
+
+impl AppearanceMode {
+    pub const ALL: [(Self, &'static str); 3] = [(Self::System, "System"), (Self::Light, "Light Mode"), (Self::Dark, "Dark Mode")];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    /// Missing OS appearance deterministically falls back to the existing Dark palette.
+    pub fn resolve(self, system: Option<egui::Theme>) -> egui::Theme {
+        match self {
+            Self::System => system.unwrap_or(egui::Theme::Dark),
+            Self::Light => egui::Theme::Light,
+            Self::Dark => egui::Theme::Dark,
+        }
+    }
+}
+
 /// App-level preferences (Settings dialog). They belong to the app, not a library, and are
 /// saved with the UI state in the app's config folder (`ui.json`, key `settings`); library
 /// preferences (import defaults, XMP, cache size) live in the library's `prefs.json`.
@@ -156,6 +187,7 @@ pub struct AppSettings {
     pub grid_badges: GridBadges,
     /// Shortcuts the user changed (Help ▸ Keyboard Shortcuts): command id → shortcut, `""` = none.
     pub keymap: crate::shortcuts::Keymap,
+    pub appearance_mode: AppearanceMode,
     /// The monitor's ICC profile previews are shown through (`app.displayProfile`; "" = none:
     /// the display is treated as sRGB).
     pub display_profile: String,
@@ -175,6 +207,7 @@ impl Default for AppSettings {
             film_badges: true,
             grid_badges: GridBadges::Auto,
             keymap: Default::default(),
+            appearance_mode: AppearanceMode::Dark,
             display_profile: String::new(),
         }
     }

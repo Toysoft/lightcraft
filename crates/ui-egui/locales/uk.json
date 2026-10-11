@@ -2070,5 +2070,10 @@
   "Downloading model": "Завантаження моделі",
   "Finding faces": "Пошук облич",
   "Synchronizing folder": "Синхронізація папки",
-  "Looking for changes": "Пошук змін"
+  "Looking for changes": "Пошук змін",
+  "Light Mode": "Світлий режим",
+  "Dark Mode": "Темний режим",
+  "Appearance": "Вигляд",
+  "Interface Theme": "Тема інтерфейсу",
+  "System follows the desktop appearance. If unavailable, it uses Dark.": "Система використовує оформлення стільниці. Якщо воно недоступне, використовується темна тема."
 }

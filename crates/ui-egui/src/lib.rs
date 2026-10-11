@@ -41,6 +41,8 @@ mod tests_activity;
 #[cfg(test)]
 mod tests_album_picker;
 #[cfg(test)]
+mod tests_appearance;
+#[cfg(test)]
 mod tests_crop_rotate;
 #[cfg(test)]
 mod tests_curve;
@@ -125,6 +127,8 @@ pub type HostAction = Box<dyn FnMut(&mut Session) -> Result<Value, String>>;
 /// Platform services injected by the host app (desktop or web).
 #[derive(Default)]
 pub struct Services {
+    /// Linux portal appearance, ahead of egui's report; the host wakes the UI on changes.
+    pub system_theme: Option<Box<dyn Fn() -> Option<egui::Theme>>>,
     /// Native file dialogs for commands, shown off the UI thread and answered later
     /// (`pick`; #191). With it, the synchronous pickers below serve only the buttons inside
     /// dialogs; without it (the web, tests) they answer the commands too.
@@ -696,6 +700,15 @@ impl LightcraftApp {
         }
     }
 
+    /// Resolve without changing the saved preference. Manual modes ignore OS changes.
+    pub fn sync_theme(&mut self, ctx: &egui::Context) {
+        let system = self.services.system_theme.as_ref().and_then(|read| read()).or_else(|| ctx.system_theme());
+        let wanted = self.ui.settings.appearance_mode.resolve(system);
+        if theme::current(ctx) != Some(wanted) {
+            theme::apply_theme(ctx, wanted);
+        }
+    }
+
     /// Draw the UI into an offscreen context at the window's size; with `capture`, rasterize it
     /// on the CPU (photo textures come from the renderer's CPU copies).
     pub fn headless_screenshot(&mut self, main: &egui::Context, capture: bool) -> Option<egui::ColorImage> {
@@ -715,7 +728,11 @@ impl LightcraftApp {
         // same scroll offsets, open sections, style… as the window
         let memory = main.memory(|m| m.clone());
         view.ctx.memory_mut(|m| *m = memory);
-        view.run(headless::HeadlessView::raw_input(size, ppp, time, vec![]), |ui| self.ui(ui));
+        // The capture has its own context: copy the displayed tokens and native input as well.
+        theme::apply_theme(&view.ctx, theme::current(main).unwrap_or(egui::Theme::Dark));
+        let mut raw = headless::HeadlessView::raw_input(size, ppp, time, vec![]);
+        raw.system_theme = main.system_theme();
+        view.run(raw, |ui| self.ui(ui));
         let img = capture.then(|| {
             let mut tex = self.renderer.cpu_textures();
             if let (Some((t, ..)), Some(px)) = (&self.merge.preview, &self.merge.preview_pixels) {
@@ -812,6 +829,7 @@ impl LightcraftApp {
         self.last_time = now;
         self.drain_control(ctx);
         self.apply_settings(ctx);
+        self.sync_theme(ctx);
         if !self.synthetic.is_empty() {
             ctx.request_repaint();
         }
@@ -1050,7 +1068,7 @@ impl LightcraftApp {
         let t = theme::Tokens::get(&ctx);
         let bg = if matches!(self.ui.view, state::ViewMode::Detail | state::ViewMode::Compare | state::ViewMode::Survey | state::ViewMode::Reference)
         {
-            t.canvas
+            t.image_canvas
         } else {
             t.grid_bg
         };

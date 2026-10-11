@@ -1876,5 +1876,10 @@
   "Downloading model": "Téléchargement du modèle",
   "Finding faces": "Recherche des visages",
   "Synchronizing folder": "Synchronisation du dossier",
-  "Looking for changes": "Recherche des modifications"
+  "Looking for changes": "Recherche des modifications",
+  "Light Mode": "Mode clair",
+  "Dark Mode": "Mode sombre",
+  "Appearance": "Apparence",
+  "Interface Theme": "Thème de l’interface",
+  "System follows the desktop appearance. If unavailable, it uses Dark.": "Système suit l’apparence du bureau. Si elle est indisponible, le thème sombre est utilisé."
 }

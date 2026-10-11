@@ -57,6 +57,13 @@ Beta-blocking gaps (B) total **~230–430 h**; with the stability and platform w
 - **Quality / fidelity:** 1, 3
 - **Stability and platforms:** 9, 26, 27
 
+## Interface extension outside the ranked target gaps
+
+- 2026-10-10: #589 adds System and Light alongside the existing Dark interface. Controls and
+  platform limits are documented in [interface-theme.md](interface-theme.md). This is an
+  extension beyond Lightroom's dark interface, so the ranked target gaps and readiness
+  estimates above stay unchanged.
+
 ## Closed recently (kept for calibration)
 
 - 2026-10-10: Nikon lossy-after-split NEF (#633), ORF 12.8 bpp (#651), HDR gain map / PQ AVIF / float

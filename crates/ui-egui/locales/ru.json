@@ -1590,5 +1590,11 @@
   "Finding faces": "Поиск лиц",
   "Quit Anyway": "Всё равно выйти",
   "Synchronizing folder": "Синхронизация папки",
-  "Looking for changes": "Поиск изменений"
+  "Looking for changes": "Поиск изменений",
+  "Light Mode": "Светлый режим",
+  "Dark Mode": "Тёмный режим",
+  "Appearance": "Оформление",
+  "Interface Theme": "Тема интерфейса",
+  "System follows the desktop appearance. If unavailable, it uses Dark.": "Система следует оформлению рабочего стола. Если оно недоступно, используется тёмная тема.",
+  "System": "Система"
 }

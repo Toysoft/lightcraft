@@ -1876,5 +1876,10 @@
   "Downloading model": "正在下载模型",
   "Finding faces": "正在查找人脸",
   "Synchronizing folder": "正在同步文件夹",
-  "Looking for changes": "正在查找更改"
+  "Looking for changes": "正在查找更改",
+  "Light Mode": "浅色模式",
+  "Dark Mode": "深色模式",
+  "Appearance": "外观",
+  "Interface Theme": "界面主题",
+  "System follows the desktop appearance. If unavailable, it uses Dark.": "系统跟随桌面外观。无法获取时使用深色。"
 }

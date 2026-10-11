@@ -92,7 +92,7 @@ fn row(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, b: &Bindable, sc:
     ui.label(name).on_hover_text(hover);
     let recording = app.recording_shortcut.as_deref() == Some(b.id);
     let text = if recording {
-        RichText::new(crate::i18n::tr("Press keys…")).color(egui::Color32::WHITE)
+        RichText::new(crate::i18n::tr("Press keys…")).color(if ui.visuals().dark_mode { egui::Color32::WHITE } else { t.text })
     } else {
         match sc {
             Some(sc) => RichText::new(menu_text(sc, mac)).color(t.text),

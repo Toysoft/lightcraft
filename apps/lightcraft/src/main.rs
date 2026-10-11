@@ -23,6 +23,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod alloc_release;
+mod appearance;
 mod control_server;
 mod dialog_filter;
 mod logging;
@@ -351,7 +352,9 @@ fn explorer_select_command(path: &str) -> std::process::Command {
 /// The platform services; `ctx` repaints when a file dialog closes, and `log_file` is
 /// for Help ▸ Open Log Folder.
 fn services(ctx: egui::Context, log_file: Option<&std::path::Path>) -> Services {
+    let system_theme = appearance::service(ctx.clone());
     Services {
+        system_theme,
         // Commands' file dialogs run on their own thread (#191): a dialog on the UI thread
         // stopped the window answering the compositor, which then reported the app as hung.
         picker: Some(Box::new(move |req: lightcraft_ui_egui::pick::PickRequest| {

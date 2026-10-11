@@ -82,7 +82,8 @@ pub fn toast(app: &mut LightcraftApp, ctx: &egui::Context) {
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("toast")));
     // long messages (a save warning, the web build's notices) wrap within the canvas
     let wrap = (canvas.width() - 80.0).clamp(200.0, 720.0);
-    let (background, foreground) = label.map(crate::theme::label_toast_colors).unwrap_or((egui::Color32::from_black_alpha(200), t.text));
+    let (background, foreground) =
+        label.map(crate::theme::label_toast_colors).unwrap_or((egui::Color32::from_black_alpha(200), crate::theme::Tokens::default().text));
     let foreground = foreground.gamma_multiply(fade);
     let galley = painter.layout(text, t.font(14.0), foreground, wrap);
     let size = vec2(galley.size().x + 40.0, (galley.size().y + 22.0).max(40.0));
@@ -94,7 +95,15 @@ pub fn toast(app: &mut LightcraftApp, ctx: &egui::Context) {
 
 /// Paint a centred, dimmed message (empty states).
 pub fn empty_message(ui: &egui::Ui, rect: Rect, title: &str, body: &str) {
-    let t = Tokens::get(ui.ctx());
+    empty_message_with_tokens(ui, rect, title, body, Tokens::get(ui.ctx()));
+}
+
+/// Photo-view empty states retain contrast on the appearance-independent dark surround.
+pub fn empty_photo_message(ui: &egui::Ui, rect: Rect, title: &str, body: &str) {
+    empty_message_with_tokens(ui, rect, title, body, Tokens::default());
+}
+
+fn empty_message_with_tokens(ui: &egui::Ui, rect: Rect, title: &str, body: &str, t: Tokens) {
     let p = ui.painter();
     p.text(rect.center() - vec2(0.0, 12.0), Align2::CENTER_CENTER, crate::i18n::tr(title), t.semibold(18.0), t.text_label);
     p.text(rect.center() + vec2(0.0, 14.0), Align2::CENTER_CENTER, crate::i18n::tr(body), t.font(13.0), t.text_dim);

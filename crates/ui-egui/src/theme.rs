@@ -34,8 +34,10 @@ pub fn label_toast_colors(label: lightcraft_catalog::ColorLabel) -> (Color32, Co
 pub struct Tokens {
     /// Top bar, side panels, bottom bar, tool strip.
     pub chrome: Color32,
-    /// Photo canvas (detail view) and filmstrip.
+    /// Inset interface panels and filmstrip.
     pub canvas: Color32,
+    /// Photo surround, independent of interface appearance.
+    pub image_canvas: Color32,
     /// Grid background behind the cells.
     pub grid_bg: Color32,
     pub cell: Color32,
@@ -80,6 +82,7 @@ impl Default for Tokens {
         Tokens {
             chrome: Color32::from_rgb(0x2d, 0x2d, 0x2d),
             canvas: Color32::from_rgb(0x1c, 0x1c, 0x1c),
+            image_canvas: Color32::from_rgb(0x1c, 0x1c, 0x1c),
             grid_bg: Color32::from_rgb(0x0f, 0x0f, 0x0f),
             cell: Color32::from_rgb(0x1c, 0x1c, 0x1c),
             cell_selected: Color32::from_rgb(0x2d, 0x2d, 0x2d),
@@ -118,6 +121,46 @@ impl Default for Tokens {
 }
 
 impl Tokens {
+    /// Interface colours only. Photo surround and mask overlays stay fixed.
+    /// Light colours adapted from luniiya's LightCraft PR #683 (MIT OR Apache-2.0).
+    pub fn for_theme(theme: egui::Theme) -> Tokens {
+        let base = Tokens::default();
+        if theme == egui::Theme::Dark {
+            return base;
+        }
+        let rgb = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+        Tokens {
+            canvas: rgb(0xcfcfcf),
+            chrome: rgb(0xe6e6e6),
+            grid_bg: rgb(0xd9d9d9),
+            cell: rgb(0xcbcbcb),
+            cell_selected: rgb(0xb4b4b4),
+            divider: rgb(0xc4c4c4),
+            inset: rgb(0xdcdcdc),
+            field: rgb(0xf6f6f6),
+            field_border: rgb(0xb8b8b8),
+            button: rgb(0xf2f2f2),
+            button_border: rgb(0xb0b0b0),
+            hover: rgb(0xd2d2d2),
+            pressed: rgb(0xc4c4c4),
+            tool_active: rgb(0xcacaca),
+            text: rgb(0x1c1c1c),
+            text_label: rgb(0x383838),
+            text_dim: rgb(0x6a6a6a),
+            text_disabled: rgb(0xa2a2a2),
+            icon: rgb(0x555555),
+            track: rgb(0xa8a8a8),
+            thumb: rgb(0x5e5e5e),
+            thumb_hover: rgb(0x262626),
+            accent: rgb(0x0a62d0),
+            star: rgb(0x3a3a3a),
+            pick: rgb(0x2a2a2a),
+            reject: rgb(0xc83434),
+            caution: rgb(0xb0761a),
+            ..base
+        }
+    }
+
     pub fn get(ctx: &egui::Context) -> Tokens {
         ctx.data(|d| d.get_temp::<Tokens>(egui::Id::NULL)).unwrap_or_default()
     }
@@ -215,15 +258,27 @@ fn craft_font_name(f: &lightcraft_engine::CraftFont) -> String {
     format!("craft-fonts {} {}", f.family, f.style)
 }
 
+/// The resolved interface palette, independent of egui's native system tracking.
+pub fn current(ctx: &egui::Context) -> Option<egui::Theme> {
+    ctx.data(|d| d.get_temp(egui::Id::new("lightcraft-theme")))
+}
+
 pub fn apply(ctx: &egui::Context) {
+    apply_theme(ctx, egui::Theme::Dark);
+}
+
+pub fn apply_theme(ctx: &egui::Context, theme: egui::Theme) {
     // Cmd+= / Cmd+- / Cmd+0 (Ctrl on Windows and Linux) are View ▸ Zoom In / Zoom Out / Zoom to Fit
     // for the photo. egui would take the same keys at the end of every frame for its browser-style
     // interface zoom (issue #566); on macOS the native menu bar got them first, elsewhere the whole
     // UI scaled.
     ctx.options_mut(|o| o.zoom_with_keyboard = false);
-    let t = Tokens::default();
-    ctx.data_mut(|d| d.insert_temp(egui::Id::NULL, t));
-    let mut v = Visuals::dark();
+    let t = Tokens::for_theme(theme);
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::NULL, t);
+        d.insert_temp(egui::Id::new("lightcraft-theme"), theme);
+    });
+    let mut v = if theme == egui::Theme::Dark { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = t.chrome;
     v.window_fill = t.chrome;
     v.extreme_bg_color = t.field;
@@ -231,11 +286,13 @@ pub fn apply(ctx: &egui::Context) {
     v.window_stroke = Stroke::new(1.0, t.button_border);
     v.window_corner_radius = CornerRadius::same(6);
     v.menu_corner_radius = CornerRadius::same(6);
-    v.selection.bg_fill = t.accent.gamma_multiply(0.6);
-    v.selection.stroke = Stroke::new(1.0, t.accent);
+    let dark = theme == egui::Theme::Dark;
+    v.selection.bg_fill = if dark { t.accent.gamma_multiply(0.6) } else { t.accent };
+    v.selection.stroke = Stroke::new(1.0, if dark { t.accent } else { Color32::WHITE });
     v.override_text_color = Some(t.text_label);
-    v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(140) };
-    v.window_shadow = egui::epaint::Shadow { offset: [0, 8], blur: 30, spread: 0, color: Color32::from_black_alpha(160) };
+    let (popup, window) = if dark { (140, 160) } else { (50, 60) };
+    v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(popup) };
+    v.window_shadow = egui::epaint::Shadow { offset: [0, 8], blur: 30, spread: 0, color: Color32::from_black_alpha(window) };
     let w = &mut v.widgets;
     for (wv, fill) in [
         (&mut w.noninteractive, t.chrome),
@@ -251,8 +308,12 @@ pub fn apply(ctx: &egui::Context) {
     }
     w.noninteractive.bg_stroke = Stroke::new(1.0, t.divider);
     w.inactive.bg_stroke = Stroke::new(1.0, t.button_border);
-    ctx.set_visuals(v);
-    ctx.global_style_mut(|s| {
+    // Concrete ThemePreference values pin NSWindow.appearance and suppress native ThemeChanged.
+    // Keep System even in manual modes; both style branches contain our resolved palette.
+    ctx.set_theme(egui::ThemePreference::System);
+    ctx.set_visuals_of(egui::Theme::Dark, v.clone());
+    ctx.set_visuals_of(egui::Theme::Light, v);
+    ctx.all_styles_mut(|s| {
         s.spacing.item_spacing = egui::vec2(6.0, 4.0);
         s.spacing.button_padding = egui::vec2(8.0, 3.0);
         s.spacing.interact_size.y = 22.0;

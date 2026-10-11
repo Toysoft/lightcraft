@@ -599,6 +599,14 @@ fn display_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
 }
 
 fn interface_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    row(ui, t, "Interface Theme", |ui| {
+        let mut mode = app.ui.settings.appearance_mode;
+        if choices(ui, "settingsAppearance", &crate::state::AppearanceMode::ALL, &mut mode) {
+            let _ = app.run("view.appearance", json!({"mode": mode.id()}));
+            ui.ctx().request_repaint();
+        }
+    });
+    hint(ui, t, "System follows the desktop appearance. If unavailable, it uses Dark.");
     heading(ui, t, crate::i18n::tr("Filmstrip"));
     check(ui, "settings.filmNames", &mut app.ui.settings.film_names, "Show file names");
     check(ui, "settings.filmBadges", &mut app.ui.settings.film_badges, "Show ratings, flags and edit badges");

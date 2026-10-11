@@ -145,7 +145,7 @@ fn area_and_filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui) -> Rect {
 /// Draw one photo fitted into `area` (rendered at its display size into `slot`), with its caption
 /// strip below. Returns the image rect and the click/drag response.
 fn photo_tile(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, slot: Slot, area: Rect, label: &str, zoom: Zoom) -> (Rect, egui::Response) {
-    let t = Tokens::get(ui.ctx());
+    let t = Tokens::default();
     let ppp = ui.ctx().pixels_per_point();
     let resp = ui.interact(area, egui::Id::new(("cull-tile", slot_index(slot), id.0)), Sense::click_and_drag());
     let Some(photo) = app.session.catalog.photo(id).cloned() else { return (area, resp) };
@@ -244,7 +244,7 @@ fn slot_index(s: Slot) -> u8 {
 pub fn show_compare(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let canvas = area_and_filmstrip(app, ui);
     let Some((sel, cand)) = compare_pair(app) else {
-        super::empty_message(ui, canvas, "Nothing to compare", "Select two photos, then choose View → Compare (Shift+C)");
+        super::empty_photo_message(ui, canvas, "Nothing to compare", "Select two photos, then choose View → Compare (Shift+C)");
         return;
     };
     let area = canvas.shrink(18.0);
@@ -296,11 +296,11 @@ pub fn survey_columns(n: usize, area: Rect) -> usize {
 }
 
 pub fn show_survey(app: &mut LightcraftApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
+    let t = Tokens::default();
     let canvas = area_and_filmstrip(app, ui);
     let photos = survey_photos(app);
     if photos.is_empty() {
-        super::empty_message(ui, canvas, "Nothing to survey", "Select photos, then choose View → Survey (N)");
+        super::empty_photo_message(ui, canvas, "Nothing to survey", "Select photos, then choose View → Survey (N)");
         return;
     }
     let area = canvas.shrink(14.0);
@@ -350,7 +350,12 @@ pub fn show_reference(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let canvas = area_and_filmstrip(app, ui);
     let reference = app.ui.reference.map(PhotoId).filter(|r| app.session.catalog.photo(*r).is_some());
     let (Some(r), Some(active)) = (reference, app.session.active()) else {
-        super::empty_message(ui, canvas, "No reference photo", "Right-click a photo ▸ Set as Reference Photo, then View → Reference View (Shift+R)");
+        super::empty_photo_message(
+            ui,
+            canvas,
+            "No reference photo",
+            "Right-click a photo ▸ Set as Reference Photo, then View → Reference View (Shift+R)",
+        );
         return;
     };
     let area = canvas.shrink(18.0);

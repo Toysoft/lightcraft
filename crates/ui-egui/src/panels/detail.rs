@@ -311,7 +311,8 @@ fn draw_window(p: &egui::Painter, app: &LightcraftApp, c: &WindowCtx, v: &Window
 }
 
 pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
-    let t = Tokens::get(ui.ctx());
+    // Photo captions and loading text stay readable on the fixed dark surround.
+    let t = Tokens::default();
     let full = ui.max_rect();
     let fullscreen = app.ui.fullscreen;
     let show_film = app.ui.filmstrip && !fullscreen;
@@ -322,7 +323,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         filmstrip(app, ui, Rect::from_min_max(pos2(full.left(), canvas.bottom()), full.max));
     }
     let Some(id) = app.session.active() else {
-        super::empty_message(ui, canvas, "No photo selected", "Choose a photo in the grid or filmstrip");
+        super::empty_photo_message(ui, canvas, "No photo selected", "Choose a photo in the grid or filmstrip");
         return;
     };
     let Some(photo) = app.session.catalog.photo(id).cloned() else { return };
@@ -956,7 +957,7 @@ fn filter_pill(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
 /// A raw shown from its embedded JPEG (issue #10): a pill at the canvas' top centre saying so;
 /// hovering it explains (registered as `notice:previewOnly:loupe`).
 fn preview_only_pill(ui: &mut egui::Ui, canvas: Rect, reason: &str) {
-    let t = Tokens::get(ui.ctx());
+    let t = Tokens::default();
     let p = ui.painter_at(canvas);
     let text = crate::i18n::tr_format!("Preview only — editing the camera's embedded JPEG ({})", crate::widgets::preview_only_variant(reason));
     let g = p.layout_no_wrap(text, t.font(12.0), Color32::WHITE);
@@ -1954,7 +1955,11 @@ fn film_label(name: &str) -> String {
 pub(crate) fn filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, r: Rect) {
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(r, 0.0, t.canvas);
-    ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width(), 4.0)), 0.0, Color32::from_gray(0x20));
+    ui.painter().rect_filled(
+        Rect::from_min_size(r.min, vec2(r.width(), 4.0)),
+        0.0,
+        if ui.visuals().dark_mode { Color32::from_gray(0x20) } else { t.divider },
+    );
     let ids = app.session.visible_cloned();
     let active = app.session.selection.active;
     let cell_w = 120.0;
@@ -2018,7 +2023,7 @@ pub(crate) fn filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, r: Rect) {
                 if app.ui.settings.film_badges
                     && let Some(ph) = app.session.catalog.photo(*id)
                 {
-                    film_badges(p, &t, fr, ph);
+                    film_badges(p, fr, ph);
                 }
                 if let Some(st) = app.session.catalog.stack_of(*id) {
                     let text =
@@ -2048,7 +2053,9 @@ pub(crate) fn filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, r: Rect) {
 }
 
 /// Rating, flag and edited badges along a filmstrip thumbnail's bottom edge (Settings → Interface).
-fn film_badges(p: &egui::Painter, t: &Tokens, fr: Rect, ph: &lightcraft_catalog::Photo) {
+fn film_badges(p: &egui::Painter, fr: Rect, ph: &lightcraft_catalog::Photo) {
+    // These glyphs sit on a dark overlay over photo pixels, independent of interface chrome.
+    let t = Tokens::default();
     use crate::icons::{Icon, paint};
     use lightcraft_catalog::Flag;
     let edited = ph.is_edited();
@@ -2171,5 +2178,54 @@ mod tests {
         assert_eq!(film_label("IMG_20240712_153012"), "IMG_20240712_…");
         assert_eq!(film_label("DSC_0001"), "DSC_0001");
         assert_eq!(film_label(""), "");
+    }
+}
+
+#[cfg(test)]
+mod filmstrip_badge_overlay_tests {
+    use super::*;
+    use crate::headless::HeadlessView;
+
+    fn luminance(c: Color32) -> f64 {
+        let linear = |byte: u8| {
+            let value = f64::from(byte) / 255.0;
+            if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+    }
+
+    #[test]
+    fn filmstrip_badge_overlay_keeps_readable_rating_pick_and_edit_in_light() {
+        let session = lightcraft_engine::Session::with_demo();
+        let mut photo = session.catalog.photos().next().unwrap().as_ref().clone();
+        photo.rating = 3;
+        photo.flag = lightcraft_catalog::Flag::Pick;
+        std::sync::Arc::make_mut(&mut photo.develop).light.exposure = 1.0;
+        assert!(photo.is_edited());
+        let render = |theme| {
+            let mut view = HeadlessView::new();
+            crate::theme::apply_theme(&view.ctx, theme);
+            for _ in 0..2 {
+                view.run(HeadlessView::raw_input(vec2(140.0, 120.0), 1.0, 0.0, vec![]), |ui| {
+                    let frame = Rect::from_min_max(pos2(10.0, 10.0), pos2(130.0, 110.0));
+                    ui.painter().rect_filled(frame, 0.0, Color32::from_gray(60));
+                    film_badges(ui.painter(), frame, &photo);
+                });
+            }
+            view.paint(&Default::default())
+        };
+        let dark = render(egui::Theme::Dark);
+        let light = render(egui::Theme::Light);
+        for (name, xs) in [("ratings", 13..40), ("pick", 42..52), ("edited", 117..127)] {
+            let background = luminance(light.pixels[102 * 140 + 80]);
+            let foreground = (97..109).flat_map(|y| xs.clone().map(move |x| y * 140 + x)).map(|at| luminance(light.pixels[at])).fold(0.0, f64::max);
+            let contrast = (foreground + 0.05) / (background + 0.05);
+            assert!(contrast >= 4.5, "{name}: rendered Light badge contrast {contrast:.2}:1");
+        }
+        for y in 95..110 {
+            for x in 10..130 {
+                assert_eq!(light.pixels[y * 140 + x], dark.pixels[y * 140 + x], "photo-overlay pixel ({x},{y}) must be appearance-independent");
+            }
+        }
     }
 }

@@ -2031,5 +2031,10 @@
   "Downloading model": "Modell wird heruntergeladen",
   "Finding faces": "Gesichter werden gesucht",
   "Synchronizing folder": "Ordner wird synchronisiert",
-  "Looking for changes": "Änderungen werden gesucht"
+  "Looking for changes": "Änderungen werden gesucht",
+  "Light Mode": "Heller Modus",
+  "Dark Mode": "Dunkler Modus",
+  "Appearance": "Erscheinungsbild",
+  "Interface Theme": "Oberflächendesign",
+  "System follows the desktop appearance. If unavailable, it uses Dark.": "System folgt dem Erscheinungsbild des Desktops. Falls nicht verfügbar, wird Dunkel verwendet."
 }
