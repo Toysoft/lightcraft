@@ -244,5 +244,9 @@
   "not added to Apple Photos: {e}": "Appleの写真に追加されませんでした：{e}",
   "{n} added to Apple Photos album “{album}”": "{n}件をAppleの写真のアルバム「{album}」に追加しました",
   "{n} added to Apple Photos": "{n}件をAppleの写真に追加しました",
-  "{n} photos opened for editing; each is stacked with its original": "{n}枚の写真を編集用に開きました。それぞれ元の写真とスタックされています"
+  "{n} photos opened for editing; each is stacked with its original": "{n}枚の写真を編集用に開きました。それぞれ元の写真とスタックされています",
+  "Model in use: {name}": "使用中のモデル：{name}",
+  "Works · {ms} ms per photo": "動作します · 1 枚あたり {ms} ms",
+  "{got} of {total} from {host}": "{host} から {got} / {total}",
+  "Downloads {size} from {host}, once. Each file is checked against its recorded checksum; then LightCraft starts using it.": "{host} から {size} を一度だけダウンロードします。各ファイルは記録済みのチェックサムで確認され、その後 LightCraft が使用を開始します。"
 }

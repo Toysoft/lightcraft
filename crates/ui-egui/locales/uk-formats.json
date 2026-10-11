@@ -244,5 +244,9 @@
   "not added to Apple Photos: {e}": "не додано до Apple Фото: {e}",
   "{n} added to Apple Photos album “{album}”": "Додано до альбому Apple Фото «{album}»: {n}",
   "{n} added to Apple Photos": "Додано до Apple Фото: {n}",
-  "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом"
+  "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом",
+  "Model in use: {name}": "Модель, що використовується: {name}",
+  "Works · {ms} ms per photo": "Працює · {ms} мс на фото",
+  "{got} of {total} from {host}": "{got} з {total} з {host}",
+  "Downloads {size} from {host}, once. Each file is checked against its recorded checksum; then LightCraft starts using it.": "Одноразово завантажує {size} з {host}. Кожен файл звіряється із записаною контрольною сумою, після чого LightCraft починає використовувати модель."
 }

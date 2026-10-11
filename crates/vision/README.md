@@ -9,7 +9,8 @@ space, in pure Rust on [candle](https://github.com/huggingface/candle) (`candle-
   the image tower (indexing), the text tower (search) or both.
 - `manifest`: what a model is (id, family, licence, files pinned by size + SHA-256, input
   preprocessing, tokenizer and context, embedding size, score kind, default tag threshold),
-  validated with bounds. Built in: `siglip2-b16-256`.
+  validated with bounds. Built in: `siglip2-b16-256` (default), `siglip2-b16-384`,
+  `siglip2-so400m-16-384`; `manifest::hugging_face(id)` is each one's pinned Hugging Face revision.
 - `siglip`: the SigLIP / SigLIP 2 (fixed resolution) towers — ViT with attention-pooling head,
   text transformer with last-token head; sigmoid scoring with the checkpoint's scale and bias.
 - `tokenizer::SentencePiece`: Gemma/SentencePiece BPE from `tokenizer.json` (added tokens, `▁`

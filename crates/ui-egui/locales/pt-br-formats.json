@@ -244,5 +244,9 @@
   "not added to Apple Photos: {e}": "não adicionadas ao Fotos da Apple: {e}",
   "{n} added to Apple Photos album “{album}”": "{n} adicionadas ao álbum “{album}” do Fotos da Apple",
   "{n} added to Apple Photos": "{n} adicionadas ao Fotos da Apple",
-  "{n} photos opened for editing; each is stacked with its original": "{n} fotos abertas para edição; cada uma está empilhada com a original"
+  "{n} photos opened for editing; each is stacked with its original": "{n} fotos abertas para edição; cada uma está empilhada com a original",
+  "Model in use: {name}": "Modelo em uso: {name}",
+  "Works · {ms} ms per photo": "Funciona · {ms} ms por foto",
+  "{got} of {total} from {host}": "{got} de {total} de {host}",
+  "Downloads {size} from {host}, once. Each file is checked against its recorded checksum; then LightCraft starts using it.": "Baixa {size} de {host}, uma única vez. Cada arquivo é verificado com sua soma de verificação registrada; depois o LightCraft começa a usá-lo."
 }

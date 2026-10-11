@@ -178,9 +178,65 @@ pub fn builtin_siglip2_b16_256() -> Manifest {
     }
 }
 
-/// The models LightCraft knows (offered for download).
+/// SigLIP 2 base, patch 16, 384 px: the same towers as [`builtin_siglip2_b16_256`] at a larger
+/// input (576 patches, about 2.4× the work per photo), for finer detail.
+pub fn builtin_siglip2_b16_384() -> Manifest {
+    let mut m = builtin_siglip2_b16_256();
+    let f = |name: &str, size: u64, sha256: &str| FileSpec { name: name.into(), size, sha256: sha256.into() };
+    m.id = "siglip2-b16-384".into();
+    m.name = "SigLIP 2 Base (384 px)".into();
+    m.source = "https://huggingface.co/google/siglip2-base-patch16-384".into();
+    m.files = vec![
+        f("model.safetensors", 1_501_968_264, "ed72c0ace85020ae610fc817c2538b9cae5a477b012a50859c60af5b3ad30857"),
+        f("tokenizer.json", 34_363_039, "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322"),
+        f("config.json", 276, "b1b2481aa448d0cd29001bcf5244e72fa8f916dd8348bd18abf9e5533105b96c"),
+        f("preprocessor_config.json", 394, "fb2817d3523ca3b666c859f15320c7138416bc38ffc515e2963f78c868c51c90"),
+    ];
+    m.image.size = 384;
+    m
+}
+
+/// SigLIP 2 So400m, patch 16, 384 px: the large towers (27 layers, width 1152, 1152-dim
+/// embeddings), 4.5 GB, several times slower than the base model.
+pub fn builtin_siglip2_so400m_16_384() -> Manifest {
+    let mut m = builtin_siglip2_b16_384();
+    let f = |name: &str, size: u64, sha256: &str| FileSpec { name: name.into(), size, sha256: sha256.into() };
+    m.id = "siglip2-so400m-16-384".into();
+    m.name = "SigLIP 2 So400m (384 px)".into();
+    m.source = "https://huggingface.co/google/siglip2-so400m-patch16-384".into();
+    m.files = vec![
+        f("model.safetensors", 4_544_267_488, "422750e06216f053d85d4176fb6a9d4c5e71ded2d1b7c7e0e6c2efd909a1e427"),
+        f("tokenizer.json", 34_363_039, "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322"),
+        f("config.json", 537, "5f09151a317b37430e2c12358b94a4b698e9e72ee332986f04ac7df7e29de931"),
+        f("preprocessor_config.json", 394, "fb2817d3523ca3b666c859f15320c7138416bc38ffc515e2963f78c868c51c90"),
+    ];
+    m.embedding.dim = 1152;
+    m
+}
+
+/// The id of the model offered first (and used when nothing else is chosen).
+pub const DEFAULT_MODEL: &str = "siglip2-b16-256";
+
+/// The models LightCraft knows (offered for download), the default first.
 pub fn builtin() -> Vec<Manifest> {
-    vec![builtin_siglip2_b16_256()]
+    vec![builtin_siglip2_b16_256(), builtin_siglip2_b16_384(), builtin_siglip2_so400m_16_384()]
+}
+
+/// Where a built-in model's files are downloaded from by default: its Hugging Face repository,
+/// pinned to the revision whose files the manifest lists (file `f` is at `<base>/<f>`). The
+/// files are checked against the manifest's sizes and SHA-256 whatever the source.
+pub fn hugging_face(id: &str) -> Option<&'static str> {
+    match id {
+        "siglip2-b16-256" => Some("https://huggingface.co/google/siglip2-base-patch16-256/resolve/3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab"),
+        "siglip2-b16-384" => Some("https://huggingface.co/google/siglip2-base-patch16-384/resolve/f775b65a79762255128c981547af89addcfe0f88"),
+        "siglip2-so400m-16-384" => Some("https://huggingface.co/google/siglip2-so400m-patch16-384/resolve/dd658faac399427308559e2c3ac1e99cbe43845d"),
+        _ => None,
+    }
+}
+
+/// The total size of a model's files in bytes.
+pub fn total_size(m: &Manifest) -> u64 {
+    m.files.iter().fold(0u64, |a, f| a.saturating_add(f.size))
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -318,6 +374,13 @@ mod tests {
         }
         let m = builtin_siglip2_b16_256();
         assert_eq!(m.file("model.safetensors").unwrap().size, 1_500_985_224);
+        assert_eq!(builtin()[0].id, DEFAULT_MODEL);
+        for m in builtin() {
+            assert!(hugging_face(&m.id).is_some_and(|u| u.starts_with("https://huggingface.co/google/")), "{}", m.id);
+            assert!(total_size(&m) > 1_500_000_000);
+        }
+        assert_eq!(builtin_siglip2_so400m_16_384().embedding.dim, 1152);
+        assert_eq!(hugging_face("nope"), None);
         let json = serde_json::to_string(&m).unwrap();
         assert!(json.contains("\"tagThreshold\"") && json.contains("\"cpuMsPerImage\""), "{json}");
     }
