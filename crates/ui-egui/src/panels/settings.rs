@@ -34,10 +34,9 @@ const CACHE_SIZES: [u32; 5] = [512, 1024, 2048, 4096, 8192];
 const LABEL_W: f32 = 150.0;
 
 /// The dialog body for `tab` (the tab bar switches `tab`).
-pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String) {
-    let t = Tokens::get(ui.ctx());
+/// The tab row: the dialog's fixed header, above the scrolling [`body`].
+pub fn tabs(ui: &mut egui::Ui, tab: &mut String) {
     ui.set_min_width(560.0);
-    ui.set_min_height(330.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         for (id, label) in TABS {
@@ -47,6 +46,13 @@ pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String) {
         }
     });
     ui.separator();
+}
+
+/// The selected tab's settings (the tabs themselves are [`tabs`]).
+pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String) {
+    let t = Tokens::get(ui.ctx());
+    ui.set_min_width(560.0);
+    ui.set_min_height(330.0);
     ui.add_space(2.0);
     match tab.as_str() {
         "import" => import_tab(app, ui, &t),

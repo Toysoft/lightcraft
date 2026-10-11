@@ -72,8 +72,9 @@ fn window(ctx: &egui::Context, id: &str, title: &str, text: &str, buttons: &[(&s
     });
     let mut chosen = None;
     let frame = egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::symmetric(18, 14));
-    egui::Window::new(crate::i18n::tr(title))
-        .id(egui::Id::new(id))
+    let window_id = egui::Id::new(id);
+    let shown = egui::Window::new(crate::i18n::tr(title))
+        .id(window_id)
         .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
@@ -84,18 +85,22 @@ fn window(ctx: &egui::Context, id: &str, title: &str, text: &str, buttons: &[(&s
             // a fixed width: a wrapped label in an auto-sized, centred window would move it every frame
             ui.set_width(420.0);
             ui.spacing_mut().item_spacing.y = 8.0;
-            ui.add(egui::Label::new(RichText::new(text).color(t.text_label)).wrap());
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                for (i, (bid, label, _)) in buttons.iter().enumerate() {
-                    let r = ui.add(egui::Button::new(crate::i18n::tr(label)).min_size(vec2(0.0, 26.0)));
-                    register(ui.ctx(), format!("button:{bid}"), r.rect);
-                    if r.clicked() {
-                        chosen = Some(i);
+            let mut layout = crate::dialog_frame::ModalLayout::begin(ui, window_id);
+            layout.body(ui, |ui| ui.add(egui::Label::new(RichText::new(text).color(t.text_label)).wrap()));
+            layout.footer(ui, |ui| {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    for (i, (bid, label, _)) in buttons.iter().enumerate() {
+                        let r = ui.add(egui::Button::new(crate::i18n::tr(label)).min_size(vec2(0.0, 26.0)));
+                        register(ui.ctx(), format!("button:{bid}"), r.rect);
+                        if r.clicked() {
+                            chosen = Some(i);
+                        }
                     }
-                }
+                });
             });
         });
+    crate::dialog_frame::ModalLayout::finish(ctx, window_id, shown.as_ref().map(|w| w.response.rect));
     chosen
 }
 

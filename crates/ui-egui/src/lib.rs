@@ -10,6 +10,7 @@ pub mod album_picker;
 pub mod control;
 pub mod credits;
 pub mod date_picker;
+pub mod dialog_frame;
 pub mod docking;
 pub mod export_task;
 pub mod headless;
@@ -47,6 +48,8 @@ mod tests_crop_rotate;
 mod tests_curve;
 #[cfg(test)]
 mod tests_date_picker;
+#[cfg(test)]
+mod tests_dialog_frame;
 #[cfg(test)]
 mod tests_filmstrip;
 #[cfg(test)]

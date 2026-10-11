@@ -97,8 +97,9 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
     });
     let mut choice = None;
     let frame = egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::symmetric(18, 14));
-    egui::Window::new(crate::i18n::tr("Your library couldn't be opened"))
-        .id(egui::Id::new("library-problem"))
+    let window_id = egui::Id::new("library-problem");
+    let shown = egui::Window::new(crate::i18n::tr("Your library couldn't be opened"))
+        .id(window_id)
         .order(egui::Order::Foreground)
         .collapsible(false)
         .resizable(false)
@@ -109,36 +110,42 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
             // a fixed width: a wrapped label in an auto-sized, centred window would move it every frame
             ui.set_width(440.0);
             ui.spacing_mut().item_spacing.y = 8.0;
-            if problem.path.is_empty() {
-                ui.label(RichText::new(crate::i18n::tr("LightCraft couldn't find where to keep your library.")).color(t.text));
-            } else {
-                ui.label(RichText::new(crate::i18n::tr("LightCraft couldn't open the library at")).color(t.text_label));
-                ui.label(RichText::new(&problem.path).font(t.semibold(12.5)).color(t.text));
-            }
-            ui.add(egui::Label::new(RichText::new(&problem.error).color(t.caution)).wrap());
-            ui.label(
-                RichText::new(
-                    "Your photos and edits in it are untouched. You can try again (e.g. after closing another program that has it open \
+            let mut layout = crate::dialog_frame::ModalLayout::begin(ui, window_id);
+            layout.body(ui, |ui| {
+                if problem.path.is_empty() {
+                    ui.label(RichText::new(crate::i18n::tr("LightCraft couldn't find where to keep your library.")).color(t.text));
+                } else {
+                    ui.label(RichText::new(crate::i18n::tr("LightCraft couldn't open the library at")).color(t.text_label));
+                    ui.label(RichText::new(&problem.path).font(t.semibold(12.5)).color(t.text));
+                }
+                ui.add(egui::Label::new(RichText::new(&problem.error).color(t.caution)).wrap());
+                ui.label(
+                    RichText::new(
+                        "Your photos and edits in it are untouched. You can try again (e.g. after closing another program that has it open \
                      or reconnecting its drive), open a different library or create a new one, or continue without a library — \
                      then nothing you do is saved.",
-                )
-                .color(t.text_dim),
-            );
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                let mut button = |ui: &mut egui::Ui, id: &str, label: &str, enabled: bool, c: Choice| {
-                    let r = ui.add_enabled(enabled, egui::Button::new(crate::i18n::tr(label)).min_size(vec2(0.0, 26.0)));
-                    register(ui.ctx(), format!("button:{id}"), r.rect);
-                    if r.clicked() {
-                        choice = Some(c);
-                    }
-                };
-                button(ui, "libraryRetry", "Try Again", problem.can_retry && !problem.path.is_empty(), Choice::Retry);
-                button(ui, "libraryChoose", "Choose Another Library…", app.services.pick_folder.is_some(), Choice::Choose);
-                button(ui, "libraryTemporary", "Continue Without Saving", true, Choice::Temporary);
-                button(ui, "libraryQuit", "Quit", true, Choice::Quit);
+                    )
+                    .color(t.text_dim),
+                );
+            });
+            layout.footer(ui, |ui| {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let mut button = |ui: &mut egui::Ui, id: &str, label: &str, enabled: bool, c: Choice| {
+                        let r = ui.add_enabled(enabled, egui::Button::new(crate::i18n::tr(label)).min_size(vec2(0.0, 26.0)));
+                        register(ui.ctx(), format!("button:{id}"), r.rect);
+                        if r.clicked() {
+                            choice = Some(c);
+                        }
+                    };
+                    button(ui, "libraryRetry", "Try Again", problem.can_retry && !problem.path.is_empty(), Choice::Retry);
+                    button(ui, "libraryChoose", "Choose Another Library…", app.services.pick_folder.is_some(), Choice::Choose);
+                    button(ui, "libraryTemporary", "Continue Without Saving", true, Choice::Temporary);
+                    button(ui, "libraryQuit", "Quit", true, Choice::Quit);
+                });
             });
         });
+    crate::dialog_frame::ModalLayout::finish(ctx, window_id, shown.as_ref().map(|w| w.response.rect));
     match choice {
         Some(Choice::Retry) => open(app, Some(problem.path)),
         Some(Choice::Choose) => open(app, None),
