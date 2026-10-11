@@ -157,7 +157,7 @@ fn the_list_offers_the_known_models_with_their_licence_and_source() {
     let l = list(&mut s);
     assert_eq!((l["enabled"].as_bool(), l["model"].is_null(), l["runtime"].as_bool()), (Some(false), true, Some(cfg!(not(target_arch = "wasm32")))));
     let ids: Vec<&str> = l["models"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str()).collect();
-    assert_eq!(ids, ["siglip2-b16-256", "siglip2-b16-384", "siglip2-so400m-16-384"]);
+    assert_eq!(ids, ["siglip2-b16-256", "siglip2-b16-384", "siglip2-so400m-16-384", "clip-vit-b32-openai"]);
     let m = find(&l, "siglip2-b16-256");
     assert_eq!((m["state"].as_str(), m["default"].as_bool(), m["installed"].as_bool()), (Some("available"), Some(true), Some(false)));
     assert_eq!(
@@ -167,6 +167,30 @@ fn the_list_offers_the_known_models_with_their_licence_and_source() {
     assert_eq!(m["downloadHost"], "huggingface.co");
     assert_eq!(m["sizeBytes"], 1_500_985_224u64 + 34_363_039 + 276 + 394);
     assert_eq!((m["supported"].as_bool(), find(&l, "siglip2-so400m-16-384")["embeddingDim"].as_u64()), (Some(true), Some(1152)));
+    assert_eq!(
+        (m["hint"]["quality"].as_str(), m["hint"]["relativeTime"].as_f64(), m["hint"]["englishOnly"].as_bool()),
+        (Some("fast"), Some(1.0), Some(false))
+    );
+    assert!(m["libraryIndex"].is_null(), "no library open");
+    // the second family: CLIP, MIT, OpenAI's, English only, smaller and quicker
+    let c = find(&l, "clip-vit-b32-openai");
+    assert_eq!(
+        (
+            c["family"].as_str(),
+            c["licence"]["name"].as_str(),
+            c["licence"]["commercial"].as_bool(),
+            c["publisher"].as_str(),
+            c["supported"].as_bool()
+        ),
+        (Some("clip"), Some("MIT"), Some(true), Some("OpenAI"), Some(cfg!(not(target_arch = "wasm32"))))
+    );
+    assert_eq!((c["embeddingDim"].as_u64(), c["imageSize"].as_u64(), c["sizeBytes"].as_u64()), (Some(512), Some(224), Some(606_549_371)));
+    assert_eq!(
+        (c["hint"]["quality"].as_str(), c["hint"]["englishOnly"].as_bool(), c["downloadHost"].as_str()),
+        (Some("fastest"), Some(true), Some("huggingface.co"))
+    );
+    assert!(c["hint"]["relativeTime"].as_f64().unwrap() < 1.0);
+    assert!(find(&l, "siglip2-so400m-16-384")["hint"]["relativeTime"].as_f64().unwrap() > 1.0);
     // no folder at all: an empty list and refusals, never a crash
     let mut bare = Session::new();
     assert_eq!(bare.execute("content.models.list", &json!({})).unwrap()["models"], json!([]));
@@ -440,7 +464,7 @@ fn an_unwritable_models_folder_is_an_error_not_a_crash() {
     let e = s.execute("content.models.download", &json!({"id": "siglip2-b16-256", "acknowledged": true})).unwrap_err().to_string();
     assert!(e.contains("could not create"), "{e}");
     assert!(s.activity.list().is_empty());
-    assert_eq!(list(&mut s)["models"].as_array().unwrap().len(), 3);
+    assert_eq!(list(&mut s)["models"].as_array().unwrap().len(), 4);
     let _ = std::fs::remove_dir_all(&d);
 }
 

@@ -2074,5 +2074,12 @@
   "Preparing auto-tags": "正在准备自动标签",
   "shows": "显示",
   "is tagged": "带有标签",
-  "isn't tagged": "没有标签"
+  "isn't tagged": "没有标签",
+  "Each model keeps its own index of your photos: switching to another indexes the library once more with it, and switching back needs no new scan.": "每个模型都保留自己的照片索引：切换到另一个模型时会用它为图库再建立一次索引，切换回来则无需重新扫描。",
+  "Small · fastest": "小 · 最快",
+  "Base · fast": "基础 · 快",
+  "Base · finer detail": "基础 · 细节更丰富",
+  "Large · best search results": "大 · 搜索结果最佳",
+  "English only": "仅英语",
+  "any language": "任意语言"
 }

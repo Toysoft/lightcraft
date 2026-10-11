@@ -145,6 +145,19 @@ pub fn known(catalog: &Catalog) -> Vec<Manifest> {
     all
 }
 
+/// A known model's manifest as installed, with this version's built-in tuning: the search and tag cut-offs, a softmax
+/// model's score offset and the model list's hint. So a calibration made after a model was installed reaches it; its
+/// files (and so its index and tag) are untouched. Anything else is returned as is.
+pub fn tuned(mut m: Manifest) -> Manifest {
+    if let Some(b) = manifest::builtin().into_iter().find(|b| b.id == m.id && b.family == m.family) {
+        m.tag_threshold = b.tag_threshold;
+        m.match_threshold = b.match_threshold;
+        m.score.offset = b.score.offset;
+        m.hint = b.hint;
+    }
+    m
+}
+
 /// How a model's folder stands.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Found {
@@ -197,7 +210,7 @@ pub fn on_disk(dir: &Path, known: &[Manifest]) -> (Vec<OnDisk>, Vec<String>) {
                 .ok_or_else(|| format!("{MANIFEST_FILE} cannot be read or is too large"))
                 .and_then(|b| manifest::parse(&b).map_err(|e| e.to_string()));
             let m = match parsed {
-                Ok(m) if m.id == name => m,
+                Ok(m) if m.id == name => tuned(m),
                 Ok(m) => {
                     errors.push(format!("{name}: its {MANIFEST_FILE} is for `{}`", m.id));
                     continue;
@@ -599,6 +612,28 @@ pub fn self_test(_: &Path, _: &Manifest) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installed_known_models_take_this_versions_tuning() {
+        for b in manifest::builtin() {
+            let mut old = b.clone();
+            old.tag_threshold = 0.3;
+            old.match_threshold = 0.4;
+            old.hint = None;
+            if old.family == manifest::Family::Clip {
+                old.score.offset = Some(1.0);
+            }
+            let t = tuned(old.clone());
+            assert_eq!((t.tag_threshold, t.match_threshold, t.score, t.hint), (b.tag_threshold, b.match_threshold, b.score, b.hint), "{}", b.id);
+            assert_eq!(t.files, old.files, "the files are what was installed");
+            // another model under a known id's name (a different family) and unknown ids are left alone
+            let mut other = old.clone();
+            other.family = if b.family == manifest::Family::Clip { manifest::Family::Siglip } else { manifest::Family::Clip };
+            assert_eq!(tuned(other.clone()), other);
+            other.id = "mine".into();
+            assert_eq!(tuned(other.clone()), other);
+        }
+    }
 
     #[test]
     fn hosts_come_from_addresses() {

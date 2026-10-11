@@ -59,6 +59,8 @@ impl Weights {
                 Some("F32") => DType::F32,
                 Some("F16") => DType::F16,
                 Some("BF16") => DType::BF16,
+                // (CLIP checkpoints carry `position_ids` tables, never read)
+                Some("I64") => DType::I64,
                 other => return Err(Error::Model(format!("{name}: unsupported dtype {other:?}"))),
             };
             let shape: Option<Vec<usize>> = v
@@ -184,13 +186,17 @@ mod tests {
         let neg = write("neg", r#"{"a":{"dtype":"F32","shape":[-1],"data_offsets":[0,4]}}"#, &[0; 4]);
         assert!(Weights::open(&neg).is_err());
         let int = write("int", r#"{"a":{"dtype":"I64","shape":[1],"data_offsets":[0,8]}}"#, &[0; 8]);
-        assert!(Weights::open(&int).is_err());
+        assert!(Weights::open(&int).is_ok(), "integer tables are listed");
+        let int = write("int", r#"{"a":{"dtype":"I64","shape":[2],"data_offsets":[0,8]}}"#, &[0; 8]);
+        assert!(Weights::open(&int).is_err(), "and their size checked");
+        let odd = write("odd", r#"{"a":{"dtype":"F8_E4M3","shape":[1],"data_offsets":[0,1]}}"#, &[0; 1]);
+        assert!(Weights::open(&odd).is_err());
         let p = std::env::temp_dir().join(format!("lc-vision-weights-hdr-{}.safetensors", std::process::id()));
         std::fs::write(&p, 1000u64.to_le_bytes()).unwrap();
         assert!(Weights::open(&p).is_err());
         std::fs::write(&p, [1u8, 2]).unwrap();
         assert!(Weights::open(&p).is_err());
-        for f in [ok, short, huge, wrap, neg, int, p] {
+        for f in [ok, short, huge, wrap, neg, int, odd, p] {
             let _ = std::fs::remove_file(f);
         }
     }

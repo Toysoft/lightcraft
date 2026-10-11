@@ -2230,5 +2230,12 @@
   "Preparing auto-tags": "Підготовка автотегів",
   "shows": "показує",
   "is tagged": "має тег",
-  "isn't tagged": "не має тегу"
+  "isn't tagged": "не має тегу",
+  "Each model keeps its own index of your photos: switching to another indexes the library once more with it, and switching back needs no new scan.": "Кожна модель має власний індекс ваших фото: під час переходу на іншу бібліотека один раз індексується нею, а під час повернення нове сканування не потрібне.",
+  "Small · fastest": "Мала · найшвидша",
+  "Base · fast": "Базова · швидка",
+  "Base · finer detail": "Базова · більше деталей",
+  "Large · best search results": "Велика · найкращі результати пошуку",
+  "English only": "лише англійська",
+  "any language": "будь-яка мова"
 }

@@ -2195,5 +2195,12 @@
   "Preparing auto-tags": "Auto-Tags werden vorbereitet",
   "shows": "zeigt",
   "is tagged": "hat das Tag",
-  "isn't tagged": "hat das Tag nicht"
+  "isn't tagged": "hat das Tag nicht",
+  "Each model keeps its own index of your photos: switching to another indexes the library once more with it, and switching back needs no new scan.": "Jedes Modell hat seinen eigenen Index Ihrer Fotos: Beim Wechsel zu einem anderen wird die Bibliothek einmal mit ihm indiziert, beim Zurückwechseln ist kein neuer Durchlauf nötig.",
+  "Small · fastest": "Klein · am schnellsten",
+  "Base · fast": "Basis · schnell",
+  "Base · finer detail": "Basis · feinere Details",
+  "Large · best search results": "Groß · beste Suchergebnisse",
+  "English only": "nur Englisch",
+  "any language": "jede Sprache"
 }

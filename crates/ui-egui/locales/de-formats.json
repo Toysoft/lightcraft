@@ -265,5 +265,10 @@
   "Similar to {name}": "Ähnlich wie {name}",
   "Preparing {n} tags…": "{n} Tags werden vorbereitet…",
   "{n} tags in the vocabulary.": "{n} Tags im Vokabular.",
-  "Vocabulary saved; {n} lines were skipped": "Vokabular gesichert; {n} Zeilen übersprungen"
+  "Vocabulary saved; {n} lines were skipped": "Vokabular gesichert; {n} Zeilen übersprungen",
+  ", ~{n}× slower": ", ~{n}× langsamer",
+  ", ~{n}× faster": ", ~{n}× schneller",
+  "Its index of this library: {n} photos": "Sein Index dieser Bibliothek: {n} Fotos",
+  "Using {name}: its own index of this library is back (the other model's is kept)": "{name} wird verwendet: sein eigener Index dieser Bibliothek ist wieder da (der des anderen Modells bleibt erhalten)",
+  "Using {name}: it indexes the library once (the other model's index is kept)": "{name} wird verwendet: es indiziert die Bibliothek einmal (der Index des anderen Modells bleibt erhalten)"
 }

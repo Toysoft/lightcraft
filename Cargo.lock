@@ -3456,6 +3456,7 @@ dependencies = [
  "candle-core",
  "candle-nn",
  "lightcraft-fetch",
+ "lightcraft-vision",
  "log",
  "serde",
  "serde_json",

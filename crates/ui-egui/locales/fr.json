@@ -2037,5 +2037,12 @@
   "Preparing auto-tags": "Préparation des balises automatiques",
   "shows": "montre",
   "is tagged": "a la balise",
-  "isn't tagged": "n'a pas la balise"
+  "isn't tagged": "n'a pas la balise",
+  "Each model keeps its own index of your photos: switching to another indexes the library once more with it, and switching back needs no new scan.": "Chaque modèle garde son propre index de vos photos : passer à un autre indexe la bibliothèque une fois de plus avec lui, et revenir ne demande pas de nouvelle analyse.",
+  "Small · fastest": "Petit · le plus rapide",
+  "Base · fast": "Base · rapide",
+  "Base · finer detail": "Base · plus de détails",
+  "Large · best search results": "Grand · les meilleurs résultats de recherche",
+  "English only": "anglais uniquement",
+  "any language": "toutes les langues"
 }

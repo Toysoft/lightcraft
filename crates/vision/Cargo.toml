@@ -3,7 +3,7 @@ name = "lightcraft-vision"
 version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
-description = "LightCraft content models: SigLIP 2 image and text embeddings in pure Rust on candle (L1)"
+description = "LightCraft content models: SigLIP 2 and CLIP image and text embeddings in pure Rust on candle (L1)"
 
 [lints]
 workspace = true

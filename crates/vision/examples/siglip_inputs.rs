@@ -1,4 +1,5 @@
-//! Writes the golden test's images as PNGs for `tools/siglip_reference.py`:
+//! Writes the golden test's images as PNGs (and its texts) for `tools/siglip_reference.py` and
+//! `tools/clip_reference.py`:
 //! `cargo run -p lightcraft-vision --example siglip_inputs -- <out dir>`.
 
 #[path = "../tests/inputs.rs"]
@@ -19,5 +20,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     std::fs::write(dir.join("texts.json"), serde_json::to_string(&inputs::TEXTS)?)?;
     std::fs::write(dir.join("token_cases.json"), serde_json::to_string(&inputs::token_cases())?)?;
+    std::fs::write(dir.join("clip_token_cases.json"), serde_json::to_string(&inputs::clip_token_cases())?)?;
     Ok(())
 }

@@ -1,5 +1,26 @@
 # What's new in LightCraft
 
+## 2026-10-12
+
+### Search by content: a second model, and models tuned one by one
+- **CLIP ViT-B/32** (OpenAI, MIT licence, 605 MB) joins the SigLIP 2 models in Settings ▸ Search: the small, quick one,
+  about twice as fast at indexing as SigLIP 2 Base and a third of its download, for English searches and tags. It finds
+  less than SigLIP 2 (see docs/content-search.md for the measurements), so SigLIP 2 Base stays the recommended model.
+- Each model in Settings ▸ Search says what it is for and what it costs: *Small · fastest, ~2× faster · English only*,
+  *Base · fast · any language*, *Large · best search results, ~8× slower · any language*, and how many photos of the open
+  library it has indexed.
+- **Switching models keeps every index**: each model has its own index of the library and its own prepared
+  vocabulary, so going back to a model you used before needs no new scan. Settings ▸ Search says so, and so does the
+  message when you switch.
+- **SigLIP 2 So400m** now has its own cut-offs for searches and auto-tags, measured like the base model's: searches
+  with it find far more (about 70 % of the matching photos instead of 44 %, as precisely), at about 8 times the
+  indexing time; its auto-tags are no better than the base model's. A model already installed picks up new cut-offs
+  when LightCraft is updated.
+- Indexing stops sooner when you switch models: the photos still waiting in the batch it was on are skipped.
+- Agents: `content.models.list` gives each model's `hint {quality, relativeTime, englishOnly}` and `libraryIndex
+  {photos, bytes}`; CLIP installs and downloads like the others (`content.models.download {id:
+  "clip-vit-b32-openai", acknowledged: true}`).
+
 ## 2026-10-11
 
 ### Search by content: auto-tags

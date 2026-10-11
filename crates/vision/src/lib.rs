@@ -3,21 +3,25 @@
 //! A [`ContentModel`] turns photos and phrases into vectors in one space; [`ContentModel::score`]
 //! says how well a photo matches a phrase. The model behind it is described by a [`Manifest`]
 //! (what it is, its files, its licence, how it wants its input), so models are interchangeable:
-//! the default is Google's SigLIP 2 (base, patch 16, 256 px) on candle ([`siglip`]); a second
-//! family (CLIP) drops in behind the same trait.
+//! the default is Google's SigLIP 2 (base, patch 16, 256 px) on candle ([`siglip`]); OpenAI's CLIP
+//! ViT-B/32 ([`clip`]) is a second family behind the same trait, with its own tokenizer and scoring.
 //!
 //! The weights are not part of LightCraft: they are read from a folder the user downloads them
 //! to ([`load`]). Everything here runs locally. On macOS the towers run on the GPU through Metal,
 //! elsewhere on the CPU; the web build has no towers ([`load`] reports that it's unsupported).
 //!
-//! The SigLIP towers are ported from the Hugging Face `transformers` implementation (Apache-2.0);
-//! see `NOTICE`. This crate is therefore licensed under the Apache License 2.0 only (not the MIT
+//! The SigLIP and CLIP towers are ported from the Hugging Face `transformers` implementation
+//! (Apache-2.0); see `NOTICE`. This crate is therefore licensed under the Apache License 2.0 only (not the MIT
 //! option of the rest of LightCraft). No UI dependencies (L1).
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod clip;
 pub mod config;
 pub mod manifest;
+#[cfg(not(target_arch = "wasm32"))]
+mod nn;
 pub mod preprocess;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod siglip;
@@ -62,8 +66,9 @@ pub trait ContentModel: Send + Sync {
     /// One L2-normalised embedding per text, in order. At most [`MAX_BATCH`] texts; the manifest
     /// says how they are prepared (lower-cased, truncated to the context).
     fn embed_texts(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
-    /// How well an image embedding matches a text embedding. For a sigmoid model this is a
-    /// probability (0..1) that a threshold can be applied to; for a softmax model it only ranks.
+    /// How well an image embedding matches a text embedding, from 0 to 1: for a sigmoid model (SigLIP) the
+    /// probability it was trained to give, for a softmax model (CLIP) its scaled cosine through a sigmoid with a
+    /// calibrated offset ([`manifest::ScoreKind`]), so a cut-off means much the same for both.
     fn score(&self, image: &[f32], text: &[f32]) -> f32 {
         self.score_cosine(dot(image, text))
     }
@@ -136,7 +141,7 @@ pub fn load(dir: &Path, manifest: &Manifest, towers: Towers) -> Result<Box<dyn C
     manifest::validate(manifest)?;
     match manifest.family {
         manifest::Family::Siglip => Ok(Box::new(siglip::Siglip::load_on(dir, manifest.clone(), towers, best_device())?)),
-        manifest::Family::Clip => Err(Error::Model(format!("{}: CLIP models are not supported yet", manifest.id))),
+        manifest::Family::Clip => Ok(Box::new(clip::Clip::load_on(dir, manifest.clone(), towers, best_device())?)),
     }
 }
 

@@ -55,3 +55,23 @@ pub fn token_cases() -> Vec<String> {
     v.push("kids on a beach at sunset ".repeat(20));
     v
 }
+
+/// Tokenizer-only cases for CLIP's tokenizer: the shared ones but the combining accent (the reference composes it
+/// first, NFC, which LightCraft's tokenizer does not do), plus contractions, digits, the markers written out, and a text
+/// longer than 77 tokens.
+pub fn clip_token_cases() -> Vec<String> {
+    let mut v: Vec<String> = token_cases().into_iter().filter(|c| !c.contains('\u{301}')).collect();
+    v.extend(
+        [
+            "don't, we're: I'll go; she'd've 'quoted'",
+            "1234 cats & 5.5 dogs!!! #42 @home",
+            "<|startoftext|>a dog<|endoftext|> on a jetty",
+            "a DOG on a Jetty at SUNSET",
+            "naïve façade, Ærøskøbing",
+            "hyphen-ated_words/and\\slashes",
+        ]
+        .iter()
+        .map(|s| s.to_string()),
+    );
+    v
+}

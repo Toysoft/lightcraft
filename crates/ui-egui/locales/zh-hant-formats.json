@@ -265,5 +265,10 @@
   "Similar to {name}": "與 {name} 相似",
   "Preparing {n} tags…": "正在準備 {n} 個標籤…",
   "{n} tags in the vocabulary.": "詞彙表中有 {n} 個標籤。",
-  "Vocabulary saved; {n} lines were skipped": "詞彙表已儲存；略過了 {n} 行"
+  "Vocabulary saved; {n} lines were skipped": "詞彙表已儲存；略過了 {n} 行",
+  ", ~{n}× slower": "，約慢 {n} 倍",
+  ", ~{n}× faster": "，約快 {n} 倍",
+  "Its index of this library: {n} photos": "其在此圖庫的索引：{n} 張照片",
+  "Using {name}: its own index of this library is back (the other model's is kept)": "正在使用 {name}：它在此圖庫的索引已恢復（另一個模型的索引仍保留）",
+  "Using {name}: it indexes the library once (the other model's index is kept)": "正在使用 {name}：它會為圖庫建立一次索引（另一個模型的索引仍保留）"
 }

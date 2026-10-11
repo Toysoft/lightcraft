@@ -1,31 +1,56 @@
 # Search by content
 
-LightCraft is learning to find photos by what they show: type `beach at sunset` or `red car` and get the photos that
-match, with no keywords needed. It runs a content model (an image and text embedding model) on this computer; no photo,
-embedding or search ever leaves it.
+LightCraft finds photos by what they show: type `beach at sunset` or `red car` and get the photos that match, with no
+keywords needed. It runs a content model (an image and text embedding model) on this computer; no photo, embedding or
+search ever leaves it.
 
-**Where it stands (phase 5 of 6):** the models and their download are done (Settings ▸ Search lists them, downloads
-one behind its licence, checks it and tests it), and so is the index: with **Index photo contents** on, LightCraft
-embeds every photo of the library in the background. **You can search by contents from the search bar** (its Contents
-mode, or `contents:` words in any search), mixed with every other filter, sorted by Relevance, and find photos with
-similar contents from any photo. **Photos get auto-tags** from a vocabulary of about 1,500 things they can show: the
-Library Filter has a Contents column, the Keywording panel suggests them as keywords, and Smart Collections can ask
-what a photo shows. A second model family (CLIP) comes next (phase 6).
+In short: pick a model in Settings ▸ Search (downloaded once, behind its licence), switch on **Index photo contents**,
+and LightCraft embeds every photo of the library in the background. Then **search by contents from the search bar**
+(its Contents mode, or `contents:` words in any search), mixed with every other filter and sorted by Relevance; **find
+photos with similar contents** from any photo; and use **auto-tags** from a vocabulary of about 1,500 things a photo can
+show: the Library Filter's Contents column, suggestions in the Keywording panel, and a Smart Collection criterion.
+Two model families work behind the same interface: Google's SigLIP 2 (the default) and OpenAI's CLIP.
 
 ## Models
 
 A content model is a folder of files described by a manifest (`content-model.json`, see `crates/vision/src/manifest.rs`):
 what it is, its licence, every file pinned by size and SHA-256, and how it wants its input. Models are interchangeable
-behind it. LightCraft knows three, all Google's SigLIP 2 under the **Apache License 2.0** (any use, commercial included):
+behind it. LightCraft knows four, in two families:
 
-| Id | Model | Size | Notes |
-|---|---|---|---|
-| `siglip2-b16-256` | [SigLIP 2 Base, patch 16, 256 px](https://huggingface.co/google/siglip2-base-patch16-256) | 1.5 GB | the default; ~200 ms per photo on a 16-core CPU |
-| `siglip2-b16-384` | [SigLIP 2 Base, patch 16, 384 px](https://huggingface.co/google/siglip2-base-patch16-384) | 1.5 GB | finer detail, about 2.4× the work per photo |
-| `siglip2-so400m-16-384` | [SigLIP 2 So400m, patch 16, 384 px](https://huggingface.co/google/siglip2-so400m-patch16-384) | 4.6 GB | the large model (1152-dim embeddings), several times slower |
+| Id | Model | Licence | Size | Settings ▸ Search says | Indexing (per photo, vs Base) |
+|---|---|---|---|---|---|
+| `siglip2-b16-256` | [SigLIP 2 Base, patch 16, 256 px](https://huggingface.co/google/siglip2-base-patch16-256) (Google) | Apache-2.0 | 1.5 GB | Base · fast · any language (recommended) | 141–167 ms (1×) |
+| `siglip2-b16-384` | [SigLIP 2 Base, patch 16, 384 px](https://huggingface.co/google/siglip2-base-patch16-384) (Google) | Apache-2.0 | 1.5 GB | Base · finer detail, ~2.4× slower · any language | not measured (~2.4× the work) |
+| `siglip2-so400m-16-384` | [SigLIP 2 So400m, patch 16, 384 px](https://huggingface.co/google/siglip2-so400m-patch16-384) (Google) | Apache-2.0 | 4.6 GB | Large · best search results, ~8× slower · any language | 1,175–1,179 ms (8×) |
+| `clip-vit-b32-openai` | [CLIP ViT-B/32](https://huggingface.co/openai/clip-vit-base-patch32) (OpenAI) | MIT | 0.6 GB | Small · fastest, ~2× faster · English only | 33–101 ms (~0.5×) |
 
-All three run on the same towers (`crates/vision`); the text tower is multilingual, so searches can be typed in the UI
-languages. The weights are not part of LightCraft and are never bundled: each is an opt-in download.
+Indexing times are end to end (reading the picture included) at Normal pace on a Ryzen 9 9950X (16 cores, CPU only,
+load average 11–20 from other work), on the same two scratch libraries (352 mixed JPEG/raw photos, 235 Sony raws with
+embedded previews).
+
+- **SigLIP 2** (`crates/vision/src/siglip.rs`): a ViT image tower with an attention-pooling head, a text tower with
+  Gemma's SentencePiece tokenizer (256k tokens, 64-token context). Trained with a sigmoid loss, so its score is a match
+  probability. The text tower is multilingual: searches can be typed in the UI languages.
+- **CLIP** (`crates/vision/src/clip.rs`): a ViT-B/32 image tower (224 px, centre crop, class-token pooling and a
+  projection), a 12-layer causal text tower with CLIP's byte-level BPE tokenizer (`vocab.json` + `merges.txt`, 77
+  tokens, pooled at the end-of-text token). English only. The tokenizer is shared with SAM 3's text encoder
+  (`crates/segment`). Trained with a softmax over a batch, CLIP has a learned scale (100) but no bias, so its scaled
+  cosine only ranks; LightCraft gives it a calibrated offset (`score.offset` in the manifest, −31 for ViT-B/32) and
+  passes it through the same sigmoid, so a cut-off, a vocabulary tag's own cut-off and a Smart Collection's `min` read
+  the same way for both families (see *Cut-offs, measured*).
+- The ports agree with the Hugging Face `transformers` reference (fp32): SigLIP 2 token ids exact on 22 cases, image
+  embeddings cosine ≥ 0.999999, text 1.000000; CLIP token ids exact on 27 cases (accents, emoji, Cyrillic, Japanese,
+  contractions, the markers written out, truncation at 77), image embeddings ≥ 0.999999, text 1.000000, cosines within
+  4e-7 (`tools/siglip_reference.py`, `tools/clip_reference.py`, `crates/vision/tests/`). CLIP's tokenizer does not
+  compose accents first (Unicode NFC); typed text already is.
+- **Which to choose:** SigLIP 2 Base for most libraries; So400m when finding more matters more than time (it
+  finds far more in searches, at about 8 times the indexing time, but tags no better with the built-in vocabulary); CLIP when indexing time or download size matters most and searches are in English: it finds clearly less
+  (tags: precision 0.56, recall 0.52 vs Base's 0.74 / 0.69).
+
+The weights are not part of LightCraft and are never bundled: each is an opt-in download. CLIP's file is the
+`model.safetensors` of the `openai/clip-vit-base-patch32` repository's safetensors conversion (revision `c237dc49…`,
+the same tensors as its `pytorch_model.bin`), checked by size and SHA-256 like the others; the weights are OpenAI's,
+released under the MIT licence with [their code](https://github.com/openai/CLIP).
 
 ## Download and licence
 
@@ -77,7 +102,8 @@ one, or switches indexing off.
 **Test** (`content.models.test`) loads the model and embeds three procedurally generated scenes (a beach, a misty
 forest, a flower close-up from `lightcraft-scenes`) and three descriptions; each scene must match its own description
 best. It records the load time and the time per photo and per text in `installed.json`. On a Ryzen 9 9950X (CPU):
-SigLIP 2 Base 256 px loads in ~0.6 s, ~200–220 ms per photo, ~50–75 ms per text.
+SigLIP 2 Base 256 px loads in ~0.6 s, ~200–220 ms per photo, ~50–75 ms per text; CLIP ViT-B/32 loads in 0.1 s, 44 ms
+per photo, 5 ms per text; So400m loads in 2.4 s, ~3.8 s per photo and ~290 ms per text (measured under load).
 
 ## Indexing
 
@@ -107,12 +133,15 @@ index. It runs in the background:
 - **Offline and unreadable photos:** a photo whose file is missing (a drive that is not connected) is skipped and
   tried again a minute later; one that cannot be read is skipped for the rest of the session (`failed` in the status).
   `content.reindex` tries them again at once.
-- **Model switch:** choosing another model stops the scan and indexing goes on with that model's own index; the old
-  index stays in its file, so switching back costs nothing. A model that does not load stops indexing with the reason
+- **Model switch:** choosing another model stops the scan (the photos still waiting in the batch it was on are
+  skipped, so it stops after the photo being read) and indexing goes on with that model's own index; the old index
+  stays in its file, so switching back costs nothing. The vocabulary's embeddings are kept per model too. Settings ▸
+  Search shows, for each model, how many photos of the open library its index holds. A model that does not load stops indexing with the reason
   in Settings ▸ Search (`error` in the status); it is tried again when indexing is switched on again, never in a loop.
 
-Measured on a Ryzen 9 9950X (16 cores, CPU only), SigLIP 2 Base 256 px: see the results in the plan; roughly
-150–300 ms per photo end to end, so a library of 10,000 photos takes about half an hour to an hour, once.
+Measured on a Ryzen 9 9950X (16 cores, CPU only): SigLIP 2 Base 256 px roughly 140–300 ms per photo end to end, so a
+library of 10,000 photos takes about half an hour to an hour, once; CLIP about half that; So400m 8 times as
+long (see *Models*).
 
 ## The index file
 
@@ -123,7 +152,8 @@ library that is not on disk keeps its index in memory only.
 - Layout (little-endian): `"LCCE"`, version `u8` (1), tag length `u16`, the tag `<model id>@<SHA-256 of the
   weights>`, dimension `u32`, element type `u8` (1 = f16); then one record per photo: photo id `u64`, the photo's
   content hash (16 bytes: a digest of its file's hash) and the embedding as `dim` f16 values. 1,560 bytes per photo
-  for the base models: 80,000 photos take about 125 MB, on disk and in memory.
+  for the base models (768 numbers), 2,328 for So400m (1152), 1,048 for CLIP (512): 80,000 photos take 84–186 MB, on
+  disk and in memory.
 - Records are appended while the scan runs (every few seconds, and when the library closes or the app quits). A record
   cut short by a crash is ignored, and the file is cut back to its last whole record before anything else is appended.
 - A photo indexed again or deleted leaves a dead record; when more than a fifth of the records are dead, the file is
@@ -148,8 +178,8 @@ library that is not on disk keeps its index in memory only.
   into one phrase.
 - **The result** is the photos that match, ANDed with everything else in view (the source, the filter bar, ratings,
   dates, folders, albums, keywords). Photos match when the model's score reaches its cut-off (`matchThreshold` in the
-  model's manifest: 0.02 for SigLIP 2 Base 256 px, measured on real libraries); when none does, the best 200 are shown
-  and the chip says *Best 200 matches*.
+  model's manifest: 0.02 for SigLIP 2 Base, 0.003 for So400m, 0.005 for CLIP; see *Cut-offs, measured*); when
+  none does, the best 200 are shown and the chip says *Best 200 matches*.
 - **The chip** above the grid: *Contents: beach* with ✕ (ends the search, the field is cleared, the sort goes back),
   **Fewer** and **More** (each halves or doubles the cut-off, or the number of best matches; Fewer never goes down to
   nothing), and how many photos matched. Hovering a photo shows a thin match bar against the best match and its score
@@ -165,7 +195,7 @@ library that is not on disk keeps its index in memory only.
   (More / Fewer: twice or half as many). It complements **Find Similar Photos**, which compares composition and tones.
 - **When it cannot run** (no model, the model removed or switched while a search is in view, a photo deleted, a text
   the model cannot read) the grid shows nothing for it and the chip says why: never a ranking left over from another
-  model. Blank searches are no search; long ones are cut to 500 characters (the model reads 64 tokens).
+  model. Blank searches are no search; long ones are cut to 500 characters (SigLIP reads 64 tokens, CLIP 77).
 
 ### How it works
 
@@ -177,7 +207,9 @@ catalog never sees the index. The ranking is worked out again when the index gro
 is pressed; texts already searched are remembered (64 of them) while the model stays loaded.
 
 For SigLIP the score is the model's match probability (a sigmoid of the scaled cosine plus the model's bias): on the
-base model the right description of a photo typically scores 0.03–0.4 and unrelated ones well under 0.01.
+base model the right description of a photo typically scores 0.03–0.4 and unrelated ones well under 0.01. For CLIP it is
+the scaled cosine plus the calibrated offset through the same sigmoid (`sigmoid(100 · cos − 31)`): it ranks exactly as
+the cosine does, and its cut-offs were chosen on the same photos.
 
 Latency (Ryzen 9 9950X, CPU): the text tower loads in about half a second, once; then a new search embeds the text in
 30–70 ms and scores the index in a few ms. Under heavy load from other work (load average ~75) a new search took
@@ -235,7 +267,7 @@ keyword of that name (`heron`, or `Birds|heron`) is not suggested the tag again.
   each batch the scan adds and when the vocabulary or the model changes. Each photo keeps its 16 best scores in memory;
   nothing is stored. Once the vocabulary is cached, no model needs to be loaded for this.
 - A photo shows the tags whose score reaches the cut-off, at most 8. The cut-off is the model's (0.01 for SigLIP 2
-  base, chosen below) or yours (Settings ▸ Search ▸ Advanced ▸ *Tag cut-off*: lower shows more tags and more wrong ones).
+  Base and CLIP, 0.007 for So400m, chosen below) or yours (Settings ▸ Search ▸ Advanced ▸ *Tag cut-off*: lower shows more tags and more wrong ones).
   Moving it applies at once. Specific tags carry their own, higher cut-off in the vocabulary (bird species, dog breeds,
   people's roles: `@0.1`, `@0.05`); one that reaches the model's cut-off but not its own counts for the tag above it, so
   a photo the model thinks shows a spaniel is still tagged *dog*.
@@ -256,12 +288,12 @@ scene|beach = beach @0.03        its own cut-off
 Levels above a tag need no line of their own. A vocabulary has at most 5,000 tags of at most 6 levels and 120
 characters, 8 phrases per tag; lines that can't be read (too long, repeated, empty) are skipped and reported. Your
 vocabulary is kept in `vocabulary.txt` in the content models folder (for every library); *Restore Defaults* goes back to
-the built-in one. Non-English terms work with SigLIP 2's multilingual text tower.
+the built-in one. Non-English terms work with SigLIP 2's multilingual text tower, not with CLIP (English only).
 
-### The cut-off, measured
+### Cut-offs, measured
 
-On 343 labelled photos (319 real photos of three scratch libraries, labelled by hand, and the 24 procedural demo
-scenes), SigLIP 2 base (256 px), the built-in vocabulary, at most 8 tags per photo:
+**Auto-tags.** On 343 labelled photos (319 real photos of three scratch libraries, labelled by hand, and the 24
+procedural demo scenes), the built-in vocabulary, at most 8 tags per photo. SigLIP 2 Base (256 px):
 
 | Cut-off | Precision | Recall | Scenes P / R | Animals P / R | Objects P / R | People P / R | Vehicles P / R |
 |---|---|---|---|---|---|---|---|
@@ -275,6 +307,42 @@ main subjects found (a tag below one counts). Scenes include nature, time of day
 buildings, rooms and things. People and vehicles had only 6 labelled subjects each, so their numbers are rough. Most
 wrong tags are near misses (a cottage for a house seen from above, the wrong small bird), which is why species carry
 their own cut-off. Chosen: 0.01 (suggestions are confirmed by the user, so recall matters).
+
+The same photos and method for the other models (the chosen cut-off in bold):
+
+| Model | Cut-off | Precision | Recall | Scenes P / R | Animals P / R | Objects P / R | People P / R | Vehicles P / R |
+|---|---|---|---|---|---|---|---|---|
+| SigLIP 2 So400m | 0.005 | 0.66 | 0.70 | 0.69 / 0.67 | 0.66 / 0.94 | 0.50 / 0.43 | 0.64 / 0.50 | 0.48 / 0.83 |
+| SigLIP 2 So400m | **0.007** | **0.68** | **0.67** | 0.71 / 0.65 | 0.68 / 0.92 | 0.53 / 0.36 | 0.67 / 0.50 | 0.46 / 0.83 |
+| SigLIP 2 So400m | 0.01 | 0.71 | 0.63 | 0.74 / 0.61 | 0.68 / 0.85 | 0.60 / 0.32 | 0.78 / 0.50 | 0.37 / 0.83 |
+| CLIP ViT-B/32 (offset −30) | 0.01 | 0.52 | 0.64 | 0.63 / 0.56 | 0.49 / 0.94 | 0.32 / 0.68 | 0.14 / 0.00 | 0.25 / 1.00 |
+| CLIP ViT-B/32 (offset −31) | **0.01** | **0.56** | **0.52** | 0.65 / 0.43 | 0.58 / 0.87 | 0.36 / 0.60 | 0.12 / 0.00 | 0.30 / 0.67 |
+| CLIP ViT-B/32 (offset −32) | 0.01 | 0.64 | 0.37 | 0.70 / 0.28 | 0.72 / 0.68 | 0.41 / 0.45 | 0.14 / 0.00 | 0.40 / 0.50 |
+
+So400m's scores run lower than Base's, so its tag cut-off is lower too; with this vocabulary (whose own cut-offs were
+set on Base) it tags no better than Base, while it finds far more in searches (below). CLIP's offset was chosen where
+its precision and recall meet, and put at the score SigLIP 2 Base's cut-off has (0.01),
+so the vocabulary's own cut-offs mean as much more for both. CLIP tags clearly worse than SigLIP 2: more near misses
+(objects and scenes), no person found among the few labelled.
+
+**Searches.** 30 searches typed as a person would (*a bird*, *the night sky*, *a construction site*, *a dog*, *a
+kitchen*, *mountains*, *a camper van*…) over the 319 labelled real photos; a shown photo is right when its labels
+include what was searched for (or a near synonym), recall counts the photos labelled with it:
+
+| Model | Cut-off | Precision | Recall | Photos shown |
+|---|---|---|---|---|
+| SigLIP 2 Base | 0.01 | 0.93 | 0.58 | 317 |
+| SigLIP 2 Base | **0.02** | **0.94** | **0.44** | 230 |
+| SigLIP 2 So400m | 0.002 | 0.93 | 0.76 | 453 |
+| SigLIP 2 So400m | **0.003** | **0.94** | **0.70** | 405 |
+| SigLIP 2 So400m | 0.005 | 0.94 | 0.60 | 339 |
+| CLIP ViT-B/32 | 0.002 | 0.86 | 0.55 | 355 |
+| CLIP ViT-B/32 | **0.005** | **0.90** | **0.38** | 223 |
+| CLIP ViT-B/32 | 0.01 | 0.92 | 0.25 | 143 |
+
+A model installed before its cut-offs changed picks the new ones up: a known model's cut-offs, offset and hint come
+from the version of LightCraft in use, not from its installed manifest. SigLIP 2 Base at 384 px uses the 256 px
+model's cut-offs (not measured: it was not downloaded for this).
 
 ## Privacy
 
@@ -329,6 +397,9 @@ lightcraft-cli run --demo content.models.install path=~/.config/lightcraft/model
 
 ## Not yet
 
-A second model family, CLIP (phase 6); the 384 px and So400m models use the base model's cut-offs (not measured); the
-vocabulary is English only (other languages can be added as user vocabularies). The web build has no content search
-(the towers run natively only).
+- The web build has no content search (the towers run natively only, on candle).
+- The vocabulary is English only (other languages can be added as user vocabularies; with SigLIP 2 they work).
+- No GPU on Linux and Windows (candle's CPU kernels; Metal on macOS): the large model is slow there.
+- The cut-offs were measured on one person's 343 photos; people and vehicles were few. SigLIP 2 Base 384 px is not
+  calibrated.
+- CLIP's tokenizer skips Unicode NFC (accents typed decomposed tokenize differently).

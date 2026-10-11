@@ -3,9 +3,13 @@
 //! - [`sentencepiece`]: SentencePiece-style BPE read from a Hugging Face `tokenizer.json`
 //!   (Gemma's, which SigLIP 2 uses): byte fallback, unknown-token fusing, added tokens,
 //!   end-of-sequence suffix and padding to the model's context.
+//! - [`clip_bpe`]: CLIP's byte-level BPE from `vocab.json` + `merges.txt` (CLIP's text tower, and SAM 3's text
+//!   encoder in `lightcraft-segment`).
 
+pub mod clip_bpe;
 pub mod sentencepiece;
 
+pub use clip_bpe::ClipBpe;
 pub use sentencepiece::SentencePiece;
 
 /// Longest text tokenized (bytes); longer input is cut at a character boundary first. Far more

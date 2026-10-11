@@ -140,6 +140,16 @@ pub(crate) fn vocab_hash(s: &mut Session) -> u64 {
     s.content.tags.vocab.as_ref().map_or(0, |v| v.1)
 }
 
+/// A cached scoring brought up to the model's manifest: a softmax (CLIP) model's offset is LightCraft's calibration,
+/// not part of the weights, so the one in use replaces the one the cache was written with.
+pub(crate) fn current_scoring(cached: Scoring, m: &lightcraft_vision::Manifest) -> Scoring {
+    if m.score.kind == lightcraft_vision::manifest::ScoreKind::Softmax && cached.sigmoid {
+        Scoring { bias: m.score.softmax_offset(), ..cached }
+    } else {
+        cached
+    }
+}
+
 /// The cut-off of every tag without its own: the user's (Settings ▸ Search), else the model's. A model LightCraft
 /// knows takes its value from the built-in manifest, so a calibration in a newer version reaches installed models.
 pub(crate) fn threshold(s: &Session) -> f32 {
@@ -204,7 +214,7 @@ pub(crate) fn step(s: &mut Session) {
             let c = read_vocab_cache(&vocab_cache_path(&dir, &cur.id), &cur.tag, cur.manifest.embedding.dim as usize);
             let t = &mut s.content.tags;
             if c.note.is_none() && !c.vectors.is_empty() {
-                t.scoring = Some(c.scoring.unwrap_or(Scoring::COSINE));
+                t.scoring = Some(current_scoring(c.scoring.unwrap_or(Scoring::COSINE), &cur.manifest));
             }
             t.vectors = c.vectors;
             t.cache_note = c.note;

@@ -100,6 +100,24 @@ fn job_row(s: &Session, id: &str) -> Value {
     v
 }
 
+/// The open library's index file for model `m`: `{photos, bytes}` (photos counted from its header and size, superseded
+/// records included), or null when there is none.
+#[cfg(not(target_arch = "wasm32"))]
+fn library_index(s: &Session, m: &Manifest) -> Value {
+    let Some(lib) = s.library.as_ref().filter(|l| l.on_disk) else { return Value::Null };
+    let path = crate::content_index::file_path(&lib.dir, &m.id);
+    match (crate::content_index::records_in(&path), std::fs::metadata(&path)) {
+        (Some(n), Ok(meta)) => json!({"photos": n, "bytes": meta.len()}),
+        _ => Value::Null,
+    }
+}
+
+/// The web build has no content index.
+#[cfg(target_arch = "wasm32")]
+fn library_index(_: &Session, _: &Manifest) -> Value {
+    Value::Null
+}
+
 fn row(s: &Session, v: &View, m: &Manifest, disk: Option<&OnDisk>) -> Value {
     let builtin = manifest::builtin().iter().any(|b| b.id == m.id);
     let from_catalog = v.catalog.models.iter().any(|c| c.id == m.id);
@@ -117,7 +135,10 @@ fn row(s: &Session, v: &View, m: &Manifest, disk: Option<&OnDisk>) -> Value {
         "family": m.family,
         "version": m.version,
         "licence": m.licence,
-        "publisher": builtin.then_some("Google"),
+        "publisher": builtin.then_some(match m.family {
+            manifest::Family::Siglip => "Google",
+            manifest::Family::Clip => "OpenAI",
+        }),
         "source": m.source,
         "sizeBytes": manifest::total_size(m),
         "embeddingDim": m.embedding.dim,
@@ -125,8 +146,12 @@ fn row(s: &Session, v: &View, m: &Manifest, disk: Option<&OnDisk>) -> Value {
         "default": m.id == DEFAULT_MODEL,
         "known": builtin || from_catalog,
         "fromCatalog": from_catalog,
-        // the towers this build has run it (CLIP comes later)
-        "supported": RUNTIME && m.family == manifest::Family::Siglip,
+        // this build has the towers (both families run natively)
+        "supported": RUNTIME,
+        // quality tier, time per photo relative to the default model, English only
+        "hint": m.hint,
+        // the open library's index for this model (each model keeps its own; switching back needs no new scan)
+        "libraryIndex": library_index(s, m),
         "state": state,
         "problem": problem,
         "installed": state == "installed",

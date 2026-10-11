@@ -103,16 +103,33 @@ pub struct EmbeddingSpec {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ScoreKind {
-    /// `sigmoid(exp(logit_scale)·cos + logit_bias)` with the weights' scale and bias: a probability.
+    /// Trained with a sigmoid loss (SigLIP): `sigmoid(exp(logit_scale)·cos + logit_bias)` with the weights' scale and
+    /// bias, a probability.
     Sigmoid,
-    /// `exp(logit_scale)·cos`: ranks only.
+    /// Trained with a softmax over a batch (CLIP): the weights have a scale (`exp(logit_scale)·cos` ranks) but no bias,
+    /// so the scaled cosine says nothing on its own. The score is `sigmoid(exp(logit_scale)·cos + offset)` with the
+    /// manifest's calibrated [`ScoreSpec::offset`], so every cut-off (search, auto-tags, the vocabulary's own,
+    /// Smart Collections) reads the same way for both kinds.
     Softmax,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScoreSpec {
     pub kind: ScoreKind,
+    /// A softmax model's offset (see [`ScoreKind::Softmax`]); [`DEFAULT_SOFTMAX_OFFSET`] when not given. Not used by
+    /// sigmoid models (they have their own bias).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f32>,
+}
+
+impl ScoreSpec {
+    pub const SIGMOID: ScoreSpec = ScoreSpec { kind: ScoreKind::Sigmoid, offset: None };
+
+    /// The offset a softmax model's scores get.
+    pub fn softmax_offset(&self) -> f32 {
+        self.offset.unwrap_or(DEFAULT_SOFTMAX_OFFSET)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -121,6 +138,33 @@ pub struct Speed {
     /// Measured by the self-test on this computer.
     #[serde(default)]
     pub cpu_ms_per_image: Option<f32>,
+}
+
+/// Where a model stands among the others, for the model list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Quality {
+    /// Small and quick, finds less.
+    Fastest,
+    /// The default balance.
+    Fast,
+    /// More pixels per photo: finer detail, more work.
+    Detailed,
+    /// The largest towers: the best search results, the slowest.
+    Best,
+}
+
+/// How a model compares with the others LightCraft knows (set for the built-in models, measured on a desktop
+/// processor; see `docs/content-search.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hint {
+    pub quality: Quality,
+    /// Time per photo while indexing, relative to the default model's.
+    pub relative_time: f32,
+    /// Searches and tags work in English only (the text tower was trained on English).
+    #[serde(default)]
+    pub english_only: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -147,6 +191,8 @@ pub struct Manifest {
     pub match_threshold: f32,
     #[serde(default)]
     pub speed: Speed,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<Hint>,
 }
 
 /// The search cut-off of SigLIP 2 base (256 px), measured on real libraries: a dog on a jetty scores 0.05–0.08 for
@@ -158,6 +204,33 @@ pub const DEFAULT_MATCH_THRESHOLD: f32 = 0.02;
 /// `docs/content-search.md`). Specific tags (bird species, dog breeds, roles) carry their own, higher cut-offs in the
 /// vocabulary.
 pub const DEFAULT_TAG_THRESHOLD: f32 = 0.01;
+
+/// The softmax offset of a CLIP model whose manifest gives none: CLIP ViT-B/32's (see [`CLIP_B32_OFFSET`]).
+pub const DEFAULT_SOFTMAX_OFFSET: f32 = CLIP_B32_OFFSET;
+
+/// CLIP ViT-B/32's calibration, on the same 343 labelled photos as SigLIP 2 base's (see `docs/content-search.md`).
+/// The offset puts its balanced tag cut-off (precision 0.56, recall 0.52 with the built-in vocabulary) at the same
+/// score as SigLIP 2 base's, 0.01, so the vocabulary's own cut-offs (`@0.1` for species and breeds) are as much
+/// stricter for both: `100 · cos − 31` is −4.6 (a score of 0.01) at a cosine of 0.264.
+pub const CLIP_B32_OFFSET: f32 = -31.0;
+pub const CLIP_B32_TAG_THRESHOLD: f32 = 0.01;
+/// Searches typed as they come ("a dog", "the sea") score lower than the tags' sentences: 0.005 gives precision 0.90,
+/// recall 0.38 over 30 searches of the labelled photos (SigLIP 2 base at 0.02: 0.94 / 0.44).
+pub const CLIP_B32_MATCH_THRESHOLD: f32 = 0.005;
+/// Indexing time per photo relative to SigLIP 2 base (256 px), measured end to end on the same library and CPU.
+/// (33–101 ms per photo against base's 141–167 on the same libraries and CPU, about half the time in all).
+pub const CLIP_B32_RELATIVE_TIME: f32 = 0.5;
+
+/// SigLIP 2 So400m's calibration, on the same labelled photos and searches as the base model's. It finds far more in
+/// searches (0.003: precision 0.94, recall 0.70; base at 0.02: 0.94 / 0.44) but tags no better with the built-in
+/// vocabulary (0.007: precision 0.68, recall 0.67; base at 0.01: 0.74 / 0.69): its scores run lower.
+pub const SO400M_TAG_THRESHOLD: f32 = 0.007;
+pub const SO400M_MATCH_THRESHOLD: f32 = 0.003;
+/// End to end at Normal pace, 1,175–1,179 ms per photo against base's 141–167 on the same libraries and CPU.
+pub const SO400M_RELATIVE_TIME: f32 = 7.5;
+/// SigLIP 2 base at 384 px: 576 patches instead of 256, about 2.4× the work (estimated from the patch count, not
+/// measured; its cut-offs are the 256 px model's, not calibrated).
+pub const B16_384_RELATIVE_TIME: f32 = 2.4;
 
 fn default_match_threshold() -> f32 {
     DEFAULT_MATCH_THRESHOLD
@@ -190,10 +263,11 @@ pub fn builtin_siglip2_b16_256() -> Manifest {
         image: ImageSpec { size: 256, resize: Filter::Bilinear, fit: Fit::Squash, mean: [0.5; 3], std: [0.5; 3] },
         text: TextSpec { tokenizer: TokenizerKind::Sentencepiece, context: 64, lowercase: true, template: "a photo of {}".into() },
         embedding: EmbeddingSpec { dim: 768 },
-        score: ScoreSpec { kind: ScoreKind::Sigmoid },
+        score: ScoreSpec::SIGMOID,
         tag_threshold: DEFAULT_TAG_THRESHOLD,
         match_threshold: DEFAULT_MATCH_THRESHOLD,
         speed: Speed::default(),
+        hint: Some(Hint { quality: Quality::Fast, relative_time: 1.0, english_only: false }),
     }
 }
 
@@ -212,6 +286,7 @@ pub fn builtin_siglip2_b16_384() -> Manifest {
         f("preprocessor_config.json", 394, "fb2817d3523ca3b666c859f15320c7138416bc38ffc515e2963f78c868c51c90"),
     ];
     m.image.size = 384;
+    m.hint = Some(Hint { quality: Quality::Detailed, relative_time: B16_384_RELATIVE_TIME, english_only: false });
     m
 }
 
@@ -230,7 +305,48 @@ pub fn builtin_siglip2_so400m_16_384() -> Manifest {
         f("preprocessor_config.json", 394, "fb2817d3523ca3b666c859f15320c7138416bc38ffc515e2963f78c868c51c90"),
     ];
     m.embedding.dim = 1152;
+    m.tag_threshold = SO400M_TAG_THRESHOLD;
+    m.match_threshold = SO400M_MATCH_THRESHOLD;
+    m.hint = Some(Hint { quality: Quality::Best, relative_time: SO400M_RELATIVE_TIME, english_only: false });
     m
+}
+
+/// CLIP ViT-B/32 (OpenAI, MIT): the small, fast, English-only model (224 px, 512-dim embeddings, 605 MB), a second
+/// family with its own tokenizer and scoring. The weights are the `safetensors` conversion of OpenAI's checkpoint in
+/// the `openai/clip-vit-base-patch32` repository (Hugging Face's conversion bot, the same tensors as
+/// `pytorch_model.bin`).
+pub fn builtin_clip_vit_b32_openai() -> Manifest {
+    let f = |name: &str, size: u64, sha256: &str| FileSpec { name: name.into(), size, sha256: sha256.into() };
+    Manifest {
+        id: "clip-vit-b32-openai".into(),
+        name: "CLIP ViT-B/32 (OpenAI)".into(),
+        family: Family::Clip,
+        version: "2021-01".into(),
+        licence: Licence { name: "MIT".into(), commercial: true, url: Some("https://github.com/openai/CLIP/blob/main/LICENSE".into()) },
+        source: "https://huggingface.co/openai/clip-vit-base-patch32".into(),
+        files: vec![
+            f("model.safetensors", 605_157_884, "99d28a652e6ec46629ab7047a0ac82c69b1fe11e0ce672c43af65d3a9a3fc05d"),
+            f("vocab.json", 862_328, "5047b556ce86ccaf6aa22b3ffccfc52d391ea4accdab9c2f2407da5b742d4363"),
+            f("merges.txt", 524_657, "f526393189112391ce6f9795d4695f704121ce452c3aad1f5335cc41337eba85"),
+            f("config.json", 4_186, "b575ef3c36f2a057fa19e221650105052d61cc9c1a972ec15019c6261ec98770"),
+            f("preprocessor_config.json", 316, "910e70b3956ac9879ebc90b22fb3bc8a75b6a0677814500101a4c072bd7857bd"),
+        ],
+        // preprocessor_config.json: shortest edge to 224 (resample 3 = PIL bicubic), centre crop 224, CLIP's mean/std
+        image: ImageSpec {
+            size: 224,
+            resize: Filter::Bicubic,
+            fit: Fit::CenterCrop,
+            mean: [0.481_454_66, 0.457_827_5, 0.408_210_73],
+            std: [0.268_629_54, 0.261_302_58, 0.275_777_1],
+        },
+        text: TextSpec { tokenizer: TokenizerKind::ClipBpe, context: 77, lowercase: true, template: "a photo of {}".into() },
+        embedding: EmbeddingSpec { dim: 512 },
+        score: ScoreSpec { kind: ScoreKind::Softmax, offset: Some(CLIP_B32_OFFSET) },
+        tag_threshold: CLIP_B32_TAG_THRESHOLD,
+        match_threshold: CLIP_B32_MATCH_THRESHOLD,
+        speed: Speed::default(),
+        hint: Some(Hint { quality: Quality::Fastest, relative_time: CLIP_B32_RELATIVE_TIME, english_only: true }),
+    }
 }
 
 /// The id of the model offered first (and used when nothing else is chosen).
@@ -238,7 +354,7 @@ pub const DEFAULT_MODEL: &str = "siglip2-b16-256";
 
 /// The models LightCraft knows (offered for download), the default first.
 pub fn builtin() -> Vec<Manifest> {
-    vec![builtin_siglip2_b16_256(), builtin_siglip2_b16_384(), builtin_siglip2_so400m_16_384()]
+    vec![builtin_siglip2_b16_256(), builtin_siglip2_b16_384(), builtin_siglip2_so400m_16_384(), builtin_clip_vit_b32_openai()]
 }
 
 /// Where a built-in model's files are downloaded from by default: its Hugging Face repository,
@@ -249,6 +365,8 @@ pub fn hugging_face(id: &str) -> Option<&'static str> {
         "siglip2-b16-256" => Some("https://huggingface.co/google/siglip2-base-patch16-256/resolve/3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab"),
         "siglip2-b16-384" => Some("https://huggingface.co/google/siglip2-base-patch16-384/resolve/f775b65a79762255128c981547af89addcfe0f88"),
         "siglip2-so400m-16-384" => Some("https://huggingface.co/google/siglip2-so400m-patch16-384/resolve/dd658faac399427308559e2c3ac1e99cbe43845d"),
+        // the commit of the repository's safetensors conversion (refs/pr/66), on top of main's 3d74acf9
+        "clip-vit-b32-openai" => Some("https://huggingface.co/openai/clip-vit-base-patch32/resolve/c237dc49a33fc61debc9276459120b7eac67e7ef"),
         _ => None,
     }
 }
@@ -367,9 +485,24 @@ pub fn validate(m: &Manifest) -> Result<(), ManifestError> {
     {
         return bad("speed.cpuMsPerImage", "must be a number from 0 to 1000000");
     }
+    if let Some(h) = m.hint
+        && !(h.relative_time.is_finite() && (0.01..=100.0).contains(&h.relative_time))
+    {
+        return bad("hint.relativeTime", "must be a number from 0.01 to 100");
+    }
+    if let Some(o) = m.score.offset
+        && !(o.is_finite() && (-200.0..=200.0).contains(&o))
+    {
+        return bad("score.offset", "must be a number from -200 to 200");
+    }
     match (m.family, m.text.tokenizer) {
-        (Family::Siglip, TokenizerKind::Sentencepiece) | (Family::Clip, TokenizerKind::ClipBpe) => Ok(()),
-        _ => bad("text.tokenizer", "does not match the model family"),
+        (Family::Siglip, TokenizerKind::Sentencepiece) | (Family::Clip, TokenizerKind::ClipBpe) => {}
+        _ => return bad("text.tokenizer", "does not match the model family"),
+    }
+    match (m.family, m.score.kind, m.score.offset) {
+        (Family::Siglip, ScoreKind::Sigmoid, None) | (Family::Clip, ScoreKind::Softmax, _) => Ok(()),
+        (Family::Siglip, ScoreKind::Sigmoid, Some(_)) => bad("score.offset", "is only for softmax (CLIP) models"),
+        _ => bad("score.kind", "does not match the model family (SigLIP: sigmoid, CLIP: softmax)"),
     }
 }
 
@@ -398,9 +531,16 @@ mod tests {
         assert_eq!(m.file("model.safetensors").unwrap().size, 1_500_985_224);
         assert_eq!(builtin()[0].id, DEFAULT_MODEL);
         for m in builtin() {
-            assert!(hugging_face(&m.id).is_some_and(|u| u.starts_with("https://huggingface.co/google/")), "{}", m.id);
-            assert!(total_size(&m) > 1_500_000_000);
+            let base = hugging_face(&m.id).unwrap();
+            assert!(base.starts_with("https://huggingface.co/") && m.source.starts_with("https://huggingface.co/"), "{}", m.id);
+            assert!(base.starts_with(&format!("{}/resolve/", m.source)), "{base} is in {}", m.source);
+            assert!(total_size(&m) > 600_000_000);
         }
+        let clip = builtin_clip_vit_b32_openai();
+        assert_eq!((clip.family, clip.text.tokenizer, clip.score.kind), (Family::Clip, TokenizerKind::ClipBpe, ScoreKind::Softmax));
+        assert_eq!((clip.image.size, clip.text.context, clip.embedding.dim), (224, 77, 512));
+        assert_eq!(clip.score.softmax_offset(), CLIP_B32_OFFSET);
+        assert_eq!(ScoreSpec { kind: ScoreKind::Softmax, offset: None }.softmax_offset(), DEFAULT_SOFTMAX_OFFSET);
         assert_eq!(builtin_siglip2_so400m_16_384().embedding.dim, 1152);
         assert_eq!(hugging_face("nope"), None);
         let json = serde_json::to_string(&m).unwrap();
@@ -437,6 +577,12 @@ mod tests {
             ("matchThreshold", Box::new(|m| m.match_threshold = -0.5)),
             ("speed.cpuMsPerImage", Box::new(|m| m.speed.cpu_ms_per_image = Some(-1.0))),
             ("text.tokenizer", Box::new(|m| m.text.tokenizer = TokenizerKind::ClipBpe)),
+            ("text.tokenizer", Box::new(|m| m.family = Family::Clip)),
+            ("score.kind", Box::new(|m| m.score.kind = ScoreKind::Softmax)),
+            ("score.offset", Box::new(|m| m.score.offset = Some(-3.0))),
+            ("score.offset", Box::new(|m| m.score.offset = Some(f32::NAN))),
+            ("hint.relativeTime", Box::new(|m| m.hint = Some(Hint { quality: Quality::Fast, relative_time: 0.0, english_only: false }))),
+            ("hint.relativeTime", Box::new(|m| m.hint = Some(Hint { quality: Quality::Fast, relative_time: f32::NAN, english_only: false }))),
         ];
         for (field, edit) in cases {
             let mut m = builtin_siglip2_b16_256();
@@ -444,6 +590,23 @@ mod tests {
             match validate(&m) {
                 Err(ManifestError::Field(f, _)) => assert_eq!(f, field),
                 other => panic!("{field}: {other:?}"),
+            }
+        }
+        // the CLIP family: its own tokenizer and scoring, a bounded offset
+        let clip_cases: Vec<(&str, Box<dyn Fn(&mut Manifest)>)> = vec![
+            ("text.tokenizer", Box::new(|m| m.text.tokenizer = TokenizerKind::Sentencepiece)),
+            ("text.tokenizer", Box::new(|m| m.family = Family::Siglip)),
+            ("score.kind", Box::new(|m| m.score.kind = ScoreKind::Sigmoid)),
+            ("score.offset", Box::new(|m| m.score.offset = Some(1e9))),
+            ("score.offset", Box::new(|m| m.score.offset = Some(f32::NEG_INFINITY))),
+            ("text.context", Box::new(|m| m.text.context = 1000)),
+        ];
+        for (field, edit) in clip_cases {
+            let mut m = builtin_clip_vit_b32_openai();
+            edit(&mut m);
+            match validate(&m) {
+                Err(ManifestError::Field(f, _)) => assert_eq!(f, field),
+                other => panic!("clip {field}: {other:?}"),
             }
         }
         assert_eq!(parse(&vec![b' '; MAX_MANIFEST_BYTES + 1]), Err(ManifestError::TooLarge));

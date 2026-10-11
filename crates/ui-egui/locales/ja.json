@@ -2039,5 +2039,12 @@
   "Preparing auto-tags": "自動タグを準備中",
   "shows": "が写っている",
   "is tagged": "タグがある",
-  "isn't tagged": "タグがない"
+  "isn't tagged": "タグがない",
+  "Each model keeps its own index of your photos: switching to another indexes the library once more with it, and switching back needs no new scan.": "モデルごとに写真のインデックスを別々に保持します。別のモデルに切り替えるとライブラリをそのモデルで一度インデックスし、元に戻すときは再スキャン不要です。",
+  "Small · fastest": "小 · 最速",
+  "Base · fast": "ベース · 高速",
+  "Base · finer detail": "ベース · より細部まで",
+  "Large · best search results": "大 · 最良の検索結果",
+  "English only": "英語のみ",
+  "any language": "全言語"
 }

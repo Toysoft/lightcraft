@@ -498,6 +498,16 @@ struct Header {
     dim: usize,
 }
 
+/// How many records the index file at `path` holds (superseded ones included), from its header and size, without
+/// reading them: `None` when there is no readable index there.
+pub(crate) fn records_in(path: &Path) -> Option<u64> {
+    let mut f = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let h = read_header(&mut f).ok()?;
+    let header = 7 + h.tag.len() as u64 + 5;
+    let record = 8 + 16 + 2 * h.dim as u64;
+    Some(std::fs::metadata(path).ok()?.len().saturating_sub(header) / record)
+}
+
 fn read_header(r: &mut impl Read) -> Result<Header, &'static str> {
     let mut fixed = [0u8; 7];
     r.read_exact(&mut fixed).map_err(|_| "is damaged (too short)")?;

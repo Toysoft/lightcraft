@@ -24,114 +24,16 @@ use std::sync::Arc;
 use candle_core::{DType, Device, IndexOp, Module, Tensor};
 use candle_nn::{LayerNorm, Linear, VarBuilder};
 
-use crate::config::{Act, SiglipConfig, TextConfig, VisionConfig};
+use crate::config::{SiglipConfig, TextConfig, VisionConfig};
 use crate::manifest::{Family, Manifest, ScoreKind, TokenizerKind};
+use crate::nn::{Block, Mlp, attend, blocks, linear, read_bounded, rows, scalar, split_heads};
 use crate::tokenizer::{MAX_TEXT_BYTES, SentencePiece};
 use crate::weights::{Backend, Weights};
-use crate::{ContentModel, Error, MAX_BATCH, Result, Rgb8, Towers, normalize, preprocess};
+use crate::{ContentModel, Error, MAX_BATCH, Result, Rgb8, Scoring, Towers, preprocess};
 
 pub const WEIGHTS_FILE: &str = "model.safetensors";
 pub const CONFIG_FILE: &str = "config.json";
 pub const TOKENIZER_FILE: &str = "tokenizer.json";
-
-/// Pre-norm multi-head self-attention (`SiglipAttention`).
-struct Attention {
-    q: Linear,
-    k: Linear,
-    v: Linear,
-    o: Linear,
-    heads: usize,
-    head_dim: usize,
-}
-
-fn linear(i: usize, o: usize, vb: VarBuilder) -> Result<Linear> {
-    Ok(candle_nn::linear(i, o, vb)?)
-}
-
-/// `[B, L, H·d]` → `[B, H, L, d]`.
-fn split_heads(x: &Tensor, heads: usize, head_dim: usize) -> Result<Tensor> {
-    let (b, l, _) = x.dims3()?;
-    Ok(x.reshape((b, l, heads, head_dim))?.transpose(1, 2)?.contiguous()?)
-}
-
-/// Scaled dot-product attention of `[B, H, Lq, d]` queries over `[B, H, Lk, d]`, back to `[B, Lq, H·d]`.
-fn attend(q: &Tensor, k: &Tensor, v: &Tensor) -> Result<Tensor> {
-    let (b, h, lq, d) = q.dims4()?;
-    let scale = (d as f64).powf(-0.5);
-    let att = (q.matmul(&k.t()?)? * scale)?;
-    let att = candle_nn::ops::softmax_last_dim(&att)?;
-    Ok(att.matmul(v)?.transpose(1, 2)?.reshape((b, lq, h * d))?)
-}
-
-impl Attention {
-    fn new(hidden: usize, heads: usize, vb: VarBuilder) -> Result<Self> {
-        Ok(Self {
-            q: linear(hidden, hidden, vb.pp("q_proj"))?,
-            k: linear(hidden, hidden, vb.pp("k_proj"))?,
-            v: linear(hidden, hidden, vb.pp("v_proj"))?,
-            o: linear(hidden, hidden, vb.pp("out_proj"))?,
-            heads,
-            head_dim: hidden / heads.max(1),
-        })
-    }
-
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let q = split_heads(&self.q.forward(x)?, self.heads, self.head_dim)?;
-        let k = split_heads(&self.k.forward(x)?, self.heads, self.head_dim)?;
-        let v = split_heads(&self.v.forward(x)?, self.heads, self.head_dim)?;
-        Ok(self.o.forward(&attend(&q, &k, &v)?)?)
-    }
-}
-
-/// fc1 → GELU → fc2 (`SiglipMLP`).
-struct Mlp {
-    fc1: Linear,
-    fc2: Linear,
-    act: Act,
-}
-
-impl Mlp {
-    fn new(hidden: usize, inter: usize, act: Act, vb: VarBuilder) -> Result<Self> {
-        Ok(Self { fc1: linear(hidden, inter, vb.pp("fc1"))?, fc2: linear(inter, hidden, vb.pp("fc2"))?, act })
-    }
-
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let x = self.fc1.forward(x)?;
-        let x = match self.act {
-            Act::GeluTanh => x.gelu()?,
-            Act::Gelu => x.gelu_erf()?,
-        };
-        Ok(self.fc2.forward(&x)?)
-    }
-}
-
-/// A pre-norm encoder block (`SiglipEncoderLayer`).
-struct Block {
-    ln1: LayerNorm,
-    attn: Attention,
-    ln2: LayerNorm,
-    mlp: Mlp,
-}
-
-impl Block {
-    fn new(hidden: usize, inter: usize, heads: usize, eps: f64, act: Act, vb: VarBuilder) -> Result<Self> {
-        Ok(Self {
-            ln1: candle_nn::layer_norm(hidden, eps, vb.pp("layer_norm1"))?,
-            attn: Attention::new(hidden, heads, vb.pp("self_attn"))?,
-            ln2: candle_nn::layer_norm(hidden, eps, vb.pp("layer_norm2"))?,
-            mlp: Mlp::new(hidden, inter, act, vb.pp("mlp"))?,
-        })
-    }
-
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let x = (x + self.attn.forward(&self.ln1.forward(x)?)?)?;
-        Ok((&x + self.mlp.forward(&self.ln2.forward(&x)?)?)?)
-    }
-}
-
-fn blocks(n: usize, hidden: usize, inter: usize, heads: usize, eps: f64, act: Act, vb: VarBuilder) -> Result<Vec<Block>> {
-    (0..n).map(|i| Block::new(hidden, inter, heads, eps, act, vb.pp(format!("encoder.layers.{i}")))).collect()
-}
 
 /// The attention-pooling head (`SiglipMultiheadAttentionPoolingHead`).
 struct PoolHead {
@@ -174,7 +76,7 @@ impl PoolHead {
         let q = split_heads(&self.q.forward(&probe)?, self.heads, hd)?;
         let k = split_heads(&self.k.forward(x)?, self.heads, hd)?;
         let v = split_heads(&self.v.forward(x)?, self.heads, hd)?;
-        let h = self.o.forward(&attend(&q, &k, &v)?)?;
+        let h = self.o.forward(&attend(&q, &k, &v, None)?)?;
         let h = (&h + self.mlp.forward(&self.ln.forward(&h)?)?)?;
         Ok(h.i((.., 0))?)
     }
@@ -224,7 +126,7 @@ impl VisionTower {
         let x = patches.broadcast_matmul(&self.patch_w)?.broadcast_add(&self.patch_b)?.broadcast_add(&self.pos)?;
         let mut x = x;
         for blk in &self.blocks {
-            x = blk.forward(&x)?;
+            x = blk.forward(&x, None)?;
         }
         let x = self.post_ln.forward(&x)?;
         self.head.forward(&x)
@@ -265,7 +167,7 @@ impl TextTower {
         let tok = weights.read_rows(TOKEN_TABLE, ids)?.to_dtype(DType::F32)?.to_device(device)?.reshape((b, l, self.config.hidden))?;
         let mut x = tok.broadcast_add(&self.pos.narrow(0, 0, l)?)?;
         for blk in &self.blocks {
-            x = blk.forward(&x)?;
+            x = blk.forward(&x, None)?;
         }
         let x = self.final_ln.forward(&x)?;
         // the last position's state (the reference pools the final token of the padded context)
@@ -287,19 +189,10 @@ pub struct Siglip {
     bias: f32,
 }
 
-fn scalar(weights: &Weights, name: &str) -> Result<f32> {
-    let t = weights.read(name)?.to_dtype(DType::F32)?.flatten_all()?;
-    let v = t.to_vec1::<f32>()?;
-    match v[..] {
-        [x] if x.is_finite() => Ok(x),
-        _ => Err(Error::Model(format!("{name}: not a finite scalar"))),
-    }
-}
-
 impl Siglip {
     /// Load from `dir` (`model.safetensors`, `config.json`, and for the text tower `tokenizer.json`).
     pub fn load_on(dir: &Path, manifest: Manifest, towers: Towers, device: Device) -> Result<Self> {
-        if manifest.family != Family::Siglip || manifest.text.tokenizer != TokenizerKind::Sentencepiece {
+        if manifest.family != Family::Siglip || manifest.text.tokenizer != TokenizerKind::Sentencepiece || manifest.score.kind != ScoreKind::Sigmoid {
             return Err(Error::Model(format!("{}: not a SigLIP manifest", manifest.id)));
         }
         if !towers.image && !towers.text {
@@ -355,6 +248,11 @@ impl Siglip {
         (self.scale, self.bias)
     }
 
+    /// `sigmoid(exp(logit_scale) · cosine + logit_bias)`: the probability the model was trained to give.
+    fn score_map(&self) -> Scoring {
+        Scoring { scale: self.scale, bias: self.bias, sigmoid: true }
+    }
+
     /// The padded token ids the text tower gets for `text` (after the manifest's lower-casing).
     pub fn tokens(&self, text: &str) -> Result<Vec<u32>> {
         let tok = self.tokenizer.as_ref().ok_or_else(|| Error::Model("the text tower is not loaded".into()))?;
@@ -381,26 +279,6 @@ impl Siglip {
         let l = ids.len().checked_div(n).unwrap_or(0);
         rows(&text.forward(ids, n, l, &self.weights, &self.device)?)
     }
-}
-
-fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>> {
-    let len = std::fs::metadata(path).map_err(|e| Error::Model(format!("{}: {e}", path.display())))?.len();
-    if len > max {
-        return Err(Error::Model(format!("{} is larger than {max} bytes", path.display())));
-    }
-    std::fs::read(path).map_err(|e| Error::Model(format!("{}: {e}", path.display())))
-}
-
-/// `[B, D]` → normalised rows.
-fn rows(t: &Tensor) -> Result<Vec<Vec<f32>>> {
-    let mut out = t.to_dtype(DType::F32)?.to_device(&Device::Cpu)?.to_vec2::<f32>()?;
-    for r in &mut out {
-        if r.iter().any(|v| !v.is_finite()) {
-            return Err(Error::Model("the model produced a non-finite embedding".into()));
-        }
-        normalize(r);
-    }
-    Ok(out)
 }
 
 impl ContentModel for Siglip {
@@ -438,17 +316,11 @@ impl ContentModel for Siglip {
     }
 
     fn score_cosine(&self, cosine: f32) -> f32 {
-        let logit = self.scale * cosine;
-        match self.manifest.score.kind {
-            ScoreKind::Sigmoid => 1.0 / (1.0 + (-(logit + self.bias)).exp()),
-            ScoreKind::Softmax => logit,
-        }
+        self.score_map().score(cosine)
     }
 
-    fn scoring(&self) -> Option<crate::Scoring> {
-        let sigmoid = self.manifest.score.kind == ScoreKind::Sigmoid;
-        // (as score_cosine: a softmax model's score is the scaled cosine)
-        Some(crate::Scoring { scale: self.scale, bias: if sigmoid { self.bias } else { 0.0 }, sigmoid })
+    fn scoring(&self) -> Option<Scoring> {
+        Some(self.score_map())
     }
 
     fn manifest(&self) -> &Manifest {

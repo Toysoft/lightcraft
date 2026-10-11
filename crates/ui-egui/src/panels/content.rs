@@ -69,6 +69,33 @@ fn licence_line(m: &Value) -> String {
     }
 }
 
+/// How a model compares with the others, from its manifest's hint: "Large · best search results, ~6× slower · multilingual".
+/// Empty for a model without one (added from a catalog).
+pub(crate) fn model_hint(m: &Value) -> String {
+    let h = &m["hint"];
+    let quality = match h["quality"].as_str() {
+        Some("fastest") => tr("Small · fastest"),
+        Some("fast") => tr("Base · fast"),
+        Some("detailed") => tr("Base · finer detail"),
+        Some("best") => tr("Large · best search results"),
+        _ => return String::new(),
+    };
+    let mut line = quality.to_string();
+    match h["relativeTime"].as_f64().filter(|r| r.is_finite() && *r > 0.0) {
+        Some(r) if r >= 1.15 => line.push_str(&tr_format!(", ~{n}× slower", n = rounded(r))),
+        Some(r) if r <= 0.87 => line.push_str(&tr_format!(", ~{n}× faster", n = rounded(1.0 / r))),
+        _ => {}
+    }
+    line.push_str(" · ");
+    line.push_str(if h["englishOnly"] == true { tr("English only") } else { tr("any language") });
+    line
+}
+
+/// 2.4 → "2.4", 6.2 → "6", 13.6 → "14".
+fn rounded(x: f64) -> String {
+    if x < 3.0 { format!("{:.1}", (x * 10.0).round() / 10.0) } else { format!("{}", x.round() as u64) }
+}
+
 /// "the download failed" → "The download failed."
 fn sentence(s: &str) -> String {
     let s = s.trim();
@@ -122,6 +149,11 @@ pub fn settings_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
         tags_section(app, ui, t);
     }
     heading(ui, t, "Models");
+    hint(
+        ui,
+        t,
+        "Each model keeps its own index of your photos: switching to another indexes the library once more with it, and switching back needs no new scan.",
+    );
     for m in &all {
         model_row(app, ui, t, m, runtime);
     }
@@ -445,6 +477,14 @@ fn model_row(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, m: &Value, 
                         ui.label(RichText::new(tag).color(color));
                     }
                 });
+                let quality = model_hint(m);
+                if !quality.is_empty() {
+                    let r = ui.label(RichText::new(quality).font(t.font(11.5)).color(t.text_dim));
+                    register(ui.ctx(), format!("label:content:hint:{id}"), r.rect);
+                }
+                if let Some(n) = m["libraryIndex"]["photos"].as_u64().filter(|n| *n > 0) {
+                    ui.label(RichText::new(tr_format!("Its index of this library: {n} photos", n = n)).font(t.font(11.5)).color(t.text_dim));
+                }
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(licence_line(m)).font(t.font(11.5)).color(t.text_dim));
                     if let Some(url) = m["licence"]["url"].as_str() {
@@ -506,7 +546,17 @@ fn model_row(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, m: &Value, 
                             run_and_refresh(app, ui.ctx(), "content.models.test", json!({"id": id}));
                         }
                         if m["selected"] != true && button(ui, "use", "Use") {
-                            run_and_refresh(app, ui.ctx(), "content.models.select", json!({"id": id}));
+                            // each model has its own index: say what switching does to it
+                            let name = m["name"].as_str().unwrap_or(&id);
+                            let msg = match app.run("content.models.select", json!({"id": id})) {
+                                Err(e) => e,
+                                Ok(_) if m["libraryIndex"]["photos"].as_u64().is_some_and(|n| n > 0) => {
+                                    tr_format!("Using {name}: its own index of this library is back (the other model's is kept)", name = name)
+                                }
+                                Ok(_) => tr_format!("Using {name}: it indexes the library once (the other model's index is kept)", name = name),
+                            };
+                            app.toast(ui.ctx(), msg);
+                            forget(ui.ctx());
                         }
                     }
                     "found" => {
@@ -650,4 +700,24 @@ pub fn confirm(app: &mut LightcraftApp, m: &Value, accepted: bool) -> Result<Val
         app.ui.dialog = Some(crate::state::Dialog::Settings { tab: "search".into() });
     }
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_model_says_what_it_is_for_and_what_it_costs() {
+        let hint =
+            |quality: &str, rel: f64, english: bool| model_hint(&json!({"hint": {"quality": quality, "relativeTime": rel, "englishOnly": english}}));
+        assert_eq!(hint("fast", 1.0, false), "Base · fast · any language");
+        assert_eq!(hint("fastest", 0.5, true), "Small · fastest, ~2.0× faster · English only");
+        assert_eq!(hint("best", 7.5, false), "Large · best search results, ~8× slower · any language");
+        assert_eq!(hint("detailed", 2.4, false), "Base · finer detail, ~2.4× slower · any language");
+        // a model without a hint (from a catalog), or a nonsense one, says nothing more than its name
+        assert_eq!(model_hint(&json!({"hint": null})), "");
+        assert_eq!(model_hint(&json!({"hint": {"quality": "magic"}})), "");
+        assert_eq!(hint("fast", f64::NAN, false), "Base · fast · any language");
+        assert_eq!(hint("fast", -3.0, true), "Base · fast · English only");
+    }
 }

@@ -67,7 +67,7 @@ impl ContentModel for Fake {
                 let mean = |c: usize| img.data.iter().map(|p| f32::from(p[c]) / 255.0).sum::<f32>() / n;
                 let (r, g, b) = (mean(0), mean(1), mean(2));
                 let m = (r + g + b) / 3.0;
-                normalised(vec![r - m, g - m, b - m, m - 0.4, 0.02, 0.0, 0.0, 0.0])
+                self.sized(normalised(vec![r - m, g - m, b - m, m - 0.4, 0.02, 0.0, 0.0, 0.0]))
             })
             .collect())
     }
@@ -79,21 +79,37 @@ impl ContentModel for Fake {
             .iter()
             .map(|t| {
                 let word = ["green", "blue", "red", "yellow"].into_iter().find(|w| t.contains(w)).unwrap_or("void");
-                colour(word)
+                self.sized(colour(word))
             })
             .collect())
     }
 
     fn score_cosine(&self, cosine: f32) -> f32 {
-        SCORING.score(cosine)
+        self.scoring_now().score(cosine)
     }
 
     fn scoring(&self) -> Option<Scoring> {
-        Some(SCORING)
+        Some(self.scoring_now())
     }
 
     fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+}
+
+impl Fake {
+    /// Its vectors at the manifest's dimension (the colours are in the first four numbers, nothing past the sixth).
+    fn sized(&self, mut v: Vec<f32>) -> Vec<f32> {
+        v.resize(self.manifest.embedding.dim as usize, 0.0);
+        v
+    }
+
+    /// As the real families: a CLIP model's score is its scaled cosine plus the manifest's offset, through a sigmoid.
+    fn scoring_now(&self) -> Scoring {
+        match self.manifest.family {
+            manifest::Family::Siglip => SCORING,
+            manifest::Family::Clip => Scoring { scale: SCORING.scale, bias: self.manifest.score.softmax_offset(), sigmoid: true },
+        }
     }
 }
 
@@ -105,7 +121,21 @@ fn loader(calls: Arc<Calls>, slow: u64) -> Loader {
 }
 
 fn install(content: &Path, id: &str) {
-    let mut m = manifest::builtin_siglip2_b16_256();
+    install_manifest(content, id, manifest::builtin_siglip2_b16_256());
+}
+
+/// A stand-in of the CLIP family: its own tokenizer kind and softmax scoring, 6 numbers per embedding.
+fn install_clip(content: &Path, id: &str) {
+    let mut m = manifest::builtin_clip_vit_b32_openai();
+    m.score.offset = Some(SCORING.bias);
+    install_manifest(content, id, m);
+    let file = content.join(id).join(cm::MANIFEST_FILE);
+    let mut m: Manifest = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    m.embedding.dim = 6;
+    std::fs::write(file, serde_json::to_vec(&m).unwrap()).unwrap();
+}
+
+fn install_manifest(content: &Path, id: &str, mut m: Manifest) {
     m.id = id.into();
     m.name = format!("Fake {id}");
     m.embedding.dim = DIM as u32;
@@ -496,6 +526,104 @@ fn a_vocabulary_edited_or_a_model_switched_while_tags_are_worked_out_never_mixes
     assert_eq!(r["state"], "noModel");
     assert!(s.content_tag_counts().is_empty());
     assert!(s.execute("content.dismissTags", &json!({"ids": [1], "tags": ["shade|green"]})).is_ok());
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// The two families side by side: a SigLIP model and a CLIP model (another tokenizer, softmax scoring, another
+/// embedding size) each keep their own index and vocabulary cache; search, tags, the Contents filter, a Smart Collection
+/// and Find Similar Contents work with either, and switching back costs no embedding at all.
+#[test]
+fn siglip_and_clip_models_are_interchangeable_and_switching_keeps_both_indexes_and_vocabularies() {
+    let d = temp("families");
+    let calls = Arc::new(Calls::default());
+    let mut s = session(&d, &calls, 0);
+    let content = d.join("content");
+    install_clip(&content, "clipfake");
+    let album = s
+        .execute(
+            "album.createSmart",
+            &json!({"name": "Shows green", "rules": {"ruleSet": {"rules": [{"field": "contents", "op": "shows", "value": "green"}]}}}),
+        )
+        .unwrap();
+    let album = lightcraft_catalog::AlbumId(album["id"].as_u64().unwrap());
+    // everything a model gives, checked against what the stand-in says
+    let check = |s: &mut Session, model: &str| {
+        let st = s.execute("content.status", &json!({})).unwrap();
+        assert_eq!(st["model"], model, "{st}");
+        let ids = all_ids(s);
+        assert_eq!(st["indexed"].as_u64(), Some(ids.len() as u64), "{st}");
+        let dim = if model == "clipfake" { 6 } else { DIM };
+        assert_eq!(s.content.index.as_ref().unwrap().vector(ids[0]).unwrap().len(), dim);
+        // tags
+        let r = tags(s, &ids);
+        assert_eq!(r["state"], "ready", "{model}: {r}");
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(photo_tags(&r, i), expected(s, *id, 0.5), "{model}: photo {id}");
+        }
+        let green: Vec<u64> = ids.iter().copied().filter(|id| score(s, *id, "green") >= 0.5).collect();
+        assert!(!green.is_empty() && green.len() < ids.len(), "{model}");
+        // search
+        let r = s.execute("content.search", &json!({"text": "green", "limit": 1000})).unwrap();
+        let mut found: Vec<u64> =
+            r["results"].as_array().unwrap().iter().filter(|x| x["score"].as_f64().unwrap() >= 0.5).map(|x| x["id"].as_u64().unwrap()).collect();
+        found.sort();
+        assert_eq!(found, green, "{model}: search");
+        let f = s.execute("library.filter", &json!({"contents": "green"})).unwrap();
+        assert_eq!(f["count"].as_u64(), Some(green.len() as u64), "{model}: {f}");
+        s.execute("content.clearQuery", &json!({})).unwrap();
+        // the Contents filter
+        let tagged = ids.iter().filter(|id| expected(s, **id, 0.5).contains(&"colour|green".to_string())).count();
+        let f = s.execute("library.filter", &json!({"contentTag": "colour|green"})).unwrap();
+        assert_eq!(f["count"].as_u64(), Some(tagged as u64), "{model}: {f}");
+        s.execute("library.filter", &json!({"contentTag": null})).unwrap();
+        // the Smart Collection (its text is embedded on the text thread)
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while s.catalog.album_count(album) != green.len() && Instant::now() < deadline {
+            s.visible();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(s.catalog.album_count(album), green.len(), "{model}: smart collection");
+        // Find Similar Contents: the photo first, then others
+        let r = s.execute("content.similar", &json!({"id": green[0], "limit": 3, "show": true})).unwrap();
+        assert!(r["results"].as_array().unwrap().iter().all(|x| x["id"] != green[0]), "{model}: {r}");
+        let q = s.execute("content.query", &json!({})).unwrap();
+        assert!(!q.is_null(), "{model}: the view is ranked by similarity");
+        assert_eq!(s.visible().first().map(|p| p.0), Some(green[0]), "{model}");
+        s.execute("content.clearQuery", &json!({})).unwrap();
+    };
+    check(&mut s, "fake");
+    // to CLIP: indexed once with it, its own vocabulary embedded
+    s.execute("content.models.select", &json!({"id": "clipfake"})).unwrap();
+    s.execute("content.pump", &json!({"wait": true})).unwrap();
+    check(&mut s, "clipfake");
+    s.close_library().unwrap();
+    for f in ["content-embeddings-fake.bin", "content-embeddings-clipfake.bin"] {
+        assert!(d.join("lib").join(f).is_file(), "{f}");
+    }
+    for f in ["content-vocab-fake.bin", "content-vocab-clipfake.bin"] {
+        assert!(content.join(f).is_file(), "{f}");
+    }
+    // the model list says each model has an index of this library
+    s.open_library(d.join("lib"), true).unwrap();
+    let l = s.execute("content.models.list", &json!({})).unwrap();
+    for id in ["fake", "clipfake"] {
+        let m = l["models"].as_array().unwrap().iter().find(|m| m["id"] == id).unwrap();
+        assert_eq!(m["libraryIndex"]["photos"].as_u64(), Some(all_ids(&s).len() as u64), "{m}");
+    }
+    // and back, and forth again: nothing is embedded, images or texts
+    let (texts, loads) = (calls.texts.load(Ordering::SeqCst), calls.loads.load(Ordering::SeqCst));
+    for model in ["fake", "clipfake"] {
+        s.execute("content.models.select", &json!({"id": model})).unwrap();
+        s.execute("content.pump", &json!({"wait": true})).unwrap();
+        let ids = all_ids(&s);
+        let r = tags(&mut s, &ids);
+        assert_eq!(r["state"], "ready", "{model}: {r}");
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(photo_tags(&r, i), expected(&s, *id, 0.5), "{model} again: photo {id}");
+        }
+    }
+    assert_eq!(calls.texts.load(Ordering::SeqCst), texts, "no vocabulary embedded again");
+    assert_eq!(calls.loads.load(Ordering::SeqCst), loads, "no model loaded to index again or to tag");
     let _ = std::fs::remove_dir_all(&d);
 }
 
