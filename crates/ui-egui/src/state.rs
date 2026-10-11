@@ -548,7 +548,8 @@ pub struct UiState {
     /// Mirroring of the triangle / spiral crop guides (0..4).
     pub crop_overlay_orient: u8,
     pub crop_overlay: CropOverlay,
-    /// Last explicitly chosen aspect, retained across photos and app launches.
+    /// Last chosen aspect, retained across photos and launches; Original until a choice is made.
+    #[serde(deserialize_with = "deserialize_crop_default_aspect")]
     pub crop_default_aspect: Option<serde_json::Value>,
     pub show_filenames: bool,
     /// What the square grid's caption shows: `filename`, `exposure` (shutter · aperture · ISO ·
@@ -1055,7 +1056,7 @@ impl Default for UiState {
             mask_overlay_opacity: 50.0,
             mask_pins: true,
             crop_overlay: CropOverlay::Thirds,
-            crop_default_aspect: None,
+            crop_default_aspect: Some(serde_json::json!("original")),
             crop_overlay_orient: 0,
             show_filenames: true,
             grid_info: "filename".into(),
@@ -1201,6 +1202,11 @@ impl UiState {
         }
         self
     }
+}
+
+fn deserialize_crop_default_aspect<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<serde_json::Value>, D::Error> {
+    // Legacy null means no choice yet. An explicitly unlocked crop is saved as "free".
+    Ok(Option::<serde_json::Value>::deserialize(d)?.or_else(|| Some(serde_json::json!("original"))))
 }
 
 fn deserialize_favorite_themes<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {

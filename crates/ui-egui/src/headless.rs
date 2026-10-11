@@ -2240,6 +2240,42 @@ mod tests {
         assert_eq!(h.app.session.develop_of(photo).unwrap(), before);
     }
 
+    #[test]
+    fn crop_starts_locked_to_original_without_editing_and_remembers_unlock() {
+        use crate::state::UiState;
+        for saved in [json!({}), json!({"cropDefaultAspect": null})] {
+            let mut h = demo([1200.0, 800.0]);
+            h.app.ui = serde_json::from_value::<UiState>(saved).unwrap();
+            let photos: Vec<_> =
+                h.app.session.visible_cloned().into_iter().filter(|id| !h.app.session.catalog.photo(*id).unwrap().is_edited()).collect();
+            let photo = photos[0];
+            h.app.run("library.select", json!({"ids": [photo.0]})).unwrap();
+            h.app.run("panel.crop", json!({})).unwrap();
+            let before = h.app.session.develop_of(photo).unwrap();
+            let p = h.app.session.catalog.photo(photo).unwrap();
+            let original = (p.width * 100, p.height * 100);
+            let undo = h.app.session.undo.len();
+            h.settle(SETTLE);
+            assert_eq!(h.app.crop_tool_aspect(), Some(original));
+            assert_eq!(h.app.session.develop_of(photo).unwrap(), before);
+            assert_eq!(h.app.session.undo.len(), undo);
+            h.app.run("develop.beginInteraction", json!({"label": "Crop"})).unwrap();
+            h.app.begin_crop().unwrap();
+            h.app.run("crop.drag", json!({"handle": "bottomRight", "from": [0.8, 0.8], "to": [0.7, 0.6]})).unwrap();
+            h.app.run("develop.endInteraction", json!({})).unwrap();
+            assert_eq!(h.app.session.develop_of(photo).unwrap().crop.aspect, Some(original));
+            assert_eq!(h.app.session.undo.len(), undo + 1);
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.develop_of(photo).unwrap(), before);
+            h.app.run("crop.aspect", json!({"aspect": "toggle"})).unwrap();
+            let saved = serde_json::to_value(&h.app.ui).unwrap();
+            h.app.ui = serde_json::from_value(saved).unwrap();
+            h.app.run("library.select", json!({"ids": [photos[1].0]})).unwrap();
+            assert_eq!(h.app.ui.crop_default_aspect, Some(json!("free")));
+            assert_eq!(h.app.crop_tool_aspect(), None);
+        }
+    }
+
     /// While cropping: O cycles the guides, ⇧O mirrors them, A locks / unlocks the aspect.
     #[test]
     fn crop_keys() {
@@ -2254,12 +2290,12 @@ mod tests {
         h.request("ui.key", json!({"key": "O", "shift": true}), t);
         assert_eq!(h.app.ui.crop_overlay_orient, 1);
         assert_eq!(h.app.ui.mask_overlay, mask_overlay, "O doesn't toggle the mask overlay while cropping");
-        let locked = |h: &Headless| h.app.session.develop_of(h.app.session.active().unwrap()).unwrap().crop.aspect.is_some();
-        assert!(!locked(&h));
-        h.request("ui.key", json!({"key": "A"}), t);
+        let locked = |h: &Headless| h.app.crop_tool_aspect().is_some();
         assert!(locked(&h));
         h.request("ui.key", json!({"key": "A"}), t);
         assert!(!locked(&h));
+        h.request("ui.key", json!({"key": "A"}), t);
+        assert!(locked(&h));
         assert!(!h.app.ui.visualize_spots);
     }
 
