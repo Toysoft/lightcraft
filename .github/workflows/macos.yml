@@ -1,0 +1,35 @@
+# Runs the full quality gate (`cargo xtask ci`) on macOS: the platform most of the app's users and
+# agents work on, and the only one where `cfg(target_os = "macos")` code (native menu, Apple Photos
+# export) compiles and APFS's case-insensitive, UTF-8-only file names apply. No corpus: the corpus
+# tests skip themselves.
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: macOS (cargo xtask ci)
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ci-macos
+      - name: cargo xtask ci
+        run: cargo xtask ci
