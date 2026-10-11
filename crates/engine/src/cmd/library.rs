@@ -2,6 +2,7 @@
 //! metadata, albums, import.
 
 use lightcraft_catalog::{Album, AlbumId, ColorLabel, CopyrightStatus, Filter, Flag, GroupBy, Op, PhotoId, Sort, SortKey};
+use lightcraft_geom::Rect;
 use serde_json::{Value, json};
 
 use super::{CommandSpec, always, bad, bool_or, cmd, has_active, has_library_selection, has_selection, ok, str_param};
@@ -232,6 +233,13 @@ fn rotate(s: &mut Session, p: &Value, cw: bool) -> Result<Value> {
         if let Some(d) = s.develop_of(id) {
             let mut d = (*d).clone();
             d.orientation = d.orientation.rotated(cw);
+            // When rotating 90° (swaps axes), swap crop rect x/y and width/height to preserve visual crop
+            if d.orientation.swaps_axes() != d.orientation.rotated(!cw).swaps_axes() {
+                let mut c = d.crop.geometry;
+                let r = c.rect;
+                c.rect = Rect::new(r.y0, r.x0, r.y0 + r.height(), r.x0 + r.width());
+                d.crop.geometry = c;
+            }
             ops.extend(s.develop_op(id, d, "Rotate"));
         }
     }
