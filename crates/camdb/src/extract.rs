@@ -2,7 +2,8 @@
 //! phones…), whose `ColorMatrix1/2` and `ForwardMatrix1/2` are the maker's own calibration.
 //!
 //! DNGs written by a converter are refused: Adobe's (DNG Converter, Lightroom, Camera Raw, Photoshop), whose matrices
-//! are Adobe's profiles, and this app's own DNG export, whose matrices came from this database or a per-photo fit.
+//! are Adobe's profiles; darktable, RawTherapee, dnglab, LibRaw, dcraw, DxO and Capture One, whose matrices come
+//! from their own or third-party (often GPL) tables; and this app's own DNG export, whose matrices came from this database or a per-photo fit.
 //! The decision rests on the `Software` tag; a DNG without one is refused too, as its origin can't be told. Per-unit
 //! `CameraCalibration1/2` and the as-shot white are not copied: they describe one camera body and one photo.
 use crate::{Entry, Error, Provenance, Source};
@@ -10,11 +11,34 @@ use crate::{Entry, Error, Provenance, Source};
 /// Words in a `Software` tag that mark a converter's DNG (compared without case).
 const CONVERTERS: &[&str] = &["adobe", "lightroom", "camera raw", "dng converter", "photoshop"];
 
+/// Other raw converters that write DNGs, as (word in the `Software` tag, name to report), compared without case
+/// and ignoring spaces, hyphens and underscores. Their matrices come from their own or third-party (often GPL)
+/// tables, not from the camera maker, so they must never enter the database as camera-native.
+const THIRD_PARTY: &[(&str, &str)] = &[
+    ("darktable", "darktable"),
+    ("rawtherapee", "RawTherapee"),
+    ("dnglab", "dnglab"),
+    ("libraw", "LibRaw"),
+    ("dcraw", "dcraw"),
+    ("pureraw", "DxO PureRAW"),
+    ("photolab", "DxO PhotoLab"),
+    ("dxo", "DxO"),
+    ("captureone", "Capture One"),
+    ("phaseone", "Capture One"),
+];
+
 /// Why `software` marks a DNG written by a converter, if it does.
 pub fn converter(software: &str) -> Option<String> {
     let lower = software.to_lowercase();
     if let Some(word) = CONVERTERS.iter().find(|w| lower.contains(*w)) {
         return Some(format!("written by Adobe software (\"{software}\" contains \"{word}\"); Adobe-converted DNGs are never a source"));
+    }
+    let squashed: String = lower.chars().filter(|c| !matches!(c, ' ' | '-' | '_')).collect();
+    if let Some((_, name)) = THIRD_PARTY.iter().find(|(w, _)| squashed.contains(*w)) {
+        return Some(format!(
+            "written by {name} (\"{software}\"); a converter's DNG carries the converter's matrices, not the maker's, \
+             so use a DNG the camera wrote itself"
+        ));
     }
     let own = "lightcraft";
     if lower.contains(own) {
@@ -126,6 +150,32 @@ mod tests {
         assert!(from_info(&info(Some("  "))).is_err());
         // our own DNG export writes the app's name: refused on the bytes path
         assert!(from_dng(&dng()).unwrap_err().0.contains("this app"));
+    }
+
+    #[test]
+    fn third_party_converter_dngs_are_refused() {
+        for (sw, name) in [
+            ("darktable 4.6.1", "darktable"),
+            ("RawTherapee 5.10", "RawTherapee"),
+            ("Raw-Therapee", "RawTherapee"),
+            ("dnglab 0.6.0", "dnglab"),
+            ("DNGLab", "dnglab"),
+            ("LibRaw 0.21.2", "LibRaw"),
+            ("dcraw v9.28", "dcraw"),
+            ("DxO PhotoLab 7", "DxO PhotoLab"),
+            ("DxO PureRAW 4", "DxO PureRAW"),
+            ("DxO", "DxO"),
+            ("Capture One 23 Macintosh", "Capture One"),
+            ("CaptureOne", "Capture One"),
+            ("capture_one", "Capture One"),
+            ("Phase One", "Capture One"),
+        ] {
+            let err = from_info(&info(Some(sw))).unwrap_err();
+            assert!(err.0.contains(name), "{sw}: {err}");
+        }
+        // a camera's own firmware string is not mistaken for a converter
+        assert!(converter("Ver.1.02").is_none());
+        assert!(converter("LEICA Q3 1.2.0").is_none());
     }
 
     #[test]

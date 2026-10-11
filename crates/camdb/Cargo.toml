@@ -12,4 +12,4 @@ workspace = true
 lightcraft-color = { workspace = true }
 lightcraft-raw = { workspace = true }
 serde = { workspace = true }
-toml = "1"
+toml = { workspace = true }
