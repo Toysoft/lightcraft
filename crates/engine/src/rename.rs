@@ -290,15 +290,39 @@ pub fn expand_tokens(template: &str, p: &Photo, seq: usize, seq_width: usize) ->
     out
 }
 
-/// Every sidecar that may belong to `path` (both naming conventions, `.xmp` and `.XMP`).
-fn sidecars(path: &str) -> Vec<(PathBuf, SidecarNaming, bool)> {
-    let mut v = Vec::new();
+/// The sidecars of `path` on `fs` (both naming conventions, `.xmp` and `.XMP`), each spelled as
+/// on disk and listed once: on a case-insensitive volume `a.XMP` also answers for `a.xmp`, and
+/// moving it under that name would change the case of the user's file.
+fn sidecars(fs: &dyn MoveFs, path: &str) -> Vec<(PathBuf, SidecarNaming)> {
+    let mut v: Vec<(PathBuf, SidecarNaming)> = Vec::new();
     for naming in [SidecarNaming::Stem, SidecarNaming::Full] {
         let p = crate::sidecar::sidecar_path(path, naming);
-        v.push((p.with_extension("XMP"), naming, true));
-        v.push((p, naming, false));
+        for candidate in [p.with_extension("XMP"), p] {
+            if !fs.is_file(&candidate) {
+                continue;
+            }
+            let on_disk = fs.spelling(&candidate).unwrap_or(candidate);
+            if !v.iter().any(|(q, _)| *q == on_disk) {
+                v.push((on_disk, naming));
+            }
+        }
     }
     v
+}
+
+/// The name of the folder entry `p` answers to: `p` itself, or on a case-insensitive volume the
+/// entry spelled differently that is the same file. `None` when the folder can't be listed.
+fn disk_spelling(p: &Path) -> Option<PathBuf> {
+    let (dir, name) = (p.parent()?, p.file_name()?);
+    let entries: Vec<std::ffi::OsString> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.file_name()).collect();
+    if entries.iter().any(|e| e == name) {
+        return Some(p.to_path_buf());
+    }
+    let folded = name.to_string_lossy().to_lowercase();
+    entries
+        .iter()
+        .map(|e| dir.join(e))
+        .find(|e| e.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase() == folded) && RealFs.same_file(p, e))
 }
 
 /// The file-system primitives renaming uses. [`RealFs`] is the disk; tests substitute a model of
@@ -319,6 +343,11 @@ pub(crate) trait MoveFs {
     /// Another photo file beside the stem-named sidecar `sidecar` that shares its stem (e.g.
     /// `IMG_1.JPG` for `IMG_1.xmp`), which still uses that sidecar.
     fn stem_sibling(&self, sidecar: &Path) -> Option<String>;
+    /// The exact name of the existing file `p` answers to (see [`disk_spelling`]); `None` when
+    /// unknown. Model volumes override this.
+    fn spelling(&self, p: &Path) -> Option<PathBuf> {
+        disk_spelling(p)
+    }
     /// Content observed in a packet, independent of its pathname or inode. Model volumes
     /// override this; disk implementations stream a bounded buffer without retaining the XML.
     fn packet_version(&self, path: &Path) -> std::io::Result<PacketVersion> {
@@ -699,19 +728,17 @@ pub(crate) fn move_file_with(fs: &dyn MoveFs, from: &str, to: &str) -> std::resu
     if fs.exists(t) && !is_respelling(fs, f, t) {
         return Err(fail(format!("{to} already exists")));
     }
-    let mut packets: Vec<RetainedPacket> = sidecars(from)
-        .into_iter()
-        .map(|(p, _, _)| p)
-        .filter(|p| fs.is_file(p))
-        .map(|path| RetainedPacket { version: fs.packet_version(&path).ok(), path })
-        .collect();
+    let found = sidecars(fs, from);
+    let mut packets: Vec<RetainedPacket> =
+        found.iter().map(|(path, _)| RetainedPacket { version: fs.packet_version(path).ok(), path: path.clone() }).collect();
     move_one(fs, f, t).map_err(|e| fail(format!("rename {from}: {e}")))?;
     let mut done: Vec<SidecarMove> = Vec::new();
-    let mut remaining = sidecars(from).into_iter().filter(|(sc, _, _)| fs.is_file(sc)).map(|(sc, naming, upper)| {
-        let mut dst = crate::sidecar::sidecar_path(to, naming);
-        if upper {
-            dst = dst.with_extension("XMP");
-        }
+    let mut remaining = found.into_iter().map(|(sc, naming)| {
+        // the sidecar keeps the case of its extension
+        let dst = match sc.extension() {
+            Some(ext) => crate::sidecar::sidecar_path(to, naming).with_extension(ext),
+            None => crate::sidecar::sidecar_path(to, naming),
+        };
         // A stem sidecar another photo still uses is copied, not taken away (issue #92).
         let copied = naming == SidecarNaming::Stem && fs.stem_sibling(&sc).is_some();
         SidecarMove { from: sc, to: dst, copied, companions: Vec::new() }
@@ -1223,6 +1250,10 @@ pub(crate) mod tests {
             self.files.borrow_mut().remove(i);
             Ok(())
         }
+        fn spelling(&self, p: &Path) -> Option<PathBuf> {
+            let i = self.idx(p)?;
+            self.files.borrow().get(i).map(|(f, _)| PathBuf::from(f.replace('/', std::path::MAIN_SEPARATOR_STR)))
+        }
         fn stem_sibling(&self, sidecar: &Path) -> Option<String> {
             let stem = Self::norm(&sidecar.with_extension(""));
             self.files.borrow().iter().map(|(f, _)| f.clone()).find(|f| {
@@ -1419,6 +1450,27 @@ pub(crate) mod tests {
         // case-insensitive, another file under another name: still a collision
         let fs = FakeFs::new(true, &[("/p/A.JPG", "a"), ("/p/b.JPG", "b")]);
         assert!(move_file_with(&fs, "/p/A.JPG", "/p/B.JPG").is_err());
+    }
+
+    /// On a case-insensitive volume `a.XMP` also answers for `a.xmp`: a sidecar keeps the case
+    /// of its extension, whichever spelling is on disk, and moves once.
+    #[test]
+    fn sidecars_keep_their_extension_case_on_case_insensitive_volumes() {
+        for (ci, files, want) in [
+            (true, vec![("/p/a.jpg", "A"), ("/p/a.xmp", "s")], vec![("/p/Trip.jpg", "A"), ("/p/Trip.xmp", "s")]),
+            (true, vec![("/p/a.jpg", "A"), ("/p/a.XMP", "s")], vec![("/p/Trip.XMP", "s"), ("/p/Trip.jpg", "A")]),
+            (true, vec![("/p/a.jpg", "A"), ("/p/a.jpg.xmp", "f")], vec![("/p/Trip.jpg", "A"), ("/p/Trip.jpg.xmp", "f")]),
+            (
+                false,
+                vec![("/p/a.jpg", "A"), ("/p/a.xmp", "s"), ("/p/a.XMP", "S")],
+                vec![("/p/Trip.XMP", "S"), ("/p/Trip.jpg", "A"), ("/p/Trip.xmp", "s")],
+            ),
+        ] {
+            let fs = FakeFs::new(ci, &files);
+            move_file_with(&fs, "/p/a.jpg", "/p/Trip.jpg").unwrap();
+            let want: Vec<(String, String)> = want.iter().map(|(p, c)| (p.to_string(), c.to_string())).collect();
+            assert_eq!(fs.listing(), want, "{files:?}");
+        }
     }
 
     /// Issue #105: a rollback that fails is reported, and the library follows the files that kept

@@ -151,7 +151,9 @@ fn autowrite_repairs_partial_rename_before_merging_foreign_xmp_across_library_sw
                     assert_eq!(parsed.title.as_deref(), Some("Final title"));
                     assert!(parsed.keywords.as_ref().unwrap().contains(&"café".to_string()));
                     if upper {
-                        assert!(!preferred.exists(), "merge uses the repaired uppercase packet");
+                        // by name: on a case-insensitive volume `Trip.xmp` answers for `Trip.XMP`
+                        let spelled = std::fs::read_dir(&root).unwrap().flatten().any(|e| Some(e.file_name().as_os_str()) == preferred.file_name());
+                        assert!(!spelled, "merge uses the repaired uppercase packet");
                     }
                     for (step, title) in [("edit.undo", "Fresh title"), ("edit.redo", "Final title")] {
                         s.execute(step, &json!({})).unwrap();
