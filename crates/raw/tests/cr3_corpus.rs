@@ -102,14 +102,13 @@ fn canon_r5m2_sensor_is_pinned() {
     check_r5m2("cr3-canon-r5m2-craw.cr3", 0xaf32_b453_57b5_34e5, (8480, 5650), Some((8192, 5464)));
 }
 
-/// Crop mode (1.6×): the sensor samples only. Its developed framing depends on how the file's misplaced valid
-/// area is read, which is not part of the CRX decode.
+/// Crop mode (1.6×): the recommended crop, the camera JPEG's 5088 × 3392, is the valid area (docs/cr3.md).
 #[test]
 fn canon_r5m2_crop_mode_sensor_is_pinned() {
     // raw.pixls.us/getfile.php/7883; SHA256 9f88c0ff012924193b7f4497559d133dfe626766d600b5d67689156721739ead
-    check_r5m2("cr3-canon-r5m2-apsc-raw.cr3", 0x31cf_630a_fe86_8958, (5376, 3574), None);
+    check_r5m2("cr3-canon-r5m2-apsc-raw.cr3", 0x31cf_630a_fe86_8958, (5376, 3574), Some((5088, 3392)));
     // raw.pixls.us/getfile.php/7884; SHA256 6a597497776a6abbfab8fcf12d0086ac7a3f8afea2879d61accf6bbf48d357d7
-    check_r5m2("cr3-canon-r5m2-apsc-craw.cr3", 0x4721_605b_2033_9332, (5376, 3574), None);
+    check_r5m2("cr3-canon-r5m2-apsc-craw.cr3", 0x4721_605b_2033_9332, (5376, 3574), Some((5088, 3392)));
 }
 
 #[test]
