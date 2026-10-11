@@ -70,6 +70,8 @@ impl Drop for Scratch {
 struct FolderBin {
     dir: PathBuf,
     next: Mutex<u32>,
+    /// While set, nothing can be moved to it.
+    closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Bin for FolderBin {
@@ -81,6 +83,9 @@ impl Bin for FolderBin {
         if name.contains("locked") {
             return Err(BinError::Failed("the file is locked".into()));
         }
+        if self.closed.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(BinError::Failed("the Trash is not there".into()));
+        }
         let mut n = self.next.lock().unwrap();
         *n += 1;
         let to = self.dir.join(format!("{}-{}", *n, path.file_name().unwrap().to_string_lossy()));
@@ -91,7 +96,7 @@ impl Bin for FolderBin {
 
 fn session(dir: &Scratch) -> Session {
     let mut s = Session::new();
-    s.trash = Arc::new(FolderBin { dir: dir.0.join("bin"), next: Mutex::new(0) });
+    s.trash = Arc::new(FolderBin { dir: dir.0.join("bin"), next: Mutex::new(0), closed: Default::default() });
     s
 }
 
@@ -437,12 +442,17 @@ fn a_file_a_browsed_photo_or_another_spelling_of_its_path_still_uses_stays() {
         "{r}"
     );
     assert!(exists(&a) && has(&s, local.0) && !has(&s, lib));
-    // the same file under another spelling of its path (a doubled separator) in a photo that stays
-    let b = dir.file("b.jpg", "B");
-    let (one, _other) = (add(&mut s, &b), add(&mut s, &b.replace("/b.jpg", "//b.jpg")));
-    let r = trash(&mut s, &[one]);
-    assert_eq!((r["trashed"].as_u64(), r["shared"].as_u64()), (Some(0), Some(1)), "{r}");
-    assert!(exists(&b));
+    // the same file reached through another folder name (a link to its folder) in a photo that
+    // stays: one file, whatever the two paths say
+    #[cfg(unix)]
+    {
+        let b = dir.file("real/b.jpg", "B");
+        std::os::unix::fs::symlink(dir.0.join("photos/real"), dir.0.join("photos/link")).unwrap();
+        let (one, _other) = (add(&mut s, &b), add(&mut s, &dir.at("link/b.jpg")));
+        let r = trash(&mut s, &[one]);
+        assert_eq!((r["trashed"].as_u64(), r["shared"].as_u64()), (Some(0), Some(1)), "{r}");
+        assert!(exists(&b));
+    }
 }
 
 #[test]
@@ -500,4 +510,70 @@ fn redo_never_erases_and_duplicate_ids_are_one_photo() {
     s.execute("edit.redo", &json!({})).unwrap();
     assert!(!has(&s, id));
     assert_eq!(std::fs::read_to_string(&far).unwrap(), "RESTORED", "redo touches no file it did not put back itself");
+}
+
+// ---- What the check of those fixes found
+
+#[test]
+fn a_sidecar_named_for_the_whole_file_stays_when_it_may_be_another_file_s() {
+    let dir = Scratch::new("whole-name");
+    // IMG_1.heic.xmp is IMG_1.heic's by its whole name and IMG_1.heic.jpg's by its stem
+    let (heic, jpg, xmp) = (dir.file("a/IMG_1.heic", "H"), dir.file("a/IMG_1.heic.jpg", "J"), dir.file("a/IMG_1.heic.xmp", "<xmp/>"));
+    let mut s = session(&dir);
+    let (ih, ij) = (add(&mut s, &heic), add(&mut s, &jpg));
+    let r = trash(&mut s, &[ih]);
+    assert_eq!((r["trashed"].as_u64(), r["sidecarsLeft"].as_u64()), (Some(1), Some(1)), "{r}");
+    assert!(exists(&xmp) && exists(&jpg) && !exists(&heic));
+    s.execute("edit.undo", &json!({})).unwrap();
+    // …and the other way round
+    let r = trash(&mut s, &[ij]);
+    assert_eq!((r["trashed"].as_u64(), r["sidecarsLeft"].as_u64()), (Some(1), Some(1)), "{r}");
+    assert!(exists(&xmp) && exists(&heic) && !exists(&jpg));
+    // with the last of them it goes
+    let r = trash(&mut s, &[ih]);
+    assert_eq!(r["trashed"], 2, "{r}");
+    assert!(!exists(&xmp));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_that_can_t_be_looked_at_is_not_taken_for_gone() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = Scratch::new("no-access");
+    let a = dir.file("closed/a.jpg", "A");
+    let mut s = session(&dir);
+    let id = add(&mut s, &a);
+    let folder = dir.0.join("photos/closed");
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let r = run(&mut s, "photo.trashFiles", &[id], json!({}));
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let e = r.unwrap_err().to_string();
+    assert!(e.contains("can't be read"), "{e}");
+    assert!(has(&s, id) && exists(&a), "the photo stays: nothing says its file is gone");
+}
+
+#[test]
+fn a_file_a_redo_could_not_take_is_taken_at_the_next_redo() {
+    let dir = Scratch::new("redo-again");
+    let a = dir.file("a.jpg", "A");
+    let mut s = Session::new();
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    s.trash = Arc::new(FolderBin { dir: dir.0.join("bin"), next: Mutex::new(0), closed: closed.clone() });
+    let id = add(&mut s, &a);
+    trash(&mut s, &[id]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    // the Trash can't take it at this redo: it says so, and the file stays
+    closed.store(true, std::sync::atomic::Ordering::Relaxed);
+    let redone = s.execute("edit.redo", &json!({})).unwrap()["redone"].as_str().unwrap().to_string();
+    assert!(redone.contains("1 file could not be moved to the Trash"), "{redone}");
+    assert!(exists(&a) && !has(&s, id));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(exists(&a) && has(&s, id));
+    // the next redo takes it, as the first one meant to
+    closed.store(false, std::sync::atomic::Ordering::Relaxed);
+    let redone = s.execute("edit.redo", &json!({})).unwrap()["redone"].as_str().unwrap().to_string();
+    assert_eq!(redone, "Move Photo's Files to Trash");
+    assert!(!exists(&a) && !has(&s, id));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(exists(&a) && in_bin(&dir).is_empty());
 }

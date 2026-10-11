@@ -101,6 +101,8 @@ pub enum Whereabouts {
     InTrash,
     /// Erased (a disk without a Trash): it is not coming back.
     Erased,
+    /// At its place: a redo could not move it to the Trash again. The next redo tries again.
+    InPlace,
 }
 
 /// The file work of an undo or redo step of `photo.trashFiles`, done with its catalog op.
@@ -142,6 +144,11 @@ impl TrashStep {
                         },
                         Whereabouts::InTrash => elsewhere += 1,
                         Whereabouts::Erased => erased += 1,
+                        // it never left: nothing to put back, and the next redo takes it again
+                        Whereabouts::InPlace => {
+                            back.push(t.from.clone());
+                            continue;
+                        }
                     }
                     still_out.push(t.clone());
                 }
@@ -167,8 +174,12 @@ impl TrashStep {
                             from: from.clone(),
                             now: at.map_or(Whereabouts::InTrash, |p| Whereabouts::At(p.to_string_lossy().to_string())),
                         }),
-                        // (never erased without being asked: the file stays where it is)
-                        Err(_) => failed += 1,
+                        // (never erased without being asked: the file stays where it is, and
+                        // is not lost sight of)
+                        Err(_) => {
+                            failed += 1;
+                            list.push(Trashed { from: from.clone(), now: Whereabouts::InPlace });
+                        }
                     }
                 }
                 let note = (failed > 0).then(|| {
@@ -260,14 +271,15 @@ pub mod xdg {
         std::fs::metadata(p).ok().map(|m| m.dev())
     }
 
-    /// A folder for the Trash could not be made. Only a disk that takes no such folder at all
-    /// (read-only, not ours to write to, no such thing there) has no Trash; a full disk or any
-    /// other trouble is a failure, and the file is then never offered for erasing.
+    /// A Trash folder at the top of another disk could not be made. Only a disk that takes no
+    /// such folder at all (read-only, or no folders of that kind) has no Trash. A full disk, a
+    /// folder that is not ours to write to or any other trouble is a failure: something to put
+    /// right, and the file is then never offered for erasing.
     fn no_place(path: &Path, e: std::io::Error) -> BinError {
         use std::io::ErrorKind as K;
         match e.kind() {
-            K::PermissionDenied | K::ReadOnlyFilesystem | K::Unsupported => BinError::NoTrash,
-            _ => BinError::Failed(format!("{}: the Trash can't be written to: {e}", path.display())),
+            K::ReadOnlyFilesystem | K::Unsupported => BinError::NoTrash,
+            _ => BinError::Failed(format!("{}: the Trash on its disk can't be written to: {e}", path.display())),
         }
     }
 
@@ -307,15 +319,23 @@ pub mod xdg {
         };
         let Some(dev) = device(dir) else { return Err(BinError::Failed(format!("{}: its folder can't be read", path.display()))) };
         // the home Trash for files of its disk, else the disk's own
-        let home_dev = std::fs::create_dir_all(&places.home_trash).ok().and_then(|()| device(&places.home_trash));
-        let (bin, relative_to) = if home_dev == Some(dev) {
+        // (a home Trash that can't be made or read is a failure, never "no Trash": the disk
+        // the home folder is on has one, it only needs putting right)
+        std::fs::create_dir_all(&places.home_trash).map_err(|e| failed("the Trash can't be made", e))?;
+        let Some(home_dev) = device(&places.home_trash) else {
+            return Err(BinError::Failed(format!("{}: the Trash can't be read", path.display())));
+        };
+        let home = home_dev == dev;
+        let (bin, relative_to) = if home {
             (places.home_trash.clone(), None)
         } else {
             let Some(top) = top_of_disk(dir) else { return Err(BinError::Failed(format!("{}: its disk can't be found", path.display()))) };
             (top.join(format!(".Trash-{}", places.uid)), Some(top))
         };
         let (files, info) = (bin.join("files"), bin.join("info"));
-        std::fs::create_dir_all(&files).and_then(|()| std::fs::create_dir_all(&info)).map_err(|e| no_place(&path, e))?;
+        std::fs::create_dir_all(&files)
+            .and_then(|()| std::fs::create_dir_all(&info))
+            .map_err(|e| if home { failed("the Trash can't be written to", e) } else { no_place(&path, e) })?;
         // in a disk's own Trash the path is written from the disk's top
         let original = relative_to.as_deref().and_then(|top| path.strip_prefix(top).ok()).unwrap_or(&path);
         let record = format!("[Trash Info]\nPath={}\nDeletionDate={}\n", encoded(original), places.now);
@@ -414,6 +434,28 @@ mod tests {
         assert!(matches!(e, BinError::Failed(_)), "{e:?}");
         let left: Vec<_> = std::fs::read_dir(places.home_trash.join("info")).unwrap().flatten().collect();
         assert!(left.is_empty(), "{left:?}");
+    }
+
+    /// A home Trash that can't be written to is a failure to put right, never "no Trash": the
+    /// file is then not offered for erasing.
+    #[test]
+    fn a_home_trash_that_can_t_be_written_is_a_failure_not_a_missing_trash() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, places) = scratch("readonly-home");
+        let photo = dir.0.join("photos/a.jpg");
+        std::fs::write(&photo, "x").unwrap();
+        // the Trash folder is there but takes nothing
+        std::fs::create_dir_all(&places.home_trash).unwrap();
+        std::fs::set_permissions(&places.home_trash, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let e = trash(&photo, &places);
+        std::fs::set_permissions(&places.home_trash, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(e, Err(BinError::Failed(_))), "{e:?}");
+        assert!(photo.exists());
+        // nor one that can't be made at all
+        let nowhere = Places { home_trash: dir.0.join("photos/a.jpg/Trash"), ..places };
+        let e = trash(&photo, &nowhere);
+        assert!(matches!(e, Err(BinError::Failed(_))), "{e:?}");
+        assert!(photo.exists());
     }
 
     /// Putting a file back never replaces what is at its place now.

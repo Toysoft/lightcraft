@@ -303,5 +303,6 @@
   "Files moved to the Trash: {files} (photos out of the library: {photos})": "Переміщено файлів до смітника: {files} (фото вилучено з бібліотеки: {photos})",
   "{n} could not be moved and stay in the library: {why}": "Не вдалося перемістити ({n}), вони залишаються в бібліотеці: {why}",
   "Photos whose file was already gone: {n}": "Фото, файлу яких уже не було: {n}",
-  "Sidecars left in place: {n}": "Залишено супровідних файлів: {n}"
+  "Sidecars left in place: {n}": "Залишено супровідних файлів: {n}",
+  "Files other photos still use, kept: {n}": "Файли, які використовують інші фото (залишено): {n}"
 }

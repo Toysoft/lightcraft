@@ -35,22 +35,31 @@ fn no_trash_param(p: &Value, c: &str) -> Result<NoTrash> {
     }
 }
 
-/// A path's folder and its name without the last extension, lower-cased: what a sidecar named
-/// for the stem (`IMG_1.xmp`) is shared by.
-fn folder_and_stem(path: &Path) -> Option<(PathBuf, String)> {
-    Some((path.parent()?.to_path_buf(), path.file_stem()?.to_string_lossy().to_lowercase()))
+/// What stays in the library, by folder: the names and the stems (name without the last
+/// extension) of its photos' files, lower-cased. A sidecar one of them may use stays, also
+/// when that photo's file is not there right now (a disk that is away).
+#[derive(Default)]
+struct Kept {
+    names: HashSet<(PathBuf, String)>,
+    stems: HashSet<(PathBuf, String)>,
+}
+
+impl Kept {
+    fn add(&mut self, path: &Path) {
+        let Some(folder) = path.parent() else { return };
+        if let Some(name) = path.file_name() {
+            self.names.insert((folder.to_path_buf(), name.to_string_lossy().to_lowercase()));
+        }
+        if let Some(stem) = path.file_stem() {
+            self.stems.insert((folder.to_path_buf(), stem.to_string_lossy().to_lowercase()));
+        }
+    }
 }
 
 /// The sidecars beside `original` that are there now and are this photo's alone, and how many
 /// are there but may be another file's (those stay). `.xmp` and `.XMP` are one file on a disk
 /// that ignores case.
-///
-/// A sidecar named for the whole file (`IMG_1.jpg.xmp`) is this photo's. One named for the stem
-/// (`IMG_1.xmp`) is also the sidecar of anything else of that stem: it is this photo's alone
-/// only when no other file of that stem is in the folder (a raw, a video, anything: other apps
-/// write stem sidecars for files LightCraft does not import) and no photo that stays in the
-/// library is of that stem there (`kept_stems`: its file may be on a disk that is away).
-fn own_sidecars(original: &str, kept_stems: &HashSet<(PathBuf, String)>) -> (Vec<PathBuf>, usize) {
+fn own_sidecars(original: &str, kept: &Kept) -> (Vec<PathBuf>, usize) {
     let fs = crate::rename::RealFs;
     let (mut own, mut left): (Vec<PathBuf>, usize) = (Vec::new(), 0);
     let mut seen: Vec<PathBuf> = Vec::new();
@@ -61,7 +70,7 @@ fn own_sidecars(original: &str, kept_stems: &HashSet<(PathBuf, String)>) -> (Vec
                 continue;
             }
             seen.push(path.clone());
-            if naming == crate::sidecar::SidecarNaming::Full || stem_is_free(Path::new(original), &path, kept_stems) {
+            if sidecar_is_free(Path::new(original), &path, kept) {
                 own.push(path);
             } else {
                 left += 1;
@@ -71,19 +80,29 @@ fn own_sidecars(original: &str, kept_stems: &HashSet<(PathBuf, String)>) -> (Vec
     (own, left)
 }
 
-/// Whether the stem sidecar `sidecar` of the photo that was at `original` (gone by now) is
-/// nobody else's: see [`own_sidecars`]. When in doubt (a folder that can't be listed): no.
-fn stem_is_free(original: &Path, sidecar: &Path, kept_stems: &HashSet<(PathBuf, String)>) -> bool {
-    let Some(key) = folder_and_stem(original) else { return false };
-    if kept_stems.contains(&key) {
+/// Whether `sidecar` (`S.xmp`) is nobody's but the photo's that was at `original` (gone from
+/// the folder by now). A sidecar is `S`'s when a file is named `S` (`IMG_1.jpg.xmp` for
+/// `IMG_1.jpg`) and the sidecar of everything whose name without its extension is `S`
+/// (`IMG_1.xmp` for `IMG_1.dng`, `IMG_1.mov`…: other apps write those for files LightCraft
+/// does not import). So it is free only when no other file in the folder is named `S` or has
+/// the stem `S`, and no photo that stays in the library is such a file there. When in doubt (a
+/// folder that can't be listed): not free.
+fn sidecar_is_free(original: &Path, sidecar: &Path, kept: &Kept) -> bool {
+    let (Some(folder), Some(of)) = (sidecar.parent(), sidecar.file_stem()) else { return false };
+    let of = of.to_string_lossy().to_lowercase();
+    let key = (folder.to_path_buf(), of.clone());
+    if kept.names.contains(&key) || kept.stems.contains(&key) {
         return false;
     }
-    let Ok(entries) = std::fs::read_dir(&key.0) else { return false };
+    let Ok(entries) = std::fs::read_dir(folder) else { return false };
     for entry in entries {
         let Ok(entry) = entry else { return false };
         let path = entry.path();
-        let is_sidecar = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("xmp"));
-        if !is_sidecar && path != sidecar && path.file_stem().is_some_and(|st| st.to_string_lossy().to_lowercase() == key.1) {
+        if path == sidecar || path == original || path.extension().is_some_and(|e| e.eq_ignore_ascii_case("xmp")) {
+            continue;
+        }
+        let is = |part: Option<&std::ffi::OsStr>| part.is_some_and(|p| p.to_string_lossy().to_lowercase() == of);
+        if is(path.file_name()) || is(path.file_stem()) {
             return false;
         }
     }
@@ -125,13 +144,11 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
     // and so does a stem sidecar one of them may share
     let fs = crate::rename::RealFs;
     let mut kept_names: HashMap<String, Vec<PathBuf>> = HashMap::new();
-    let mut kept_stems: HashSet<(PathBuf, String)> = HashSet::new();
+    let mut kept_beside = Kept::default();
     for p in s.catalog.photos().filter(|p| !going.contains(&p.id)) {
         let Source::File { path } = &p.source else { continue };
         let path = PathBuf::from(path);
-        if let Some(key) = folder_and_stem(&path) {
-            kept_stems.insert(key);
-        }
+        kept_beside.add(&path);
         if let Some(name) = path.file_name() {
             kept_names.entry(name.to_string_lossy().to_lowercase()).or_default().push(path);
         }
@@ -146,6 +163,8 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
     let (mut taken, mut gone_paths): (Vec<Trashed>, Vec<String>) = (Vec::new(), Vec::new());
     let (mut missing, mut shared, mut sidecars_left) = (0usize, 0usize, 0usize);
     let mut done: Vec<PathBuf> = Vec::new();
+    // photos named that stay after all (could not go, or no Trash): keepers for the sidecars
+    let mut stayed: Vec<PathBuf> = Vec::new();
     // the photos' own files first; the sidecars after, once it is known which photos stay
     for id in &named {
         let Some(p) = s.catalog.photo(*id) else { continue };
@@ -166,19 +185,30 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
             removed.push(*id);
             continue;
         }
-        if !fs.exists(file) {
+        match std::fs::symlink_metadata(file) {
+            Ok(_) => {}
             // gone from a folder that is there: the photo just leaves. A folder that isn't
             // there says nothing about the file (a disk that is away): the photo stays
-            if file.parent().is_some_and(Path::is_dir) {
-                missing += 1;
-                removed.push(*id);
-            } else {
-                fail(&mut failed, format!("{path}: its folder can't be reached (is the disk connected?)"));
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if file.parent().is_some_and(Path::is_dir) {
+                    missing += 1;
+                    removed.push(*id);
+                } else {
+                    fail(&mut failed, format!("{path}: its folder can't be reached (is the disk connected?)"));
+                    stayed.push(file.to_path_buf());
+                }
+                continue;
             }
-            continue;
+            // (it may well be there: only "not found" means gone)
+            Err(e) => {
+                fail(&mut failed, format!("{path}: can't be read: {e}"));
+                stayed.push(file.to_path_buf());
+                continue;
+            }
         }
         if !fs.is_file(file) {
             fail(&mut failed, format!("{path}: not a file"));
+            stayed.push(file.to_path_buf());
             continue;
         }
         match bin.trash(file) {
@@ -191,20 +221,23 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
                 // (its sidecars stay: only the file that was asked about is erased)
                 Ok(()) => {
                     taken.push(Trashed { from: path.clone(), now: Whereabouts::Erased });
-                    let (own, left) = own_sidecars(path, &kept_stems);
+                    let (own, left) = own_sidecars(path, &kept_beside);
                     sidecars_left += own.len() + left;
                 }
                 Err(e) => {
                     fail(&mut failed, format!("{path}: can't be erased: {e}"));
+                    stayed.push(file.to_path_buf());
                     continue;
                 }
             },
             Err(BinError::NoTrash) => {
                 no_trash_ids.push(id.0);
+                stayed.push(file.to_path_buf());
                 continue;
             }
             Err(BinError::Failed(why)) => {
                 fail(&mut failed, why);
+                stayed.push(file.to_path_buf());
                 continue;
             }
         }
@@ -213,8 +246,11 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
     }
     // the sidecars of the files that went to the Trash follow them there: those that are theirs
     // alone. One that can't go stays behind (and is counted); nothing is lost by that.
+    for path in &stayed {
+        kept_beside.add(path);
+    }
     for original in &gone_paths {
-        let (own, left) = own_sidecars(original, &kept_stems);
+        let (own, left) = own_sidecars(original, &kept_beside);
         sidecars_left += left;
         for sidecar in own {
             match bin.trash(&sidecar) {

@@ -1469,7 +1469,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
     }
     if trash_instead {
         app.ui.dialog = None;
-        match super::trash_files::open(app, &json!({})) {
+        match super::trash_files::open(app, &json!({"settle": true})) {
             Ok(_) => return,
             Err(e) => app.toast(ctx, e),
         }

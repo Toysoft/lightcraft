@@ -147,7 +147,7 @@ fn move_files_to_trash_asks_first_and_undo_brings_photo_and_file_back() {
     let dir = Scratch::new("ask");
     let (mut h, ids, paths) = app(&dir, &["a.jpg", "b.jpg"]);
     run(&mut h, "dialog.trashFiles", json!({}));
-    assert_eq!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Trash { ids: vec![ids[0]], emptying: false })));
+    assert_eq!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Trash { ids: vec![ids[0]], emptying: false, since: None })));
     assert!(in_library(&h, ids[0]) && exists(&paths[0]), "asking does nothing");
     ask(&mut h, "ui.dialog.cancel", json!({}));
     assert!(in_library(&h, ids[0]) && exists(&paths[0]), "Cancel leaves photo and file");
@@ -182,7 +182,7 @@ fn a_photo_s_menu_in_the_grid_offers_it_in_the_library_and_in_recently_deleted()
     assert!(!in_library(&h, ids[0]) && !exists(&paths[0]) && exists(&paths[1]));
     ask(&mut h, "ui.clickWidget", json!({"id": format!("thumb:{}", ids[1]), "button": "right"}));
     click(&mut h, "button:contextEmptyTrashFiles");
-    assert_eq!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Trash { ids: vec![ids[1], ids[2]], emptying: true })));
+    assert_eq!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Trash { ids: vec![ids[1], ids[2]], emptying: true, since: None })));
     let undo = h.app.session.undo.len();
     click(&mut h, "button:dialogOk");
     assert!(!exists(&paths[1]) && !exists(&paths[2]) && !in_library(&h, ids[2]));
@@ -198,7 +198,13 @@ fn the_delete_question_offers_move_files_to_trash_as_a_second_answer() {
     assert_eq!(h.app.ui.dialog, Some(Dialog::ConfirmDelete { count: 1 }));
     assert!(has(&h, "button:dialogTrashFiles"));
     click(&mut h, "button:dialogTrashFiles");
-    assert_eq!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Trash { ids: vec![ids[0]], emptying: false })), "the other question");
+    assert!(
+        matches!(&h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Trash { ids: asked, since: Some(_), .. })) if *asked == vec![ids[0]]),
+        "the other question: {:?}",
+        h.app.ui.dialog
+    );
+    // a second click of a double-click does not answer it: its button waits a moment
+    click(&mut h, "button:dialogOk");
     assert!(in_library(&h, ids[0]) && exists(&paths[0]), "still nothing done");
     ask(&mut h, "ui.dialog.cancel", json!({}));
     // Delete's own answer is what it was: to Recently Deleted, no file touched

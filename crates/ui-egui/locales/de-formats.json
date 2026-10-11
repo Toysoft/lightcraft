@@ -303,5 +303,6 @@
   "Files moved to the Trash: {files} (photos out of the library: {photos})": "In den Papierkorb gelegte Dateien: {files} (aus der Bibliothek entfernte Fotos: {photos})",
   "{n} could not be moved and stay in the library: {why}": "{n} konnten nicht verschoben werden und bleiben in der Bibliothek: {why}",
   "Photos whose file was already gone: {n}": "Fotos, deren Datei bereits fehlte: {n}",
-  "Sidecars left in place: {n}": "Belassene Filialdateien: {n}"
+  "Sidecars left in place: {n}": "Belassene Filialdateien: {n}",
+  "Files other photos still use, kept: {n}": "Dateien, die andere Fotos noch verwenden (behalten): {n}"
 }

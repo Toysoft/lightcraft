@@ -13,7 +13,9 @@ use crate::state::Dialog;
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TrashAsk {
     /// Move these photos' files to the Trash? (`emptying`: they are all of Recently Deleted.)
-    Trash { ids: Vec<u64>, emptying: bool },
+    /// `since`: when it took another question's place (the Delete question's second answer):
+    /// its button waits a moment then, as the Erase question's always does.
+    Trash { ids: Vec<u64>, emptying: bool, since: Option<f64> },
     /// These photos are on a disk without a Trash: erase their files for good? `since`: when it
     /// came up (its button waits a moment, so a second click meant for the question before it
     /// does not answer this one).
@@ -26,8 +28,8 @@ pub const ERASE_SETTLE_SECONDS: f64 = 1.0;
 /// Whether the question's button can be pressed yet.
 pub(crate) fn armed(ctx: &egui::Context, ask: &TrashAsk) -> bool {
     match ask {
-        TrashAsk::Trash { .. } => true,
-        TrashAsk::Erase { since, .. } => {
+        TrashAsk::Trash { since: None, .. } => true,
+        TrashAsk::Trash { since: Some(since), .. } | TrashAsk::Erase { since, .. } => {
             let left = since + ERASE_SETTLE_SECONDS - ctx.input(|i| i.time);
             if left > 0.0 {
                 ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
@@ -58,7 +60,9 @@ pub fn open(app: &mut LightcraftApp, p: &Value) -> Result<Value, String> {
     if ids.is_empty() {
         return Err(crate::i18n::tr(if emptying { "Recently Deleted is empty" } else { "No photos of the library are selected" }).to_string());
     }
-    app.ui.dialog = Some(Dialog::TrashFiles(TrashAsk::Trash { ids, emptying }));
+    // (in place of another question: a second click meant for that one must not answer this)
+    let since = p.get("settle").and_then(Value::as_bool).unwrap_or(false).then(|| app.now());
+    app.ui.dialog = Some(Dialog::TrashFiles(TrashAsk::Trash { ids, emptying, since }));
     Ok(Value::Null)
 }
 
@@ -160,10 +164,13 @@ pub(crate) fn run(app: &mut LightcraftApp, ask: &TrashAsk) -> Result<Value, Stri
     if n("missing") > 0 {
         said.push(crate::i18n::tr_format!("Photos whose file was already gone: {n}", n = n("missing")));
     }
+    if n("shared") > 0 {
+        said.push(crate::i18n::tr_format!("Files other photos still use, kept: {n}", n = n("shared")));
+    }
     if n("sidecarsLeft") > 0 {
         said.push(crate::i18n::tr_format!("Sidecars left in place: {n}", n = n("sidecarsLeft")));
     }
-    let plain = failed.is_empty() && n("missing") == 0 && n("sidecarsLeft") == 0;
+    let plain = failed.is_empty() && n("missing") == 0 && n("sidecarsLeft") == 0 && n("shared") == 0;
     if !said.is_empty() {
         app.say(said.join(" · "), if plain { 4.0 } else { 12.0 });
     }
