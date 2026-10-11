@@ -243,7 +243,11 @@ pub fn specs() -> Vec<CommandSpec> {
                     let fresh = match look {
                         Some(l) => (*l).clone(),
                         None => {
+                            // the photo's built-in defaults (raws: capture sharpening and colour noise
+                            // reduction, embedded lens corrections), as at import, with the white balance
+                            // of its current as-shot reference
                             let info = s.source_info(id);
+                            let defaults = s.catalog.photo(id).map(|p| p.camera_defaults()).unwrap_or_default();
                             let mut fresh = DevelopSettings {
                                 wb: lightcraft_develop::WhiteBalance {
                                     mode: WbMode::AsShot,
@@ -251,7 +255,7 @@ pub fn specs() -> Vec<CommandSpec> {
                                     tint: info.as_shot_tint,
                                     ..Default::default()
                                 },
-                                ..Default::default()
+                                ..defaults
                             };
                             lightcraft_pipeline::local::normalize_wb(&mut fresh, &info);
                             fresh
