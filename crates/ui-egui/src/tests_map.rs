@@ -136,6 +136,10 @@ fn the_map_view_fits_the_photos_with_gps_and_credits_the_tiles() {
     }
     // the menu and the bottom bar know the view
     assert_eq!(crate::menubar::checked(&h.app, "view.map"), Some(true));
+    assert!(w.contains("\"icon:map\""), "the bottom bar has the Map button: {w}");
+    // the map draws in the docking canvas, beside (not under) the docked Tools panel
+    let tools = h.app.widgets.iter().find(|(id, _)| id == "panel:right_panel").map(|(_, r)| *r).expect("Tools is docked by default");
+    assert!(!canvas.intersect(tools).is_positive(), "map {canvas:?} overlaps Tools {tools:?}");
     // the view is kept for the session: leaving and coming back doesn't refit
     run(&mut h, "map.setView", json!({"lat": 10.0, "lon": 20.0, "zoom": 7}));
     run(&mut h, "view.photoGrid", json!({}));
