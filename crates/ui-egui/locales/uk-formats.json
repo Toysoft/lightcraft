@@ -238,5 +238,9 @@
   "Set Time Zone Offset… (UTC{o})": "Задати зміщення часового поясу… (UTC{o})",
   "Auto-Tag {n} Selected Photos": "Прив'язати вибрані фото ({n})",
   "{m} of them fall within the track's time range": "{m} з них потрапляють у час треку",
-  "{n} more tracks": "ще треків: {n}"
+  "{n} more tracks": "ще треків: {n}",
+  "Deleted {n} map tiles": "Видалено фрагментів мапи: {n}",
+  "{size} MB in {n} tiles (limit {cap} MB)": "{size} МБ, фрагментів: {n} (межа {cap} МБ)",
+  "Map tiles from {id}": "Фрагменти мапи: {id}",
+  "In use: {url} (up to zoom {zoom})": "Використовується: {url} (до масштабу {zoom})"
 }

@@ -33,7 +33,7 @@ impl Transport for FakeTiles {
     }
 }
 
-fn tile_png() -> Vec<u8> {
+pub(super) fn tile_png() -> Vec<u8> {
     let mut px = Vec::with_capacity(256 * 256 * 4);
     for y in 0..256u32 {
         for x in 0..256u32 {
@@ -288,7 +288,7 @@ fn offline_shows_a_note_and_never_starts_the_tile_service() {
     run(&mut h, "view.map", json!({}));
     frames(&mut h, 3);
     let text = h.painted_text().join("\n");
-    assert!(text.contains("Map tiles are off (Settings / map.tileSource)"), "{text}");
+    assert!(text.contains("Map tiles are off (Settings ▸ Map)"), "{text}");
     assert!(!text.contains("OpenStreetMap contributors"));
     assert!(h.app.session.map.service().is_none(), "no tile service, so no network");
     assert_eq!(state(&mut h)["offline"], true);

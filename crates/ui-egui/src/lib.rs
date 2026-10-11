@@ -72,6 +72,8 @@ mod tests_map_filter;
 #[cfg(test)]
 mod tests_map_geotag;
 #[cfg(test)]
+mod tests_map_keys;
+#[cfg(test)]
 mod tests_map_locations;
 #[cfg(test)]
 mod tests_map_tracks;

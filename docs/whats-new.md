@@ -9,7 +9,7 @@
 - Drag to pan; the mouse wheel or a pinch zooms where the pointer is; Fit to Photos frames every photo with a location.
   The count of photos without GPS is shown bottom left.
 - The map uses OpenStreetMap's tiles (credited on the map) or a tile server you choose, only fetches what is on screen,
-  and can be switched off (`map.tileSource {offline: true}`); see [Map](map.md) for what is sent where.
+  and can be switched off in **Settings ▸ Map**; see [Map](map.md) for what is sent where.
 - The Info panel shows a small map of the photo's place under its location fields (the active photo's, with several
   selected). Click it to open the Map view there; **Open in Browser** (formerly Show on Map) still opens
   OpenStreetMap's site.
@@ -37,6 +37,15 @@
   Photos** places them where the track was at their capture time, in one undo step. The selected photos are marked on
   the track where they would go, so a wrong offset shows before anything is written. Files up to 50 MB (2 million
   points) draw smoothly. Agents: `map.trackLog`, `photo.autoTagTracklog {loaded: true}`.
+- The Map view's keys, as in Lightroom Classic's Map module: **⌘K** Lock Markers, **\\** hides the location filter
+  bar, **O** folds the Saved Locations list, **=** / **−** zoom, **⌘0** fits the photos, and **H** hides the photo pins
+  (also the map's new **Hide Pins** button) so the map, saved locations and tracks show alone. They work in the Map view
+  only: elsewhere H, \\ and O keep Remove, Show Original and the mask overlay.
+- **View ▸ Map** gathers every map command: Fit to Photos, zoom, Show Pins, Lock Markers, the location filter, Saved
+  Locations, Tracklog and Map Tiles….
+- **Settings ▸ Map**: choose OpenStreetMap, Offline or your own tile server (URL template, attribution, max zoom; used
+  only once you press Apply), see how much the tile cache holds and clear it. A note says what the tile server sees.
+  Agents: `map.showPins`, `map.filterBar`, `map.showLocations`, `map.settings`.
 
 ### Activity stack
 - Long-running tasks show in one place, top left under the top bar, as in Lightroom Classic (issue #345): imports and

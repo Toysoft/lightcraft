@@ -350,6 +350,11 @@ pub struct UiState {
     pub face_boxes: bool,
     /// Map view: Lock Markers (pins can't be dragged to move a photo's position; `map.lockMarkers`).
     pub map_lock_markers: bool,
+    /// Map view: photo pins and clusters drawn (H, `map.showPins`; saved locations and track logs
+    /// stay).
+    pub map_show_pins: bool,
+    /// Map view: the location filter bar above the map (`\`, `map.filterBar`).
+    pub map_filter_bar: bool,
     /// Left-sidebar sections folded shut by their header (`albums`, `local`, `byDate`,
     /// `keywords`); the rest are open.
     pub collapsed_sidebar: Vec<String>,
@@ -829,6 +834,8 @@ impl Default for UiState {
             show_counts: true,
             face_boxes: true,
             map_lock_markers: false,
+            map_show_pins: true,
+            map_filter_bar: true,
             collapsed_sidebar: Vec::new(),
             name_edit: None,
             person_page: None,

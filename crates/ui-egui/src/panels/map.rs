@@ -23,6 +23,11 @@
 //!   photo's pin moves it (a cluster's drag pans, as Lightroom Classic does), unless Lock Markers
 //!   is on; right-click a pin to remove its photos' GPS. Each is one undo step (`photo.setGps`,
 //!   `photo.removeGps`); `map.lockMarkers` toggles the lock (a UI preference).
+//! - **Hide Pins** (H, `map.showPins`): no photo pins or clusters (nothing to click, hover or
+//!   drag); saved-location circles and the track log stay. `map.filterBar` (`\`) hides the
+//!   location filter bar, `map.showLocations` (O) folds the Saved Locations list. The keys that
+//!   share a key with another command (H, `\`, O) are the map's only in the Map view
+//!   (`shortcuts::MAP_ONLY`); View ▸ Map lists every map command (`menubar`).
 //! - **Location filter** (the bar above the map, as Lightroom Classic's): Visible on Map, Tagged,
 //!   Untagged or None, with counts ([`LocationFilter`], `map.locationFilter`). It narrows the
 //!   photos in view through [`lightcraft_engine::Session::narrow`] (rules Has GPS / GPS Area, the
@@ -49,6 +54,8 @@ use crate::icons::Icon;
 
 #[path = "map_locations.rs"]
 pub mod locations;
+#[path = "map_settings.rs"]
+pub mod settings;
 #[path = "map_tracks.rs"]
 pub mod tracks;
 use crate::theme::Tokens;
@@ -219,6 +226,8 @@ pub struct MapView {
     pub loc: locations::LocState,
     /// The track log drawn on the map.
     pub trk: tracks::TrackState,
+    /// Settings ▸ Map: a custom tile server being typed (applied on confirm).
+    pub source_draft: settings::SourceDraft,
 }
 
 impl MapView {
@@ -415,8 +424,8 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let film = app.ui.filmstrip && full.height() >= t.film_h + 80.0;
     let film_h = if film { t.film_h } else { 0.0 };
     let above = Rect::from_min_max(full.min, pos2(full.right(), (full.bottom() - film_h).max(full.top())));
-    // the location filter bar on top, when the map keeps some room
-    let bar_h = if above.height() >= FILTER_BAR_H + 80.0 { FILTER_BAR_H } else { 0.0 };
+    // the location filter bar on top (unless hidden: `\`, `map.filterBar`), when the map keeps some room
+    let bar_h = if app.ui.map_filter_bar && above.height() >= FILTER_BAR_H + 80.0 { FILTER_BAR_H } else { 0.0 };
     let canvas = Rect::from_min_max(pos2(above.left(), above.top() + bar_h), above.max);
     app.canvas_rect = Some(canvas);
     if film {
@@ -623,14 +632,16 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     tracks::draw(app, &painter, &t, canvas, &vp);
 
     // ---- pins
+    let no_pins = app.map.location == LocationFilter::Untagged || !app.ui.map_show_pins;
     let key = (
-        app.map.points.generation.unwrap_or(0) ^ u64::from(app.map.location == LocationFilter::Untagged).rotate_left(63),
+        app.map.points.generation.unwrap_or(0) ^ u64::from(no_pins).rotate_left(63),
         [vp.center.lat.to_bits(), vp.center.lon.to_bits(), vp.zoom.to_bits(), (vp.width.to_bits() ^ vp.height.to_bits().rotate_left(32))],
     );
     if app.map.clusters_for != Some(key) {
         let t0 = crate::now_ms();
-        // Untagged: the filmstrip holds the photos without a position, so no pins
-        let shown: &[MapPoint] = if app.map.location == LocationFilter::Untagged { &[] } else { &app.map.points.points };
+        // Untagged: the filmstrip holds the photos without a position, so no pins; Hide Pins (H):
+        // none either (nothing to click, hover or drag; saved locations and tracks stay)
+        let shown: &[MapPoint] = if no_pins { &[] } else { &app.map.points.points };
         app.map.clusters = lightcraft_map::cluster(shown, &vp, CLUSTER_CELL);
         app.map.cluster_ms = crate::now_ms() - t0;
         app.map.clusters_for = Some(key);
@@ -753,7 +764,7 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
         note_box(&painter, &t, canvas.center(), &[(crate::i18n::tr(title).to_string(), true), (crate::i18n::tr(body).to_string(), false)]);
     }
     if offline {
-        let text = crate::i18n::tr("Map tiles are off (Settings / map.tileSource)").to_string();
+        let text = crate::i18n::tr("Map tiles are off (Settings ▸ Map)").to_string();
         note_box(&painter, &t, pos2(canvas.center().x, canvas.top() + 28.0), &[(text, false)]);
     }
     if without > 0 {
@@ -1053,15 +1064,26 @@ fn controls(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     let fit_w = ui.painter().layout_no_wrap(fit_label.clone(), t.font(12.5), t.text).size().x + 20.0;
     let lock_label = crate::i18n::tr("Lock Markers").to_string();
     let lock_w = ui.painter().layout_no_wrap(lock_label.clone(), t.font(12.5), t.text).size().x + 20.0;
+    let pins_label = crate::i18n::tr("Hide Pins").to_string();
+    let pins_w = ui.painter().layout_no_wrap(pins_label.clone(), t.font(12.5), t.text).size().x + 20.0;
     let track_w = ui.painter().layout_no_wrap(crate::i18n::tr("Tracklog").to_string(), t.font(12.5), t.text).size().x + 20.0;
-    let bar_w = track_w + 6.0 + lock_w + 6.0 + fit_w + 6.0 + 64.0;
+    let bar_w = track_w + 6.0 + pins_w + 6.0 + lock_w + 6.0 + fit_w + 6.0 + 64.0;
     let bar = Rect::from_min_size(pos2(canvas.right() - 12.0 - bar_w, canvas.top() + 12.0), vec2(bar_w, 30.0));
     if bar.left() < canvas.left() || bar.bottom() > canvas.bottom() {
         return;
     }
     tracks::button(app, ui, Rect::from_min_size(bar.min, vec2(track_w, 30.0)));
+    // Hide Pins: lit while the photo pins are hidden (H)
+    let hidden = !app.ui.map_show_pins;
+    let pins_r = Rect::from_min_size(pos2(bar.left() + track_w + 6.0, bar.top()), vec2(pins_w, 30.0));
+    let fill = if hidden { t.tool_active } else { t.chrome.gamma_multiply(0.92) };
+    let b = ui.put(pins_r, egui::Button::new(egui::RichText::new(pins_label).font(t.font(12.5))).fill(fill).selected(hidden));
+    register(ui.ctx(), "map:hidePins", b.rect);
+    if b.on_hover_text(crate::i18n::tr("Hide the photo pins (saved locations and tracks stay)")).clicked() {
+        let _ = app.run("map.showPins", json!({}));
+    }
     let locked = app.ui.map_lock_markers;
-    let lock_r = Rect::from_min_size(pos2(bar.left() + track_w + 6.0, bar.top()), vec2(lock_w, 30.0));
+    let lock_r = Rect::from_min_size(pos2(pins_r.right() + 6.0, bar.top()), vec2(lock_w, 30.0));
     let fill = if locked { t.tool_active } else { t.chrome.gamma_multiply(0.92) };
     let b = ui.put(lock_r, egui::Button::new(egui::RichText::new(lock_label).font(t.font(12.5))).fill(fill).selected(locked));
     register(ui.ctx(), "map:lockMarkers", b.rect);
@@ -1115,6 +1137,14 @@ fn num(p: &Value, key: &str) -> Result<Option<f64>, String> {
     match p.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(v) => v.as_f64().filter(|v| v.is_finite()).map(Some).ok_or_else(|| format!("map.setView: `{key}` must be a number")),
+    }
+}
+
+/// A toggle's `{on?}`: the value asked for, or the opposite of `cur` without one.
+fn toggle(p: &Value, cur: bool) -> Result<bool, ()> {
+    match p.get("on") {
+        None | Some(Value::Null) => Ok(!cur),
+        Some(v) => v.as_bool().ok_or(()),
     }
 }
 
@@ -1191,15 +1221,45 @@ pub fn command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Result<Va
         }
         "map.lockMarkers" => {
             // {on?}: without it, toggles
-            let on = match p.get("on") {
-                None | Some(Value::Null) => !app.ui.map_lock_markers,
-                Some(v) => match v.as_bool() {
-                    Some(b) => b,
-                    None => return Some(Err("map.lockMarkers: `on` is true or false".into())),
-                },
+            let Ok(on) = toggle(p, app.ui.map_lock_markers) else {
+                return Some(Err("map.lockMarkers: `on` is true or false".into()));
             };
             app.ui.map_lock_markers = on;
             Ok(json!({"on": on}))
+        }
+        "map.showPins" | "map.filterBar" | "map.showLocations" => {
+            // {on?}: without it, toggles
+            let cur = match id {
+                "map.showPins" => app.ui.map_show_pins,
+                "map.filterBar" => app.ui.map_filter_bar,
+                _ => !app.map.loc.list_folded,
+            };
+            let on = match toggle(p, cur) {
+                Ok(on) => on,
+                Err(()) => return Some(Err(format!("{id}: `on` is true or false"))),
+            };
+            match id {
+                "map.showPins" => {
+                    app.ui.map_show_pins = on;
+                    app.map.clusters_for = None;
+                    if !on {
+                        app.map.pin_drag = None;
+                        app.map.menu_for.clear();
+                    }
+                }
+                "map.filterBar" => app.ui.map_filter_bar = on,
+                _ => app.map.loc.list_folded = !on,
+            }
+            Ok(json!({"on": on}))
+        }
+        "map.location.new" => {
+            // the name is asked for, then `map.location.add` saves it at the map's centre
+            locations::new_location(app, p.get("fromSelection").and_then(Value::as_bool).unwrap_or(false));
+            Ok(Value::Null)
+        }
+        "map.settings" => {
+            app.ui.dialog = Some(crate::state::Dialog::Settings { tab: "map".into() });
+            Ok(Value::Null)
         }
         "map.locationFilter" => {
             // {mode?: visible|tagged|untagged|none}: without it, reports
@@ -1277,6 +1337,9 @@ fn state_core(app: &mut LightcraftApp) -> Value {
         "clusterCount": app.map.clusters.len(),
         "clusterMs": app.map.cluster_ms,
         "lockMarkers": app.ui.map_lock_markers,
+        "showPins": app.ui.map_show_pins,
+        "filterBar": app.ui.map_filter_bar,
+        "locationList": !app.map.loc.list_folded,
         "locationFilter": location_state(app),
         "movingPin": app.map.pin_drag.map(|d| json!({"id": d.id, "x": d.at.x, "y": d.at.y})),
         "drop": app.map.drop_at.map(|(n, at)| {

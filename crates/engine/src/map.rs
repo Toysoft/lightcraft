@@ -7,13 +7,13 @@
 //! hermetic. Commands: `map.tileSource`, `map.cacheInfo`, `map.clearCache` (`cmd/map.rs`).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use lightcraft_map::{DEFAULT_CACHE_BYTES, TileService, TileSource};
+use lightcraft_map::{DEFAULT_CACHE_BYTES, TileCache, TileService, TileSource, Transport};
 
 use crate::Session;
 
 /// See the module docs.
-#[derive(Debug)]
 pub struct MapState {
     source: TileSource,
     /// The tile cache folder (`<cache>/map-tiles`, one folder per source inside); `None` = tiles
@@ -28,6 +28,25 @@ pub struct MapState {
     pub track: Option<crate::tracklog::LoadedTrack>,
     /// Bumped by every change of [`MapState::track`] (load, active track, offset, clear).
     pub track_generation: u64,
+    /// How the services this state starts fetch tiles: `None` is HTTPS (`lightcraft-fetch`); a
+    /// host with its own transport, or tests with a fake server, set it so that every source the
+    /// user picks (Settings ▸ Map) goes through it.
+    pub transport: Option<Arc<dyn Transport>>,
+}
+
+impl std::fmt::Debug for MapState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MapState")
+            .field("source", &self.source)
+            .field("cache_root", &self.cache_root)
+            .field("cache_bytes", &self.cache_bytes)
+            .field("service", &self.service.is_some())
+            .field("locations", &self.locations)
+            .field("track", &self.track.is_some())
+            .field("track_generation", &self.track_generation)
+            .field("transport", &self.transport.is_some())
+            .finish()
+    }
 }
 
 impl Default for MapState {
@@ -40,6 +59,7 @@ impl Default for MapState {
             locations: Default::default(),
             track: None,
             track_generation: 0,
+            transport: None,
         }
     }
 }
@@ -97,6 +117,18 @@ impl Session {
     /// [`TileService::poll`] for arrivals; nothing here blocks on disk or network.
     pub fn map_tiles(&mut self) -> &TileService {
         let m = &mut self.map;
-        m.service.get_or_insert_with(|| TileService::new(m.source.clone(), m.cache_root.clone(), m.cache_bytes))
+        m.service.get_or_insert_with(|| match &m.transport {
+            Some(t) => {
+                let cache = if m.source.is_offline() {
+                    None
+                } else {
+                    m.cache_root
+                        .clone()
+                        .and_then(|root| TileCache::new(root, &m.source.id, m.cache_bytes).map_err(|e| log::warn!("map: no tile cache: {e}")).ok())
+                };
+                TileService::with_transport(m.source.clone(), cache, Some(Arc::clone(t)))
+            }
+            None => TileService::new(m.source.clone(), m.cache_root.clone(), m.cache_bytes),
+        })
     }
 }

@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; shortcut notes moved here from the checklist) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Map view keys); earlier: major (created; shortcut notes moved here from the checklist) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 How LightCraft's interaction compares with Lightroom's: views, panels, tools and handles, modifier
 keys, shortcuts, zoom, context menus and feel. Rows for individual menu items and shortcuts live in
@@ -67,10 +67,18 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 
 **Library culling (KEYC-RATING):** `0–5`, `6–9` and `P/X/U` reach egui on macOS even when displayed in the native menu (adapted from PR #261; issue #283). `Shift+0–9` applies and advances once; `Shift+P` picks and advances in Photo Grid / Square Grid and retains Presets elsewhere. See [library shortcuts](library-shortcuts.md) for the verified Classic mapping and regression coverage. Remaining Classic gaps: rating `[` / `]`, flag cycling and filter-bar keys.
 
+**Map view (KEYC-MODULE-OUTPUT, KEY-HIDEPINS):** the Map module's keys work in the Map view only
+(`shortcuts::MAP_ONLY`): ⌘K Lock Markers, `\` location filter bar, O Saved Locations list, `=` / `−` zoom (⌘= / ⌘− /
+⌘0 too), H hide pins. H, `\` and O mean Remove, Show Original and the mask overlay elsewhere and keep that meaning
+there; in the Map view the map's command wins (the pairs are in `shortcuts::CONTEXTUAL`, so reassigning one doesn't
+take the key from the other). Not mapped: Classic's I (map info), ⌘F (map search), ⌘1–6 (map styles) and ⌫ (delete GPS;
+⌫ stays Delete photo, Remove GPS Coordinates is in the Photo menu). All are in View ▸ Map; see [Map](map.md#keys-and-menus).
+
 **Still missing / broken:**
 - No command yet: F1 help (verify the rest of the old list: full screen, settings, stacks,
   visualize spots and merges have commands now).
-- `H` opens Remove; Lightroom also uses it (Classic) to hide pins — pins toggle from View → Show Mask Pins.
+- `H` opens Remove; Classic also uses it to hide Develop's edit pins — mask pins toggle from View → Show Mask Pins.
+  In the Map view `H` hides the photo pins instead (below).
 - ⌘M / ⌘H / ⌘Q / ⌘W rely on the platform window defaults (unverified).
 
 
@@ -78,4 +86,5 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Map view keys (⌘K, \\, O, = / −, H) scoped to the Map view |
 | 2026-10-10 | major | Created: measured command and shortcut counts, assessment by area, estimates; moved the shortcut conflicts section here from the checklist |

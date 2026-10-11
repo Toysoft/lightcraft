@@ -238,5 +238,9 @@
   "Set Time Zone Offset… (UTC{o})": "Zeitzonenversatz festlegen… (UTC{o})",
   "Auto-Tag {n} Selected Photos": "{n} ausgewählte Fotos automatisch verorten",
   "{m} of them fall within the track's time range": "{m} davon liegen im Zeitbereich des Tracks",
-  "{n} more tracks": "{n} weitere Tracks"
+  "{n} more tracks": "{n} weitere Tracks",
+  "Deleted {n} map tiles": "{n} Kartenkacheln gelöscht",
+  "{size} MB in {n} tiles (limit {cap} MB)": "{size} MB in {n} Kacheln (Grenze {cap} MB)",
+  "Map tiles from {id}": "Kartenkacheln von {id}",
+  "In use: {url} (up to zoom {zoom})": "In Verwendung: {url} (bis Zoomstufe {zoom})"
 }

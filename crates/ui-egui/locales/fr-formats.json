@@ -238,5 +238,9 @@
   "Set Time Zone Offset… (UTC{o})": "Définir le décalage horaire… (UTC{o})",
   "Auto-Tag {n} Selected Photos": "Géolocaliser les {n} photos sélectionnées",
   "{m} of them fall within the track's time range": "{m} d'entre elles tombent dans la plage horaire du tracé",
-  "{n} more tracks": "{n} autres tracés"
+  "{n} more tracks": "{n} autres tracés",
+  "Deleted {n} map tiles": "{n} tuiles de carte supprimées",
+  "{size} MB in {n} tiles (limit {cap} MB)": "{size} Mo en {n} tuiles (limite {cap} Mo)",
+  "Map tiles from {id}": "Tuiles de carte de {id}",
+  "In use: {url} (up to zoom {zoom})": "Utilisé : {url} (jusqu'au zoom {zoom})"
 }

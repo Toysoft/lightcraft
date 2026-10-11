@@ -238,5 +238,9 @@
   "Set Time Zone Offset… (UTC{o})": "Definir deslocamento de fuso… (UTC{o})",
   "Auto-Tag {n} Selected Photos": "Geomarcar {n} fotos selecionadas",
   "{m} of them fall within the track's time range": "{m} delas estão no intervalo de tempo da trilha",
-  "{n} more tracks": "mais {n} trilhas"
+  "{n} more tracks": "mais {n} trilhas",
+  "Deleted {n} map tiles": "{n} blocos do mapa excluídos",
+  "{size} MB in {n} tiles (limit {cap} MB)": "{size} MB em {n} blocos (limite de {cap} MB)",
+  "Map tiles from {id}": "Blocos do mapa de {id}",
+  "In use: {url} (up to zoom {zoom})": "Em uso: {url} (até o zoom {zoom})"
 }

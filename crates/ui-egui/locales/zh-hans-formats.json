@@ -238,5 +238,9 @@
   "Set Time Zone Offset… (UTC{o})": "设置时区偏移… (UTC{o})",
   "Auto-Tag {n} Selected Photos": "自动为所选的 {n} 张照片添加位置",
   "{m} of them fall within the track's time range": "其中 {m} 张在轨迹的时间范围内",
-  "{n} more tracks": "另有 {n} 条轨迹"
+  "{n} more tracks": "另有 {n} 条轨迹",
+  "Deleted {n} map tiles": "已删除 {n} 个地图图块",
+  "{size} MB in {n} tiles (limit {cap} MB)": "{size} MB,{n} 个图块(上限 {cap} MB)",
+  "Map tiles from {id}": "地图图块来自 {id}",
+  "In use: {url} (up to zoom {zoom})": "使用中:{url}(最大缩放 {zoom})"
 }

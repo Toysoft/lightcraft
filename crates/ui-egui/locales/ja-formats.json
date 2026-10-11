@@ -238,5 +238,9 @@
   "Set Time Zone Offset… (UTC{o})": "時差を設定… (UTC{o})",
   "Auto-Tag {n} Selected Photos": "選択した {n} 枚の写真に自動で位置を付ける",
   "{m} of them fall within the track's time range": "うち {m} 枚がトラックの時間範囲内です",
-  "{n} more tracks": "他 {n} 件のトラック"
+  "{n} more tracks": "他 {n} 件のトラック",
+  "Deleted {n} map tiles": "地図タイルを {n} 枚削除しました",
+  "{size} MB in {n} tiles (limit {cap} MB)": "{size} MB・{n} タイル(上限 {cap} MB)",
+  "Map tiles from {id}": "地図タイルの取得元: {id}",
+  "In use: {url} (up to zoom {zoom})": "使用中: {url}(ズーム {zoom} まで)"
 }
