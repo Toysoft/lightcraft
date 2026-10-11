@@ -10,7 +10,7 @@
 - File ▸ Upload to Flickr… uploads the selected photos with their edits as JPEGs: choose the size (1024, 2048,
   4096 px or full size), quality and who can see them (public, friends, family, friends & family, only you). Titles
   come from each photo's title (else its file name), the caption becomes the description and keywords become tags;
-  location is left out unless you ask for it. Pick one of your Flickr albums to put them in (none by default). The
+  location is left out unless you ask for it. Put them in one of your Flickr albums, or make a new one around them (none by default). The
   upload runs in the background in the activity stack, with ✕.
 - Agents and the CLI use `flickr.signIn`, `flickr.completeSignIn` and `flickr.upload` (see docs/flickr.md).
 

@@ -249,5 +249,7 @@
   "Signed in to Flickr as {name}": "已以 {name} 身分登入 Flickr",
   "Upload {n} photo{} to Flickr as {name}": "以 {name} 身分上傳 {n} 張照片到 Flickr{:.0}",
   "Uploaded {ok} of {total} photo{} to Flickr": "已上傳 {ok}／{total} 張照片到 Flickr{:.0}",
-  " · {} not added to the album": " · {} 張未加入相簿"
+  " · {} not added to the album": " · {} 張未加入相簿",
+  " · the album couldn't be made: {}": " · 無法建立相簿：{}",
+  " · new album “{}”": " · 新相簿「{}」"
 }

@@ -279,3 +279,24 @@ fn adds_a_photo_to_an_album() {
     assert_eq!((reply::field(&r.params, "photoset_id"), reply::field(&r.params, "photo_id")), (Some("72157600000000001"), Some("987654")));
     assert!(signed_ok(&f.base, r, "access-secret"), "a change is a signed form POST");
 }
+
+#[test]
+fn creates_an_album_around_an_uploaded_photo() {
+    let f = fake(|i, _| match i {
+        0 => (200, r#"{"photoset":{"id":"72157700000000009","url":"https://www.flickr.com/photos/me/sets/72157700000000009/"},"stat":"ok"}"#.into()),
+        _ => (200, r#"{"stat":"fail","code":2,"message":"Invalid primary photo id"}"#.into()),
+    });
+    let c = client(&f);
+    let cancel = AtomicBool::new(false);
+    let id = c.create_album(&token(), "  Wyoming & Montana 2026 ", "987654", &cancel).unwrap();
+    assert_eq!(id, "72157700000000009");
+    let e = c.create_album(&token(), "Trip", "nope", &cancel).unwrap_err();
+    assert!(e.to_string().contains("Invalid primary photo id"), "{e}");
+    assert!(c.create_album(&token(), "   ", "987654", &cancel).is_err(), "a name is needed, before asking Flickr");
+    let seen = f.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    let r = &seen[0];
+    assert_eq!((r.method.as_str(), reply::field(&r.params, "method")), ("POST", Some("flickr.photosets.create")));
+    assert_eq!((reply::field(&r.params, "title"), reply::field(&r.params, "primary_photo_id")), (Some("Wyoming & Montana 2026"), Some("987654")));
+    assert!(signed_ok(&f.base, r, "access-secret"));
+}

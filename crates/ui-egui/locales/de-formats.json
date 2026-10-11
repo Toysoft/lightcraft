@@ -249,5 +249,7 @@
   "Signed in to Flickr as {name}": "Bei Flickr angemeldet als {name}",
   "Upload {n} photo{} to Flickr as {name}": "{n} Foto{} als {name} auf Flickr hochladen",
   "Uploaded {ok} of {total} photo{} to Flickr": "{ok} von {total} Foto{} auf Flickr hochgeladen",
-  " · {} not added to the album": " · {} nicht zum Album hinzugefügt"
+  " · {} not added to the album": " · {} nicht zum Album hinzugefügt",
+  " · the album couldn't be made: {}": " · das Album konnte nicht erstellt werden: {}",
+  " · new album “{}”": " · neues Album „{}“"
 }

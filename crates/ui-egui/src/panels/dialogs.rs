@@ -1896,14 +1896,30 @@ fn flickr_upload_body(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, op
             opts.album.clear();
         }
         let none = crate::i18n::tr("None").to_string();
-        let c = egui::ComboBox::from_id_salt("flickrAlbum").width(220.0).selected_text(current.unwrap_or(none.clone())).show_ui(ui, |ui| {
-            ui.selectable_value(&mut opts.album, String::new(), none);
+        let new = crate::i18n::tr("New Album…").to_string();
+        let shown = if opts.new_album { new.clone() } else { current.unwrap_or(none.clone()) };
+        let c = egui::ComboBox::from_id_salt("flickrAlbum").width(220.0).selected_text(shown).show_ui(ui, |ui| {
+            if ui.selectable_label(!opts.new_album && opts.album.is_empty(), none).clicked() {
+                opts.album.clear();
+                opts.new_album = false;
+            }
+            let r = ui.selectable_label(opts.new_album, new);
+            crate::widgets::register(ui.ctx(), "item:flickrNewAlbum", r.rect);
+            if r.clicked() && !opts.new_album {
+                opts.album.clear();
+                opts.new_album = true;
+                // the name field takes the focus
+                ui.memory_mut(|m| m.request_focus(crate::text_field::id("field:flickrNewAlbum")));
+            }
             if !albums.is_empty() {
                 ui.separator();
             }
             for (id, title, photos) in &albums {
                 let title = if title.trim().is_empty() { id.clone() } else { title.clone() };
-                ui.selectable_value(&mut opts.album, id.clone(), title).on_hover_text(photos.to_string());
+                if ui.selectable_label(!opts.new_album && opts.album == *id, title).on_hover_text(photos.to_string()).clicked() {
+                    opts.album = id.clone();
+                    opts.new_album = false;
+                }
             }
             if app.flickr.albums_loading && albums.is_empty() {
                 ui.add_enabled(false, egui::Label::new(crate::i18n::tr("Loading albums…")));
@@ -1914,6 +1930,19 @@ fn flickr_upload_body(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, op
             ui.spinner();
         }
     });
+    if opts.new_album {
+        field(ui, "Album name", |ui| {
+            crate::text_field::TextField::singleline("field:flickrNewAlbum", &mut opts.new_album_title)
+                .hint(crate::i18n::tr("Name of the new album"))
+                .width(220.0)
+                .show(ui);
+        });
+        ui.label(
+            egui::RichText::new(crate::i18n::tr("Flickr makes the album with the first photo that goes up as its cover."))
+                .size(11.0)
+                .color(t.text_dim),
+        );
+    }
     if let Some(e) = &app.flickr.albums_error {
         ui.label(egui::RichText::new(format!("{} {e}", crate::i18n::tr("Couldn't read your Flickr albums:"))).size(11.0).color(t.caution));
     }

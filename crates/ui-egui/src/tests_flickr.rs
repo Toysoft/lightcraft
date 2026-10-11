@@ -52,6 +52,8 @@ fn fake(delay: Duration) -> String {
             n += 1;
             let body = if head.contains("/request_token") {
                 "oauth_callback_confirmed=true&oauth_token=req&oauth_token_secret=reqsecret".to_string()
+            } else if head.contains("/services/rest/") && String::from_utf8_lossy(&got).contains("photosets.create") {
+                r#"{"photoset":{"id":"601","url":"x"},"stat":"ok"}"#.to_string()
             } else if head.contains("/services/rest/") {
                 r#"{"photosets":{"page":1,"pages":1,"photoset":[{"id":"501","title":{"_content":"Portfolio"},"photos":"9"},{"id":"502","title":{"_content":"Travel"},"photos":4}]},"stat":"ok"}"#.to_string()
             } else if head.contains("/access_token") {
@@ -255,4 +257,34 @@ fn the_upload_dialog_lists_albums_and_starts_with_none() {
     h.step();
     let Some(Dialog::FlickrUpload { opts }) = &h.app.ui.dialog else { panic!("no dialog") };
     assert_eq!(opts.album, "");
+}
+
+#[test]
+fn makes_a_new_album_from_the_dialog() {
+    let base = fake(Duration::ZERO);
+    let (mut h, _) = app(&base);
+    signed_in(&mut h);
+    h.app.flickr.last_dialog = Some(crate::flickr::UploadDialog { new_album: true, new_album_title: "Last time".into(), ..Default::default() });
+    h.app.run("dialog.flickrUpload", json!({})).unwrap();
+    let Some(Dialog::FlickrUpload { opts }) = &h.app.ui.dialog else { panic!("no dialog") };
+    assert!(!opts.new_album && opts.new_album_title.is_empty(), "a new dialog doesn't make an album unless asked");
+    h.step_until(T, |h| h.app.flickr.albums.is_some());
+
+    // the params a new album sends, and an empty name stays in the dialog with a reason
+    let named = crate::flickr::UploadDialog { new_album: true, new_album_title: "Road Trip".into(), album: "501".into(), ..Default::default() };
+    assert_eq!((named.params()["newAlbum"].as_str(), named.params()["album"].is_null()), (Some("Road Trip"), true));
+    let unnamed = Dialog::FlickrUpload { opts: crate::flickr::UploadDialog { new_album: true, ..Default::default() } };
+    let e = crate::panels::dialogs::confirm_dialog(&mut h.app, &unnamed).unwrap_err();
+    assert!(e.contains("name"), "{e}");
+
+    let ids: Vec<u64> = h.app.session.catalog.photos().take(2).map(|p| p.id.0).collect();
+    h.app.run("library.select", json!({"ids": ids, "active": ids[0]})).unwrap();
+    h.app.ui.dialog = None;
+    crate::panels::dialogs::confirm_dialog(&mut h.app, &Dialog::FlickrUpload { opts: crate::flickr::UploadDialog { long_edge: 256, ..named } })
+        .unwrap();
+    assert!(h.step_until(T, |h| h.app.flickr.last_result.is_some()));
+    let r = h.app.flickr.last_result.clone().unwrap();
+    assert_eq!((r["uploaded"].as_u64(), r["album"].as_str(), r["albumFailed"].as_u64()), (Some(2), Some("601"), Some(0)), "{r}");
+    assert!(h.app.ui.toast.as_ref().is_some_and(|(t, _, _)| t.contains("Road Trip")), "{:?}", h.app.ui.toast);
+    assert_eq!(h.app.flickr.albums.as_ref().unwrap()[0], ("601".to_string(), "Road Trip".to_string(), 2), "listed at once");
 }

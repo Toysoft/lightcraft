@@ -2040,5 +2040,8 @@
   "Start Over": "重新开始",
   "Loading albums…": "正在加载相册…",
   "Couldn't read your Flickr albums:": "无法读取你的 Flickr 相册：",
-  "Reading Flickr albums": "正在读取 Flickr 相册"
+  "Reading Flickr albums": "正在读取 Flickr 相册",
+  "Album name": "相册名称",
+  "Name of the new album": "新相册的名称",
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr 会以第一张上传的照片作为封面创建相册。"
 }

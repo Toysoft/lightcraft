@@ -249,5 +249,7 @@
   "Signed in to Flickr as {name}": "Sesión iniciada en Flickr como {name}",
   "Upload {n} photo{} to Flickr as {name}": "Subir {n} foto{} a Flickr como {name}",
   "Uploaded {ok} of {total} photo{} to Flickr": "Subidas {ok} de {total} foto{} a Flickr",
-  " · {} not added to the album": " · {} sin añadir al álbum"
+  " · {} not added to the album": " · {} sin añadir al álbum",
+  " · the album couldn't be made: {}": " · no se pudo crear el álbum: {}",
+  " · new album “{}”": " · nuevo álbum «{}»"
 }

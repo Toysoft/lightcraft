@@ -201,6 +201,9 @@ pub struct UploadOptions {
     pub remove_location: bool,
     /// The id of the account's album to put the photos in (`None`: no album).
     pub album: Option<String>,
+    /// A new album to make for the photos, by title (made once the first photo is up: Flickr
+    /// needs one of the account's photos for it). Not with `album`.
+    pub new_album: Option<String>,
 }
 
 impl Default for UploadOptions {
@@ -214,6 +217,7 @@ impl Default for UploadOptions {
             description: true,
             remove_location: true,
             album: None,
+            new_album: None,
         }
     }
 }
@@ -253,6 +257,15 @@ impl UploadOptions {
             }
             Some(_) => return Err("`album` must be an album id from flickr.albums (or null: no album)".into()),
         };
+        o.new_album = match p.get("newAlbum") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) if s.trim().is_empty() => return Err("enter a name for the new album".into()),
+            Some(Value::String(s)) if s.trim().chars().count() <= 255 && !s.chars().any(char::is_control) => Some(s.trim().to_string()),
+            Some(_) => return Err("`newAlbum` must be the new album's name (at most 255 characters)".into()),
+        };
+        if o.album.is_some() && o.new_album.is_some() {
+            return Err("give `album` (an existing album) or `newAlbum` (a new one), not both".into());
+        }
         Ok(o)
     }
 
@@ -281,6 +294,7 @@ pub struct UploadJob {
     client: Client,
     token: Token,
     album: Option<String>,
+    new_album: Option<String>,
 }
 
 /// Set up the upload of the photos `p` names (`ids`; default: the selection) with the options in
@@ -301,7 +315,7 @@ pub fn prepare_upload(s: &mut Session, p: &Value) -> Result<UploadJob, String> {
         ids.iter().map(|id| s.catalog.photo(*id).map(|ph| photo_info(ph, &opts)).ok_or(format!("no photo {}", id.0))).collect::<Result<_, _>>()?;
     let exports = crate::export::prepare_batch(s, &ids, &eo)?;
     let items = exports.into_iter().zip(infos).map(|(export, info)| Item { export, info }).collect();
-    Ok(UploadJob { items, client, token, album: opts.album })
+    Ok(UploadJob { items, client, token, album: opts.album, new_album: opts.new_album })
 }
 
 /// What [`list_albums`] needs, taken from the session: the client and the signed-in account.
@@ -345,7 +359,9 @@ impl UploadJob {
         self.items.is_empty()
     }
 
-    /// Render and upload each photo in order, then put it in the album, if one was chosen.
+    /// Render and upload each photo in order, then put it in the album, if one was chosen. A new
+    /// album is made around the first photo that goes up (its cover); if that fails, the photos
+    /// still go up, each with `albumError`. `createdAlbum` is `{id, title}` once made.
     /// `progress(done, file)` is called before each one; it, or `cancel`, stops the rest. A refused
     /// sign-in stops the rest too (they would all fail). A photo that went up but couldn't join
     /// the album counts as uploaded, with `albumError`. → `{uploaded, failed, albumFailed,
@@ -355,6 +371,9 @@ impl UploadJob {
         let total = self.items.len();
         let (mut photos, mut uploaded, mut failed, mut album_failed) = (Vec::new(), 0usize, 0usize, 0usize);
         let (mut cancelled, mut sign_in) = (false, false);
+        let mut album = self.album.clone();
+        // the new album: made with the first photo, or why it couldn't be
+        let (mut created, mut create_error): (Option<String>, Option<String>) = (None, None);
         for (i, item) in self.items.into_iter().enumerate() {
             let name = item.export.file_name.clone();
             if !progress(i, &name) || cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -380,7 +399,32 @@ impl UploadJob {
                     uploaded += 1;
                     let mut entry =
                         json!({"photo": photo, "file": name, "photoId": id, "url": lightcraft_flickr::photo_url(&self.token.user_nsid, &id)});
-                    if let Some(album) = &self.album
+                    let mut joined = false;
+                    if album.is_none()
+                        && create_error.is_none()
+                        && let Some(title) = &self.new_album
+                    {
+                        // the first photo up becomes the new album's cover, and is in it
+                        match self.client.create_album(&self.token, title, &id, cancel) {
+                            Ok(new_id) => {
+                                album = Some(new_id.clone());
+                                created = Some(new_id);
+                                joined = true;
+                            }
+                            Err(e) => {
+                                if e.is_cancelled() {
+                                    cancelled = true;
+                                }
+                                log::warn!("flickr: the album {title} could not be made: {e}");
+                                create_error = Some(e.to_string());
+                            }
+                        }
+                    }
+                    if let Some(e) = &create_error {
+                        album_failed += 1;
+                        entry["albumError"] = json!(e);
+                    } else if let Some(album) = &album
+                        && !joined
                         && let Err(e) = self.client.add_to_album(&self.token, album, &id, cancel)
                     {
                         if e.is_cancelled() {
@@ -416,7 +460,9 @@ impl UploadJob {
             "albumFailed": album_failed,
             "cancelled": cancelled,
             "signInNeeded": sign_in,
-            "album": self.album,
+            "album": album,
+            "createdAlbum": created.map(|id| json!({"id": id, "title": self.new_album})),
+            "albumCreateError": create_error,
             "photos": photos,
         })
     }

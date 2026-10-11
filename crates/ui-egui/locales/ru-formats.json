@@ -249,5 +249,7 @@
   "Signed in to Flickr as {name}": "Вход во Flickr выполнен: {name}",
   "Upload {n} photo{} to Flickr as {name}": "Загрузить во Flickr фото ({n}) как {name}{:.0}",
   "Uploaded {ok} of {total} photo{} to Flickr": "Загружено во Flickr фото: {ok} из {total}{:.0}",
-  " · {} not added to the album": " · не добавлено в альбом: {}"
+  " · {} not added to the album": " · не добавлено в альбом: {}",
+  " · the album couldn't be made: {}": " · не удалось создать альбом: {}",
+  " · new album “{}”": " · новый альбом «{}»"
 }

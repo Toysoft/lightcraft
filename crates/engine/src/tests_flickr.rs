@@ -268,3 +268,48 @@ fn a_photo_that_cannot_join_the_album_still_counts_as_uploaded() {
         assert!(e.contains("album"), "{e}");
     }
 }
+
+#[test]
+fn makes_a_new_album_around_the_first_photo() {
+    let (base, seen) = fake(|_, path| match path {
+        // made: the answer to flickr.photosets.create (addPhoto takes any "ok")
+        "/services/rest/" => (200, r#"{"photoset":{"id":"777","url":"x"},"stat":"ok"}"#.into()),
+        _ => flickr_ok(0, path),
+    });
+    let mut s = signed_in(&base);
+    let ids: Vec<u64> = s.catalog.photos().take(3).map(|p| p.id.0).collect();
+    let r = s.execute("flickr.upload", &json!({"ids": ids, "longEdge": 128, "newAlbum": " Road Trip "})).unwrap();
+    assert_eq!((r["uploaded"].as_u64(), r["albumFailed"].as_u64(), r["album"].as_str()), (Some(3), Some(0), Some("777")), "{r}");
+    assert_eq!(r["createdAlbum"], json!({"id": "777", "title": "Road Trip"}));
+    let first = r["photos"][0]["photoId"].as_str().unwrap().to_string();
+    let rest: Vec<String> =
+        seen.lock().unwrap().iter().filter(|q| q.path == "/services/rest/").map(|q| String::from_utf8_lossy(&q.body).to_string()).collect();
+    assert_eq!(rest.len(), 3, "one create, then the two other photos added: {rest:?}");
+    assert!(rest[0].contains("photosets.create") && rest[0].contains("title=Road%20Trip") && rest[0].contains(&format!("primary_photo_id={first}")));
+    assert!(rest[1..].iter().all(|b| b.contains("photosets.addPhoto") && b.contains("photoset_id=777")));
+}
+
+#[test]
+fn a_new_album_that_cannot_be_made_leaves_the_photos_uploaded() {
+    let (base, seen) = fake(|_, path| match path {
+        "/services/rest/" => (200, r#"{"stat":"fail","code":3,"message":"User has reached the maximum number of photosets"}"#.into()),
+        _ => flickr_ok(0, path),
+    });
+    let mut s = signed_in(&base);
+    let ids: Vec<u64> = s.catalog.photos().take(2).map(|p| p.id.0).collect();
+    let r = s.execute("flickr.upload", &json!({"ids": ids, "longEdge": 128, "newAlbum": "Too Many"})).unwrap();
+    assert_eq!((r["uploaded"].as_u64(), r["albumFailed"].as_u64(), r["album"].as_str()), (Some(2), Some(2), None), "{r}");
+    assert!(r["albumCreateError"].as_str().unwrap().contains("can't have more albums"), "{r}");
+    assert_eq!(r["createdAlbum"], Value::Null);
+    let creates = seen.lock().unwrap().iter().filter(|q| q.path == "/services/rest/").count();
+    assert_eq!(creates, 1, "tried once, not once per photo");
+    // names and combinations that aren't accepted
+    for (p, why) in [
+        (json!({"ids": ids, "newAlbum": "  "}), "name"),
+        (json!({"ids": ids, "newAlbum": "x".repeat(256)}), "255"),
+        (json!({"ids": ids, "newAlbum": "A", "album": "111"}), "not both"),
+    ] {
+        let e = s.execute("flickr.upload", &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{p}: {e}");
+    }
+}

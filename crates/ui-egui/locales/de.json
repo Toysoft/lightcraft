@@ -2160,5 +2160,8 @@
   "Start Over": "Neu beginnen",
   "Loading albums…": "Alben werden geladen…",
   "Couldn't read your Flickr albums:": "Deine Flickr-Alben konnten nicht gelesen werden:",
-  "Reading Flickr albums": "Flickr-Alben werden gelesen"
+  "Reading Flickr albums": "Flickr-Alben werden gelesen",
+  "Album name": "Albumname",
+  "Name of the new album": "Name des neuen Albums",
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr erstellt das Album mit dem zuerst hochgeladenen Foto als Titelbild."
 }

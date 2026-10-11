@@ -23,9 +23,11 @@ republished and nothing on Flickr is changed or deleted afterwards (see `LRC-LIB
    - **Remove location info** (on by default): GPS is left out of the file, so the photo isn't placed on Flickr's map.
      Turn it off to share where it was taken.
    - **Hide from public searches**.
-   - **Album**: one of your Flickr albums to put the photos in, or None (the default every time the dialog opens).
-     The list is read from Flickr when the dialog opens. A photo that uploads but can't be added to the album still
-     counts as uploaded; the toast says how many weren't added.
+   - **Album**: one of your Flickr albums to put the photos in, **New Album…** to make one (type its name), or None
+     (the default every time the dialog opens). The list is read from Flickr when the dialog opens. Flickr makes an
+     album around one of your photos, so a new album is made right after the first photo goes up, with that photo as
+     its cover, and the others join it. A photo that uploads but can't be added to the album still counts as
+     uploaded; the toast says how many weren't added, or why the new album couldn't be made.
 
    The upload runs in the background with a row in the activity stack (✕ stops it after the current photo). A toast
    says how many went up. Photos are rendered like an export (sRGB JPEG, sharpened for screen), so they look as
@@ -52,7 +54,7 @@ over MCP (`lightcraft-cli mcp`, synchronously):
 | `flickr.completeSignIn` | `{code}` | status, signed in and saved |
 | `flickr.cancelSignIn` / `flickr.signOut` | — | status |
 | `flickr.albums` | — | `{albums: [{id, title, photos}]}`, as arranged on Flickr |
-| `flickr.upload` | `{ids?, longEdge?, quality?, privacy?, hidden?, tags?, description?, removeLocation?, album?}` | `{total, uploaded, failed, albumFailed, cancelled, signInNeeded, album, photos: [{photo, file, photoId, url, albumError?} \| {photo, file, error}]}` |
+| `flickr.upload` | `{ids?, longEdge?, quality?, privacy?, hidden?, tags?, description?, removeLocation?, album?, newAlbum?}` (`album` or `newAlbum`, not both) | `{total, uploaded, failed, albumFailed, cancelled, signInNeeded, album, createdAlbum?, albumCreateError?, photos: [{photo, file, photoId, url, albumError?} \| {photo, file, error}]}` |
 
 At most 500 photos per upload. In the app, `flickr.upload` returns `{background: true, total}` at once; poll
 `ui.inspect` → `flickr` (or `activity.list`, kind `upload`).
@@ -72,6 +74,7 @@ At most 500 photos per upload. In the app, `flickr.upload` returns `{background:
   at build time (e.g. as release-workflow secrets). Without them, users enter their own. A key's secret in a
   desktop binary can be extracted; Flickr's terms for non-commercial keys apply to whoever registers it.
 - Albums are Flickr photosets: `flickr.photosets.getList` (signed `GET` to `api.flickr.com/services/rest/`, 500 per
-  page) and `flickr.photosets.addPhoto` (signed form `POST`) after each upload; "already in the album" is fine.
-- Not done: publish collections (remember what was uploaded, republish edited photos, delete on Flickr), creating
-  albums, other services, a localhost callback instead of copying the code.
+  page), `flickr.photosets.addPhoto` (signed form `POST`) after each upload ("already in the album" is fine) and
+  `flickr.photosets.create`, which needs a primary photo the account owns: it is called once, after the first upload.
+- Not done: publish collections (remember what was uploaded, republish edited photos, delete on Flickr), other
+  services, a localhost callback instead of copying the code.

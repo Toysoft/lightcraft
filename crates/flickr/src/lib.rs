@@ -90,6 +90,7 @@ impl std::fmt::Display for Error {
             Error::Status(s, body) => write!(f, "{}", reply::snippet(&format!("Flickr answered HTTP {s}"), body)),
             Error::Flickr { code, message } => {
                 let hint = match code {
+                    _ if message.contains("maximum number of photosets") => " (the account can't have more albums)",
                     6 => " (the account's upload limit is reached)",
                     8 => " (the file is too large for Flickr)",
                     96..=99 => " (sign in to Flickr again)",
@@ -453,6 +454,18 @@ impl Client {
             }
             page += 1;
         }
+    }
+
+    /// Make a new album titled `title` on `token`'s account. Flickr needs one of the account's
+    /// photos for it (its cover, and its first photo): `primary_photo_id`. → the new album's id.
+    pub fn create_album(&self, token: &Token, title: &str, primary_photo_id: &str, cancel: &AtomicBool) -> Result<String, Error> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(Error::Protocol("an album needs a name".into()));
+        }
+        let args = [("title", title.to_string()), ("primary_photo_id", primary_photo_id.to_string())];
+        let v = self.rest(true, token, "flickr.photosets.create", &args, cancel)?;
+        reply::text(&v["photoset"]["id"]).filter(|id| !id.is_empty()).ok_or_else(|| Error::Protocol("no album id in Flickr's answer".into()))
     }
 
     /// Put photo `photo_id` in album `album_id`. A photo already there is fine.

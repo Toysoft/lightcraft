@@ -26,6 +26,9 @@ pub struct UploadDialog {
     pub remove_location: bool,
     /// The Flickr album to put the photos in (its id; empty: none). Starts empty every time.
     pub album: String,
+    /// Make a new album for the photos instead, named `new_album_title`.
+    pub new_album: bool,
+    pub new_album_title: String,
 }
 
 impl Default for UploadDialog {
@@ -39,6 +42,8 @@ impl Default for UploadDialog {
             description: true,
             remove_location: true,
             album: String::new(),
+            new_album: false,
+            new_album_title: String::new(),
         }
     }
 }
@@ -53,7 +58,8 @@ impl UploadDialog {
             "tags": self.tags,
             "description": self.description,
             "removeLocation": self.remove_location,
-            "album": if self.album.is_empty() { Value::Null } else { json!(self.album) },
+            "album": if self.album.is_empty() || self.new_album { Value::Null } else { json!(self.album) },
+            "newAlbum": if self.new_album { json!(self.new_album_title) } else { Value::Null },
         })
     }
 }
@@ -184,7 +190,12 @@ mod native {
                     return Err(crate::i18n::tr("Sign in to Flickr first").to_string());
                 }
                 // no album unless one is chosen this time
-                let opts = super::UploadDialog { album: String::new(), ..app.flickr.last_dialog.clone().unwrap_or_default() };
+                let opts = super::UploadDialog {
+                    album: String::new(),
+                    new_album: false,
+                    new_album_title: String::new(),
+                    ..app.flickr.last_dialog.clone().unwrap_or_default()
+                };
                 app.ui.dialog = Some(Dialog::FlickrUpload { opts });
                 load_albums(app);
                 Ok(Value::Null)
@@ -372,8 +383,16 @@ mod native {
                     m += &crate::i18n::tr_format!(" · {} failed: {}", failed, first);
                 }
                 let album_failed = r["albumFailed"].as_u64().unwrap_or(0);
-                if album_failed > 0 && r["signInNeeded"] != true {
+                if let Some(e) = r["albumCreateError"].as_str() {
+                    m += &crate::i18n::tr_format!(" · the album couldn't be made: {}", e);
+                } else if album_failed > 0 && r["signInNeeded"] != true {
                     m += &crate::i18n::tr_format!(" · {} not added to the album", album_failed);
+                }
+                if let (Some(id), Some(title)) = (r["createdAlbum"]["id"].as_str(), r["createdAlbum"]["title"].as_str()) {
+                    m += &crate::i18n::tr_format!(" · new album “{}”", title);
+                    // the next dialog lists it even before the albums are read again
+                    let photos = r["uploaded"].as_u64().unwrap_or(0).saturating_sub(album_failed);
+                    app.flickr.albums.get_or_insert_with(Vec::new).insert(0, (id.to_string(), title.to_string(), photos));
                 }
                 if r["cancelled"] == true {
                     m += crate::i18n::tr(" · cancelled");

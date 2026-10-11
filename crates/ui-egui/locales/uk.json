@@ -2196,5 +2196,8 @@
   "Start Over": "Почати спочатку",
   "Loading albums…": "Завантаження альбомів…",
   "Couldn't read your Flickr albums:": "Не вдалося прочитати ваші альбоми Flickr:",
-  "Reading Flickr albums": "Читання альбомів Flickr"
+  "Reading Flickr albums": "Читання альбомів Flickr",
+  "Album name": "Назва альбому",
+  "Name of the new album": "Назва нового альбому",
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr створює альбом із першим завантаженим фото як обкладинкою."
 }

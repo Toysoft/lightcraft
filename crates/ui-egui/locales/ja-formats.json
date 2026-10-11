@@ -249,5 +249,7 @@
   "Signed in to Flickr as {name}": "{name}としてFlickrにサインインしました",
   "Upload {n} photo{} to Flickr as {name}": "{name}として{n}枚の写真をFlickrにアップロード{:.0}",
   "Uploaded {ok} of {total} photo{} to Flickr": "{total}枚中{ok}枚をFlickrにアップロードしました{:.0}",
-  " · {} not added to the album": " · {}枚はアルバムに追加されませんでした"
+  " · {} not added to the album": " · {}枚はアルバムに追加されませんでした",
+  " · the album couldn't be made: {}": " · アルバムを作成できませんでした：{}",
+  " · new album “{}”": " · 新しいアルバム「{}」"
 }

@@ -2002,5 +2002,8 @@
   "Start Over": "Recomeçar",
   "Loading albums…": "Carregando álbuns…",
   "Couldn't read your Flickr albums:": "Não foi possível ler seus álbuns do Flickr:",
-  "Reading Flickr albums": "Lendo álbuns do Flickr"
+  "Reading Flickr albums": "Lendo álbuns do Flickr",
+  "Album name": "Nome do álbum",
+  "Name of the new album": "Nome do novo álbum",
+  "Flickr makes the album with the first photo that goes up as its cover.": "O Flickr cria o álbum com a primeira foto enviada como capa."
 }
