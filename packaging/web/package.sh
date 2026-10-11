@@ -15,7 +15,7 @@ if [ "${1:-}" != "--skip-build" ]; then
   (cd "$ROOT" && cargo xtask web)
 fi
 
-SITE="$CARGO_TARGET_DIR/web"
+SITE="$CARGO_TARGET_DIR/web-site"
 [ -f "$SITE/index.html" ] || { echo "error: $SITE/index.html missing; run without --skip-build" >&2; exit 1; }
 # Paths must be relative so the site works under any prefix.
 if grep -Eq '(src|href)="/[^/]' "$SITE/index.html"; then
