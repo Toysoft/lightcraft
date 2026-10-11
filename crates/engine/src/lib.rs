@@ -34,6 +34,8 @@ mod faces_index;
 #[cfg(not(target_arch = "wasm32"))]
 mod faces_worker;
 pub mod files;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod flickr;
 pub mod fonts;
 pub mod guard;
 pub mod import;
@@ -189,6 +191,9 @@ pub struct Session {
     /// The loaded recognition model and the face embeddings made with it.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) faces: faces_index::FacesState,
+    /// The Flickr account and a sign-in in progress ([`flickr`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub flickr: flickr::State,
     /// Copied develop settings (partial JSON) for Paste.
     pub clipboard: Option<Value>,
     /// The folder on disk the [`LibrarySource::Folder`] view browses.
@@ -313,6 +318,8 @@ impl Session {
             face_catalog: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             faces: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            flickr: Default::default(),
             clipboard: None,
             meta_clipboard: None,
             browse: None,
@@ -877,6 +884,8 @@ mod tests_face_models;
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 mod tests_face_recognize;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests_flickr;
 #[cfg(test)]
 mod tests_folders;
 #[cfg(test)]

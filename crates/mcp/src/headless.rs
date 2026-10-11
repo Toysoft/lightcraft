@@ -32,7 +32,7 @@ impl Drop for Headless {
 
 impl Default for Headless {
     fn default() -> Self {
-        Self::new(Session::new().with_fs().with_default_denoise_models().with_system_clock().with_default_face_models())
+        Self::new(Session::new().with_fs().with_default_denoise_models().with_system_clock().with_default_face_models().with_default_flickr())
     }
 }
 
