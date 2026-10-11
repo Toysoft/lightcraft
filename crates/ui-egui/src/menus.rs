@@ -490,7 +490,7 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
         params.insert("background".into(), Value::Bool(true));
         return Some(app.session.execute(id, &Value::Object(params)).map_err(|e| e.to_string()));
     }
-    if id == "library.backupPreferences" && p.get("choose").is_some() {
+    if id == "library.backupPreferences" && p.get("choose").and_then(Value::as_bool) == Some(true) {
         return Some(choose_backup_folder(app, p));
     }
     if id == "library.restore" {
