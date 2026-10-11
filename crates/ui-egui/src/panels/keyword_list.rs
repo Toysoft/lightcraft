@@ -406,6 +406,9 @@ fn menu(app: &mut LightcraftApp, ui: &mut egui::Ui, path: &str, selection: &[Pho
         app.act("library.filter", json!({"keyword": path}));
     }
     ui.separator();
+    super::side_select::keyword_clip_items(app, ui, &[path.to_string()]);
+    super::side_select::keyword_paste_item(app, ui, path);
+    ui.separator();
     if item(ui, "purge", crate::i18n::tr("Purge Unused Keywords"), true) {
         app.act("keyword.purgeUnused", json!({}));
     }

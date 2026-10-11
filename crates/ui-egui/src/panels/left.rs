@@ -577,6 +577,8 @@ fn new_album_menu(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     if ui.button(crate::i18n::tr("Create Folder…")).clicked() {
         app.ui.dialog = Some(crate::state::Dialog::NewAlbum { name: String::new(), folder: true, parent: None, include_selected: false });
     }
+    // albums taken with Cut or Copy go to the top level from here
+    super::side_select::album_paste_item(app, ui, None);
     // only once the albums were put in an order by hand
     if app.session.catalog.album_children_are_ordered(None) {
         ui.separator();
@@ -1698,6 +1700,10 @@ fn folder_menu(app: &mut LightcraftApp, resp: &egui::Response, a: &Album) {
                 }
             }
         });
+        super::side_select::album_clip_items(app, ui, &[a.id.0]);
+        if a.folder {
+            super::side_select::album_paste_item(app, ui, Some(a.id));
+        }
         if ui.button(crate::i18n::tr("Rename…")).clicked() {
             app.ui.dialog = Some(crate::state::Dialog::RenameAlbum { id: a.id.0, name: a.name.clone() });
         }
@@ -2185,6 +2191,8 @@ fn keyword_row(
             app.act("photo.setMeta", json!({"removeKeywords": [n.path]}));
         }
         ui.separator();
+        super::side_select::keyword_clip_items(app, ui, std::slice::from_ref(&n.path));
+        super::side_select::keyword_paste_item(app, ui, &n.path);
         if ui.button(crate::i18n::tr("Rename Keyword…")).clicked() {
             app.ui.dialog = Some(crate::state::Dialog::RenameKeyword { from: n.path.clone(), to: n.path.clone() });
         }
