@@ -179,6 +179,12 @@
       <Component Id="LightcraftCli">
         <File Id="LightcraftCliExe" Source="$(var.BinDir)\lightcraft-cli.exe" KeyPath="yes" />
       </Component>
+      <Component Id="LensfunLicense">
+        <File Id="LensfunLicenseFile" Source="$(var.BinDir)\Lensfun-CC-BY-SA-3.0.txt" KeyPath="yes" />
+      </Component>
+      <Component Id="ThirdPartyNotice">
+        <File Id="ThirdPartyNoticeFile" Source="$(var.BinDir)\NOTICE" KeyPath="yes" />
+      </Component>
     </ComponentGroup>
   </Fragment>
 </Wix>

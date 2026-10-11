@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~14 points and ~340–600 h away
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (full re-measure against Lightroom Classic 15.5 and the installed Lightroom 9.6; restructured to the progress-docs standard) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (photographer-driven RAW, native lens coverage and mask correctness; readiness estimates not re-measured) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 One-page summary of how close LightCraft is to Adobe Lightroom. Agents: read this, then pick work
 from [docs/gaps.md](docs/gaps.md). The full assessment, method and evidence are in
@@ -12,7 +12,7 @@ from [docs/gaps.md](docs/gaps.md). The full assessment, method and evidence are 
 
 | | Value | Kind |
 |---|---:|---|
-| **Feature breadth** (checklist) | **81.1%** of 517 rows (P0 98.0%, P1 95.1%, P2 46.9%) | measured: [parity-checklist.md](docs/parity-checklist.md) recount |
+| **Feature breadth** (checklist) | **81.2%** of 519 rows (P0 98.0%, P1 95.2%, P2 47.2%) | measured: [parity-checklist.md](docs/parity-checklist.md) recount |
 | **Feature breadth** (weighted by use) | **~77%** | estimated |
 | **Ready for real work** (full target) | **~61%** (56–66%) | estimated: weighted sum over the dimensions |
 | **Mainstream practitioner** | **~49%** (44–54%) | estimated |
@@ -25,12 +25,12 @@ Each audience with its own hours (Opus 5.5 agent wall-clock hours to ~95%):
 | Audience | Ready | Opus 5.5 agent wall-clock hours to ~95% | Work that dominates |
 |---|---:|---:|---|
 | Full target (ready for real work) | **~61%** | **1,000–1,800 h** (~70% parallelizes) | raw colour, lens and camera data; AI models; Classic output modules; localization; plug-in ecosystem |
-| Mainstream practitioner | **~49%** | **450–840 h** (~60% parallelizes) | camera colour and render fidelity; CR3 / ORF / HE NEF; lens database; subject / sky masks; Lightroom XMP exchange; stability |
+| Mainstream practitioner | **~49%** | **450–840 h** (~60% parallelizes) | camera colour and render fidelity; CR3 / ORF / HE NEF; lens coverage; subject / sky masks; Lightroom XMP exchange; stability |
 | Essentials user | **~64%** | **160–300 h** (~50% parallelizes) | default raw look for popular cameras; launch stability; basic-slider feel; opening CR3 / HEIC files people send |
 
 The gap between breadth and readiness is quality and coverage, not missing buttons: camera colour is
 estimated rather than measured, CR3 decodes on three verified Canon bodies, compressed ORF and HE NEF
-open as previews, rendering is tuned by eye, AI masks are heuristics, there is no lens database, and
+open as previews, rendering is tuned by eye, AI masks are heuristics, lens database coverage is partial, and
 tests run in CI on FreeBSD only. **Why alpha:** core workflows run end to end, but readiness is below
 the ~75% beta bar (it is above the ~40% alpha bar) and Lightroom's main inputs, raw files, still have blocking gaps (Canon, ~30% of
 raw users, decodes CR3 on three verified bodies). It passes the alpha gate: all six core workflows
@@ -98,6 +98,12 @@ while lower-layer errors stay English. Detail: [localization-parity.md](docs/loc
 
 Also shipped: Traditional Chinese (87%), Russian (74%), Ukrainian (99%).
 
+A native lens catalog now supplies 1,540 rectilinear calibration sets for 1,039 camera records,
+with original Rust evaluation and conservative matching (`docs/lens-catalog.md`). DNG source
+normalization and pooled Canon calibration are corrected; asynchronous AI mask results are
+rejected after input changes, and the UI identifies approximate selections. These correctness
+changes do not establish Lightroom fidelity or close the broader coverage/AI gaps.
+
 ## Upcoming
 
 Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/gaps.md](docs/gaps.md).
@@ -108,7 +114,7 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 4. Full-resolution zoom (8–15 h)
 5. AI masks: Subject / Sky / People (40–70 h + model decision)
 6. Compressed ORF and HE NEF (28–55 h)
-7. Lens profile database of our own (40–80 h)
+7. Broader matching and measured fidelity for the native lens catalog (coverage remains partial; `docs/lens-catalog.md`)
 8. Tests in CI on macOS, Windows and Linux (6–12 h)
 9. Per-model raw verification (20–35 h)
 
@@ -157,6 +163,7 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Native, separately licensed lens catalog with partial capability coverage; DNG normalization, deterministic Canon calibration and stale-mask correctness. No parity percentage inferred from these corrections. |
 | 2026-10-10 | minor | RAW measured model by model; RAW decode and colour as explicit rows: full 59% → 61%, mainstream 51% → 49%, essentials 63% → 64%; beta ~14 points |
 | 2026-10-10 | minor | Full ready restored to the additive weighted sum (~59%; method aligned with the standard, no new evidence); hours per audience; beta ~16 points away |
 | 2026-10-10 | minor | Mainstream practitioner and essentials user numbers; full ready 55% → 46% (method written down); beta 340–600 h |

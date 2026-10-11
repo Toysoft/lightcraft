@@ -11,13 +11,13 @@
 //! dimensionless scales), so a 400 px preview and a full-size export are warped identically.
 //!
 //! Also here: automatic lateral chromatic aberration estimation ([`estimate_lateral_ca`]) and [`defringe`].
-//! Profile corrections use only lens data embedded in the files: DNG `WarpRectilinear` / `FixVignetteRadial`, and the
-//! raw readers' equivalent of a camera's own correction (Panasonic / Leica RW2 distortion).
+//! Profile corrections use embedded camera data first, otherwise the engine's independently licensed
+//! rectilinear lens catalog. Both share normalized geometry and a single resample.
 
 use std::sync::Mutex;
 
 use lightcraft_color::perceptual::{oklab_from_2020, oklab_to_2020};
-use lightcraft_develop::{DevelopSettings, EmbeddedLens, EmbeddedVignette, EmbeddedWarp};
+use lightcraft_develop::{CatalogLens, DevelopSettings, EmbeddedLens, EmbeddedVignette, EmbeddedWarp};
 use lightcraft_geom::{Affine, Homography, Interval, Orientation, Point, Real};
 use lightcraft_raster::{Plane, Rgb32f};
 
@@ -83,7 +83,14 @@ impl Warp {
         if o.lens_profile
             && let Some(l) = lens
         {
-            wp.lens = Some(*l);
+            let mut resolved = *l;
+            resolved.catalog = resolved.catalog.filter(CatalogLens::is_valid);
+            if !o.remove_ca
+                && let Some(c) = &mut resolved.catalog
+            {
+                c.tca = None;
+            }
+            wp.lens = Some(resolved);
             wp.lens_dist = (o.profile_distortion / 100.0).clamp(0.0, 2.0);
             wp.lens_vig = (o.profile_vignetting / 100.0).clamp(0.0, 2.0);
         }
@@ -103,18 +110,21 @@ impl Warp {
         self.persp != Homography::IDENTITY
             || self.k1 != 0.0
             || self.ca.iter().any(|c| *c != 0.0)
-            || (self.lens_dist != 0.0 && self.lens.is_some_and(|l| l.warp.is_some()))
+            || (self.lens_dist != 0.0 && self.lens.is_some_and(|l| l.warp.is_some() || l.catalog.is_some_and(|c| c.distortion.is_some())))
+            || self.lens.and_then(|l| l.catalog).is_some_and(|c| c.tca.is_some())
     }
 
     /// Whether the colour planes are sampled at different positions.
     pub fn per_channel(&self) -> bool {
         self.ca[0] != self.ca[1]
             || self.ca[1] != self.ca[2]
+            || self.lens.and_then(|l| l.catalog).is_some_and(|c| c.tca.is_some())
             || (self.lens_dist != 0.0 && self.lens.and_then(|l| l.warp).is_some_and(|w| w.planes[0] != w.planes[1] || w.planes[1] != w.planes[2]))
     }
 
     pub fn has_gain(&self) -> bool {
-        self.vig_stops != 0.0 || (self.lens_vig != 0.0 && self.lens.is_some_and(|l| l.vignette.is_some()))
+        self.vig_stops != 0.0
+            || (self.lens_vig != 0.0 && self.lens.is_some_and(|l| l.vignette.is_some() || l.catalog.is_some_and(|c| c.vignette.is_some())))
     }
 
     pub fn is_identity(&self) -> bool {
@@ -170,7 +180,10 @@ impl Warp {
             let (sx, sy) = embedded_warp_real(&wp, qx, qy, ch, self.w, self.h);
             (qx, qy) = (qx + (sx - qx) * self.lens_dist, qy + (sy - qy) * self.lens_dist);
         }
-        let k = self.ca[ch];
+        if let Some(catalog) = self.lens.and_then(|l| l.catalog) {
+            (qx, qy) = catalog_warp_real(&catalog, qx, qy, ch, self.w, self.h, self.lens_dist);
+        }
+        let k = self.ca[ch.min(2)];
         if k != 0.0 {
             (qx, qy) = ((qx - c.x) * (1.0 + k) + c.x, (qy - c.y) * (1.0 + k) + c.y);
         }
@@ -194,6 +207,18 @@ impl Warp {
             && let Some(v) = self.lens.and_then(|l| l.vignette)
         {
             g *= 1.0 + (embedded_vignette_gain(&v, src, self.w, self.h) - 1.0) * self.lens_vig;
+        }
+        if self.lens_vig != 0.0
+            && let Some(c) = self.lens.and_then(|l| l.catalog)
+            && let Some(k) = c.vignette
+        {
+            let radius = (c.vignette_radius * self.w.max(self.h)).max(1e-9);
+            let r2 = ((src.x - c.center.x * self.w).powi(2) + (src.y - c.center.y * self.h).powi(2)) / radius.powi(2);
+            let transmission = 1.0 + r2 * (k[0] + r2 * (k[1] + r2 * k[2]));
+            // A polynomial may leave its measured domain outside the source/cropped canvas.
+            // Cap compensation at four stops rather than amplifying noise without bound.
+            let gain = 1.0 / transmission.clamp(1.0 / 16.0, 4.0);
+            g *= 1.0 + (gain - 1.0) * self.lens_vig;
         }
         g as f32
     }
@@ -316,7 +341,36 @@ pub fn reorient_lens(lens: &EmbeddedLens, o: Orientation, w: f64, h: f64) -> Emb
         EmbeddedWarp { planes, center: map_pt(wp.center), radius: wp.radius * long_ratio }
     });
     let vignette = lens.vignette.map(|v| EmbeddedVignette { k: v.k, center: map_pt(v.center), radius: v.radius * long_ratio });
-    EmbeddedLens { warp, vignette }
+    let catalog = lens.catalog.map(|c| CatalogLens { center: map_pt(c.center), ..c });
+    EmbeddedLens { warp, vignette, catalog }
+}
+
+/// Original evaluation of the public PTLens/poly3/poly5 and TCA equations. Distortion
+/// precedes TCA in the inverse map; TCA therefore uses the distorted (green) radius.
+fn catalog_warp_real<T: Real>(c: &CatalogLens, x: T, y: T, ch: usize, w: f64, h: f64, strength: f64) -> (T, T) {
+    let (cx, cy) = (c.center.x * w, c.center.y * h);
+    let radius = (c.radius * w.max(h)).max(1e-9);
+    let (mut dx, mut dy) = ((x - cx) / radius, (y - cy) / radius);
+    if strength != 0.0
+        && let Some(k) = c.distortion
+    {
+        let r = (dx * dx + dy * dy).sqrt_nonnegative();
+        let f = (((r * k[4] + k[3]) * r + k[2]) * r + k[1]) * r + k[0];
+        let f = (f - 1.0) * strength + 1.0;
+        (dx, dy) = (dx * f, dy * f);
+    }
+    if let Some(tca) = c.tca
+        && let Some(k) = match ch {
+            0 => tca.first(),
+            2 => tca.get(1),
+            _ => None,
+        }
+    {
+        let r = (dx * dx + dy * dy).sqrt_nonnegative();
+        let f = (r * k[2] + k[1]) * r + k[0];
+        (dx, dy) = (dx * f, dy * f);
+    }
+    (dx * radius + cx, dy * radius + cy)
 }
 
 // ------------------------------------------------------------------------------------------ lateral CA
@@ -646,17 +700,108 @@ mod tests {
             };
             let planes = [plane(), plane(), plane()];
             let warp = EmbeddedWarp { planes, center: Point::new(r.range(0.4, 0.6), r.range(0.4, 0.6)), radius: r.range(0.5, 0.8) };
-            wp.lens = Some(EmbeddedLens { warp: Some(warp), vignette: None });
+            wp.lens = Some(EmbeddedLens { warp: Some(warp), vignette: None, catalog: None });
             wp.lens_dist = r.maybe(0.0, 2.0);
         }
         wp
     }
 
-    /// FNV-1a over the bits of the f64 warp results (`Affine::apply`, `Homography::apply`, `to_corrected`,
-    /// `from_corrected`, `corrected_to_source`, `to_source`, `embedded_warp`) for pseudo-random warps and points.
-    /// The expected value was captured before these formulas became generic over `Real`: the f64 path must keep
-    /// the same operations in the same order, bit for bit. To recompute it after changing the inputs, run this
-    /// test (printing `hash`) on a scratch copy of 419261c (thumb-split, pre-generic formulas) and paste it here.
+    fn catalog_lens() -> EmbeddedLens {
+        EmbeddedLens {
+            catalog: Some(CatalogLens {
+                distortion: Some([1.02, -0.01, -0.02, 0.01, 0.0]),
+                tca: Some([[1.001, 0.002, -0.001], [0.999, -0.001, 0.002]]),
+                vignette: Some([-0.5, 0.0, 0.0]),
+                center: Point::new(0.5, 0.5),
+                radius: 1.0 / 3.0,
+                vignette_radius: 0.6009252125773316,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn malformed_stored_catalog_coefficients_do_not_enter_the_warp() {
+        let mut s = DevelopSettings::default();
+        s.optics.lens_profile = true;
+        for radius in [f64::NAN, f64::INFINITY, 0.0, 1e-300] {
+            let mut lens = catalog_lens();
+            lens.catalog.as_mut().unwrap().radius = radius;
+            assert!(Warp::from_settings(300.0, 200.0, &s, Some(&lens)).is_identity());
+        }
+        let mut lens = catalog_lens();
+        lens.catalog.as_mut().unwrap().distortion = Some([f64::NAN; 5]);
+        assert!(Warp::from_settings(300.0, 200.0, &s, Some(&lens)).is_identity());
+    }
+
+    #[test]
+    fn catalog_equations_use_distorted_tca_radius_and_inverse_transmission() {
+        let mut s = DevelopSettings::default();
+        s.optics.lens_profile = true;
+        s.optics.remove_ca = true;
+        let w = Warp::from_settings(300.0, 200.0, &s, Some(&catalog_lens()));
+        // At r=0.5, PTLens scale=1.01125; distorted r=0.505625. Independently
+        // calculated red TCA scale=1.001755593359375, not its value at r=0.5.
+        let q = w.to_source(Point::new(200.0, 100.0), 0);
+        assert!((q.x - 200.65126718923338).abs() < 1e-9, "{q:?}");
+        assert_eq!(q.y, 100.0);
+        assert!((w.to_source(Point::new(200.0, 100.0), 1).x - 200.5625).abs() < 1e-9);
+        assert!((w.gain(Point::new(300.0, 200.0)) - 2.0).abs() < 1e-6, "corner attenuation .5 must require gain 2");
+        s.optics.remove_ca = false;
+        let no_ca = Warp::from_settings(300.0, 200.0, &s, Some(&catalog_lens()));
+        assert_eq!(no_ca.to_source(Point::new(200.0, 100.0), 0), no_ca.to_source(Point::new(200.0, 100.0), 1));
+        s.optics.profile_distortion = 0.0;
+        s.optics.remove_ca = true;
+        let only_ca = Warp::from_settings(300.0, 200.0, &s, Some(&catalog_lens()));
+        assert!(only_ca.moves_pixels() && only_ca.per_channel());
+        assert_eq!(only_ca.to_source(Point::new(200.0, 100.0), 1), Point::new(200.0, 100.0));
+    }
+
+    #[test]
+    fn catalog_warp_is_resolution_independent_and_rotates_with_the_photo() {
+        let lens = catalog_lens();
+        let mut s = DevelopSettings::default();
+        s.optics.lens_profile = true;
+        s.optics.remove_ca = true;
+        let big = Warp::from_settings(3000.0, 2000.0, &s, Some(&lens));
+        let small = Warp::from_settings(300.0, 200.0, &s, Some(&lens));
+        for ch in 0..3 {
+            let a = small.to_source(Point::new(275.0, 50.0), ch);
+            let b = big.to_source(Point::new(2750.0, 500.0), ch);
+            assert!(a.dist(Point::new(b.x / 10.0, b.y / 10.0)) < 1e-9);
+            for o in [Orientation::Rotate90, Orientation::Rotate180, Orientation::FlipH] {
+                let rotated = reorient_lens(&lens, o, 300.0, 200.0);
+                let (w, h) = if o.swaps_axes() { (200.0, 300.0) } else { (300.0, 200.0) };
+                let wp = Warp::from_settings(w, h, &s, Some(&rotated));
+                let (x, y) = o.map(275.0, 50.0, 300.0, 200.0);
+                let q = wp.to_source(Point::new(x, y), ch);
+                let (ax, ay) = o.map(a.x, a.y, 300.0, 200.0);
+                assert!(q.dist(Point::new(ax, ay)) < 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn catalog_interval_coverage_never_disagrees_with_a_pixel() {
+        let mut s = DevelopSettings::default();
+        s.optics.lens_profile = true;
+        let wp = Warp::from_settings(300.0, 200.0, &s, Some(&catalog_lens()));
+        let a = Affine::IDENTITY;
+        for x0 in (0..300).step_by(16) {
+            for y0 in (0..200).step_by(16) {
+                let (x1, y1) = ((x0 + 16).min(300), (y0 + 16).min(200));
+                if let Some(covered) = wp.block_coverage(&a, x0, x1, y0, y1) {
+                    for x in x0..x1 {
+                        for y in y0..y1 {
+                            assert_eq!(wp.covers(&a, x, y), covered);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn warp_f64_results_are_bit_identical_to_the_pre_generic_formulas() {
         let mut hash = 0xCBF2_9CE4_8422_2325u64;
@@ -758,6 +903,7 @@ mod tests {
                 radius: 0.6,
             }),
             vignette: None,
+            catalog: None,
         };
         let mut cases: Vec<DevelopSettings> = Vec::new();
         let mut s = DevelopSettings::default();
@@ -863,6 +1009,7 @@ mod tests {
         let lens = EmbeddedLens {
             warp: Some(EmbeddedWarp { planes: [[1.0, 0.01, 0.0, 0.0, 0.001, 0.002]; 3], center: Point::new(0.4, 0.5), radius: 0.6 }),
             vignette: Some(EmbeddedVignette { k: [0.2, 0.0, 0.0, 0.0, 0.0], center: Point::new(0.4, 0.5), radius: 0.6 }),
+            catalog: None,
         };
         let r = reorient_lens(&lens, Orientation::Rotate90, 300.0, 200.0);
         // rotate 90° cw: (x, y) → (h − y, x)

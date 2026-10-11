@@ -48,3 +48,12 @@ also embed the fonts listed in https://github.com/storytold/craft-fonts/blob/mai
 (the Japanese fonts BIZ UDPGothic, BIZ UDMincho and Shippori Mincho; the web build embeds only BIZ
 UDPGothic Regular), under the SIL Open Font License 1.1. Release packages include each font's
 licence as OFL-<family>.txt.
+
+The camera/lens calibration data in assets/lenses/catalog.json is adapted from
+Lensfun contributors' database, revision 43f9e001ab66c4fcdd4f400463f13b72f94b2288.
+Source: https://github.com/lensfun/lensfun/tree/43f9e001ab66c4fcdd4f400463f13b72f94b2288/data/db
+Modified by the LightCraft contributors (2026): rectilinear subset converted from XML to JSON;
+unsupported projection/decentering/ACM records omitted. It is separately licensed CC BY-SA 3.0
+(https://creativecommons.org/licenses/by-sa/3.0/), not MIT/Apache-2.0. See
+assets/lenses/CC-BY-SA-3.0.txt (Lensfun-CC-BY-SA-3.0.txt in release packages) and
+assets/lenses/source-manifest.json for provenance. The Lensfun library is not included or linked.

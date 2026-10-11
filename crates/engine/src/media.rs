@@ -62,7 +62,7 @@ impl SettingsHashes {
 }
 
 /// Bump when the pipeline's output changes, to invalidate cached thumbnails.
-pub const RENDER_CACHE_VERSION: u64 = 50;
+pub const RENDER_CACHE_VERSION: u64 = 51;
 
 /// Thumbnails render at one of these long edges (so window/cell size changes reuse the cache).
 pub const THUMB_SIZES: [usize; 4] = [128, 256, 384, 512];
@@ -216,7 +216,14 @@ impl DecodedSource {
     /// What to render these pixels against: the decoder's facts, else `header` (the catalog's)
     /// with any stored camera tone curve.
     pub fn info_or(&self, header: SourceInfo) -> SourceInfo {
-        self.info.clone().unwrap_or_else(|| SourceInfo { camera_tone: self.camera_tone.or(header.camera_tone), ..header })
+        let stored_lens = header.lens.filter(|l| l.catalog.is_some());
+        let mut info = self.info.clone().unwrap_or_else(|| SourceInfo { camera_tone: self.camera_tone.or(header.camera_tone), ..header });
+        if info.raw && (stored_lens.is_some() || info.lens.is_some_and(|l| l.catalog.is_some())) {
+            // A legacy photo without stored catalog coefficients must explicitly Reload to
+            // acquire them. Merely opening it after a database update cannot change its look.
+            info.lens = stored_lens;
+        }
+        info
     }
 }
 
@@ -923,12 +930,21 @@ impl QuickJob {
     }
 }
 
-/// What identifies a photo's pixels for caching: its content hash, else its source.
+/// What identifies a photo's pixels for caching: its content hash, else its source, and any
+/// stored catalog calibration. Reloading only lens coefficients must invalidate every render
+/// size (and reject decoded facts returned for the previous interpretation of the photo).
 pub fn content_key(p: &Photo) -> String {
-    match (&p.content_hash, &p.source) {
+    let base = match (&p.content_hash, &p.source) {
         (Some(h), _) => h.clone(),
         (None, Source::Demo { scene }) => format!("demo:{scene}"),
         (None, Source::File { path }) => format!("file:{path}:{}", p.file_size),
+    };
+    if let Some(lens) = p.embedded_lens.and_then(|l| l.catalog) {
+        let serialized = serde_json::to_string(&lens).unwrap_or_default();
+        let hash = Hasher128::new().str(&serialized).finish();
+        format!("{base}:lens:{:032x}", hash.0)
+    } else {
+        base
     }
 }
 
@@ -1719,5 +1735,66 @@ mod tests {
         let pv = s.preview_job(id, 800, 600, true, &a).unwrap();
         assert_ne!(pv.key, s.render_job(id, 800, 600, false, true).unwrap().key);
         assert_eq!(*pv.settings, a);
+    }
+}
+
+#[cfg(test)]
+mod lens_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn reloading_only_lens_coefficients_invalidates_all_render_caches() {
+        let mut s = crate::Session::with_demo();
+        let id = s.active().unwrap();
+        let mut p = s.catalog.photo(id).unwrap().as_ref().clone();
+        let original_hash = p.content_hash.clone();
+        let lens = lightcraft_develop::EmbeddedLens {
+            catalog: Some(lightcraft_develop::CatalogLens {
+                profile_id: 1,
+                distortion: Some([1.0, 0.0, 0.01, 0.0, 0.0]),
+                center: lightcraft_geom::Point::new(0.5, 0.5),
+                radius: 0.5,
+                vignette_radius: 0.6,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        s.catalog.apply(lightcraft_catalog::Op::SetEmbeddedLens { id, lens: Some(Box::new(lens)) }).unwrap();
+        p.embedded_lens = Some(lens);
+        let thumb = s.thumb_job(id, 256).unwrap();
+        let view = crate::Session::view_key(&p, true);
+        let variant = crate::Session::variant_key(&p, &p.develop, 256);
+        let mut changed = lens;
+        changed.catalog.as_mut().unwrap().distortion = Some([1.0, 0.0, 0.02, 0.0, 0.0]);
+        s.catalog.apply(lightcraft_catalog::Op::SetEmbeddedLens { id, lens: Some(Box::new(changed)) }).unwrap();
+        p.embedded_lens = Some(changed);
+        let new_thumb = s.thumb_job(id, 256).unwrap();
+        assert_ne!(thumb.key, new_thumb.key);
+        assert_ne!(thumb.cache.unwrap().1, new_thumb.cache.unwrap().1);
+        assert_ne!(view, crate::Session::view_key(&p, true));
+        assert_ne!(variant, crate::Session::variant_key(&p, &p.develop, 256));
+        assert_eq!(p.content_hash, original_hash, "interpretation does not modify the source file hash");
+    }
+
+    #[test]
+    fn decoded_raw_uses_stored_calibration_but_jpeg_fallback_does_not() {
+        let old = lightcraft_develop::EmbeddedLens {
+            catalog: Some(lightcraft_develop::CatalogLens { profile_id: 1, ..Default::default() }),
+            ..Default::default()
+        };
+        let new = lightcraft_develop::EmbeddedLens {
+            catalog: Some(lightcraft_develop::CatalogLens { profile_id: 2, ..Default::default() }),
+            ..Default::default()
+        };
+        let header = SourceInfo { raw: true, lens: Some(old), ..Default::default() };
+        let decoded = DecodedSource::new(Arc::new(Rgb32f::new(2, 2)), Some(SourceInfo { raw: true, lens: Some(new), ..Default::default() }));
+        assert_eq!(decoded.info_or(header.clone()).lens, Some(old), "a database refresh must not silently change saved edits");
+        assert!(
+            decoded.info_or(SourceInfo { raw: true, ..Default::default() }).lens.is_none(),
+            "legacy catalogs acquire external profiles only on explicit reload"
+        );
+        let rendered_preview = DecodedSource::new(Arc::new(Rgb32f::new(2, 2)), Some(SourceInfo::default()));
+        let info = rendered_preview.info_or(header);
+        assert!(!info.raw && info.lens.is_none(), "already rendered camera JPEGs must not receive RAW corrections");
     }
 }

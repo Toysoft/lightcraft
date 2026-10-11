@@ -592,7 +592,9 @@ pub fn render(
     // 1. geometry (on the CPU when the source exceeds the device's buffer limit)
     let sampled = match &cached {
         Some(e) => e.sampled.clone(),
-        None if gpu.fits(src.data.len() * 3) => {
+        // Catalog geometry is evaluated by the shared f64 CPU mapper until a matching GPU
+        // kernel exists. Remaining tone/detail/mask stages retain GPU acceleration.
+        None if gpu.fits(src.data.len() * 3) && plan.frame.warp.as_ref().is_none_or(|wp| wp.lens.and_then(|l| l.catalog).is_none()) => {
             let upload = || gpu.upload(rgb_words(src));
             // (a source too big for a view's stages to keep is the one shared copy: a window is
             // cut from the photo's own pixels, and what its stages keep is its own sampled pixels)
@@ -1058,6 +1060,7 @@ mod tests {
                 radius: 0.6,
             }),
             vignette: None,
+            catalog: None,
         };
         let mut s = DevelopSettings::default();
         s.optics.lens_profile = true;

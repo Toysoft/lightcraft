@@ -646,16 +646,53 @@ impl Default for Optics {
     }
 }
 
-/// Lens corrections embedded in the file, converted to the oriented, default-cropped image: a DNG's `OpcodeList3`
+/// Resolved lens corrections, converted to the oriented, default-cropped image: a DNG's `OpcodeList3`
 /// (`WarpRectilinear`, `FixVignetteRadial`), or a raw reader's equivalent of the camera's own correction (Panasonic /
 /// Leica RW2 distortion, `lightcraft_raw`'s `vendor/rw2.rs`). This is camera/file data (stored on the photo record, not in the develop
 /// settings); "Enable Profile Corrections" applies it, scaled by the profile distortion/vignetting amounts.
+/// The optional catalog provider carries independently licensed lens calibration data.
 /// LightCraft never uses Adobe LCP lens profiles.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmbeddedLens {
     pub warp: Option<EmbeddedWarp>,
     pub vignette: Option<EmbeddedVignette>,
+    /// Independently licensed catalog corrections; absent in older catalogs. Embedded corrections
+    /// take precedence, so a file never receives both geometries for the same optical defect.
+    pub catalog: Option<CatalogLens>,
+}
+
+/// Resolved rectilinear lens calibration in the uncropped source's oriented frame. Coefficients
+/// are stored with the photo so a database update cannot change an existing edit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CatalogLens {
+    /// Source identity (FNV-1a over the database revision, model and calibration crop factor).
+    pub profile_id: u64,
+    /// Source radius = corrected radius × polynomial(r), coefficients in increasing powers of r.
+    pub distortion: Option<[f64; 5]>,
+    /// Red and blue radii relative to green: v + c r + b r², measured on the distorted source.
+    pub tca: Option<[[f64; 3]; 2]>,
+    /// Transmission (not gain): 1 + k1 r² + k2 r⁴ + k3 r⁶. Compensation divides by it.
+    pub vignette: Option<[f64; 3]>,
+    pub center: Point,
+    /// Distortion/TCA radius, as a fraction of the source's long edge (calibration half short edge).
+    pub radius: f64,
+    /// Vignetting radius (calibration half diagonal), as a fraction of the source's long edge.
+    pub vignette_radius: f64,
+}
+
+impl CatalogLens {
+    /// Catalogs can be edited outside the app. Reject malformed resolved data before evaluating
+    /// it, including finite but near-zero radii that could overflow a high-order polynomial.
+    pub fn is_valid(&self) -> bool {
+        let coefficient = |k: &f64| k.is_finite() && k.abs() < 16.0;
+        [self.center.x, self.center.y].iter().all(|v| v.is_finite() && (-2.0..=3.0).contains(v))
+            && [self.radius, self.vignette_radius].iter().all(|v| v.is_finite() && (1e-6..=16.0).contains(v))
+            && self.distortion.as_ref().is_none_or(|k| k.iter().all(coefficient))
+            && self.tca.as_ref().is_none_or(|k| k.iter().flatten().all(coefficient))
+            && self.vignette.as_ref().is_none_or(|k| k.iter().all(coefficient))
+    }
 }
 
 /// DNG `WarpRectilinear`: per plane (R, G, B) `[kr0, kr1, kr2, kr3, kt0, kt1]`. For an output (corrected) point at

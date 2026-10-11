@@ -187,6 +187,23 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             });
         }
     });
+    let source = app.session.source_info(id);
+    let approximate = d
+        .masks
+        .iter()
+        .any(|m| m.visible && m.components.iter().any(|c| lightcraft_pipeline::masks::approximate_selection(&c.shape, source.mattes.as_deref())));
+    if approximate {
+        egui::Frame::NONE.inner_margin(egui::Margin::symmetric(16, 0)).show(ui, |ui| {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(crate::i18n::tr("Automatic selection is approximate. Refine with Brush or use Object / Describe."))
+                        .color(t.text_dim)
+                        .size(11.0),
+                )
+                .wrap(),
+            );
+        });
+    }
     divider(ui);
     // mask list
     egui::Frame::NONE.inner_margin(egui::Margin { left: 16, right: 16, top: 8, bottom: 8 }).show(ui, |ui| {

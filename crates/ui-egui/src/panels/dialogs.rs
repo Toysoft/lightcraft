@@ -946,6 +946,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                                 "MIT OR Apache-2.0. Fonts: {} (OFL). Icons: original.",
                                 crate::theme::font_credits(app.chinese_font.is_some())
                             ));
+                            ui.label(crate::i18n::tr("Lens calibration data: Lensfun contributors (CC BY-SA 3.0), adapted by LightCraft."));
                             ui.add_space(10.0);
                             let discord = egui::Button::new(egui::RichText::new(crate::i18n::tr("Join the ArtCraft Discord")).font(t.semibold(15.0)).color(egui::Color32::WHITE))
                                 .fill(t.accent)
@@ -959,6 +960,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                             for (label, url) in [
                                 ("LightCraft website", crate::links::APP_PAGE),
                                 ("Source code on GitHub", crate::links::GITHUB),
+                                ("Lens calibration source and licence", "https://github.com/lensfun/lensfun/tree/43f9e001ab66c4fcdd4f400463f13b72f94b2288/data/db"),
                                 ("ArtCraft — more creative apps", crate::links::WEBSITE),
                             ] {
                                 let r = ui.link(crate::i18n::tr(label)).on_hover_text(url);

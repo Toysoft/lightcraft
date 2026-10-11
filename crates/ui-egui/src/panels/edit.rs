@@ -318,7 +318,10 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         ui.add_space(8.0);
     });
     section(app, ui, &d, "optics", "Optics", |app, ui, d| {
-        let has_lens = app.session.catalog.photo(id).is_some_and(|p| p.embedded_lens.is_some());
+        let lens = app.session.catalog.photo(id).and_then(|p| p.embedded_lens);
+        let has_lens = lens.is_some();
+        let has_distortion = lens.is_some_and(|l| l.warp.is_some() || l.catalog.is_some_and(|c| c.distortion.is_some()));
+        let has_vignetting = lens.is_some_and(|l| l.vignette.is_some() || l.catalog.is_some_and(|c| c.vignette.is_some()));
         egui::Frame::NONE.inner_margin(egui::Margin { left: 24, right: 22, top: 4, bottom: 4 }).show(ui, |ui| {
             let mut ca = d.optics.remove_ca;
             if ui.checkbox(&mut ca, crate::i18n::tr("Remove Chromatic Aberration")).changed() {
@@ -330,16 +333,27 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             }
             if lp && !has_lens {
                 ui.label(
-                    egui::RichText::new(crate::i18n::tr("No lens data embedded in this file (DNG lens opcodes only)."))
+                    egui::RichText::new(crate::i18n::tr("No matching lens calibration. Manual corrections remain available."))
                         .size(11.0)
                         .color(Tokens::get(ui.ctx()).text_dim),
                 );
             }
         });
         if d.optics.lens_profile {
-            for c in ["optics.profileDistortion", "optics.profileVignetting"] {
-                control(app, ui, d, c, has_lens);
+            if let Some(l) = lens {
+                egui::Frame::NONE.inner_margin(egui::Margin { left: 24, right: 22, top: 0, bottom: 0 }).show(ui, |ui| {
+                    let provider = if l.catalog.is_some() { "Lensfun" } else { "Camera / file" };
+                    ui.label(format!("{}: {provider}", crate::i18n::tr("Lens profile")));
+                    if !has_vignetting {
+                        ui.small(crate::i18n::tr("No vignetting calibration for this aperture or focus distance."));
+                    }
+                    if !has_distortion {
+                        ui.small(crate::i18n::tr("No distortion calibration for this focal length."));
+                    }
+                });
             }
+            control(app, ui, d, "optics.profileDistortion", has_distortion);
+            control(app, ui, d, "optics.profileVignetting", has_vignetting);
         }
         sub_title(ui, crate::i18n::tr("Manual"));
         for c in ["optics.distortion", "optics.vignetting"] {

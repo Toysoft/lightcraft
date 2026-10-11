@@ -169,6 +169,7 @@ rustPlatform.buildRustPackage {
     install -Dm644 -t "$doc" \
       README.md LICENSE-MIT LICENSE-APACHE NOTICE \
       assets/ATTRIBUTION.md assets/fonts/OFL-Inter.txt
+    install -Dm644 assets/lenses/CC-BY-SA-3.0.txt "$doc/Lensfun-CC-BY-SA-3.0.txt"
   ''
   + lib.optionalString (craft-fonts != null) ''
     for lic in ${toString craft-fonts}/fonts/*/OFL.txt; do

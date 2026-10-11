@@ -51,6 +51,7 @@ copy_docs() {
   for f in README.md LICENSE LICENSE-MIT LICENSE-APACHE COPYRIGHT NOTICE; do
     if [ -f "$ROOT/$f" ]; then cp "$ROOT/$f" "$dest/"; fi
   done
+  cp "$ROOT/assets/lenses/CC-BY-SA-3.0.txt" "$dest/Lensfun-CC-BY-SA-3.0.txt"
   copy_font_licences "$dest"
 }
 

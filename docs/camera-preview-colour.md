@@ -76,7 +76,24 @@ This is a per-file camera-look estimate, **not measured spectral calibration or 
 
 ## Camera profiles (pooled per model)
 
-One photo can show too little of a colour for its own fit to learn it: in a second shot of the lime shirt only a few dozen proxy pixels show it, next to a hillside of foliage at the same hue that the camera renders differently, and the shirt stayed yellow (hue 68° against the JPEG's 82°; a 192-pixel proxy only reached 74°). `lightcraft-cli calibrate [--max N] [--out DIR] FOLDERS…` therefore pools the colour pairs of many ARWs, NEFs or RAFs per camera model — each against its own embedded JPEG, at a 192-pixel proxy, at most 4000 pairs per photo, files spread evenly over the folders — and fits one matrix (from white-balanced camera RGB, so no single photo's white point is baked in) and one hue/saturation/value table. Models need at least 5 usable photos.
+The calibration CLI discovers ARW, NEF/NRW, RAF and Canon CR2/CR3 inputs, including mixed-case
+extensions and nested folders. Previously the Canon files were silently omitted before the
+existing `Pool` / `profile_pairs` path could inspect them. Canon CR3 uses the same independent
+sensor/JPEG framing validation as its per-file fit. Unsupported compression variants still
+report decoder errors and cannot train a profile from an embedded preview alone.
+
+Decoding remains parallel, but the pairs are merged in sorted input-file order before fitting.
+The same files now produce the same profile regardless of worker scheduling; the fitting
+holdout and floating-point accumulation no longer change with thread assignment. Existing
+stored profiles are unchanged; rerun calibration to regenerate them in the canonical order.
+
+These are camera-JPEG look estimates, not measured calibration or Adobe Color equivalents.
+Training should cover different scenes and illuminants, with separate photos held out for
+evaluation. Five files are the minimum, not proof of generalization. The other vendor formats
+remain outside the CLI's discovery list; in particular, RW2 sensor/JPEG lens misregistration
+must be resolved before those pairs can safely train pooled profiles.
+
+One photo can show too little of a colour for its own fit to learn it: in a second shot of the lime shirt only a few dozen proxy pixels show it, next to a hillside of foliage at the same hue that the camera renders differently, and the shirt stayed yellow (hue 68° against the JPEG's 82°; a 192-pixel proxy only reached 74°). `lightcraft-cli calibrate [--max N] [--out DIR] FOLDERS…` therefore pools the colour pairs of many ARWs, NEFs, RAFs or Canon CR2/CR3s per camera model — each against its own embedded JPEG, at a 192-pixel proxy, at most 4000 pairs per photo, files spread evenly over the folders — and fits one matrix (from white-balanced camera RGB, so no single photo's white point is baked in) and one hue/saturation/value table. Models need at least 5 usable photos.
 
 Profiles are JSON files `<model>.json` in `$LIGHTCRAFT_CAMERA_PROFILES`, else `<config>/camera-profiles` (macOS `~/Library/Application Support/LightCraft/camera-profiles`); a local profile replaces a built-in one. Built-in profiles live in `assets/camera-profiles/` (listed in `assets/ATTRIBUTION.md`) and are compiled in, so the app, CLI and web build share them: ILCE-7M4, fitted to 597 photos (2.2 million colour pairs) shot in 2026, mostly with the Standard creative style and DRO Auto; ILCE-7CR, 125 photos (below); X-H2S, 201 photos; X-T4, 545 photos. They hold aggregate colour statistics only. A photo of a profiled model takes its colour from the profile and fits only its own tone and chroma curves (picture styles vary per shot; with Sony's DRO on, that tone curve is then lowered as described below); the acceptance gates still apply. A rejected profile fit retries the photo's own colour and tone fit before falling back to neutral rendering. Files are read once per process and validated (version, bounded invertible matrix, table shape and finite data); a damaged file is ignored with a warning. The profiles folder's contents are part of the render cache keys, so thumbnails rendered before a profile existed are redone; smart previews built before keep their colour until rebuilt.
 

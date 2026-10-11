@@ -517,6 +517,7 @@ fn embedded_lens_perspective_edges_match() {
             radius: 0.6,
         }),
         vignette: Some(EmbeddedVignette { k: [0.4, -0.1, 0.02, 0.0, 0.0], center: Point::new(0.5, 0.5), radius: 0.6 }),
+        catalog: None,
     };
     let info = SourceInfo { lens: Some(lens), ..raw };
     let mut s = DevelopSettings::default();
@@ -811,4 +812,32 @@ fn windows_of_a_big_photo_share_one_uploaded_source() {
     assert_eq!(lightcraft_gpu::shared_source_bytes(), 0, "an idle app gives it back");
     lightcraft_gpu::render(&src, &info, &s, &at(1000), Some(&after)).expect("gpu render");
     assert_eq!(lightcraft_gpu::source_uploads() - start, 2);
+}
+
+#[test]
+fn catalog_geometry_retains_cpu_gpu_equivalence() {
+    if !gpu() {
+        return;
+    }
+    let src = scene(2, 300, 200);
+    let lens = lightcraft_develop::EmbeddedLens {
+        catalog: Some(lightcraft_develop::CatalogLens {
+            distortion: Some([1.02, -0.01, -0.02, 0.01, 0.0]),
+            tca: Some([[1.001, 0.002, 0.0], [0.999, -0.001, 0.0]]),
+            vignette: Some([-0.5, 0.1, 0.0]),
+            center: Point::new(0.5, 0.5),
+            radius: 1.0 / 3.0,
+            vignette_radius: 0.6,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let info = SourceInfo { raw: true, lens: Some(lens), ..Default::default() };
+    let mut s = DevelopSettings::default();
+    s.optics.lens_profile = true;
+    s.optics.remove_ca = true;
+    check("catalog geometry", &src, &info, &s, &RenderRequest::fit(600, 400));
+    s.orientation = Orientation::Rotate90;
+    s.geometry.horizontal = 10.0;
+    check("catalog rotated perspective", &src, &info, &s, &RenderRequest::fit(400, 600));
 }

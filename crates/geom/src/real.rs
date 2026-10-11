@@ -21,9 +21,14 @@ pub trait Real:
 {
     /// `if |v| < tiny { tiny } else { v }`: the guard of a denominator against zero ([`crate::Homography::apply`]).
     fn clamp_tiny(self, tiny: f64) -> Self;
+    /// sqrt(max(v, 0)), including an outward bound when evaluating intervals.
+    fn sqrt_nonnegative(self) -> Self;
 }
 
 impl Real for f64 {
+    fn sqrt_nonnegative(self) -> f64 {
+        self.max(0.0).sqrt()
+    }
     fn clamp_tiny(self, tiny: f64) -> f64 {
         if self.abs() < tiny { tiny } else { self }
     }
@@ -161,6 +166,12 @@ impl Div<f64> for Interval {
 }
 
 impl Real for Interval {
+    fn sqrt_nonnegative(self) -> Interval {
+        if !self.is_decided() {
+            return Interval::UNDECIDED;
+        }
+        Interval::outward(self.lo.max(0.0).sqrt(), self.hi.max(0.0).sqrt())
+    }
     /// Unchanged when no value in the interval would be clamped, else undecided.
     fn clamp_tiny(self, tiny: f64) -> Interval {
         if self.lo >= tiny || self.hi <= -tiny { self } else { Interval::UNDECIDED }
@@ -193,6 +204,8 @@ mod tests {
             prop_assert!(contains(ia + ib, a + b));
             prop_assert!(contains(ia - ib, a - b));
             prop_assert!(contains(ia * ib, a * b));
+            prop_assert!(contains(ia.sqrt_nonnegative(), a.sqrt_nonnegative()));
+            prop_assert!(contains(ib.sqrt_nonnegative(), b.sqrt_nonnegative()));
             let q = ia / ib;
             prop_assert!(!q.is_decided() || contains(q, a / b));
             prop_assert!(contains(ia + k, a + k));

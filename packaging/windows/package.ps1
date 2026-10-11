@@ -112,6 +112,8 @@ $Stage = Join-Path $TargetDir "windows-package\$Arch"
 Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 Copy-Item (Join-Path $Bin 'lightcraft.exe'), (Join-Path $Bin 'lightcraft-cli.exe') $Stage
+Copy-Item (Join-Path $Root 'assets\lenses\CC-BY-SA-3.0.txt') (Join-Path $Stage 'Lensfun-CC-BY-SA-3.0.txt')
+Copy-Item (Join-Path $Root 'NOTICE') $Stage
 
 & (Join-Path $PSScriptRoot 'sign.ps1') (Join-Path $Stage 'lightcraft.exe') (Join-Path $Stage 'lightcraft-cli.exe')
 
@@ -147,6 +149,7 @@ $Portable = Join-Path $TargetDir "windows-package\lightcraft-$Version-windows-$A
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Portable | Out-Null
 Copy-Item (Join-Path $Stage '*.exe') $Portable
+Copy-Item (Join-Path $Stage 'Lensfun-CC-BY-SA-3.0.txt') $Portable
 foreach ($f in 'README.md', 'LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE') {
   $p = Join-Path $Root $f
   if (Test-Path $p) { Copy-Item $p $Portable }

@@ -1,6 +1,6 @@
 # RAW parity: cameras, formats, demosaic, colour and lens profiles
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (model-by-model measurement against Adobe's published camera list; use-weighted coverage; variant matrix; colour and lens sections; ranked next cameras) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6 (Camera Raw 18.7)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (photographer-driven RAW, native lens coverage and mask correctness; readiness estimates not re-measured) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6 (Camera Raw 18.7)
 
 Raw processing is the deepest single dimension of Lightroom parity: a photographer whose camera
 does not decode, or decodes with the wrong colour, cannot switch. This document measures it model by
@@ -191,17 +191,23 @@ the distance to Adobe Standard is unmeasured. In the readiness numbers this beco
 of ×0.85 for a working photographer (they correct colour by hand, at a cost) and ×0.75 for the
 essentials user (the default look is what they keep).
 
+DNG full/binned development uses the maximum computed black per sample plane, including
+phase-aware deltas ([dng-normalization.md](dng-normalization.md)). The pooled calibration CLI
+now discovers Canon CR2/CR3 and merges pairs in deterministic sorted order; the acceptance
+gates and camera-JPEG-estimate limitations are unchanged.
+
 ## Lens profiles
 
 | Item | Adobe | LightCraft |
 |---|---|---|
-| Profile database | 3,635 profile files, 56 makers, auto-selected | **0** (Adobe LCPs never used; no database of our own) |
+| Profile database | 3,635 profile files, 56 makers, auto-selected | 1,540 rectilinear calibration sets / 1,039 camera records from pinned, separately licensed Lensfun data; original Rust evaluator; strict matching and partial capabilities ([lens-catalog.md](lens-catalog.md)); Adobe LCPs never used |
 | In-file corrections | ✅ | DNG opcodes (WarpRectilinear, FixVignetteRadial, GainMap…) applied; Panasonic / Leica RW2 distortion (79 photos, 13 bodies, 11 lenses); Sony tag 0x7037 distortion for the ILCE-7RM4A (2 lenses) |
 | Vignetting / lateral CA from maker notes | ✅ | ⬜ |
 | Manual distortion, vignetting, CA, defringe | ✅ | ✅ |
 
-**Lens score ~10%** (estimated): automatic correction reaches roughly Panasonic / Leica, phone and
-drone DNG users (~9% of photographers by the weights above); Adobe reaches nearly everyone.
+**Lens score ~10%** is the pre-catalog baseline estimate, retained until coverage and correction
+fidelity are re-measured. The native database extends correction beyond in-file Panasonic / Leica
+and DNG metadata, but calibration-set counts do not establish the share of photographers covered.
 
 ## Scores
 
@@ -241,7 +247,7 @@ Beyond decoding:
 | Gap | Hours | Needs |
 |---|---:|---|
 | Measured colour calibration for the ~60 popular bodies, Kelvin WB, render-fidelity suite against Lightroom | 80–150 | chart shots per camera (a human with cameras) or licensable measured data |
-| Lens profile database of our own (fitting tools, data format, top 100 lenses), maker-note vignetting / CA | 40–80 | calibration shots (a human with lenses) |
+| Broader native catalog coverage, measured fitting tools, maker-note vignetting / CA | 40–80 | calibration shots (a human with lenses) |
 | Demosaic and highlight quality measured against Lightroom; X-Trans AI denoise | 15–30 | |
 | **Total RAW** | **255–480 h** (decoding list above 120–220 h; ~60% parallelizes) | |
 
@@ -249,5 +255,6 @@ Beyond decoding:
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Native, separately licensed lens catalog with partial capability coverage; DNG normalization, deterministic Canon calibration and stale-mask correctness. No parity percentage inferred from these corrections. |
 | 2026-10-10 (later) | major | Model-by-model measurement against Adobe's published list (1,446 models: 234 verified, 943 unverified, 233 preview, 36 unsupported); `docs/raw/` data and re-measure script; use-weighted share 84% (40% on verified bodies); variant matrix; colour and lens sections with scores; ranked next cameras; RAW readiness ~56% from written parts |
 | 2026-10-10 | major | Created: formats, makers, demosaic, colour and lens checklists; target counts from the installed Lightroom 9.6 bundle listing |

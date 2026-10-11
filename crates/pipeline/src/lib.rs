@@ -69,7 +69,7 @@ pub struct CameraColor {
 /// Facts about the source the settings are interpreted against.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceInfo {
-    /// Lens corrections embedded in the file (DNG opcodes), relative to the EXIF-oriented source.
+    /// Resolved lens corrections (embedded data or native catalog), relative to the EXIF-oriented source.
     pub lens: Option<lightcraft_develop::EmbeddedLens>,
     /// Raw sources use absolute Kelvin white balance; rendered sources use a relative scale around
     /// their as-shot white.
@@ -220,7 +220,8 @@ pub fn native_output_size(src_w: usize, src_h: usize, s: &DevelopSettings) -> (f
 /// The geometric frame `render` uses for `src` (lens data, automatic CA estimate included).
 pub fn frame_for(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, apply_crop: bool) -> geometry::Frame {
     let mut frame = geometry::Frame::with_lens(src.width, src.height, s, apply_crop, info.lens.as_ref());
-    if s.optics.remove_ca && s.section_enabled("optics") {
+    let profile_tca = s.optics.lens_profile && info.lens.and_then(|l| l.catalog).is_some_and(|c| c.is_valid() && c.tca.is_some());
+    if s.optics.remove_ca && s.section_enabled("optics") && !profile_tca {
         frame.add_lateral_ca(optics::estimate_lateral_ca(src));
     }
     frame

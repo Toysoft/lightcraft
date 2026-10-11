@@ -1,6 +1,6 @@
 # Target-app parity: LightCraft vs Adobe Lightroom
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (full re-measure against Lightroom Classic 15.5 and the installed Lightroom 9.6; merged ROADMAP's parity estimate and honest assessment into this file) · **Target:** Adobe Lightroom Classic 15.5 (August 2026) and Lightroom 9.6 (desktop)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (photographer-driven RAW, native lens coverage and mask correctness; readiness estimates not re-measured) · **Target:** Adobe Lightroom Classic 15.5 (August 2026) and Lightroom 9.6 (desktop)
 
 The authoritative assessment of how close LightCraft is to Lightroom. The row-by-row checklist is
 [parity-checklist.md](parity-checklist.md); the ranked work list is [gaps.md](gaps.md); deep areas
@@ -12,7 +12,7 @@ have their own documents: [raw-parity.md](raw-parity.md), [file-format-parity.md
 
 | Number | Value | Kind |
 |---|---:|---|
-| **Feature breadth**, checklist | **81.1%** of 517 in-scope rows (P0 98.0%, P1 95.1%, P2 46.9%) | **measured**: recount of [parity-checklist.md](parity-checklist.md) rows (✅ 1, 🟡 ½, 🚫 left out), the same rule `cargo xtask parity` uses |
+| **Feature breadth**, checklist | **81.2%** of 519 in-scope rows (P0 98.0%, P1 95.2%, P2 47.2%) | **measured**: recount of [parity-checklist.md](parity-checklist.md) rows (✅ 1, 🟡 ½, 🚫 left out), the same rule `cargo xtask parity` uses |
 | **Feature breadth**, weighted by use | **~77%** | estimated: feature-area table below |
 | **Ready for real work** (full target) | **~61%** (range 56–66%) | estimated: weighted sum over the dimensions with written weights, see [below](#ready-for-real-work-mainstream-practitioner-and-essentials-user) |
 | **Mainstream practitioner** | **~49%** (range 44–54%) | estimated: weekly areas of a working photographer, depth 71.8% × 0.804 × colour 0.85 |
@@ -70,7 +70,7 @@ from the checklist sections and the deep-dive documents.
 | RAW decoding and camera coverage | 15% | 81% | 76% | 120–220 h | [raw-parity.md](raw-parity.md), measured model by model: 84% of photographers' cameras decode (use-weighted), × 0.9 for per-body bugs; CR3 variants, compressed ORF, HE NEF |
 | Colour, camera profiles, render fidelity | 10% | 65% | 35% | 80–150 h | 4 bundled profiles vs Adobe's 1,500; per-file fits median ΔE ~5 vs the camera JPEG, ~10% far off; no fidelity suite ([raw-parity.md](raw-parity.md#colour)) |
 | Global develop adjustments (light, colour, curves, grading, effects, detail) | 15% | 93% | 70% | 30–60 h | checklist F 91.7%; character tuned by eye |
-| Optics, lens profiles, crop and geometry | 6% | 80% | 50% | 40–80 h | no lens database; crop / Upright complete |
+| Optics, lens profiles, crop and geometry | 6% | 80% | 50% | 40–80 h | native lens catalog with strict matching and partial capabilities; broader measured coverage remains open ([lens-catalog.md](lens-catalog.md)); crop / Upright complete |
 | Masking | 8% | 67% | 45% | 60–110 h | checklist K 67.4%; AI masks heuristic or SAM 3 without mirror |
 | Remove, heal, Enhance (denoise, Raw Details, Super Resolution, Lens Blur) | 7% | 45% | 30% | 70–130 h | checklist I 75%, P 0% |
 | Presets, profiles, versions, history, sync | 5% | 95% | 85% | 8–15 h | |
@@ -117,7 +117,7 @@ work. Each has its own hours to ~95%, calibrated as in [How hours are calibrated
 | Audience | Ready | Opus 5.5 agent wall-clock hours to ~95% | Work that dominates |
 |---|---:|---:|---|
 | Full target (ready for real work) | **~61%** | **1,000–1,800 h** (~70% parallelizes) | raw colour, lens and camera data; AI models; Classic output modules; localization; plug-in ecosystem |
-| Mainstream practitioner | **~49%** | **450–840 h** (~60% parallelizes) | camera colour and render fidelity; CR3 / ORF / HE NEF; lens database; subject / sky masks; Lightroom XMP exchange; stability |
+| Mainstream practitioner | **~49%** | **450–840 h** (~60% parallelizes) | camera colour and render fidelity; CR3 / ORF / HE NEF; broader lens coverage; subject / sky masks; Lightroom XMP exchange; stability |
 | Essentials user | **~64%** | **160–300 h** (~50% parallelizes) | default raw look for popular cameras; launch stability; basic-slider feel; opening CR3 / HEIC files people send |
 
 ### Full target (ready for real work): ~61%
@@ -297,6 +297,7 @@ P2 items 12–25 h; look tuning, performance, packaging, hardening 25–45 h.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Native, separately licensed lens catalog with partial capability coverage; DNG normalization, deterministic Canon calibration and stale-mask correctness. No parity percentage inferred from these corrections. |
 | 2026-10-10 | minor | RAW measured model by model (raw-parity.md): RAW decoding (76%) and colour (35%) are explicit rows of the full sum (59% → 61%); mainstream uses the use-weighted 84% plus a ×0.85 colour discount (51% → 49%); essentials uses 84% × colour 0.75 (63% → 64%); beta ~14 points |
 | 2026-10-10 | minor | Full number restored to an additive weighted sum over the dimensions (~59%; method aligned with the standard, no new evidence); hours to ~95% for each of the three audiences; beta distance ~16 points |
 | 2026-10-10 | minor | Added mainstream practitioner (~51%) and essentials user (~63%) numbers; full ready re-derived from written weights × discounts (55% → 46%); user-issue evidence; beta hours 340–600 |
