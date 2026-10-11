@@ -597,6 +597,14 @@ impl Session {
         });
     }
 
+    /// Apply and journal (so it is saved) without an undo step: a change the app made by itself, not the user.
+    pub(crate) fn apply_unrecorded(&mut self, op: Op) -> Result<()> {
+        let fwd = op.clone();
+        self.catalog.apply(op)?;
+        self.pending_log.push(fwd);
+        Ok(())
+    }
+
     /// Apply without recording undo (interactive previews).
     fn apply_silent(&mut self, op: Op) -> Result<()> {
         self.catalog.apply(op)?;

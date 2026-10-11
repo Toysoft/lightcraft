@@ -47,6 +47,44 @@ fn session(dir: &std::path::Path, url: &str) -> Session {
     s
 }
 
+/// A look-up the app makes by itself (after the database changed) gives the photo its lens data, but adds no undo
+/// step: the user did nothing.
+#[test]
+fn a_lens_look_up_is_not_an_undo_step() {
+    let _g = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    if skip_for_env() {
+        return;
+    }
+    let before = crate::lens_profiles::configured_dir();
+    crate::lens_profiles::set_dir(None);
+    let dir = scratch("undo");
+    let m = lightcraft_meta::Metadata {
+        make: Some("Testcam".into()),
+        model: Some("TC-1".into()),
+        lens_model: Some("18-55mm F3.5-5.6".into()),
+        focal_length: Some(18.0),
+        f_number: Some(3.5),
+        ..Default::default()
+    };
+    let (w, h) = (64usize, 48usize);
+    let data: Vec<u16> = (0..w * h).map(|i| 600 + (i % 977) as u16).collect();
+    let file = dir.join("a.dng");
+    std::fs::write(&file, crate::tests_xmp::synthetic_dng_of(w, h, "RGGB", data, None, m)).unwrap();
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [file.to_string_lossy()]})).unwrap();
+    let id = s.catalog.photos().next().unwrap().id;
+    assert!(s.catalog.photo(id).unwrap().embedded_lens.is_none());
+    let db = scratch("undo-db");
+    std::fs::write(db.join("lenses.xml"), DB).unwrap();
+    s.lens_db.set_dir(Some(db)).unwrap();
+    let undo = s.undo.len();
+    let changed = s.execute("lens.db.refresh", &json!({"ids": [id.0]})).unwrap();
+    crate::lens_profiles::set_dir(before);
+    assert_eq!(changed["changed"], json!([id.0]));
+    assert!(s.catalog.photo(id).unwrap().embedded_lens.is_some(), "the profile was applied");
+    assert_eq!(s.undo.len(), undo, "no undo step for a look-up");
+}
+
 fn skip_for_env() -> bool {
     std::env::var_os(crate::lens_profiles::ENV).is_some_and(|v| !v.is_empty())
 }

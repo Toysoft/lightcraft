@@ -135,7 +135,8 @@ impl Session {
             self.media.forget(*id);
         }
         if !ops.is_empty() {
-            self.commit("Lens Profile", lightcraft_catalog::Op::Batch { ops })?;
+            // found by the app, not done by the user: saved, but no undo step
+            self.apply_unrecorded(lightcraft_catalog::Op::Batch { ops })?;
         }
         Ok(changed)
     }
