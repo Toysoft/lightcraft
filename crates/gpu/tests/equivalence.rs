@@ -14,6 +14,31 @@ use lightcraft_raster::{Rgb32f, Rgba8};
 const MEAN_LSB: f64 = 0.5;
 const MAX_LSB: u8 = 3;
 
+#[test]
+fn fine_sharpening_radius_detail_masking_and_legacy_match_cpu() {
+    if !gpu() {
+        return;
+    }
+    let src = Arc::new(Rgb32f::from_fn(6000, 24, |x, y| {
+        let v = (if x % 160 < 80 { 0.12 } else { 0.48 }) + ((x * 17 + y * 31) % 11) as f32 * 0.0005;
+        [v, v * 0.8, v * 0.6]
+    }));
+    let req = RenderRequest::fit(6000, 24);
+    let info = SourceInfo::default();
+    for process in [1, 2] {
+        for (radius, detail, masking, texture) in [(0.5, 0.0, 0.0, 0.0), (1.0, 25.0, 50.0, 0.0), (3.0, 100.0, 0.0, 30.0)] {
+            let mut s = DevelopSettings { process: lightcraft_develop::ProcessVersion(process), ..Default::default() };
+            s.detail.sharpen_amount = 80.0;
+            s.detail.nr_color = 25.0;
+            s.detail.sharpen_radius = radius;
+            s.detail.sharpen_detail = detail;
+            s.detail.sharpen_masking = masking;
+            s.effects.texture = texture;
+            check(&format!("detail P{process} r{radius} d{detail} m{masking}"), &src, &info, &s, &req);
+        }
+    }
+}
+
 fn gpu() -> bool {
     let ok = lightcraft_gpu::available();
     if !ok {

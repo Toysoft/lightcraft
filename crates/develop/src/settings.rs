@@ -81,16 +81,19 @@ impl ProcessVersion {
 pub enum Process {
     /// The rendering of LightCraft before process versions existed (2026-10).
     V1,
+    /// Fine-detail sharpening and stronger colour-noise reduction at low Amount settings.
+    V2,
 }
 
 impl Process {
     /// Every process, oldest first.
-    pub const ALL: [Process; 1] = [Process::V1];
-    pub const LATEST: Process = Process::V1;
+    pub const ALL: [Process; 2] = [Process::V1, Process::V2];
+    pub const LATEST: Process = Process::V2;
 
     pub const fn version(self) -> ProcessVersion {
         match self {
             Process::V1 => ProcessVersion(1),
+            Process::V2 => ProcessVersion(2),
         }
     }
 }

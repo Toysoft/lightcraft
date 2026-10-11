@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V2 detail processing; luminance-NR Contrast marked incomplete) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -31,7 +31,7 @@ cited here still exists. Formerly docs/parity.md.
 | C. Views & navigation (VIEW) | 15 | 1 | 1 | 0 | 8/9 (89%) | 4/4 (100%) |
 | D. Search & filter (FILT) | 11 | 1 | 1 | 0 | 4/4 (100%) | 4/4 (100%) |
 | E. Metadata (META) | 5 | 1 | 0 | 0 | 2/2 (100%) | 2/2 (100%) |
-| F. Edit panel — global adjustments (EDIT) | 43 | 2 | 3 | 1 | 28/28 (100%) | 13/14 (93%) |
+| F. Edit panel — global adjustments (EDIT) | 42 | 3 | 3 | 1 | 27/28 (96%) | 13/14 (93%) |
 | G. Profiles (PROF) | 7 | 1 | 3 | 0 | 3/4 (75%) | 3/3 (100%) |
 | H. Crop & rotate (CROP) | 9 | 0 | 0 | 1 | 6/6 (100%) | 3/3 (100%) |
 | I. Remove / healing (REM) | 7 | 1 | 2 | 2 | 4/4 (100%) | 2/3 (67%) |
@@ -53,9 +53,9 @@ cited here still exists. Formerly docs/parity.md.
 | Y. Menus | 82 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 75 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
 | Lightroom Classic extras | 33 | 15 | 35 | 9 | — | 23/25 (92%) |
-| **Total** | 397 | 49 | 73 | 36 | 192/200 (96%) | 143/155 (92%) |
+| **Total** | 396 | 50 | 73 | 36 | 191/200 (96%) | 143/155 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.2%** of 519 in-scope rows — P0 98.0% of 200 · P1 95.2% of 155 · P2 47.2% of 163.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.1%** of 519 in-scope rows — P0 97.8% of 200 · P1 95.2% of 155 · P2 47.2% of 163.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -202,8 +202,8 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-EDIT-EFFECTS-DEHAZE | Dehaze | P0 | ✅ | `ctl:effects.dehaze` | |
 | LR-EDIT-EFFECTS-VIGNETTE | Post-crop vignette | P0 | ✅ | `ctl:vignette.*`, `crates/pipeline/src/finish.rs`, `crates/ui-egui/src/panels/edit.rs` | style picker (Highlight / Color / Paint) in the Effects section |
 | LR-EDIT-EFFECTS-GRAIN | Grain | P1 | ✅ | `ctl:grain.*` | |
-| LR-EDIT-DETAIL-SHARPEN | Sharpening | P0 | ✅ | `ctl:detail.sharpenAmount`, `ctl:detail.sharpenRadius`, `ctl:detail.sharpenDetail`, `ctl:detail.sharpenMasking` | no Alt-drag mask preview |
-| LR-EDIT-DETAIL-NR | Luminance noise reduction | P0 | ✅ | `ctl:detail.nrLuminance`, `ctl:detail.nrDetail`, `ctl:detail.nrContrast` | |
+| LR-EDIT-DETAIL-SHARPEN | Sharpening | P0 | ✅ | `ctl:detail.sharpenAmount`, `ctl:detail.sharpenRadius`, `ctl:detail.sharpenDetail`, `ctl:detail.sharpenMasking`, `docs/detail-processing.md` | V2 separates fine sharpening from Texture and makes Radius/Detail effective; V1 retained for existing edits; no Alt-drag mask preview or measured Lightroom fidelity |
+| LR-EDIT-DETAIL-NR | Luminance noise reduction | P0 | 🟡 | `ctl:detail.nrLuminance`, `ctl:detail.nrDetail`, `ctl:detail.nrContrast` | Amount and Detail work; Contrast is stored but not rendered |
 | LR-EDIT-DETAIL-CNR | Colour noise reduction | P0 | ✅ | `ctl:detail.nrColor`, `ctl:detail.nrColorDetail`, `ctl:detail.nrColorSmoothness` | |
 | LR-EDIT-DETAIL-DENOISE | AI denoise | P2 | 🟡 | cmd:denoise.toggle, cmd:denoise.models.install, cmd:denoise.queue, ctl:enhance.denoise, `crates/denoise/`, `docs/denoise.md` | non-destructive Bayer RAW, opt-in weights, pure-Rust CPU/GPU; GPU convolution uses independently written shared scalars (Metal equivalence regression, issue #479); X-Trans/linear RGB, model policy and Lightroom fidelity remain |
 | LR-EDIT-DETAIL-RAWDETAILS | Improved demosaic toggle | P2 | ⬜ | | |
@@ -708,7 +708,7 @@ From `08-lightroom-classic-extras.md` (Classic-only features) and part 2 of `06-
 | LRC-DEV-CALIB | Calibration panel | P1 | ✅ | `ctl:calibration.*` | |
 | LRC-DEV-TAT | Targeted adjustment tools | P1 | ✅ | `cmd:develop.targeted` (`target`: curve / hue / sat / lum) | |
 | LRC-DEV-DEFAULTS | Per-camera raw defaults | P1 | ✅ | `cmd:library.preferences` (`camera`, `import.perCamera`), `crates/ui-egui/src/panels/settings.rs` | Settings → Import: raw default and per-camera presets |
-| LRC-DEV-PROCESS | Process versions, Update to Current Process | P1 | ✅ | `cmd:develop.updateProcess`, `cmd:develop.reset`, `cmd:develop.get`, `crates/develop/src/settings.rs`, `crates/pipeline/src/finish.rs`, `docs/process-versions.md` | each photo records the rendering process its settings are interpreted by: settings saved before this existed load as V1, new photos and Reset get the latest, virtual copies inherit, copy / paste / sync / presets keep each photo's own; Photo ▸ Update to Current Process (one undo step, enabled while a selected photo is on an older process); a number from a newer LightCraft is kept and renders with the newest known process. Only V1 exists so far: this is what lets a retuned default tone (#146) or stronger Light sliders (#196) ship without changing existing edits |
+| LRC-DEV-PROCESS | Process versions, Update to Current Process | P1 | ✅ | `cmd:develop.updateProcess`, `cmd:develop.reset`, `cmd:develop.get`, `crates/develop/src/settings.rs`, `crates/pipeline/src/finish.rs`, `docs/process-versions.md` | each photo records the rendering process its settings are interpreted by: settings saved before this existed load as V1, new photos and Reset get the latest, virtual copies inherit, copy / paste / sync / presets keep each photo's own; Photo ▸ Update to Current Process (one undo step, enabled while a selected photo is on an older process); a number from a newer LightCraft is kept and renders with the newest known process. V2 adds fine sharpening and stronger colour NR; V1 preserves earlier detail processing. Full Reset restores RAW capture detail and embedded lens corrections, or the recorded default preset |
 | LRC-DEV-VIEWOPTIONS | Develop view options | P2 | ⬜ | | |
 | LRC-DEV-VIDEO | Video frame capture | P2 | ⬜ | | |
 | LRC-MAP-VIEW | Map view | P2 | ⬜ | | |
@@ -776,6 +776,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | V2 detail processing; Radius/Detail now affect sharpening, stronger colour NR; downgrade luminance NR because Contrast remains ineffective |
 | 2026-10-10 | minor | LR-IMP-FORMATS records native Nikon HE/HE★ decoding and exact Z50 II/Z6 III sensor evidence; format row remains partial for other gaps |
 | 2026-10-10 | minor | Renamed from `parity.md` (progress-docs standard); Top gaps moved to gaps.md (its duplicated items 1–2 from a bad merge resolved there), shortcut notes moved to ui-parity.md. Rows unchanged; a recount of the rows gives 81.1% of 517 in-scope rows (P0 98.0%, P1 95.1%, P2 46.9%), so the generated summary above is due a `cargo xtask parity --write` |
 | 2026-09-30 – 2026-10-10 | — | Rows added and updated with each feature (see `git log -- docs/parity.md docs/parity-checklist.md`) |

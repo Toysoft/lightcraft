@@ -176,6 +176,8 @@ pub struct FinishParams {
     pub dehaze: f32,
     pub sharpen: f32,
     pub sharpen_mask: f32,
+    /// Small log-luminance changes left unsharpened by the V2 Detail control.
+    pub sharpen_threshold: f32,
     /// Airlight after and before exposure, exposure gain and EV (see [`crate::Prepared`]).
     pub air: f32,
     pub air_pre: f32,
@@ -243,8 +245,9 @@ impl FinishParams {
             clar,
             tex,
             dehaze,
-            sharpen: (s.detail.sharpen_amount / 150.0) as f32,
+            sharpen: (s.detail.sharpen_amount / if s.process.process() == Process::V1 { 150.0 } else { 100.0 }) as f32,
             sharpen_mask: (s.detail.sharpen_masking / 100.0) as f32,
+            sharpen_threshold: 0.04 * (1.0 - (s.detail.sharpen_detail / 100.0).clamp(0.0, 1.0) as f32).powi(2),
             air: air_pre * gain,
             air_pre,
             gain,
@@ -279,7 +282,7 @@ impl FinishParams {
 pub fn base_tone(s: &DevelopSettings, info: &SourceInfo, peak: f32) -> ToneMap {
     let l = &s.light;
     match s.process.process() {
-        Process::V1 => match info.camera_tone.as_ref().filter(|_| info.raw && peak <= 1.0) {
+        Process::V1 | Process::V2 => match info.camera_tone.as_ref().filter(|_| info.raw && peak <= 1.0) {
             Some(curve) => ToneMap::camera(curve, l.contrast, l.whites, l.blacks),
             None if info.raw => ToneMap::hdr(l.contrast, l.whites, l.blacks, peak),
             None => ToneMap::display_hdr(l.contrast, l.whites, l.blacks, peak),
@@ -506,10 +509,18 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
                 let det = l_pre - b.data[i];
                 let tame = 1.0 - 0.6 * smooth(0.4, 1.6, det.abs());
                 delta += tx * 1.1 * det.clamp(-1.0, 1.0) * tame;
-                if sp != 0.0 {
+                if sp != 0.0 && p.sharpen_blur.is_none() {
                     let m = if sharpen_mask > 0.0 { smooth(sharpen_mask * 0.25, sharpen_mask * 0.25 + 0.15, det.abs()) } else { 1.0 };
                     delta += sp * 1.3 * det.clamp(-0.8, 0.8) * m;
                 }
+            }
+            if sp != 0.0
+                && let Some(b) = &p.sharpen_blur
+            {
+                let det = l_pre - b.data[i];
+                let fine = det.signum() * (det.abs() - fp.sharpen_threshold).max(0.0);
+                let m = if sharpen_mask > 0.0 { smooth(sharpen_mask * 0.25, sharpen_mask * 0.25 + 0.15, det.abs()) } else { 1.0 };
+                delta += sp * 1.3 * fine.clamp(-0.5, 0.5) * m;
             }
             // local Noise: smooth (or, negative, boost) small-amplitude detail, keep edges
             if l_noise != 0.0

@@ -196,6 +196,7 @@ pub(crate) struct Prepared {
     pub base: Arc<Plane>,
     pub clarity_blur: Option<Arc<Plane>>,
     pub texture_blur: Option<Arc<Plane>>,
+    pub sharpen_blur: Option<Arc<Plane>>,
     pub dark: Option<Arc<Plane>>,
     /// Blurred chromaticity (`rgb / Y`) for local Moiré / Noise.
     pub chroma_blur: Option<Arc<Rgb32f>>,
@@ -294,7 +295,7 @@ impl StageCache {
             }
             let pl = &e.planes;
             let planes = pl.log_l.iter().chain(pl.base.iter().map(|x| &x.1)).chain(pl.clarity.iter().map(|x| &x.1));
-            for p in planes.chain(pl.texture.iter().map(|x| &x.1)).chain(pl.dark.iter().map(|x| &x.1)) {
+            for p in planes.chain(pl.texture.iter().map(|x| &x.1)).chain(pl.sharpen.iter().map(|x| &x.1)).chain(pl.dark.iter().map(|x| &x.1)) {
                 add(Arc::as_ptr(p) as usize, size(p));
             }
         }
@@ -428,6 +429,7 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         // and the local tone mapping
         local_tone::enabled(info, s),
         [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits),
+        s.process,
         src_long,
     ));
     Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
@@ -638,6 +640,8 @@ pub(crate) fn for_rows<T: Send>(data: &mut [T], w: usize, f: impl Fn(usize, &mut
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_detail;
 #[cfg(test)]
 mod tests_geometry;
 #[cfg(test)]
