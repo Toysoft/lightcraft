@@ -50,6 +50,8 @@ mod tests_before_after;
 #[cfg(test)]
 mod tests_compare;
 #[cfg(test)]
+mod tests_content_search;
+#[cfg(test)]
 mod tests_copy_paste_dialogs;
 #[cfg(test)]
 mod tests_crop_rotate;

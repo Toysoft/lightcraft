@@ -29,6 +29,8 @@ log = { workspace = true }
 [dev-dependencies]
 # Settings ▸ Search tests describe a small model of their own
 lightcraft-vision = { workspace = true }
+# the real-model search test looks up which demo scene a photo shows
+lightcraft-scenes = { workspace = true }
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
 lightcraft-denoise = { workspace = true, features = ["runtime"] }
 lightcraft-codecs = { workspace = true }

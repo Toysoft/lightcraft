@@ -2,6 +2,25 @@
 
 ## 2026-10-11
 
+### Search by content: from the search bar
+- The search field's magnifier now opens **Search Text** / **Search Contents**. In Contents mode, type what is in the
+  photo (*beach at sunset*, *a dog on a jetty*, *trees seen from above*; other languages work too) and the grid shows
+  the photos that show it, best match first. It mixes with every other filter, and `contents:` / `shows:` words work in
+  the ordinary search as well: `rating:>=3 contents:"red car"`.
+- A chip above the grid shows the search, with **More** / **Fewer** to widen or narrow it and ✕ to end it; hovering a
+  photo shows how well it matched. When nothing clears the bar, the best matches are shown and the chip says so.
+- **Relevance** is a new sort (best match first), chosen for you while searching by contents; any other sort still
+  works, and ending the search brings back the one you had.
+- **Find Similar Contents** in the grid's and the loupe's context menu shows the photos with similar contents to a
+  photo (next to Find Similar Photos, which compares composition and tones).
+- While the library is still being indexed the bar says how much is done (*Indexed 41 % of photos*); with no model or
+  indexing off it says how to turn it on, with a button to Settings → Search. The search model loads in the
+  background: the window never waits for it.
+- `rating:>=3` and `<=` now work in the search field (only `>` and `<` did).
+- Indexing uses far less memory: at most 4 previews and 1 full render at a time, raws with a small embedded preview are
+  read from it, and very large TIFFs are reduced as they are read (a folder with a 2.3 GB layered TIFF peaked at 4.8 GB,
+  now 1.4 GB). The same makes grid thumbnails of such raws and TIFFs faster.
+
 ### Search by content: indexing
 - With Settings ▸ Search ▸ **Index photo contents** on, LightCraft now looks at every photo of the library in the
   background and remembers what it shows (an embedding per photo, in `content-embeddings-<model>.bin` beside the
@@ -12,7 +31,7 @@
   photo is what is indexed), a replaced original does. Raws are indexed from their embedded preview.
 - Agents and the CLI can already search: `content.search {text: "kids on a beach"}` ranks the photos by how well they
   match, `content.similar {id}` finds photos with similar contents, `content.status` reports progress
-  (docs/content-search.md). The search bar's Contents mode comes next.
+  (docs/content-search.md).
 
 ### Search by content: the models
 - Settings ▸ Search (new) lists the models LightCraft will use to find photos by what they show (Google's SigLIP 2:

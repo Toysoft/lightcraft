@@ -21,7 +21,8 @@ use serde_json::{Value, json};
 use super::bad;
 use crate::content_index::{Hash, Index, file_path};
 use crate::content_models::{self as cm, Found, read_settings};
-use crate::content_worker::{Batch, Counts, Current, EDGE, Item, Outcome, Pace, TextModel, Worker};
+use crate::content_query::{ContentAsk, ContentHint, ContentState, ContentView};
+use crate::content_worker::{Batch, Counts, Current, EDGE, Item, Outcome, Pace, TextVector, TextWorker, Worker};
 use crate::{Result, Session};
 
 /// How long a look at the settings is trusted by the per-frame pump.
@@ -36,8 +37,12 @@ const OFFLINE_RETRY: Duration = Duration::from_secs(60);
 const TEXT_IDLE: Duration = Duration::from_secs(300);
 /// Batches waiting behind the one running, so the worker never waits for the next frame.
 const PREFETCH: usize = 1;
-/// Recent search texts whose embeddings are kept.
-const QUERY_CACHE: usize = 32;
+/// How long a command that answers at once waits for the search model (loading it takes about half a second).
+const TEXT_WAIT: Duration = Duration::from_secs(120);
+/// Photos shown as "best matches" when none reaches the cut-off (at the default step; More doubles it).
+const BEST_MATCHES: usize = 200;
+/// Photos shown by Find Similar Contents (at the default step; More doubles it).
+const SIMILAR_MATCHES: usize = 100;
 /// Most results a search or a find-similar returns.
 pub(crate) const MAX_RESULTS: usize = 10_000;
 
@@ -273,9 +278,14 @@ pub(crate) fn step(s: &mut Session, pause: bool) {
     super::content::settle(s);
     refresh(s, false);
     let st = &mut s.content;
-    if st.text.as_ref().is_some_and(|t| t.used.elapsed() >= TEXT_IDLE) {
-        st.text = None;
+    if let Some(t) = st.text.as_mut() {
+        t.poll();
     }
+    // (not while a search by contents is in view: it may be asked again any moment)
+    if st.text.as_ref().is_some_and(|t| t.used.elapsed() >= TEXT_IDLE) && s.content_query.view.is_none() {
+        s.content.text = None;
+    }
+    let st = &mut s.content;
     let tag = st.current.as_ref().map(|c| c.tag.clone());
     let failed = st.error.as_ref().is_some_and(|(t, _)| Some(t) == tag.as_ref());
     if !st.enabled || failed {
@@ -510,22 +520,51 @@ pub(crate) fn clear(s: &mut Session) -> Result<Value> {
     Ok(json!({"cleared": true, "file": file}))
 }
 
-/// The text tower of the model in use, loaded when first needed.
-fn text_model(s: &mut Session, c: &str) -> Result<Arc<dyn lightcraft_vision::ContentModel>> {
-    let cur = s.content.current.clone().ok_or_else(|| bad(c, "no content model is in use: choose one in Settings ▸ Search"))?;
-    if let Some(t) = s.content.text.as_mut().filter(|t| t.tag == cur.tag) {
-        t.used = Instant::now();
-        return Ok(t.model.clone());
+/// The text thread of the model in use, started (the model loads on it) when there is none yet. `None`: no model is in
+/// use, or the thread could not be started (`Err`).
+pub(crate) fn text_worker(s: &mut Session) -> std::result::Result<Option<&mut TextWorker>, String> {
+    let Some(cur) = s.content.current.clone() else { return Ok(None) };
+    if s.content.text.as_ref().is_none_or(|t| t.tag != cur.tag) {
+        let loader = s.content.loader();
+        s.content.text = Some(TextWorker::start(cur.tag, cur.home, cur.manifest, loader)?);
     }
-    let loader = s.content.loader();
-    let model = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        loader(&cur.home, &cur.manifest, lightcraft_vision::Towers { image: false, text: true })
-    }))
-    .map_err(|_| bad(c, "loading the model stopped unexpectedly"))?
-    .map_err(|e| bad(c, format!("the content model could not be loaded: {e}")))?;
-    let model: Arc<dyn lightcraft_vision::ContentModel> = Arc::from(model);
-    s.content.text = Some(TextModel { tag: cur.tag, model: model.clone(), used: Instant::now(), queries: Default::default() });
-    Ok(model)
+    Ok(s.content.text.as_mut())
+}
+
+/// Start loading the search model of the model in use (the Contents search mode was chosen): `content.prepare`.
+pub(crate) fn prepare_search(s: &mut Session) -> Value {
+    refresh(s, false);
+    let state = match text_worker(s) {
+        Ok(Some(w)) => {
+            w.poll();
+            w.used = Instant::now();
+            match (&w.model, &w.error) {
+                (Some(_), _) => json!({"state": "ready"}),
+                (None, Some(e)) => json!({"state": "error", "error": e}),
+                (None, None) => json!({"state": "loading"}),
+            }
+        }
+        Ok(None) => json!({"state": "noModel"}),
+        Err(e) => json!({"state": "error", "error": e}),
+    };
+    let mut out = coverage(s);
+    if let (Some(o), Some(st)) = (out.as_object_mut(), state.as_object()) {
+        o.extend(st.clone());
+    }
+    out
+}
+
+/// The embedding of `text` with the model in use, waiting for it.
+fn text_vector(s: &mut Session, c: &str, text: &str) -> Result<(Vec<f32>, Arc<dyn lightcraft_vision::ContentModel>)> {
+    let w = text_worker(s).map_err(|e| bad(c, e))?.ok_or_else(|| bad(c, "no content model is in use: choose one in Settings ▸ Search"))?;
+    match w.wait(text, TEXT_WAIT) {
+        TextVector::Ready(v) => {
+            let model = w.model.clone().ok_or_else(|| bad(c, "the search model is not loaded"))?;
+            Ok((v, model))
+        }
+        TextVector::Failed(e) => Err(bad(c, e)),
+        TextVector::Pending => Err(bad(c, "the search model took too long")),
+    }
 }
 
 /// How much of the library the answers come from.
@@ -561,27 +600,8 @@ pub(crate) fn search(s: &mut Session, text: &str, limit: usize, min: f32) -> Res
         return Err(bad(C, "no content model is in use: choose one in Settings ▸ Search"));
     }
     recount(s);
-    let model = text_model(s, C)?;
-    let key = text.trim().to_string();
-    let cached = s.content.text.as_ref().and_then(|t| t.queries.get(&key).cloned());
-    let query = match cached {
-        Some(q) => q,
-        None => {
-            let q = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| model.embed_texts(&[key.as_str()])))
-                .map_err(|_| bad(C, "the model stopped unexpectedly"))?
-                .map_err(|e| bad(C, e.to_string()))?
-                .into_iter()
-                .next()
-                .ok_or_else(|| bad(C, "the model made no embedding for the text"))?;
-            if let Some(t) = s.content.text.as_mut() {
-                if t.queries.len() >= QUERY_CACHE {
-                    t.queries.clear();
-                }
-                t.queries.insert(key.clone(), q.clone());
-            }
-            q
-        }
-    };
+    let key: String = text.trim().chars().take(crate::content_query::MAX_QUERY_CHARS).collect();
+    let (query, model) = text_vector(s, C, &key)?;
     let cosines = s.content.index.as_ref().map(|i| i.cosines(&query)).unwrap_or_default();
     let scored: Vec<(u64, f32)> = cosines.into_iter().map(|(id, c)| (id, model.score_cosine(c))).collect();
     let results = ranked(s, scored, min, limit, None);
@@ -613,4 +633,180 @@ pub(crate) fn similar(s: &mut Session, id: u64, limit: usize, min: f32) -> Resul
     out["id"] = json!(id);
     out["results"] = json!(results);
     Ok(out)
+}
+
+/// What the search bar says about searching by contents, given whether a model is in use (see `Session::content_hint`).
+fn hint_for(s: &Session, has_model: bool) -> Option<ContentHint> {
+    let (indexed, total, enabled) = (s.content.counts.indexed, s.content.counts.total, s.content.enabled);
+    if !has_model || (!enabled && indexed < total) || (total == 0 && !enabled) {
+        Some(ContentHint::TurnOnIndexing)
+    } else if indexed < total {
+        Some(ContentHint::Partial { percent: (indexed.saturating_mul(100) / total.max(1)).min(99) as u32 })
+    } else {
+        None
+    }
+}
+
+/// `Session::content_hint`.
+pub(crate) fn hint(s: &mut Session) -> Option<ContentHint> {
+    refresh(s, false);
+    let has_model = ensure_index(s);
+    if has_model {
+        recount(s);
+    }
+    hint_for(s, has_model)
+}
+
+/// The cut-off of a text search `step`s from the model's own (More: each step halves it; Fewer: doubles it).
+fn cutoff(base: f32, step: i32) -> f32 {
+    (base * 2f32.powi(-step.clamp(crate::content_query::MIN_STEP, crate::content_query::MAX_STEP))).clamp(1e-6, 1.0)
+}
+
+/// How many photos a list of best matches holds at `step`.
+fn best_count(base: usize, step: i32) -> usize {
+    let step = step.clamp(crate::content_query::MIN_STEP, crate::content_query::MAX_STEP);
+    let n = if step >= 0 { base.saturating_mul(1 << step) } else { base >> (-step) };
+    n.clamp(10, MAX_RESULTS)
+}
+
+/// Work out the ranking of the library view's search by contents (`Session::content_query`), when what it depends on
+/// changed: the model in use, the question, More / Fewer, the index. While the text is being read the last ranking of
+/// the same model stays (typing does not blank the grid); a problem shows nothing (never a stale ranking).
+pub(crate) fn rank(s: &mut Session, ask: ContentAsk) {
+    refresh(s, false);
+    let label = s.content_label(&ask);
+    let step = s.content_query.step;
+    let has_model = ensure_index(s);
+    if has_model {
+        recount(s);
+    }
+    let (indexed, total) = (s.content.counts.indexed, s.content.counts.total);
+    let hint = hint_for(s, has_model);
+    let mut view = ContentView {
+        ask: ask.clone(),
+        label,
+        state: ContentState::Ready,
+        matches: 0,
+        best_matches: false,
+        step,
+        can_more: false,
+        can_fewer: false,
+        min: None,
+        indexed,
+        total,
+        hint,
+    };
+    let problem = |s: &mut Session, mut view: ContentView, why: String| {
+        let key = format!("problem|{why}|{:?}", view.ask);
+        if s.content_query.key.as_deref() != Some(key.as_str()) {
+            s.content_query.set_ranked(Some(lightcraft_catalog::Ranked::default()), Some(key));
+        }
+        view.state = ContentState::Problem(why);
+        s.content_query.view = Some(view);
+    };
+    let Some(cur) = s.content.current.clone().filter(|_| has_model) else {
+        return problem(s, view, "No content model is in use: turn on Index photo contents in Settings → Search".into());
+    };
+    let (index_len, index_version, index_path) =
+        s.content.index.as_ref().map(|i| (i.len(), i.version(), i.path().map(|p| p.display().to_string()))).unwrap_or_default();
+    // what the ranking depends on, but the query's vector
+    let key = format!("{}|{ask:?}|{step}|{index_len}|{index_version}|{index_path:?}", cur.tag);
+    let same_model = s.content_query.key.as_deref().is_some_and(|k| k.starts_with(&format!("{}|", cur.tag)));
+    // the vector to rank by, and how to score a cosine
+    let (query, model): (Vec<f32>, Option<Arc<dyn lightcraft_vision::ContentModel>>) = match &ask {
+        ContentAsk::Text(text) => {
+            if s.content_query.key.as_deref() == Some(key.as_str()) {
+                // nothing changed: keep it (and its view's counts)
+                if let Some(v) = s.content_query.view.as_mut() {
+                    v.indexed = indexed;
+                    v.total = total;
+                    v.hint = view.hint.clone();
+                }
+                return;
+            }
+            let w = match text_worker(s) {
+                Ok(Some(w)) => w,
+                Ok(None) => return problem(s, view, "No content model is in use".into()),
+                Err(e) => return problem(s, view, e),
+            };
+            match w.vector(text) {
+                TextVector::Ready(v) => (v, w.model.clone()),
+                TextVector::Failed(e) => return problem(s, view, e),
+                TextVector::Pending => {
+                    view.state = ContentState::Preparing;
+                    if !same_model {
+                        // another model's ranking (or a problem's) is not shown while this one is prepared
+                        s.content_query.set_ranked(Some(lightcraft_catalog::Ranked::default()), Some(format!("{}|preparing", cur.tag)));
+                    }
+                    view.matches = s.content_query.ranked.as_ref().map_or(0, |r| r.ids.len());
+                    s.content_query.view = Some(view);
+                    return;
+                }
+            }
+        }
+        ContentAsk::Similar(id) => {
+            if s.catalog.photo(*id).is_none_or(|p| p.deleted) {
+                return problem(s, view, "That photo is no longer in the library".into());
+            }
+            if s.content_query.key.as_deref() == Some(key.as_str()) {
+                if let Some(v) = s.content_query.view.as_mut() {
+                    v.indexed = indexed;
+                    v.total = total;
+                    v.hint = view.hint.clone();
+                }
+                return;
+            }
+            match s.content.index.as_ref().and_then(|i| i.vector(id.0)) {
+                Some(v) => (v, None),
+                None => return problem(s, view, "That photo is not indexed yet".into()),
+            }
+        }
+    };
+    let cosines = s.content.index.as_ref().map(|i| i.cosines(&query)).unwrap_or_default();
+    let mut scored: Vec<(PhotoId, f32)> = cosines
+        .into_iter()
+        .filter(|(id, _)| s.catalog.photo(PhotoId(*id)).is_some_and(|p| eligible(p)))
+        .map(|(id, c)| (PhotoId(id), model.as_ref().map_or(c, |m| m.score_cosine(c))))
+        .filter(|(_, score)| score.is_finite())
+        .collect();
+    if let ContentAsk::Similar(id) = &ask {
+        // the photo itself first, ahead of any exact twin
+        let top = scored.iter().map(|(_, sc)| *sc).fold(1.0f32, f32::max);
+        if let Some(own) = scored.iter_mut().find(|(p, _)| p == id) {
+            own.1 = top + 1e-3;
+        }
+    }
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    let (kept, min, best) = match &ask {
+        ContentAsk::Text(_) => {
+            let base = cur.manifest.match_threshold;
+            let passing = |step: i32| scored.iter().take_while(|(_, sc)| *sc >= cutoff(base, step)).count();
+            let (lo, hi) = (crate::content_query::MIN_STEP, crate::content_query::MAX_STEP);
+            if passing(0) > 0 {
+                // photos reach the model's cut-off: More and Fewer move it (Fewer never down to nothing)
+                let n = passing(step);
+                view.can_more = step < hi && n < scored.len();
+                view.can_fewer = step > lo && passing(step - 1) > 0 && passing(step - 1) < n;
+                (n.min(MAX_RESULTS), cutoff(base, step), false)
+            } else {
+                // none does: the best matches there are, More and Fewer change how many
+                let n = best_count(BEST_MATCHES, step).max(passing(step)).min(scored.len());
+                view.can_more = step < hi && n < scored.len();
+                view.can_fewer = step > lo && n > 10;
+                (n, f32::NEG_INFINITY, true)
+            }
+        }
+        ContentAsk::Similar(_) => {
+            let n = best_count(SIMILAR_MATCHES, step).min(scored.len());
+            view.can_more = step < crate::content_query::MAX_STEP && n < scored.len();
+            view.can_fewer = step > crate::content_query::MIN_STEP && n > 10;
+            (n, f32::NEG_INFINITY, false)
+        }
+    };
+    scored.truncate(kept);
+    view.matches = scored.len();
+    view.best_matches = best;
+    view.min = min.is_finite().then_some(min);
+    s.content_query.set_ranked(Some(lightcraft_catalog::Ranked { ids: scored, min }), Some(key));
+    s.content_query.view = Some(view);
 }

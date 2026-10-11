@@ -193,7 +193,8 @@ command registry (engine commands, plus the app's UI commands such as `view.deta
 connected): the id with `.` replaced by `_` and a `cmd_` prefix — `photo.rate` → `cmd_photo_rate`,
 `develop.set` → `cmd_develop_set`, `edit.undo` → `cmd_edit_undo`, `content.models.list` →
 `cmd_content_models_list` (content search models, docs/content-search.md; `cmd_content_search {text}` finds photos by
-what they show once `cmd_content_enable {on: true}` and `cmd_content_pump {wait: true}` have indexed the library). Arguments are the command's
+what they show once `cmd_content_enable {on: true}` and `cmd_content_pump {wait: true}` have indexed the library;
+`cmd_library_filter {contents: "a red car"}` shows them in the view, ranked, with the other filters). Arguments are the command's
 JSON params (documented in each tool's description and by `list_commands`). Pass `--compact` to
 leave these per-command tools out when a client struggles with a large tool list; `run_command`
 still reaches every command.

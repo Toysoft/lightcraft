@@ -26,6 +26,7 @@ pub mod contact_sheet;
 #[cfg(not(target_arch = "wasm32"))]
 mod content_index;
 pub mod content_models;
+pub mod content_query;
 #[cfg(not(target_arch = "wasm32"))]
 mod content_worker;
 pub mod crs;
@@ -220,6 +221,8 @@ pub struct Session {
     /// Content indexing (search by what photos show): the index of the model in use and the background scan.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) content: content_worker::State,
+    /// The library view's search by contents (`library.filter {contents}`, `contents:` words, Find Similar Contents).
+    pub content_query: content_query::ContentQuery,
     /// Copied develop settings (partial JSON) for Paste.
     pub clipboard: Option<Value>,
     /// The folder on disk the [`LibrarySource::Folder`] view browses.
@@ -364,6 +367,7 @@ impl Session {
             faces: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             content: Default::default(),
+            content_query: Default::default(),
             clipboard: None,
             meta_clipboard: None,
             browse: None,
@@ -855,8 +859,12 @@ impl Session {
 
     /// Photos shown in the grid/filmstrip for the current source, filter and sort.
     pub fn visible(&mut self) -> &[PhotoId] {
-        let mut key =
-            (self.catalog.revision, format!("{:?}|{:?}|{:?}|{:?}|{:?}", self.source, self.filter, self.sort, self.browse, self.library_folder));
+        // the search by contents first: it can change the sort (Relevance), and its ranking is part of the filter
+        let contents = self.content_refresh();
+        let mut key = (
+            self.catalog.revision,
+            format!("{:?}|{:?}|{:?}|{:?}|{:?}|c{contents}", self.source, self.filter, self.sort, self.browse, self.library_folder),
+        );
         if self.source == LibrarySource::Missing && self.media.availability.is_background() {
             // the view fills in as the background checks find files gone
             key.1.push_str(&format!("|{}", self.media.availability.generation()));
@@ -865,6 +873,7 @@ impl Session {
             // "in the last N days" rules count back from the session's clock
             lightcraft_catalog::rules::set_now(Some((self.clock)()));
             let mut f = self.source.to_filter(&self.filter, &self.catalog);
+            f.ranked = self.content_query.ranked.clone();
             if self.source == LibrarySource::Folder {
                 // no folder chosen: nothing (an empty path matches nothing)
                 let b = self.browse.clone().unwrap_or_default();
@@ -889,6 +898,7 @@ impl Session {
                 && let Some(al) = self.catalog.album(a)
                 && !al.is_smart()
                 && self.filter == Filter::default()
+                && self.content_query.ranked.is_none()
             {
                 let order = al.photos.clone();
                 visible.sort_by_key(|id| order.iter().position(|x| x == id).unwrap_or(usize::MAX));
@@ -896,8 +906,11 @@ impl Session {
                     visible.reverse();
                 }
             }
-            if self.source == LibrarySource::RecentlyAdded {
-                // newest import first, whatever the sort (the grid groups by import day)
+            if self.source == LibrarySource::RecentlyAdded
+                && !(self.content_query.ranked.is_some() && self.sort.key == lightcraft_catalog::SortKey::Relevance)
+            {
+                // newest import first, whatever the sort (the grid groups by import day), except best matches first
+                // while searching by contents
                 let cat = &self.catalog;
                 visible.sort_by(|a, b| {
                     let key = |id: &PhotoId| cat.photo(*id).map(|p| p.imported.clone()).unwrap_or_default();

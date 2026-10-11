@@ -257,5 +257,10 @@
   "{n} of {total} photos indexed.": "{total}枚中{n}枚をインデックス化済み。",
   "{n} photos could not be read.": "{n}枚の写真を読み込めませんでした。",
   "{n} photos are offline: they are indexed when their drive is back.": "{n}枚の写真がオフラインです：ドライブが戻るとインデックス化されます。",
-  "Index: {size}": "インデックス：{size}"
+  "Index: {size}": "インデックス：{size}",
+  "match {score}": "一致度 {score}",
+  "Indexed {percent} % of photos": "写真の {percent} % をインデックス化済み",
+  "{n} matches": "{n} 件の一致",
+  "Best {n} matches": "上位 {n} 件の一致",
+  "Similar to {name}": "{name} に類似"
 }

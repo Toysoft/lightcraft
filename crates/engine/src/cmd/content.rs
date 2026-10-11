@@ -516,7 +516,19 @@ mod scan {
         const C: &str = "content.similar";
         let id = p.get("id").and_then(Value::as_u64).or_else(|| s.active().map(|a| a.0)).ok_or_else(|| bad(C, "missing `id`"))?;
         let (limit, min) = (limit(p, 50), min(p, C)?);
-        cs::similar(s, id, limit, min)
+        let mut out = cs::similar(s, id, limit, min)?;
+        if p.get("show").and_then(Value::as_bool) == Some(true) {
+            // the view shows them, ranked, until the chip is closed
+            s.clear_content_query();
+            s.content_query.similar = Some(lightcraft_catalog::PhotoId(id));
+            out["count"] = serde_json::json!(s.visible().len());
+            out["contents"] = s.content_view().map(|v| v.to_json()).unwrap_or_default();
+        }
+        Ok(out)
+    }
+
+    pub fn prepare(s: &mut Session, _: &Value) -> Result<Value> {
+        Ok(cs::prepare_search(s))
     }
 
     pub fn pump(s: &mut Session, p: &Value) -> Result<Value> {
@@ -563,6 +575,10 @@ mod scan {
         unavailable("content.similar")
     }
 
+    pub fn prepare(_: &mut Session, _: &Value) -> Result<Value> {
+        Ok(serde_json::json!({"state": "unavailable"}))
+    }
+
     pub fn pump(_: &mut Session, _: &Value) -> Result<Value> {
         Ok(serde_json::json!({"active": false, "indexing": false, "pending": 0}))
     }
@@ -574,6 +590,36 @@ mod scan {
     pub fn clear(_: &mut Session, _: &Value) -> Result<Value> {
         unavailable("content.clearIndex")
     }
+}
+
+/// `content.more` / `content.fewer`: widen or narrow the library view's search by contents by one step.
+fn widen(s: &mut Session, by: i32, c: &str) -> Result<Value> {
+    let view = s.content_view().ok_or_else(|| bad(c, "no search by contents is in view"))?;
+    let can = if by > 0 { view.can_more } else { view.can_fewer };
+    if can {
+        let q = &mut s.content_query;
+        q.step = (q.step + by).clamp(crate::content_query::MIN_STEP, crate::content_query::MAX_STEP);
+    }
+    let count = s.visible().len();
+    let view = s.content_view().map(|v| v.to_json()).unwrap_or_default();
+    Ok(json!({"count": count, "changed": can, "contents": view}))
+}
+
+fn more(s: &mut Session, _: &Value) -> Result<Value> {
+    widen(s, 1, "content.more")
+}
+
+fn fewer(s: &mut Session, _: &Value) -> Result<Value> {
+    widen(s, -1, "content.fewer")
+}
+
+fn clear_query(s: &mut Session, _: &Value) -> Result<Value> {
+    s.clear_content_query();
+    Ok(json!({"count": s.visible().len()}))
+}
+
+fn query_status(s: &mut Session, _: &Value) -> Result<Value> {
+    Ok(s.content_view().map(|v| v.to_json()).unwrap_or(Value::Null))
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -590,7 +636,12 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(query "content.pace", "Indexing Pace", [], None, "{pace: low | normal | fast} → {pace} — how much of the computer indexing may use: low (a few threads), normal (half), fast (most)", always, pace),
         cmd!(query "content.pump", "Run Content Indexing", [], None, "{pause?: bool, wait?: bool, timeoutMs?: 600000} → {active, indexing, pending, inFlight, indexed, total, stopped} — one step of the background scan (the app calls it a few times a second; `pause`: the user is busy, start no new batch). With `wait`, runs the scan to its end (or the timeout) and saves the index: what a headless session (CLI, MCP) uses to index a library", always, scan::pump),
         cmd!(query "content.search", "Search Photo Contents", [], None, "{text, limit?: 100, min?} → {text, results: [{id, score}], model, indexed, total, complete, indexing, ms} — photos ranked by how well they show `text` (any language the model knows), best first; `score` is the model's match probability (SigLIP: sigmoid, so a threshold means something; around 0.01 and up is a match for the base model). Works on a partial index: `indexed` of `total` photos were searched. The text model is loaded on the first search (about half a second) and kept while searches come", always, scan::search),
-        cmd!(query "content.similar", "Find Similar Contents", [], None, "{id?: active photo, limit?: 50, min?} → {id, results: [{id, score}], model, indexed, total, complete} — the photos whose contents are most like this photo's (cosine similarity of their embeddings, 1 = the same), the photo itself left out; it must be indexed", always, scan::similar),
+        cmd!(query "content.similar", "Find Similar Contents", [], None, "{id?: active photo, limit?: 50, min?, show?: bool} → {id, results: [{id, score}], model, indexed, total, complete, count?, contents?} — the photos whose contents are most like this photo's (cosine similarity of their embeddings, 1 = the same), the photo itself left out; it must be indexed. `show`: the library view shows them (the photo first), ranked, with a chip \"Similar to …\" (content.clearQuery ends it)", always, scan::similar),
+        cmd!(query "content.prepare", "Prepare Search by Contents", [], None, "{} → {state: ready | loading | noModel | error, error?, model, indexed, total, complete, indexing} — load the search model of the model in use in the background (the search bar's Contents mode does this when chosen, so the first search does not wait)", always, scan::prepare),
+        cmd!(query "content.more", "Show More Matches", [], None, "{} → {count, changed, contents} — widen the library view's search by contents one step (half the cut-off, or twice as many best matches)", always, more),
+        cmd!(query "content.fewer", "Show Fewer Matches", [], None, "{} → {count, changed, contents} — narrow the library view's search by contents one step", always, fewer),
+        cmd!(query "content.clearQuery", "Clear Search by Contents", [], None, "{} → {count} — end the library view's search by contents (the Contents text, `contents:` words, Find Similar Contents); the sort goes back to what it was", always, clear_query),
+        cmd!(query "content.query", "Search by Contents in View", [], None, "{} → null | {kind: text | similar, text, id, label, state: ready | preparing | problem, problem, matches, bestMatches, step, canMore, canFewer, min, indexed, total, hint: null | {kind: turnOnIndexing | partial, percent}} — the library view's search by contents, as its chip shows it", always, query_status),
         cmd!(query "content.reindex", "Index Photo Contents Again", [], None, "{ids?: [photo ids]} → {queued} — embed these photos (or every photo) again, failed ones included; also restarts a stopped scan. Indexing must be on for it to run", always, scan::reindex),
         cmd!(query "content.clearIndex", "Clear Content Index", [], None, "{} → {cleared, file} — forget the index of the model in use for this library and delete its file; with indexing on it starts over", always, scan::clear),
     ]

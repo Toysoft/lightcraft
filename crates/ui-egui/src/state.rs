@@ -161,6 +161,16 @@ impl LightsOut {
 /// How many libraries File ▸ Open Recent Library remembers.
 pub const RECENT_LIBRARIES: usize = 8;
 
+/// What the search field searches: the photos' text (file names, keywords, metadata, fielded words) or what they show
+/// (Contents: the content index, Settings ▸ Search).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchMode {
+    #[default]
+    Text,
+    Contents,
+}
+
 /// Whether the interface uses the dark or the light theme (Settings ▸ Interface ▸ Appearance).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -604,6 +614,12 @@ pub struct UiState {
     #[serde(skip)]
     pub dragging_control: Option<String>,
     pub search: String,
+    /// Text or Contents (the search field's magnifier menu). Not kept between runs: a search by contents is not either.
+    #[serde(skip)]
+    pub search_mode: SearchMode,
+    /// When the Contents text typed last is searched for (egui time): typing waits for a pause.
+    #[serde(skip)]
+    pub search_due: Option<f64>,
     /// Focus the search field on the next frame (Edit → Find…).
     #[serde(skip)]
     pub focus_search: bool,
@@ -1084,6 +1100,8 @@ impl Default for UiState {
             was_focused: true,
             auto_import_at: 0.0,
             search: String::new(),
+            search_mode: SearchMode::Text,
+            search_due: None,
             focus_search: false,
             renaming_mask: None,
             describe: None,

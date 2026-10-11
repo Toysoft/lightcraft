@@ -97,6 +97,8 @@ pub(crate) struct Index {
     pub note: Option<String>,
     /// The last save's failure, until a save works.
     pub save_error: Option<String>,
+    /// Bumped by every change of the vectors (a search ranked at one version is still right at it).
+    version: u64,
 }
 
 impl Index {
@@ -117,6 +119,7 @@ impl Index {
             file_matches: false,
             note: None,
             save_error: None,
+            version: 0,
         }
     }
 
@@ -129,6 +132,11 @@ impl Index {
             index.load(&p);
         }
         index
+    }
+
+    /// Changes whenever a vector is added, replaced or removed.
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     pub fn tag(&self) -> &str {
@@ -188,6 +196,7 @@ impl Index {
     /// Remember photo `photo`'s embedding (made when its content hash was `hash`), replacing an earlier one. Refused
     /// when the vector is not this index's size or not finite, or when the index is full.
     pub fn insert(&mut self, photo: u64, hash: Hash, v: &[f32]) -> Result<(), String> {
+        self.version = self.version.wrapping_add(1);
         if v.len() != self.dim {
             return Err(format!("the model made {} numbers for a photo, not {}", v.len(), self.dim));
         }
@@ -227,6 +236,7 @@ impl Index {
 
     /// Forget photo `photo` (deleted from the library, or to be embedded again). `true` if it was indexed.
     pub fn remove(&mut self, photo: u64) -> bool {
+        self.version = self.version.wrapping_add(1);
         let Some(r) = self.rows.remove(&photo) else { return false };
         let last = self.photos.len().saturating_sub(1);
         if self.on_disk.get(r).copied().unwrap_or(false) {
@@ -252,6 +262,7 @@ impl Index {
 
     /// Forget everything, and the file too.
     pub fn clear(&mut self) -> std::io::Result<()> {
+        self.version = self.version.wrapping_add(1);
         self.photos.clear();
         self.hashes.clear();
         self.data = Vec::new();

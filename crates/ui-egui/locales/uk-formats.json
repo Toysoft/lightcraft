@@ -257,5 +257,10 @@
   "{n} of {total} photos indexed.": "Проіндексовано {n} з {total} фото.",
   "{n} photos could not be read.": "Не вдалося прочитати фото: {n}.",
   "{n} photos are offline: they are indexed when their drive is back.": "Фото поза мережею: {n}. Їх буде проіндексовано, коли диск повернеться.",
-  "Index: {size}": "Індекс: {size}"
+  "Index: {size}": "Індекс: {size}",
+  "match {score}": "збіг {score}",
+  "Indexed {percent} % of photos": "Проіндексовано {percent} % фото",
+  "{n} matches": "Збігів: {n}",
+  "Best {n} matches": "Найкращі збіги: {n}",
+  "Similar to {name}": "Схожі на {name}"
 }

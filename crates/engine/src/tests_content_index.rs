@@ -68,6 +68,8 @@ impl ContentModel for Fake {
                 "green" => Ok(normalised(vec![-0.5, 1.0, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0])),
                 "blue" => Ok(normalised(vec![-0.5, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0])),
                 "red" => Ok(normalised(vec![1.0, -0.5, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0])),
+                // like nothing any picture is (no photo reaches the cut-off)
+                "void" => Ok(normalised(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])),
                 _ => Err(lightcraft_vision::Error::Input(format!("the stand-in knows no `{t}`"))),
             })
             .collect()
@@ -95,6 +97,8 @@ fn install(content: &Path, id: &str) -> Manifest {
     m.id = id.into();
     m.name = format!("Fake {id}");
     m.embedding.dim = DIM as u32;
+    // (the stand-in's scores: a cosine of 0.5 and up)
+    m.match_threshold = 0.5;
     let bytes = format!("weights of {id}").into_bytes();
     m.files =
         vec![manifest::FileSpec { name: "model.safetensors".into(), size: bytes.len() as u64, sha256: lightcraft_faces::hash::sha256_hex(&bytes) }];
@@ -539,5 +543,240 @@ fn the_real_model_finds_the_beach() {
     assert_eq!(kind(&s, top), lightcraft_scenes::Kind::Beach, "{r}");
     let r = s.execute("content.search", &json!({"text": "a flower", "limit": 3})).unwrap();
     assert_eq!(kind(&s, r["results"][0]["id"].as_u64().unwrap()), lightcraft_scenes::Kind::Macro, "{r}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// ---------------------------------------------------------------- the library view's search by contents
+
+/// An indexed demo library with the stand-in model.
+fn indexed(name: &str) -> (PathBuf, Arc<Calls>, Session) {
+    let d = temp(name);
+    let calls = Arc::new(Calls::default());
+    let mut s = session(&d, &calls, 0, true);
+    s.execute("content.pump", &json!({"wait": true})).unwrap();
+    (d, calls, s)
+}
+
+fn filter(s: &mut Session, p: Value) -> Value {
+    s.execute("library.filter", &p).unwrap()
+}
+
+/// The stand-in's score of photo `id` for a text vector (sigmoid of 10 × cosine − 5).
+fn fake_score(s: &Session, id: PhotoId, text: &[f32]) -> f32 {
+    let v = s.content.index.as_ref().unwrap().vector(id.0).unwrap();
+    let c: f32 = v.iter().zip(text).map(|(a, b)| a * b).sum();
+    1.0 / (1.0 + (-(10.0 * c - 5.0)).exp())
+}
+
+fn green() -> Vec<f32> {
+    normalised(vec![-0.5, 1.0, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0])
+}
+
+#[test]
+fn contents_in_the_filter_rank_the_view_and_and_with_the_other_filters() {
+    let (d, _, mut s) = indexed("filter");
+    let all = s.visible().len();
+    let r = filter(&mut s, json!({"contents": "green"}));
+    let n = r["count"].as_u64().unwrap() as usize;
+    assert_eq!((r["contents"]["state"].as_str(), r["contents"]["label"].as_str()), (Some("ready"), Some("Contents: green")), "{r}");
+    assert!(n > 0 && n < all, "some photos are green, not all: {n} of {all}");
+    assert_eq!(r["contents"]["bestMatches"], false);
+    // the view: exactly the photos at or above the model's cut-off, best first (Relevance is the sort now)
+    assert_eq!(s.sort.key, lightcraft_catalog::SortKey::Relevance);
+    let vis = s.visible().to_vec();
+    let want: Vec<PhotoId> = {
+        let mut v: Vec<(PhotoId, f32)> =
+            s.catalog.photos().filter(|p| p.in_library()).map(|p| (p.id, fake_score(&s, p.id, &green()))).filter(|(_, sc)| *sc >= 0.5).collect();
+        v.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        v.into_iter().map(|(id, _)| id).collect()
+    };
+    assert_eq!(vis.len(), want.len());
+    let scores: Vec<f32> = vis.iter().map(|id| s.content_score(*id).unwrap()).collect();
+    assert!(scores.windows(2).all(|w| w[0] >= w[1]), "best first: {scores:?}");
+    assert_eq!(vis.first(), want.first());
+    // ANDed with a rating
+    for id in vis.iter().step_by(2) {
+        s.execute("photo.rate", &json!({"ids": [id.0], "rating": 4})).unwrap();
+    }
+    let rated: Vec<PhotoId> = vis.iter().filter(|id| s.catalog.photo(**id).unwrap().rating >= 3).copied().collect();
+    assert!(!rated.is_empty() && rated.len() < vis.len());
+    let r = filter(&mut s, json!({"rating": 3}));
+    assert_eq!(r["count"].as_u64().unwrap() as usize, rated.len(), "{r}");
+    // the same as words in the search text, in any mode, quoted or not, `shows:` too
+    filter(&mut s, json!({"contents": null, "rating": 0}));
+    assert_eq!(s.content_ask(), None);
+    assert_eq!(s.sort.key, lightcraft_catalog::SortKey::CaptureDate, "the sort comes back");
+    assert_eq!(s.visible().len(), all);
+    for text in ["rating:>=3 contents:green", "rating:>=3 contents:\"green\"", "shows:green rating:>=3"] {
+        let r = filter(&mut s, json!({"text": text}));
+        assert_eq!(r["count"].as_u64().unwrap() as usize, rated.len(), "{text}: {r}");
+        assert_eq!(r["contents"]["label"], "Contents: green");
+    }
+    // another sort can still be chosen
+    s.execute("library.sort", &json!({"key": "fileName", "ascending": true})).unwrap();
+    let by_name = s.visible().to_vec();
+    let names: Vec<String> = by_name.iter().map(|id| s.catalog.photo(*id).unwrap().file_name.to_lowercase()).collect();
+    assert!(names.windows(2).all(|w| w[0] <= w[1]), "{names:?}");
+    // clearing the search ends it (and the other words stay)
+    let r = s.execute("content.clearQuery", &json!({})).unwrap();
+    assert_eq!(s.filter.text, "rating:>=3");
+    assert_eq!(r["count"].as_u64().unwrap() as usize, s.catalog.photos().filter(|p| p.in_library() && p.rating >= 3).count());
+    assert_eq!(s.sort.key, lightcraft_catalog::SortKey::FileName, "a sort the user chose stays");
+    assert!(s.execute("content.query", &json!({})).unwrap().is_null());
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn more_and_fewer_move_the_cut_off_and_nothing_passing_shows_the_best_matches() {
+    let (d, _, mut s) = indexed("morefewer");
+    let total = s.visible().len();
+    let n0 = filter(&mut s, json!({"contents": "green"}))["count"].as_u64().unwrap();
+    let more = s.execute("content.more", &json!({})).unwrap();
+    let n1 = more["count"].as_u64().unwrap();
+    assert!(n1 >= n0 && more["contents"]["step"] == 1, "{more}");
+    let back = s.execute("content.fewer", &json!({})).unwrap();
+    assert_eq!(back["count"].as_u64(), Some(n0));
+    // fewer and fewer: never down to nothing
+    let mut last = n0;
+    for _ in 0..12 {
+        let r = s.execute("content.fewer", &json!({})).unwrap();
+        let n = r["count"].as_u64().unwrap();
+        assert!(n >= 1 && n <= last, "{r}");
+        last = n;
+    }
+    // a new question starts again at the model's cut-off
+    assert_eq!(filter(&mut s, json!({"contents": "green"}))["count"].as_u64(), Some(last), "same question, same step");
+    filter(&mut s, json!({"contents": "blue"}));
+    assert_eq!(s.content_query.step, 0);
+    // nothing reaches the cut-off: the best matches, said so
+    let r = filter(&mut s, json!({"contents": "void"}));
+    assert_eq!(r["contents"]["bestMatches"], true, "{r}");
+    assert_eq!(r["count"].as_u64().unwrap() as usize, total.min(200));
+    let r = s.execute("content.fewer", &json!({})).unwrap();
+    assert_eq!(r["count"].as_u64().unwrap() as usize, total.min(100), "{r}");
+    // the cut-off is the model's: another model's manifest says another
+    assert_eq!(s.content_view().unwrap().min, None);
+    // without a search, More / Fewer say so
+    s.execute("content.clearQuery", &json!({})).unwrap();
+    assert!(s.execute("content.more", &json!({})).is_err());
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn find_similar_contents_ranks_the_view_from_a_photo() {
+    let (d, _, mut s) = indexed("similarview");
+    let id = s.visible()[3];
+    let r = s.execute("content.similar", &json!({"id": id.0, "show": true})).unwrap();
+    let name = s.catalog.photo(id).unwrap().file_name.clone();
+    assert_eq!(r["contents"]["label"].as_str(), Some(format!("Similar to {name}").as_str()), "{r}");
+    let vis = s.visible().to_vec();
+    assert_eq!(vis.first(), Some(&id), "the photo itself first");
+    assert_eq!(vis.len(), s.catalog.photos().filter(|p| p.in_library()).count().min(100));
+    let scores: Vec<f32> = vis.iter().map(|v| s.content_score(*v).unwrap()).collect();
+    assert!(scores.windows(2).all(|w| w[0] >= w[1]));
+    // Fewer: half as many
+    let r = s.execute("content.fewer", &json!({})).unwrap();
+    assert_eq!(r["count"].as_u64().unwrap() as usize, vis.len().min(50));
+    // a text search replaces it; Clear Filters ends everything
+    filter(&mut s, json!({"contents": "green"}));
+    assert!(matches!(s.content_ask(), Some(crate::content_query::ContentAsk::Text(_))));
+    s.execute("content.similar", &json!({"id": id.0, "show": true})).unwrap();
+    s.execute("library.clearFilter", &json!({})).unwrap();
+    assert_eq!(s.content_ask(), None);
+    // the photo deleted while shown: the chip says so, nothing stale is shown
+    s.execute("content.similar", &json!({"id": id.0, "show": true})).unwrap();
+    s.execute("photo.delete", &json!({"ids": [id.0]})).unwrap();
+    assert_eq!(s.visible().len(), 0);
+    let v = s.content_view().unwrap();
+    assert!(matches!(v.state, crate::content_query::ContentState::Problem(_)), "{v:?}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_content_search_never_crashes_without_a_model_an_index_or_a_sensible_query() {
+    let d = temp("searchsafe");
+    let calls = Arc::new(Calls::default());
+    let mut s = session(&d, &calls, 0, false);
+    let all = s.visible().len();
+    // the index is empty (indexing off): a problem-free answer that shows nothing and says to turn indexing on
+    let r = filter(&mut s, json!({"contents": "green"}));
+    assert_eq!((r["count"].as_u64(), r["contents"]["hint"]["kind"].as_str()), (Some(0), Some("turnOnIndexing")), "{r}");
+    // blank, huge, emoji and quote-only queries
+    for q in ["", "   ", "\"", "🦂🦂 scorpion", &"x".repeat(100_000)] {
+        let r = s.execute("library.filter", &json!({"contents": q})).unwrap();
+        assert!(r["count"].is_u64(), "{q:?}: {r}");
+    }
+    assert_eq!(s.content_query.contents.as_ref().map(|c| c.chars().count()), Some(crate::content_query::MAX_QUERY_CHARS));
+    for text in ["contents:", "contents:\"", "shows: contents:\"\"", "contents:🦂"] {
+        assert!(s.execute("library.filter", &json!({"contents": null, "text": text})).is_ok(), "{text}");
+    }
+    assert!(s.execute("library.filter", &json!({"contents": 5})).is_err());
+    // a word the model cannot read: the chip says why, nothing is shown
+    let r = filter(&mut s, json!({"text": "", "contents": "unknown words"}));
+    assert_eq!((r["count"].as_u64(), r["contents"]["state"].as_str()), (Some(0), Some("problem")), "{r}");
+    // the model removed while a search is in view: the problem, never the old ranking
+    s.execute("content.enable", &json!({"on": true})).unwrap();
+    s.execute("content.pump", &json!({"wait": true})).unwrap();
+    let n = filter(&mut s, json!({"contents": "green"}))["count"].as_u64().unwrap();
+    assert!(n > 0);
+    s.execute("content.models.remove", &json!({"id": "fake"})).unwrap();
+    assert_eq!(s.visible().len(), 0, "no stale ranking");
+    let v = s.content_view().unwrap();
+    assert!(matches!(&v.state, crate::content_query::ContentState::Problem(p) if p.contains("No content model")), "{v:?}");
+    assert_eq!(v.hint, Some(crate::content_query::ContentHint::TurnOnIndexing));
+    s.execute("library.clearFilter", &json!({})).unwrap();
+    assert_eq!(s.visible().len(), all);
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn another_model_switched_in_ranks_again_with_its_own_index() {
+    let (d, _, mut s) = indexed("searchswitch");
+    let n = filter(&mut s, json!({"contents": "green"}))["count"].as_u64().unwrap();
+    assert!(n > 0);
+    let content = d.join("content");
+    install(&content, "other");
+    choose(&content, "other", true, Some("low"));
+    s.execute("content.models.select", &json!({"id": "other"})).unwrap();
+    // the new model has no index yet: nothing to show (not the old model's ranking), and indexing is under way
+    let r = filter(&mut s, json!({}));
+    assert_eq!(r["count"].as_u64(), Some(0), "{r}");
+    s.execute("content.pump", &json!({"wait": true})).unwrap();
+    let r = filter(&mut s, json!({}));
+    assert_eq!(r["count"].as_u64(), Some(n), "the same stand-in, indexed again, ranks the same: {r}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn the_search_model_loads_off_the_session_thread_and_queries_typed_meanwhile_run_when_it_is_ready() {
+    let (d, calls, mut s) = indexed("textthread");
+    // a search model that takes a while to load
+    let slow_calls = calls.clone();
+    s.set_content_model_loader(Arc::new(move |_: &Path, m: &Manifest, towers: Towers| {
+        if towers.text {
+            std::thread::sleep(Duration::from_millis(400));
+        }
+        slow_calls.loads.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(Fake { manifest: m.clone(), calls: slow_calls.clone(), slow: 0 }) as Box<dyn ContentModel>)
+    }));
+    let prepared = s.execute("content.prepare", &json!({})).unwrap();
+    assert_eq!(prepared["state"], "loading", "{prepared}");
+    // typing while it loads: each answer comes at once, the view says it is preparing
+    let t = Instant::now();
+    for q in ["g", "gr", "gre", "green"] {
+        let r = filter(&mut s, json!({"contents": q, "wait": false}));
+        assert_eq!(r["contents"]["state"], "preparing", "{r}");
+    }
+    assert!(t.elapsed() < Duration::from_millis(300), "the session thread never waits: {:?}", t.elapsed());
+    // the last one runs once the model is there
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while s.content_view().unwrap().state == crate::content_query::ContentState::Preparing {
+        assert!(Instant::now() < deadline, "never ready");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let v = s.content_view().unwrap();
+    assert_eq!((v.label.as_str(), v.state.clone()), ("Contents: green", crate::content_query::ContentState::Ready));
+    assert!(!s.visible().is_empty());
+    assert_eq!(s.execute("content.prepare", &json!({})).unwrap()["state"], "ready");
     let _ = std::fs::remove_dir_all(&d);
 }

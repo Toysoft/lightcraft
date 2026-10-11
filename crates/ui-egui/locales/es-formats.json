@@ -257,5 +257,10 @@
   "{n} of {total} photos indexed.": "{n} de {total} fotos indexadas.",
   "{n} photos could not be read.": "No se pudieron leer {n} fotos.",
   "{n} photos are offline: they are indexed when their drive is back.": "{n} fotos están sin conexión: se indexarán cuando vuelva su unidad.",
-  "Index: {size}": "Índice: {size}"
+  "Index: {size}": "Índice: {size}",
+  "match {score}": "coincidencia {score}",
+  "Indexed {percent} % of photos": "{percent} % de las fotos indexadas",
+  "{n} matches": "{n} coincidencias",
+  "Best {n} matches": "Las {n} mejores coincidencias",
+  "Similar to {name}": "Similar a {name}"
 }

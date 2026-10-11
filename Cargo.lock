@@ -3495,6 +3495,7 @@ dependencies = [
  "lightcraft-pipeline",
  "lightcraft-preview",
  "lightcraft-raster",
+ "lightcraft-scenes",
  "lightcraft-vision",
  "log",
  "serde",

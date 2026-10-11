@@ -10,7 +10,7 @@ pub(crate) mod browse;
 mod color;
 mod content;
 #[cfg(not(target_arch = "wasm32"))]
-mod content_scan;
+pub(crate) mod content_scan;
 pub(crate) mod convert;
 mod cull;
 pub mod curves;

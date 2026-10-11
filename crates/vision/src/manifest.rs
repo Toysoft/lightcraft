@@ -141,8 +141,20 @@ pub struct Manifest {
     pub score: ScoreSpec,
     /// Default per-tag cut-off on [`crate::ContentModel::score`].
     pub tag_threshold: f32,
+    /// Default cut-off of a search on [`crate::ContentModel::score`]: photos scoring at least this match the query
+    /// (the user widens or narrows it from there). Manifests from before it existed get [`DEFAULT_MATCH_THRESHOLD`].
+    #[serde(default = "default_match_threshold")]
+    pub match_threshold: f32,
     #[serde(default)]
     pub speed: Speed,
+}
+
+/// The search cut-off of SigLIP 2 base (256 px), measured on real libraries: a dog on a jetty scores 0.05–0.08 for
+/// "a dog", a rocky coast 0.03 for "the sea", while unrelated photos stay below 0.005.
+pub const DEFAULT_MATCH_THRESHOLD: f32 = 0.02;
+
+fn default_match_threshold() -> f32 {
+    DEFAULT_MATCH_THRESHOLD
 }
 
 impl Manifest {
@@ -174,6 +186,7 @@ pub fn builtin_siglip2_b16_256() -> Manifest {
         embedding: EmbeddingSpec { dim: 768 },
         score: ScoreSpec { kind: ScoreKind::Sigmoid },
         tag_threshold: 0.10,
+        match_threshold: DEFAULT_MATCH_THRESHOLD,
         speed: Speed::default(),
     }
 }
@@ -340,6 +353,9 @@ pub fn validate(m: &Manifest) -> Result<(), ManifestError> {
     if !(m.tag_threshold.is_finite() && (0.0..=1.0).contains(&m.tag_threshold)) {
         return bad("tagThreshold", "must be a number from 0 to 1");
     }
+    if !(m.match_threshold.is_finite() && (0.0..=1.0).contains(&m.match_threshold)) {
+        return bad("matchThreshold", "must be a number from 0 to 1");
+    }
     if let Some(s) = m.speed.cpu_ms_per_image
         && !(s.is_finite() && (0.0..=1e6).contains(&s))
     {
@@ -383,6 +399,11 @@ mod tests {
         assert_eq!(hugging_face("nope"), None);
         let json = serde_json::to_string(&m).unwrap();
         assert!(json.contains("\"tagThreshold\"") && json.contains("\"cpuMsPerImage\""), "{json}");
+        // a manifest written before the search cut-off existed gets the default
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        v.as_object_mut().unwrap().remove("matchThreshold");
+        let old: Manifest = serde_json::from_value(v).unwrap();
+        assert_eq!(old.match_threshold, DEFAULT_MATCH_THRESHOLD);
     }
 
     #[test]
@@ -407,6 +428,7 @@ mod tests {
             ("embedding.dim", Box::new(|m| m.embedding.dim = 0)),
             ("embedding.dim", Box::new(|m| m.embedding.dim = u32::MAX)),
             ("tagThreshold", Box::new(|m| m.tag_threshold = f32::INFINITY)),
+            ("matchThreshold", Box::new(|m| m.match_threshold = -0.5)),
             ("speed.cpuMsPerImage", Box::new(|m| m.speed.cpu_ms_per_image = Some(-1.0))),
             ("text.tokenizer", Box::new(|m| m.text.tokenizer = TokenizerKind::ClipBpe)),
         ];

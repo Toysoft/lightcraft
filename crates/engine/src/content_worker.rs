@@ -390,13 +390,132 @@ pub(crate) struct Current {
     pub manifest: Manifest,
 }
 
-/// The loaded text tower (for searches), kept while it is used.
-pub(crate) struct TextModel {
+/// What the text thread sends back.
+enum TextMsg {
+    Loaded(Arc<dyn ContentModel>),
+    LoadFailed(String),
+    Embedded(String, Result<Vec<f32>, String>),
+}
+
+/// Recent search texts whose embeddings are kept.
+const QUERY_CACHE: usize = 64;
+
+/// The text tower (for searches), loaded and run on a thread of its own so the window never waits for it: loading
+/// takes about half a second, embedding a text a few tens of milliseconds. Searches typed while it loads are embedded
+/// once it is ready.
+pub(crate) struct TextWorker {
+    /// `<model id>@<sha256>` of the model it loads.
     pub tag: String,
-    pub model: Arc<dyn ContentModel>,
+    jobs: Sender<String>,
+    done: Receiver<TextMsg>,
+    /// The model, once loaded (scores are computed with it on the session thread: [`ContentModel::score_cosine`]).
+    pub model: Option<Arc<dyn ContentModel>>,
+    /// It could not be loaded.
+    pub error: Option<String>,
+    /// Texts handed over and not yet back.
+    pending: HashSet<String>,
+    /// Embeddings of recent texts, or why a text could not be embedded.
+    queries: HashMap<String, Result<Vec<f32>, String>>,
     pub used: Instant,
-    /// Embeddings of recent searches.
-    pub queries: HashMap<String, Vec<f32>>,
+}
+
+/// Where a text's embedding is.
+pub(crate) enum TextVector {
+    Ready(Vec<f32>),
+    /// Being loaded or embedded: ask again.
+    Pending,
+    Failed(String),
+}
+
+impl TextWorker {
+    /// Start the thread for the model in `home`: it loads the text tower right away.
+    pub fn start(tag: String, home: PathBuf, manifest: Manifest, loader: Loader) -> Result<TextWorker, String> {
+        let (jobs, job_rx) = channel::<String>();
+        let (done_tx, done) = channel::<TextMsg>();
+        std::thread::Builder::new()
+            .name("lightcraft-content-text".into())
+            .spawn(move || {
+                let loaded = catch_unwind(AssertUnwindSafe(|| loader(&home, &manifest, Towers { image: false, text: true })));
+                let model: Result<Arc<dyn ContentModel>, String> = match loaded {
+                    Ok(Ok(m)) => Ok(Arc::from(m)),
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => Err("loading the model stopped unexpectedly".into()),
+                };
+                let sent = match &model {
+                    Ok(m) => done_tx.send(TextMsg::Loaded(m.clone())),
+                    Err(e) => done_tx.send(TextMsg::LoadFailed(e.clone())),
+                };
+                if sent.is_err() {
+                    return;
+                }
+                // ends when the session drops its sender (the model changed, or no search for a while)
+                while let Ok(text) = job_rx.recv() {
+                    let v = match &model {
+                        Ok(m) => match catch_unwind(AssertUnwindSafe(|| m.embed_texts(&[text.as_str()]))) {
+                            Ok(Ok(v)) => v.into_iter().next().ok_or_else(|| "the model made no embedding for the text".to_string()),
+                            Ok(Err(e)) => Err(e.to_string()),
+                            Err(_) => Err("the model stopped unexpectedly".to_string()),
+                        },
+                        Err(e) => Err(e.clone()),
+                    };
+                    if done_tx.send(TextMsg::Embedded(text, v)).is_err() {
+                        break;
+                    }
+                }
+            })
+            .map_err(|e| format!("could not start the search model: {e}"))?;
+        Ok(TextWorker { tag, jobs, done, model: None, error: None, pending: HashSet::new(), queries: HashMap::new(), used: Instant::now() })
+    }
+
+    /// Take in what the thread finished.
+    pub fn poll(&mut self) {
+        for msg in self.done.try_iter() {
+            match msg {
+                TextMsg::Loaded(m) => self.model = Some(m),
+                TextMsg::LoadFailed(e) => self.error = Some(e),
+                TextMsg::Embedded(text, v) => {
+                    self.pending.remove(&text);
+                    if self.queries.len() >= QUERY_CACHE {
+                        self.queries.clear();
+                    }
+                    self.queries.insert(text, v);
+                }
+            }
+        }
+    }
+
+    /// The embedding of `text`, asking the thread for it when it is not known yet.
+    pub fn vector(&mut self, text: &str) -> TextVector {
+        self.poll();
+        self.used = Instant::now();
+        if let Some(e) = &self.error {
+            return TextVector::Failed(format!("the content model could not be loaded: {e}"));
+        }
+        match self.queries.get(text) {
+            Some(Ok(v)) => return TextVector::Ready(v.clone()),
+            Some(Err(e)) => return TextVector::Failed(e.clone()),
+            None => {}
+        }
+        if !self.pending.contains(text) {
+            if self.jobs.send(text.to_string()).is_err() {
+                return TextVector::Failed("the search model stopped".into());
+            }
+            self.pending.insert(text.to_string());
+        }
+        TextVector::Pending
+    }
+
+    /// [`Self::vector`], waiting for it (at most `timeout`): for commands that answer at once (`content.search`).
+    pub fn wait(&mut self, text: &str, timeout: std::time::Duration) -> TextVector {
+        let started = Instant::now();
+        loop {
+            match self.vector(text) {
+                TextVector::Pending if started.elapsed() < timeout => std::thread::sleep(std::time::Duration::from_millis(2)),
+                TextVector::Pending => return TextVector::Failed("the search model took too long".into()),
+                done => return done,
+            }
+        }
+    }
 }
 
 /// Counts over the library, made when the queue is.
@@ -447,7 +566,7 @@ pub(crate) struct State {
     pub counts: Counts,
     /// The catalog revision and index size the counts were made at (a status with nothing changed does not count again).
     pub counts_stamp: Option<(u64, usize)>,
-    pub text: Option<TextModel>,
+    pub text: Option<TextWorker>,
     /// Test hook: a stand-in for [`lightcraft_vision::load`].
     pub loader: Option<Loader>,
     /// Bumped when another library opens.
