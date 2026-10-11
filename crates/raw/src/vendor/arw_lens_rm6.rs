@@ -1,5 +1,6 @@
-//! Sony ARW lens corrections from the tables in the raw IFD, as the equivalent DNG `OpcodeList3` opcodes, so they
-//! reach the same "profile corrections" (`optics.lens_profile`) as a DNG's embedded warp.
+//! Sony ARW lens corrections from the tables in the raw IFD: distortion as the equivalent DNG `OpcodeList3` opcode,
+//! so it reaches the same "profile corrections" (`optics.lens_profile`) as a DNG's embedded warp, and lateral CA as
+//! the mosaic's pre-demosaic map ([`LateralCa`]).
 //!
 //! These are the ILCE-7RM6 conventions, measured against the camera JPEG. [`super::arw_lens`] holds the ILCE-7RM4A
 //! conventions, measured against Sony's Imaging Edge exports (unit 16384, the table indexed at the output radius).
@@ -31,11 +32,11 @@
 //! - lateral CA: red's (blue's) source radius is `g · (1 + c(g) / 3.36·10⁶)` with `g` the green source radius and `c`
 //!   the red (blue) half on the same knots. The unit is **provisional**: the measurement is borderline (0.399 px
 //!   worst against a 0.3 px budget; per-photo best units scatter from 1.5·10⁶ to 7.2·10⁶, about ±30 % scene bias),
-//!   but it cuts the rms raw-CFA CA over 46 photos from 0.079 to 0.052 px. The table is parsed and [`warp_opcode`]
-//!   converts it to the warp's R and B planes, but they are **not emitted by default**: [`lens_opcodes`] passes
-//!   `lateral_ca: false`, because applied after demosaic they made the render's CA worse (numbers there). To turn
-//!   them on in code, pass `true` there. When on, a CA value beyond [`CA_MAX_RELATIVE`] or a colour plane that fails
-//!   the fit gate above drops both colour planes, and G alone is applied to all three channels.
+//!   but it cuts the rms raw-CFA CA over 46 photos from 0.079 to 0.052 px. [`lateral_ca`] turns the table into a
+//!   map corrected on the mosaic before demosaic (`OpcodeLists::lateral_ca`), always: it is not governed by Lens
+//!   Corrections (`optics.lens_profile`) and never written to a DNG. A value beyond
+//!   [`crate::lateral_ca::MAX_SCALE`] (relative) refuses the table. As R and B planes of the warp, after demosaic, it
+//!   made the render's CA worse (see [`lens_opcodes`]). The unit and the numbers: the doc below.
 //!
 //! The correction is produced whatever the in-camera flag says. Only bodies listed in [`FULL_FRAME_CROP`] get it: the
 //! unit and the knot spacing are verified on the ILCE-7RM6 alone. Another body is added by repeating the measurement
@@ -45,7 +46,7 @@
 use super::fit_radial_warp;
 use crate::lateral_ca::interpolate;
 use crate::opcodes::max_radius;
-use crate::{Opcode, Rect};
+use crate::{LateralCa, Opcode, Rect};
 use lightcraft_tiff::Ifd;
 use std::ops::RangeInclusive;
 
@@ -63,10 +64,6 @@ const DISTORTION_UNIT: f64 = 15000.0;
 /// The CA table's value of 1 (relative to the green source radius). Provisional: the median best unit of the 20
 /// cleanest photos; per-photo units scatter from 1.5·10⁶ to 7.2·10⁶ (the measurement's scene bias is about ±30 %).
 const CA_UNIT: f64 = 3.36e6;
-/// Largest plausible CA value relative to the green source radius (|c| / [`CA_UNIT`]): about 12 px at the full-frame
-/// corner; the largest value in the 54 measured photos' tables is 1724 (FE 24–70 mm), 1724 / 3.36·10⁶ ≈ 5.1·10⁻⁴.
-/// A table beyond it is refused.
-const CA_MAX_RELATIVE: f64 = 2e-3;
 /// Crop border radii scanned by the frame-filling zoom.
 const ZOOM_SCAN: usize = 4096;
 /// Largest polynomial fit error accepted at the fit samples the crop shows, px at a 1440 px long edge.
@@ -142,14 +139,12 @@ fn fill_zoom(source: &dyn Fn(f64) -> f64, x: f64, y: f64) -> Option<f64> {
     Some(0.5 * (lo + hi))
 }
 
-/// The distortion and CA tables as a `WarpRectilinear` relative to the active area `active` (centred on the default
-/// crop `crop`, as the camera corrects), with knots `knot_spacing` px apart: planes R, G, B with `lateral_ca`, or G
-/// alone (applied to all three) without it, or when the CA table is absent, implausible or a colour plane's fit
-/// fails. `None` when the distortion table is absent or
-/// all zero (CA alone is not applied: it is relative to green), the zoom or the G fit fails. A fit fails when it is
-/// worse than 0.25 px at a 1440 px long edge at one of the fit samples within the crop (a padded active area, as in
-/// lossless files, reaches radii that are never shown).
-pub(crate) fn warp_opcode(t: &LensTables, knot_spacing: f64, active: Rect, crop: Rect, lateral_ca: bool) -> Option<Opcode> {
+/// The distortion table as a one-plane `WarpRectilinear` (applied to all three channels) relative to the active area
+/// `active`, centred on the default crop `crop` as the camera corrects, with knots `knot_spacing` px apart. `None`
+/// when the distortion table is absent or all zero, the zoom or the fit fails. The fit fails when it is worse than
+/// 0.25 px at a 1440 px long edge at one of the fit samples within the crop (a padded active area, as in lossless
+/// files, reaches radii that are never shown).
+pub(crate) fn warp_opcode(t: &LensTables, knot_spacing: f64, active: Rect, crop: Rect) -> Option<Opcode> {
     let v = t.distortion.as_deref().filter(|v| v.iter().any(|&x| x != 0.0))?;
     let (aw, ah) = (active.width as f64, active.height as f64);
     if aw < 2.0 || ah < 2.0 || crop.width == 0 || crop.height == 0 {
@@ -165,36 +160,37 @@ pub(crate) fn warp_opcode(t: &LensTables, knot_spacing: f64, active: Rect, crop:
     let shown = (cw / 2.0).hypot(ch / 2.0) / m;
     // output radius (px) → green source radius
     let green = |r: f64| source(r / z);
-    let plane = |map: &dyn Fn(f64) -> f64| {
-        let [k0, k1, k2, k3] = fit_radial_warp(&|u| map(u * m) / m, max_fit_error, shown)?;
-        Some([k0, k1, k2, k3, 0.0, 0.0])
-    };
-    let g = plane(&green)?;
-    // red and blue: relative to the green source radius, at that radius
-    let colour = |c: &[f64]| {
-        plane(&|r| {
-            let s = green(r);
-            s * (1.0 + interpolate(c, knot_spacing, s) / CA_UNIT)
-        })
-    };
-    // a NaN fails the comparison: refused too
-    let plausible = |c: &[f64]| c.iter().all(|v| v.abs() <= CA_MAX_RELATIVE * CA_UNIT);
-    let rgb = t.ca.as_ref().filter(|(red, blue)| lateral_ca && plausible(red) && plausible(blue));
-    let rgb = rgb.and_then(|(red, blue)| Some(vec![colour(red)?, g, colour(blue)?]));
-    Some(Opcode::WarpRectilinear { planes: rgb.unwrap_or_else(|| vec![g]), center: [cx / (aw - 1.0), cy / (ah - 1.0)] })
+    let [k0, k1, k2, k3] = fit_radial_warp(&|u| green(u * m) / m, max_fit_error, shown)?;
+    Some(Opcode::WarpRectilinear { planes: vec![[k0, k1, k2, k3, 0.0, 0.0]], center: [cx / (aw - 1.0), cy / (ah - 1.0)] })
+}
+
+/// The lateral CA table of a Sony raw IFD for the verified body `model` as the pre-demosaic map: knots c / 3.36·10⁶
+/// (provisional unit) at i · knot_spacing px of the sensor about the default-crop centre `(crop.x + (cw − 1)/2,
+/// crop.y + (ch − 1)/2)`; red's source radius is ρ·(1 + c_R(ρ) / U). Needs no distortion table (CA is relative to
+/// green on the sensor). `None` for an unverified body, an empty crop (as [`warp_opcode`]), an absent or malformed
+/// table, a value beyond `lateral_ca::MAX_SCALE` (6720; the largest in the 54 measured photos' tables is 1724) or an
+/// all-zero table.
+pub(crate) fn lateral_ca(raw: &Ifd, model: &str, crop: Rect) -> Option<LateralCa> {
+    if crop.width == 0 || crop.height == 0 {
+        return None;
+    }
+    let spacing = knot_spacing(model)?;
+    let (red, blue) = read_tables(raw).ca?;
+    let unit = |c: Vec<f64>| c.into_iter().map(|v| v / CA_UNIT).collect();
+    let (cw, ch) = (crop.width as f64, crop.height as f64);
+    LateralCa::new([crop.x as f64 + (cw - 1.0) / 2.0, crop.y as f64 + (ch - 1.0) / 2.0], spacing, unit(red), unit(blue))
 }
 
 /// The `OpcodeList3` lens corrections of a Sony raw IFD for the body `model` (Exif `Model`); empty for a body whose
 /// tables are not verified.
 ///
-/// Distortion only: the lateral CA planes are off (`lateral_ca: false`). Our demosaic already hides about 70 % of the
-/// lens CA (the render shows 0.29 × the CA measured on the raw CFA), while the warp, which runs after demosaic, moves
-/// R and B by 0.84 × the table. Over the 43 verified photos with enough corner detail, the render's corner R/G and B/G
-/// CA went from rms 0.032 / max 0.125 px (off) to 0.052 / 0.219 px (on) at a 1440 px long edge; only the 16–35 mm
-/// improved. Follow-up: warp the CFA colour planes before demosaic, then turn the planes on here.
+/// Distortion only. Lateral CA is the separate pre-demosaic map ([`lateral_ca`]), applied always: our demosaic (AHD)
+/// hides about 70 % of the lens CA (the render shows 0.29 × the CA measured on the raw CFA), so R and B warp planes
+/// after demosaic overshot: over the 43 verified photos with enough corner detail, the render's corner R/G and B/G CA
+/// went from rms 0.032 px (off) to 0.052 px (on) at a 1440 px long edge.
 pub(crate) fn lens_opcodes(raw: &Ifd, model: &str, active: Rect, crop: Rect) -> Vec<Opcode> {
     let Some(spacing) = knot_spacing(model) else { return Vec::new() };
-    warp_opcode(&read_tables(raw), spacing, active, crop, false).into_iter().collect()
+    warp_opcode(&read_tables(raw), spacing, active, crop).into_iter().collect()
 }
 
 #[cfg(test)]
@@ -232,14 +228,9 @@ mod tests {
     const FF_CROP: Rect = Rect { x: 12, y: 8, width: 9984, height: 6656 };
     const APSC_ACTIVE: Rect = Rect { x: 0, y: 0, width: 6592, height: 4372 };
     const APSC_CROP: Rect = Rect { x: 16, y: 10, width: 6528, height: 4352 };
-    /// The G planes of the examples on their ARW6 geometry, and the R and B planes with each file's CA table
-    /// (docs/sony-ilce7rm6-lens-corrections.md).
+    /// The G planes of the examples on their ARW6 geometry (docs/sony-ilce7rm6-lens-corrections.md).
     const FF_G: [f64; 4] = [0.9714495823, 0.022508032, 0.0006090085237, 0.005683284548];
-    const FF_HQ_R: [f64; 4] = [0.9715153129, 0.02236266369, 0.0007060224765, 0.005666341563];
-    const FF_HQ_B: [f64; 4] = [0.97137946, 0.02277016389, 0.0003830082563, 0.005727820598];
     const APSC_G: [f64; 4] = [1.01627551, -0.0618606692, 0.02768349621, -0.005595798468];
-    const APSC_R: [f64; 4] = [1.016503991, -0.06206460153, 0.0278447625, -0.005644118171];
-    const APSC_B: [f64; 4] = [1.016155702, -0.06162477627, 0.02753315326, -0.005554915901];
 
     fn knots() -> f64 {
         knot_spacing("ILCE-7RM6").unwrap()
@@ -330,7 +321,7 @@ mod tests {
             let ifd = ifd(vec![(DISTORTION_PARAMS, Value::SShort(table))]);
             let t = read_tables(&ifd);
             assert!(t.distortion.is_none(), "{what}");
-            assert!(warp_opcode(&t, knots(), FF_ACTIVE, FF_CROP, false).is_none(), "{what}");
+            assert!(warp_opcode(&t, knots(), FF_ACTIVE, FF_CROP).is_none(), "{what}");
             assert!(lens_opcodes(&ifd, "ILCE-7RM6", FF_ACTIVE, FF_CROP).is_empty(), "{what}");
         }
         // not an integer array, or absent
@@ -358,7 +349,7 @@ mod tests {
             ("not finite", vec![0.0, f64::NAN, 20.0]),
             ("infinite", vec![0.0, f64::INFINITY, 20.0]),
         ] {
-            assert!(warp_opcode(&tables_with_distortion(&table), knots(), FF_ACTIVE, FF_CROP, false).is_none(), "{what}");
+            assert!(warp_opcode(&tables_with_distortion(&table), knots(), FF_ACTIVE, FF_CROP).is_none(), "{what}");
         }
         // the same through the IFD, as 64-bit values
         for v in [i64::MAX / 4, i64::MIN, i64::MAX] {
@@ -375,131 +366,107 @@ mod tests {
             ("knot spacing NaN", f64::NAN, FF_ACTIVE, FF_CROP),
             ("knot spacing 0", 0.0, FF_ACTIVE, FF_CROP),
         ] {
-            assert!(warp_opcode(&ff, knots, active, crop, false).is_none(), "{what}");
+            assert!(warp_opcode(&ff, knots, active, crop).is_none(), "{what}");
         }
     }
 
     #[test]
     fn ff_example_table_becomes_the_measured_warp() {
         let t = tables_with_distortion(&values(&FF_DISTORTION));
-        assert_warp(warp_opcode(&t, knots(), FF_ACTIVE, FF_CROP, false), [0.4996005991, 0.5], &[FF_G]);
+        assert_warp(warp_opcode(&t, knots(), FF_ACTIVE, FF_CROP), [0.4996005991, 0.5], &[FF_G]);
     }
 
     #[test]
     fn apsc_example_table_becomes_the_measured_warp() {
         let t = tables_with_distortion(&values(&APSC_DISTORTION));
-        let op = warp_opcode(&t, knots(), APSC_ACTIVE, APSC_CROP, false);
+        let op = warp_opcode(&t, knots(), APSC_ACTIVE, APSC_CROP);
         assert_warp(op, [0.4975724473, 0.5], &[APSC_G]);
     }
 
     #[test]
-    fn ca_table_shifts_red_and_blue_planes() {
-        let t = read_tables(&sony_lens_ifd(&FF_DISTORTION, &FF_VIGNETTING, &FF_HQ_CA, [0, 2, 1]));
-        let planes = assert_warp(warp_opcode(&t, knots(), FF_ACTIVE, FF_CROP, true), [0.4996005991, 0.5], &[FF_HQ_R, FF_G, FF_HQ_B]);
-        assert_ne!(planes[0][0], planes[1][0]);
-        // G is the distortion plane alone
-        let g = warp_opcode(&tables_with_distortion(&values(&FF_DISTORTION)), knots(), FF_ACTIVE, FF_CROP, false);
-        assert!(matches!(g, Some(Opcode::WarpRectilinear { planes: ref p, .. }) if p == &[planes[1]]), "{g:?}");
-    }
-
-    #[test]
-    fn apsc_ca_planes_match_the_measured_warp() {
-        let t = read_tables(&sony_lens_ifd(&APSC_DISTORTION, &APSC_VIGNETTING, &APSC_CA, [0, 2, 1]));
-        assert_warp(warp_opcode(&t, knots(), APSC_ACTIVE, APSC_CROP, true), [0.4975724473, 0.5], &[APSC_R, APSC_G, APSC_B]);
-    }
-
-    #[test]
-    fn ca_without_distortion_is_not_applied() {
-        let ifd = ifd(vec![(CA_PARAMS, Value::SShort(FF_HQ_CA.to_vec()))]);
-        let t = read_tables(&ifd);
-        assert!(t.ca.is_some() && t.distortion.is_none());
-        assert!(warp_opcode(&t, knots(), FF_ACTIVE, FF_CROP, true).is_none());
-        assert!(lens_opcodes(&ifd, "ILCE-7RM6", FF_ACTIVE, FF_CROP).is_empty());
-        // an all-zero distortion table counts as absent
-        let zero = LensTables { ca: t.ca, ..tables_with_distortion(&[0.0; 16]) };
-        assert!(warp_opcode(&zero, knots(), FF_ACTIVE, FF_CROP, true).is_none());
-    }
-
-    #[test]
-    fn rejected_ca_keeps_the_single_green_plane() {
-        let green = assert_warp(
-            warp_opcode(&tables_with_distortion(&values(&FF_DISTORTION)), knots(), FF_ACTIVE, FF_CROP, false),
-            [0.4996005991, 0.5],
-            &[FF_G],
+    fn ca_table_becomes_lateral_ca() {
+        let ifd_ff = sony_lens_ifd(&FF_DISTORTION, &FF_VIGNETTING, &FF_HQ_CA, [0, 2, 1]);
+        let ca = lateral_ca(&ifd_ff, "ILCE-7RM6", FF_CROP).expect("a map");
+        assert_eq!(ca.center, [12.0 + 4991.5, 8.0 + 3327.5]);
+        assert_eq!(ca.spacing, knots());
+        let v = values(&FF_HQ_CA);
+        assert_eq!(ca.red, v[..16].iter().map(|c| c / 3.36e6).collect::<Vec<_>>());
+        assert_eq!(ca.blue, v[16..].iter().map(|c| c / 3.36e6).collect::<Vec<_>>());
+        assert!((ca.red[0] - 7.202380952380953e-5).abs() < 1e-18 && (ca.blue[0] + 8.035714285714285e-5).abs() < 1e-18);
+        // the APS-C example: 11 knots on the same sensor spacing, centred on its own crop
+        let apsc = lateral_ca(&sony_lens_ifd(&APSC_DISTORTION, &APSC_VIGNETTING, &APSC_CA, [0, 2, 1]), "ILCE-7RM6", APSC_CROP).unwrap();
+        assert_eq!((apsc.center, apsc.red.len(), apsc.blue.len(), apsc.spacing), ([16.0 + 3263.5, 10.0 + 2175.5], 11, 11, knots()));
+        // no distortion table needed; the warp ignores the CA table
+        let ca_only = ifd(vec![(CA_PARAMS, Value::SShort(FF_HQ_CA.to_vec()))]);
+        assert!(lateral_ca(&ca_only, "ILCE-7RM6", FF_CROP).is_some());
+        assert!(lens_opcodes(&ca_only, "ILCE-7RM6", FF_ACTIVE, FF_CROP).is_empty());
+        let with_ca = read_tables(&ifd_ff);
+        assert_eq!(
+            warp_opcode(&with_ca, knots(), FF_ACTIVE, FF_CROP),
+            warp_opcode(&tables_with_distortion(&values(&FF_DISTORTION)), knots(), FF_ACTIVE, FF_CROP)
         );
-        let ok = values(&FF_HQ_CA);
-        let huge = vec![(i64::MAX / 4) as f64; 16];
-        for (what, red, blue) in [
-            ("huge red", huge.clone(), ok[16..].to_vec()),
-            ("huge blue", ok[..16].to_vec(), huge),
-            ("most negative blue", ok[..16].to_vec(), vec![i64::MIN as f64; 16]),
-            ("not finite red", vec![0.0, f64::NAN, 20.0], ok[16..].to_vec()),
-            ("one knot", vec![100.0], vec![100.0]),
-        ] {
-            let t = LensTables { ca: Some((red, blue)), ..tables_with_distortion(&values(&FF_DISTORTION)) };
-            let Some(Opcode::WarpRectilinear { planes, .. }) = warp_opcode(&t, knots(), FF_ACTIVE, FF_CROP, true) else { panic!("{what}: no warp") };
-            assert_eq!(planes, green, "{what}");
-        }
-        // through the IFD: an odd count, or values that overflow the fit
+        assert!(lateral_ca(&ifd_ff, "ILCE-7M4", FF_CROP).is_none());
+        assert!(lateral_ca(&ifd(vec![]), "ILCE-7RM6", FF_CROP).is_none());
+    }
+
+    #[test]
+    fn implausible_ca_tables_get_no_map() {
         let mut odd = FF_HQ_CA.to_vec();
         odd[0] = 31;
-        let mut huge_ifd = vec![i64::MAX / 4; 33];
-        huge_ifd[0] = 32;
-        // a constant 32767 (the SShort maximum) fits as well as G does and would shift red ~59 px at the full-res
-        // corner: refused as implausible (bound 2·10⁻³ relative = 6720)
-        let mut max = vec![32767; 33];
-        max[0] = 32;
-        for (what, ca) in [("odd count", Value::SShort(odd)), ("huge", Value::SLong8(huge_ifd)), ("constant 32767", Value::SShort(max))] {
-            let ifd = ifd(vec![(DISTORTION_PARAMS, Value::SShort(FF_DISTORTION.to_vec())), (CA_PARAMS, ca)]);
-            let op = warp_opcode(&read_tables(&ifd), knots(), FF_ACTIVE, FF_CROP, true);
-            assert!(matches!(op, Some(Opcode::WarpRectilinear { ref planes, .. }) if planes == &green), "{what}: {op:?}");
+        let mut huge = vec![i64::MAX / 4; 33];
+        huge[0] = 32;
+        let filled = |v: i16| {
+            let mut t = vec![v; 33];
+            t[0] = 32;
+            t
+        };
+        // 32767 (the SShort maximum) would shift red ~59 px at the full-resolution corner
+        for (what, ca) in [
+            ("odd count", Value::SShort(odd)),
+            ("huge", Value::SLong8(huge)),
+            ("constant 32767", Value::SShort(filled(32767))),
+            ("just beyond the bound", Value::SShort(filled(6721))),
+            ("all zero", Value::SShort(filled(0))),
+        ] {
+            assert!(lateral_ca(&ifd(vec![(CA_PARAMS, ca)]), "ILCE-7RM6", FF_CROP).is_none(), "{what}");
         }
-        // values up to the bound are kept
-        let mut at_bound = vec![6720; 33];
-        at_bound[0] = 32;
-        let ifd = ifd(vec![(DISTORTION_PARAMS, Value::SShort(FF_DISTORTION.to_vec())), (CA_PARAMS, Value::SShort(at_bound))]);
-        let op = warp_opcode(&read_tables(&ifd), knots(), FF_ACTIVE, FF_CROP, true);
-        assert!(matches!(op, Some(Opcode::WarpRectilinear { ref planes, .. }) if planes.len() == 3), "{op:?}");
+        // values up to the bound (2·10⁻³ relative = 6720) are kept
+        assert!(lateral_ca(&ifd(vec![(CA_PARAMS, Value::SShort(filled(6720)))]), "ILCE-7RM6", FF_CROP).is_some());
+        // an empty crop (a corrupt DefaultCrop clipped to nothing) has no centre: no map, as no warp
+        let ok = ifd(vec![(CA_PARAMS, Value::SShort(FF_HQ_CA.to_vec()))]);
+        for crop in [Rect::new(10016, 6672, 0, 0), Rect::new(12, 8, 0, 6656), Rect::new(12, 8, 9984, 0)] {
+            assert!(lateral_ca(&ok, "ILCE-7RM6", crop).is_none(), "{crop:?}");
+        }
     }
 
-    /// The default: a valid CA table is read and converts (above), but `lens_opcodes` emits the G plane alone.
+    /// A valid CA table leaves the warp alone: `lens_opcodes` emits the G plane (the CA is [`lateral_ca`]'s map).
     #[test]
     fn lens_opcodes_emit_the_green_plane_only() {
         let ifd = sony_lens_ifd(&FF_DISTORTION, &FF_VIGNETTING, &FF_HQ_CA, [1, 2, 1]);
-        let with_ca = warp_opcode(&read_tables(&ifd), knots(), FF_ACTIVE, FF_CROP, true);
-        assert!(matches!(with_ca, Some(Opcode::WarpRectilinear { ref planes, .. }) if planes.len() == 3), "{with_ca:?}");
         let ops = lens_opcodes(&ifd, "ILCE-7RM6", FF_ACTIVE, FF_CROP);
         let [Opcode::WarpRectilinear { planes, .. }] = ops.as_slice() else { panic!("{ops:?}") };
         assert_eq!(planes.len(), 1);
-        let green = warp_opcode(&tables_with_distortion(&values(&FF_DISTORTION)), knots(), FF_ACTIVE, FF_CROP, false);
+        let green = warp_opcode(&tables_with_distortion(&values(&FF_DISTORTION)), knots(), FF_ACTIVE, FF_CROP);
         assert_eq!(ops.first(), green.as_ref());
     }
 
     /// The corpus lossless files' own tables on their decoded geometry (padded active areas; the corpus test checks
-    /// the G plane from the files): R, G, B with the CA planes enabled.
+    /// the G plane from the files).
     #[test]
-    fn lossless_examples_ca_planes_match_the_measured_warp() {
+    fn lossless_examples_green_plane_matches_the_measured_warp() {
         let ff = read_tables(&sony_lens_ifd(&FF_DISTORTION, &FF_VIGNETTING, &FF_CA, [0, 2, 1]));
         let ff_active = Rect { x: 0, y: 0, width: 10240, height: 7168 };
         assert_warp(
-            warp_opcode(&ff, knots(), ff_active, FF_CROP, true),
+            warp_opcode(&ff, knots(), ff_active, FF_CROP),
             [0.488670768629749, 0.4653969582810102],
-            &[
-                [0.971770511193381, 0.023073568897462152, 0.00879158563716919, 0.0030468782543633132],
-                [0.9717033132764651, 0.023249297636569695, 0.008638979168841135, 0.003091041831374855],
-                [0.9716312798157171, 0.02356676356656341, 0.00830169937204417, 0.003182927930635947],
-            ],
+            &[[0.9717033132764651, 0.023249297636569695, 0.008638979168841135, 0.003091041831374855]],
         );
         let apsc = read_tables(&sony_lens_ifd(&APSC_LOSSLESS_DISTORTION, &APSC_VIGNETTING, &APSC_LOSSLESS_CA, [0, 2, 1]));
         let apsc_active = Rect { x: 0, y: 0, width: 6656, height: 4608 };
         assert_warp(
-            warp_opcode(&apsc, knots(), apsc_active, APSC_CROP, true),
+            warp_opcode(&apsc, knots(), apsc_active, APSC_CROP),
             [0.49278737791134486, 0.4743868026915563],
-            &[
-                [1.0165959888027158, -0.0690974265041942, 0.036328960724338874, -0.009486844437228997],
-                [1.016366854640611, -0.0688824189782517, 0.03615745253291194, -0.009438825010476538],
-                [1.0162457267369314, -0.0686225599869027, 0.035974238433727206, -0.009384155126102897],
-            ],
+            &[[1.016366854640611, -0.0688824189782517, 0.03615745253291194, -0.009438825010476538]],
         );
     }
 
@@ -510,7 +477,7 @@ mod tests {
     fn padded_active_area_gates_only_the_displayed_radii() {
         let strong: Vec<f64> = values(&FF_DISTORTION).iter().map(|v| v * 1.5).collect();
         let padded = Rect { x: 0, y: 0, width: 10240, height: 7168 };
-        let op = warp_opcode(&tables_with_distortion(&strong), knots(), padded, FF_CROP, false);
+        let op = warp_opcode(&tables_with_distortion(&strong), knots(), padded, FF_CROP);
         assert!(matches!(op, Some(Opcode::WarpRectilinear { .. })), "{op:?}");
     }
 
@@ -518,10 +485,11 @@ mod tests {
     fn unknown_model_gets_no_opcodes() {
         let ifd = sony_lens_ifd(&FF_DISTORTION, &FF_VIGNETTING, &FF_CA, [0, 2, 1]);
         assert!(lens_opcodes(&ifd, "ILCE-7M4", FF_ACTIVE, FF_CROP).is_empty());
+        assert!(lateral_ca(&ifd, "ILCE-7M4", FF_CROP).is_none());
         assert!(lens_opcodes(&ifd, "", FF_ACTIVE, FF_CROP).is_empty());
         // the camera's in-camera flag (0 = off here) doesn't matter: the table is applied
         let ops = lens_opcodes(&ifd, " ILCE-7RM6 ", FF_ACTIVE, FF_CROP);
-        assert_eq!(ops, warp_opcode(&read_tables(&ifd), knots(), FF_ACTIVE, FF_CROP, false).into_iter().collect::<Vec<_>>());
+        assert_eq!(ops, warp_opcode(&read_tables(&ifd), knots(), FF_ACTIVE, FF_CROP).into_iter().collect::<Vec<_>>());
         assert_eq!(ops.len(), 1);
     }
 }
