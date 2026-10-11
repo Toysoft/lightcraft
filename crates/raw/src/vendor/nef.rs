@@ -1,14 +1,14 @@
-//! Nikon NEF / NRW — uncompressed and Huffman-compressed (lossless, lossy) variants.
+//! Nikon NEF / NRW — uncompressed, Huffman-compressed and High Efficiency variants.
 //!
 //! Sources: TIFF 6.0 (the raw image is a standard CFA SubIFD), Laurent Clévy's NEF structure notes (prose: IFD
 //! layout, SubIFDs, maker note header) and the ExifTool Nikon tag-name documentation (`0x000c` WB_RBLevels,
 //! `0x003d` BlackLevel, `0x0096` NEFLinearizationTable). The Huffman-compressed data (compression 34713) is decoded
 //! by [`super::nefc`], which documents its clean-room sources; "lossy after split" files are decoded when their strip follows the
-//! rule documented there; files it can't decode are reported as [`RawError::Unsupported`] and their embedded previews still work. So are High Efficiency NEFs
-//! (HE / HE★, Z 8, Z 9, Z 6III, Z f): they keep compression 34713 but carry a wavelet codestream that starts with
-//! the JPEG XS markers SOC + CAP (ISO/IEC 21122-1, `FF10 FF50`) and have no `0x0096` table (issue #193).
+//! rule documented there. High Efficiency NEFs (HE / HE★) keep compression 34713 but carry a JPEG XS-derived
+//! wavelet codestream with no `0x0096` table; [`super::nefhe`] decodes its verified four-component profile.
+//! Unsupported variants still report a specific reason and retain their embedded-preview fallback.
 
-use super::{nefc, white_from_data};
+use super::{nefc, nefhe, white_from_data};
 use crate::tiffraw::{Packing, read_image};
 use crate::{BlackLevel, Cfa, ColorData, OpcodeLists, RawData, RawError, RawFormat, RawImage, Rect, Result};
 use lightcraft_geom::Orientation;
@@ -20,11 +20,6 @@ const WB_RB_LEVELS: u16 = 0x000c;
 const BLACK_LEVEL: u16 = 0x003d;
 const LINEARIZATION_TABLE: u16 = 0x0096;
 const CROP_AREA: u16 = 0x0045;
-/// JPEG XS start of codestream (SOC, `FF10`) followed by its mandatory capabilities marker (CAP, `FF50`).
-const JPEG_XS_START: [u8; 4] = [0xff, 0x10, 0xff, 0x50];
-/// Why a High Efficiency NEF shows its embedded preview: the UI shows the part before " (".
-pub(crate) const HIGH_EFFICIENCY: &str =
-    "Nikon High Efficiency NEF (HE / HE★, a JPEG XS-based codec with no public specification; shoot RAW Lossless compressed to edit the raw data)";
 /// Maker note `0x0014`, the "NRW" data block of Coolpix raws: `"NRW "` + a 4-character version, then fields. In
 /// version `0104` the `u32` at byte `0x20` is the black level in sample units (200 in the four 12-bit files here
 /// that have 200 as their darkest samples, 0 in the one whose samples reach 0).
@@ -91,10 +86,10 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<RawImage> {
     let make = ifd0.string(t::MAKE).unwrap_or_default();
     let mn =
         tiff.exif().and_then(|e| e.get(t::MAKER_NOTE)).and_then(|e| makernote::parse_makernote(bytes, e.offset, e.count() as u64, tiff.order, &make));
-    let data = if info.compression == t::compression::NIKON {
+    let (data, he_black) = if info.compression == t::compression::NIKON {
         compressed(bytes, &info, mn.as_ref())?
     } else {
-        uncompressed(bytes, &info, tiff.order, mn.as_ref())?
+        (uncompressed(bytes, &info, tiff.order, mn.as_ref())?, None)
     };
     let RawData::U16(ref samples) = data else { return Err(RawError::Unsupported("float NEF".into())) };
 
@@ -102,14 +97,18 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<RawImage> {
     // D7500 and Z 50 store 600 / 1008 / 400 / 400 / 1008 while their darkest samples are 150 / ~252 / 99 / 99 / ~250
     // (our measurements on CC0 raw.pixls.us samples; the same bodies' 14-bit files match the tag as is).
     let black_scale = if bits == 12 { 0.25 } else { 1.0 };
-    let black = match mn.as_ref().and_then(|m| m.ifd.f64s(BLACK_LEVEL)).as_deref() {
-        Some([a, b, c, d]) if [a, b, c, d].iter().all(|v| **v < 16384.0) => BlackLevel {
-            repeat_rows: 2,
-            repeat_cols: 2,
-            values: [a, b, c, d].iter().map(|v| (**v * black_scale) as f32).collect(),
-            ..Default::default()
-        },
-        _ => BlackLevel::uniform(nrw_black(mn.as_ref(), bits).unwrap_or(0.0)),
+    let black = if let Some(black) = he_black {
+        BlackLevel::uniform(black as f32)
+    } else {
+        match mn.as_ref().and_then(|m| m.ifd.f64s(BLACK_LEVEL)).as_deref() {
+            Some([a, b, c, d]) if [a, b, c, d].iter().all(|v| **v < 16384.0) => BlackLevel {
+                repeat_rows: 2,
+                repeat_cols: 2,
+                values: [a, b, c, d].iter().map(|v| (**v * black_scale) as f32).collect(),
+                ..Default::default()
+            },
+            _ => BlackLevel::uniform(nrw_black(mn.as_ref(), bits).unwrap_or(0.0)),
+        }
     };
     let wb = mn
         .as_ref()
@@ -120,7 +119,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<RawImage> {
         (Some([2, 2]), Some(p)) if p.len() == 4 && p.iter().all(|&c| c <= 2) => Cfa { width: 2, height: 2, pattern: p.to_vec() },
         _ => Cfa::bayer_static("RGGB"),
     };
-    let white = white_from_data(samples, bits);
+    let white = if he_black.is_some() { 16383.0 } else { white_from_data(samples, bits) };
     let active_w = trailing_masked_columns(samples, w, h, white);
     let crop = default_crop(mn.as_ref(), active_w, h);
     let mut metadata = lightcraft_meta::from_tiff(&tiff);
@@ -172,13 +171,25 @@ fn uncompressed(bytes: &[u8], info: &ImageInfo, order: ByteOrder, mn: Option<&ma
 }
 
 /// Nikon Huffman-compressed strip (see [`super::nefc`]); the decode table is maker note `0x0096`.
-fn compressed(bytes: &[u8], info: &ImageInfo, mn: Option<&makernote::MakerNote>) -> Result<RawData> {
+fn compressed(bytes: &[u8], info: &ImageInfo, mn: Option<&makernote::MakerNote>) -> Result<(RawData, Option<u16>)> {
     let starts_with = |magic: &[u8]| {
         let start = info.chunks(bytes.len() as u64).first().and_then(|c| usize::try_from(c.offset).ok());
         start.and_then(|o| bytes.get(o..o.checked_add(magic.len())?)) == Some(magic)
     };
-    if starts_with(&JPEG_XS_START) {
-        return Err(RawError::Unsupported(HIGH_EFFICIENCY.into()));
+    if starts_with(&nefhe::MAGIC) {
+        let chunks = info.chunks(bytes.len() as u64);
+        let [chunk] = chunks.as_slice() else { return Err(RawError::Unsupported("Nikon High Efficiency NEF (requires one strip)".into())) };
+        if info.samples_per_pixel != 1 {
+            return Err(RawError::Unsupported("Nikon High Efficiency NEF (requires one sample per pixel)".into()));
+        }
+        let end = chunk.offset.checked_add(chunk.len);
+        let src = usize::try_from(chunk.offset)
+            .ok()
+            .zip(end.and_then(|v| usize::try_from(v).ok()))
+            .and_then(|(a, b)| bytes.get(a..b))
+            .ok_or_else(|| RawError::Corrupt("Nikon High Efficiency NEF: strip outside the file".into()))?;
+        let (samples, black) = nefhe::decode(src, info.width as usize, info.height as usize, info.bits() as u32)?;
+        return Ok((RawData::U16(samples), Some(black)));
     }
     // (some Z bodies label uncompressed, row-padded data 34713 without a table: not handled here yet)
     let table = mn
@@ -195,7 +206,7 @@ fn compressed(bytes: &[u8], info: &ImageInfo, mn: Option<&makernote::MakerNote>)
     let end = last.offset.saturating_add(last.len).min(bytes.len() as u64);
     let src = usize::try_from(first.offset).ok().zip(usize::try_from(end).ok()).and_then(|(a, b)| bytes.get(a..b));
     let src = src.ok_or_else(|| RawError::Corrupt("NEF: image data outside the file".into()))?;
-    Ok(RawData::U16(nefc::decode(src, info.width as usize, info.height as usize, bits, &table)?))
+    Ok((RawData::U16(nefc::decode(src, info.width as usize, info.height as usize, bits, &table)?), None))
 }
 
 #[cfg(test)]
@@ -381,11 +392,24 @@ mod tests {
         let bytes = nef(34713, 14, vec![strip], 8, 8, 8);
         for result in [crate::decode(&bytes).map(|_| ()), crate::probe_info(&bytes).map(|_| ())] {
             let Err(RawError::Unsupported(why)) = result else { panic!("expected unsupported") };
-            assert_eq!(why, HIGH_EFFICIENCY);
             assert!(why.starts_with("Nikon High Efficiency NEF ("), "{why}");
         }
         // a strip too short to hold the markers is still the missing-table case, not a panic
         let short = nef(34713, 14, vec![vec![0xff, 0x10]], 1, 1, 1);
         assert!(matches!(crate::decode(&short), Err(RawError::Unsupported(w)) if w.contains("linearization table")));
+    }
+
+    #[test]
+    fn high_efficiency_decodes_without_a_linearization_table() {
+        let strip = nefhe::tests::fixture(70, 12);
+        for order in [ByteOrder::Big, ByteOrder::Little] {
+            let bytes = nef_in(order, 34713, 14, vec![strip.clone()], 70, 12, 12, None);
+            let image = crate::decode(&bytes).unwrap();
+            assert_eq!(image.black.values, vec![1008.0]);
+            assert_eq!(image.white, vec![16383.0]);
+            let RawData::U16(samples) = &image.data else { panic!("expected integer samples") };
+            assert_eq!(&samples[..4], &[1114, 1097, 1114, 1097]);
+            assert_eq!(crate::probe_info(&bytes).unwrap(), image.info());
+        }
     }
 }
