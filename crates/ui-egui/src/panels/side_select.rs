@@ -72,12 +72,16 @@ pub enum Several {
 fn same_id(a: &u64, b: &u64) -> bool {
     a == b
 }
+// (a list's keys are `String`s: these are passed where two keys are told alike)
+#[allow(clippy::ptr_arg)]
 fn same_date(a: &String, b: &String) -> bool {
     a == b
 }
+#[allow(clippy::ptr_arg)]
 fn same_kw(a: &String, b: &String) -> bool {
     same_keyword(a, b)
 }
+#[allow(clippy::ptr_arg)]
 fn same_dir(a: &String, b: &String) -> bool {
     super::left::same_folder(a, b)
 }

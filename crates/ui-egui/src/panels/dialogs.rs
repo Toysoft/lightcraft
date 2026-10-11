@@ -1836,7 +1836,7 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
             }
         }
         Dialog::DeleteKeyword { keyword, .. } => app.run("keyword.delete", json!({"keyword": keyword})),
-        Dialog::Several(s) => super::side_select::several_run(app, &s),
+        Dialog::Several(s) => super::side_select::several_run(app, s),
         Dialog::KeywordSet { replaces, name, slots, as_new } => {
             use lightcraft_catalog::keywords::same;
             let name = name.trim();
