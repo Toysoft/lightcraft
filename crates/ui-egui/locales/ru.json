@@ -2146,7 +2146,7 @@
   "Adding to Apple Photos": "Добавление в Apple Фото",
   "Sign in to Flickr first": "Сначала войдите во Flickr",
   "Enter the code Flickr shows": "Введите код, который показывает Flickr",
-  "Flickr no longer accepts the sign-in: sign in again in Settings → Flickr": "Flickr больше не принимает вход: войдите снова в разделе Настройки → Flickr",
+  "Flickr no longer accepts the sign-in: sign in again in Settings → Accounts": "Flickr больше не принимает вход: войдите снова в разделе Настройки → Учётные записи",
   " · cancelled": " · отменено",
   "The upload to Flickr stopped unexpectedly": "Загрузка во Flickr неожиданно остановилась",
   "Contacting Flickr…": "Подключение к Flickr…",
@@ -2161,7 +2161,7 @@
   "Flickr account": "Учётная запись Flickr",
   "Open Your Photostream": "Открыть ваш фотопоток",
   "Sign Out": "Выйти",
-  "Select photos, then choose File → Upload to Flickr….": "Выберите фото, затем Файл → Загрузить во Flickr….",
+  "Select photos, then choose File → Share → Flickr….": "Выберите фото, затем Файл → Поделиться → Flickr….",
   "Code": "Код",
   "Finish Sign-In": "Завершить вход",
   "Open the Flickr Page Again": "Открыть страницу Flickr ещё раз",
@@ -2174,8 +2174,6 @@
   "Save Key": "Сохранить ключ",
   "Forget Key": "Забыть ключ",
   "This session keeps the sign-in until LightCraft quits.": "Этот сеанс хранит вход до выхода из LightCraft.",
-  "Upload to Flickr": "Загрузить во Flickr",
-  "Upload to Flickr…": "Загрузить во Flickr…",
   "Upload": "Загрузить",
   "Visibility": "Видимость",
   "Keywords as tags": "Ключевые слова как теги",
@@ -2197,5 +2195,10 @@
   "Reading Flickr albums": "Чтение альбомов Flickr",
   "Album name": "Название альбома",
   "Name of the new album": "Название нового альбома",
-  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr создаёт альбом с первым загруженным фото в качестве обложки."
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr создаёт альбом с первым загруженным фото в качестве обложки.",
+  "Share to Flickr": "Поделиться во Flickr",
+  "Share to Flickr…": "Поделиться во Flickr…",
+  "Share": "Поделиться",
+  "Accounts": "Учётные записи",
+  "Export and share": "Экспорт и публикация"
 }

@@ -251,7 +251,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         Dialog::PasteSettings { .. } => "Paste Selected Settings",
         Dialog::Export { .. } => "Export",
         Dialog::ContactSheet { .. } => "Contact Sheet PDF",
-        Dialog::FlickrUpload { .. } => "Upload to Flickr",
+        Dialog::FlickrUpload { .. } => "Share to Flickr",
         Dialog::Merge { opts } => opts.title(),
         Dialog::Settings { .. } => "Settings",
         Dialog::ConfirmDelete { .. } => "Delete Photos",
@@ -1853,7 +1853,7 @@ fn num(ui: &mut egui::Ui, spec: &ControlSpec, v: &mut f64) -> bool {
 }
 
 /// A labelled row (fixed label column).
-/// File → Upload to Flickr…: size, quality, who can see the photos, and what goes with them.
+/// File → Share → Flickr…: size, quality, who can see the photos, and what goes with them.
 fn flickr_upload_body(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, opts: &mut crate::flickr::UploadDialog) {
     use crate::flickr::{PRIVACY, SIZES};
     let n = app.session.targets(&json!({})).len();

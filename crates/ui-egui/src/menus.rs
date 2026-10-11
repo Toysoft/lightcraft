@@ -163,7 +163,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("view.focusSearch", "Find…", Some("Cmd+F"), "Edit"),
     ("dialog.export", "Export…", None, "File"),
     ("dialog.contactSheet", "Contact Sheet PDF…", None, "File"),
-    ("dialog.flickrUpload", "Upload to Flickr…", None, "File"),
+    ("dialog.flickrUpload", "Flickr…", None, "File>Share"),
     ("app.contactSheet", "Export Contact Sheet PDF", None, ""),
     ("photo.editInPhotoCraft", "Edit in PhotoCraft", Some("Cmd+Shift+E"), "Photo>Edit In"),
     ("photo.editInExternal", "Edit in Other Editor", Some("Cmd+Alt+E"), "Photo>Edit In"),

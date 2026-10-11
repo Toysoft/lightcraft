@@ -1,6 +1,7 @@
-# Uploading to Flickr
+# Sharing to Flickr
 
-LightCraft uploads chosen photos to a Flickr account, rendered with their edits. It is a one-way upload for
+LightCraft shares chosen photos to a Flickr account (File ▸ Share ▸ Flickr…, or the share button in the top bar),
+rendered with their edits. It is a one-way upload for
 showcasing work, not a publish service: LightCraft doesn't remember what it uploaded, so an edited photo isn't
 republished and nothing on Flickr is changed or deleted afterwards (see `LRC-LIB-PUBLISH` in
 [parity-checklist.md](parity-checklist.md)).
@@ -8,13 +9,13 @@ republished and nothing on Flickr is changed or deleted afterwards (see `LRC-LIB
 ## For photographers
 
 1. **An API key.** Flickr gives every app that talks to it a key and a secret. Official builds can carry LightCraft's
-   own; otherwise **Settings ▸ Flickr** walks you through it: *Open Flickr's API Key Page* opens
+   own; otherwise **Settings ▸ Accounts** walks you through it: *Open Flickr's API Key Page* opens
    <https://www.flickr.com/services/apps/create/noncommercial/> (any app name will do), then paste the key and its
    secret and click **Continue**.
 2. **Sign in.** Continue goes straight on: Flickr's approval page opens in your browser. Approve LightCraft (it asks
    to upload, nothing more), then paste the code Flickr shows (like `123-456-789`) into the Code field; it is sent as
    soon as it is complete. LightCraft never sees your Flickr password.
-3. **Upload.** Select photos, then **File ▸ Upload to Flickr…**:
+3. **Upload.** Select photos, then **File ▸ Share ▸ Flickr…**:
    - **Size**: 1024, 2048 (default) or 4096 px on the long edge, or full size; never enlarged.
    - **Quality**: JPEG quality, 90 by default.
    - **Visibility**: public, friends, family, friends & family, or only you.

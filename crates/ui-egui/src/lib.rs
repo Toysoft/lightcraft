@@ -373,7 +373,7 @@ pub struct LightcraftApp {
     pub tasks: tasks::Tasks,
     /// The files of the last finished background export (`ui.inspect` → `export.last`).
     pub last_export_result: Option<Value>,
-    /// Flickr sign-in steps and uploads (Settings ▸ Flickr, File ▸ Upload to Flickr…).
+    /// Flickr sign-in steps and uploads (Settings ▸ Accounts, File ▸ Share ▸ Flickr…).
     pub flickr: flickr::FlickrUi,
     /// The look the loupe shows while the pointer rests on a preset or profile (set by the
     /// panels each frame; nothing is committed, no history entry).

@@ -1954,7 +1954,7 @@
   "Adding to Apple Photos": "正在加入 Apple 照片",
   "Sign in to Flickr first": "請先登入 Flickr",
   "Enter the code Flickr shows": "請輸入 Flickr 顯示的代碼",
-  "Flickr no longer accepts the sign-in: sign in again in Settings → Flickr": "Flickr 不再接受此登入：請在 設定 → Flickr 中重新登入",
+  "Flickr no longer accepts the sign-in: sign in again in Settings → Accounts": "Flickr 不再接受此登入：請在 設定 → 帳號 中重新登入",
   " · cancelled": " · 已取消",
   "The upload to Flickr stopped unexpectedly": "上傳到 Flickr 意外停止",
   "Contacting Flickr…": "正在連線 Flickr…",
@@ -1969,7 +1969,7 @@
   "Flickr account": "Flickr 帳號",
   "Open Your Photostream": "開啟你的相片串流",
   "Sign Out": "登出",
-  "Select photos, then choose File → Upload to Flickr….": "選取照片，然後選擇 檔案 → 上傳到 Flickr…。",
+  "Select photos, then choose File → Share → Flickr….": "選取照片，然後選擇 檔案 → 分享 → Flickr…。",
   "Code": "代碼",
   "Finish Sign-In": "完成登入",
   "Open the Flickr Page Again": "再次開啟 Flickr 頁面",
@@ -1982,8 +1982,6 @@
   "Save Key": "儲存金鑰",
   "Forget Key": "移除金鑰",
   "This session keeps the sign-in until LightCraft quits.": "此工作階段會保留登入狀態，直到結束 LightCraft。",
-  "Upload to Flickr": "上傳到 Flickr",
-  "Upload to Flickr…": "上傳到 Flickr…",
   "Upload": "上傳",
   "Visibility": "可見範圍",
   "Keywords as tags": "關鍵字作為標籤",
@@ -2005,5 +2003,10 @@
   "Reading Flickr albums": "正在讀取 Flickr 相簿",
   "Album name": "相簿名稱",
   "Name of the new album": "新相簿的名稱",
-  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr 會以第一張上傳的照片作為封面建立相簿。"
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr 會以第一張上傳的照片作為封面建立相簿。",
+  "Share to Flickr": "分享到 Flickr",
+  "Share to Flickr…": "分享到 Flickr…",
+  "Share": "分享",
+  "Accounts": "帳號",
+  "Export and share": "匯出和分享"
 }

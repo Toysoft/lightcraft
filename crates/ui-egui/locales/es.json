@@ -1954,7 +1954,7 @@
   "Adding to Apple Photos": "Añadiendo a Fotos de Apple",
   "Sign in to Flickr first": "Inicia sesión en Flickr primero",
   "Enter the code Flickr shows": "Introduce el código que muestra Flickr",
-  "Flickr no longer accepts the sign-in: sign in again in Settings → Flickr": "Flickr ya no acepta el inicio de sesión: vuelve a iniciar sesión en Ajustes → Flickr",
+  "Flickr no longer accepts the sign-in: sign in again in Settings → Accounts": "Flickr ya no acepta el inicio de sesión: vuelve a iniciar sesión en Ajustes → Cuentas",
   " · cancelled": " · cancelado",
   "The upload to Flickr stopped unexpectedly": "La subida a Flickr se detuvo inesperadamente",
   "Contacting Flickr…": "Conectando con Flickr…",
@@ -1969,7 +1969,7 @@
   "Flickr account": "Cuenta de Flickr",
   "Open Your Photostream": "Abrir tu fotostream",
   "Sign Out": "Cerrar sesión",
-  "Select photos, then choose File → Upload to Flickr….": "Selecciona fotos y elige Archivo → Subir a Flickr….",
+  "Select photos, then choose File → Share → Flickr….": "Selecciona fotos y elige Archivo → Compartir → Flickr….",
   "Code": "Código",
   "Finish Sign-In": "Terminar el inicio de sesión",
   "Open the Flickr Page Again": "Abrir de nuevo la página de Flickr",
@@ -1982,8 +1982,6 @@
   "Save Key": "Guardar clave",
   "Forget Key": "Olvidar clave",
   "This session keeps the sign-in until LightCraft quits.": "Esta sesión conserva el inicio de sesión hasta que cierres LightCraft.",
-  "Upload to Flickr": "Subir a Flickr",
-  "Upload to Flickr…": "Subir a Flickr…",
   "Upload": "Subir",
   "Visibility": "Visibilidad",
   "Keywords as tags": "Palabras clave como etiquetas",
@@ -2005,5 +2003,10 @@
   "Reading Flickr albums": "Leyendo álbumes de Flickr",
   "Album name": "Nombre del álbum",
   "Name of the new album": "Nombre del nuevo álbum",
-  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr crea el álbum con la primera foto que se sube como portada."
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr crea el álbum con la primera foto que se sube como portada.",
+  "Share to Flickr": "Compartir en Flickr",
+  "Share to Flickr…": "Compartir en Flickr…",
+  "Share": "Compartir",
+  "Accounts": "Cuentas",
+  "Export and share": "Exportar y compartir"
 }

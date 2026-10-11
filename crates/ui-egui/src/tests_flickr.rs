@@ -1,5 +1,5 @@
 //! Flickr in the desktop app against a local stand-in for Flickr (never the internet): the
-//! Settings → Flickr sign-in in the background, File → Upload to Flickr… and its activity row.
+//! Settings → Accounts sign-in in the background, File → Share → Flickr… and its activity row.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -91,7 +91,7 @@ fn has(h: &Headless, id: &str) -> bool {
 }
 
 fn settings(h: &mut Headless) {
-    h.app.ui.dialog = Some(Dialog::Settings { tab: "flickr".into() });
+    h.app.ui.dialog = Some(Dialog::Settings { tab: "accounts".into() });
     h.step();
     h.step();
 }
@@ -172,7 +172,7 @@ fn signed_in(h: &mut Headless) {
 fn the_upload_dialog_needs_a_sign_in() {
     let (mut h, _) = app("http://127.0.0.1:9");
     assert!(h.app.run("dialog.flickrUpload", json!({})).is_err());
-    assert!(matches!(&h.app.ui.dialog, Some(Dialog::Settings { tab }) if tab == "flickr"), "Settings → Flickr opens instead");
+    assert!(matches!(&h.app.ui.dialog, Some(Dialog::Settings { tab }) if tab == "accounts"), "Settings → Accounts opens instead");
     signed_in(&mut h);
     h.app.run("dialog.flickrUpload", json!({})).unwrap();
     assert!(matches!(&h.app.ui.dialog, Some(Dialog::FlickrUpload { .. })));
@@ -287,4 +287,23 @@ fn makes_a_new_album_from_the_dialog() {
     assert_eq!((r["uploaded"].as_u64(), r["album"].as_str(), r["albumFailed"].as_u64()), (Some(2), Some("601"), Some(0)), "{r}");
     assert!(h.app.ui.toast.as_ref().is_some_and(|(t, _, _)| t.contains("Road Trip")), "{:?}", h.app.ui.toast);
     assert_eq!(h.app.flickr.albums.as_ref().unwrap()[0], ("601".to_string(), "Road Trip".to_string(), 2), "listed at once");
+}
+
+#[test]
+fn share_lives_in_the_file_menu_and_the_top_bar() {
+    let entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == "dialog.flickrUpload").expect("a menu entry");
+    assert_eq!((entry.1, entry.3), ("Flickr…", "File>Share"));
+    let (mut h, _) = app("http://127.0.0.1:9");
+    signed_in(&mut h);
+    h.step();
+    assert_eq!(h.request("ui.clickWidget", json!({"id": "icon:share"}), T)["ok"], true);
+    for _ in 0..3 {
+        h.step();
+    }
+    assert!(has(&h, "menu:shareExport") && has(&h, "menu:shareFlickr"), "the share icon opens Export… and Share to Flickr…");
+    assert_eq!(h.request("ui.clickWidget", json!({"id": "menu:shareFlickr"}), T)["ok"], true);
+    for _ in 0..3 {
+        h.step();
+    }
+    assert!(matches!(&h.app.ui.dialog, Some(Dialog::FlickrUpload { .. })), "{:?}", h.app.ui.dialog.is_some());
 }

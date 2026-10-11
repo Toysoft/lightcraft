@@ -1,4 +1,4 @@
-//! Settings → Flickr: connecting LightCraft to a Flickr account, one step at a time, then the
+//! Settings → Accounts: connecting LightCraft to a Flickr account, one step at a time, then the
 //! connected account. The steps lead into each other: saving the API key starts the sign-in
 //! (Flickr's approval page opens in the browser), and pasting the code Flickr shows finishes it.
 //! Network steps run in the background ([`crate::flickr`]); this tab only shows where they are.
@@ -119,7 +119,7 @@ fn connected(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, status: &Va
     heading(ui, t, "Flickr account");
     let name = status["fullname"].as_str().filter(|s| !s.trim().is_empty()).or(status["username"].as_str()).unwrap_or_default();
     ui.label(RichText::new(format!("✓  {}", crate::i18n::tr_format!("Signed in as {name}", name = name))).font(t.semibold(12.5)));
-    hint(ui, t, "Select photos, then choose File → Upload to Flickr….");
+    hint(ui, t, "Select photos, then choose File → Share → Flickr….");
     ui.horizontal(|ui| {
         if button(ui, "flickrPhotostream", "Open Your Photostream", true) {
             open(app, &format!("https://www.flickr.com/photos/{}/", status["userNsid"].as_str().unwrap_or("me")));

@@ -766,7 +766,7 @@ pub enum Dialog {
     ContactSheet {
         options: lightcraft_engine::contact_sheet::Options,
     },
-    /// Upload the selected photos to Flickr (File ▸ Upload to Flickr…).
+    /// Upload the selected photos to Flickr (File ▸ Share ▸ Flickr…).
     FlickrUpload {
         opts: crate::flickr::UploadDialog,
     },

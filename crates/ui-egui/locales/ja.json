@@ -1956,7 +1956,7 @@
   "Adding to Apple Photos": "Appleの写真に追加中",
   "Sign in to Flickr first": "先にFlickrにサインインしてください",
   "Enter the code Flickr shows": "Flickrに表示されたコードを入力してください",
-  "Flickr no longer accepts the sign-in: sign in again in Settings → Flickr": "Flickrがサインインを受け付けなくなりました：設定 → Flickr でもう一度サインインしてください",
+  "Flickr no longer accepts the sign-in: sign in again in Settings → Accounts": "Flickrがサインインを受け付けなくなりました：設定 → アカウント でもう一度サインインしてください",
   " · cancelled": " · キャンセルしました",
   "The upload to Flickr stopped unexpectedly": "Flickrへのアップロードが予期せず停止しました",
   "Contacting Flickr…": "Flickrに接続中…",
@@ -1971,7 +1971,7 @@
   "Flickr account": "Flickrアカウント",
   "Open Your Photostream": "フォトストリームを開く",
   "Sign Out": "サインアウト",
-  "Select photos, then choose File → Upload to Flickr….": "写真を選択して、ファイル → Flickrにアップロード… を選びます。",
+  "Select photos, then choose File → Share → Flickr….": "写真を選択して、ファイル → 共有 → Flickr… を選びます。",
   "Code": "コード",
   "Finish Sign-In": "サインインを完了",
   "Open the Flickr Page Again": "Flickrのページをもう一度開く",
@@ -1984,8 +1984,6 @@
   "Save Key": "キーを保存",
   "Forget Key": "キーを削除",
   "This session keeps the sign-in until LightCraft quits.": "このセッションはLightCraftを終了するまでサインインを保持します。",
-  "Upload to Flickr": "Flickrにアップロード",
-  "Upload to Flickr…": "Flickrにアップロード…",
   "Upload": "アップロード",
   "Visibility": "公開範囲",
   "Keywords as tags": "キーワードをタグとして",
@@ -2007,5 +2005,10 @@
   "Reading Flickr albums": "Flickrのアルバムを読み込み中",
   "Album name": "アルバム名",
   "Name of the new album": "新しいアルバムの名前",
-  "Flickr makes the album with the first photo that goes up as its cover.": "Flickrは最初にアップロードされた写真をカバーにしてアルバムを作成します。"
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickrは最初にアップロードされた写真をカバーにしてアルバムを作成します。",
+  "Share to Flickr": "Flickrで共有",
+  "Share to Flickr…": "Flickrで共有…",
+  "Share": "共有",
+  "Accounts": "アカウント",
+  "Export and share": "書き出しと共有"
 }

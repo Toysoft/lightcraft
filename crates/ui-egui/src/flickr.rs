@@ -3,7 +3,7 @@
 //! background instead (same ids and params): sign-in steps as [`crate::tasks`] with a row in the
 //! activity stack, an upload as an [`UploadTask`] with progress and ✕ (issue #345).
 //!
-//! Settings → Flickr (`panels::flickr`) holds the API key and the sign-in; File ▸ Upload to
+//! Settings → Accounts (`panels::flickr`) holds the API key and the sign-in; File ▸ Upload to
 //! Flickr… opens [`crate::state::Dialog::FlickrUpload`] for the selected photos.
 
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use crate::LightcraftApp;
 
-/// The Upload to Flickr dialog's choices (`flickr.upload` params).
+/// The Share to Flickr dialog's choices (`flickr.upload` params).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UploadDialog {
@@ -73,7 +73,7 @@ pub const PRIVACY: &[(&str, &str)] =
 /// What the Flickr settings and dialog remember between frames.
 #[derive(Default)]
 pub struct FlickrUi {
-    /// The API key fields of Settings → Flickr (filled from the saved account when first shown).
+    /// The API key fields of Settings → Accounts (filled from the saved account when first shown).
     pub key: String,
     pub secret: String,
     /// The code Flickr shows after the user approves LightCraft.
@@ -186,7 +186,7 @@ mod native {
         match id {
             "dialog.flickrUpload" => {
                 if app.session.flickr_token().is_none() {
-                    app.ui.dialog = Some(Dialog::Settings { tab: "flickr".into() });
+                    app.ui.dialog = Some(Dialog::Settings { tab: "accounts".into() });
                     return Err(crate::i18n::tr("Sign in to Flickr first").to_string());
                 }
                 // no album unless one is chosen this time
@@ -377,7 +377,7 @@ mod native {
                 let mut m =
                     crate::i18n::tr_format!("Uploaded {ok} of {total} photo{} to Flickr", if total == 1 { "" } else { "s" }, ok = ok, total = total);
                 if r["signInNeeded"] == true {
-                    m = crate::i18n::tr("Flickr no longer accepts the sign-in: sign in again in Settings → Flickr").to_string();
+                    m = crate::i18n::tr("Flickr no longer accepts the sign-in: sign in again in Settings → Accounts").to_string();
                 } else if failed > 0 {
                     let first = r["photos"].as_array().and_then(|a| a.iter().find_map(|p| p["error"].as_str())).unwrap_or("error");
                     m += &crate::i18n::tr_format!(" · {} failed: {}", failed, first);

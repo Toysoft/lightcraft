@@ -2112,7 +2112,7 @@
   "Adding to Apple Photos": "Wird zu Apple Fotos hinzugefügt",
   "Sign in to Flickr first": "Melde dich zuerst bei Flickr an",
   "Enter the code Flickr shows": "Gib den Code ein, den Flickr anzeigt",
-  "Flickr no longer accepts the sign-in: sign in again in Settings → Flickr": "Flickr akzeptiert die Anmeldung nicht mehr: Melde dich unter Einstellungen → Flickr erneut an",
+  "Flickr no longer accepts the sign-in: sign in again in Settings → Accounts": "Flickr akzeptiert die Anmeldung nicht mehr: Melde dich unter Einstellungen → Konten erneut an",
   " · cancelled": " · abgebrochen",
   "The upload to Flickr stopped unexpectedly": "Das Hochladen zu Flickr wurde unerwartet beendet",
   "Contacting Flickr…": "Verbindung mit Flickr…",
@@ -2127,7 +2127,7 @@
   "Flickr account": "Flickr-Konto",
   "Open Your Photostream": "Deinen Fotostream öffnen",
   "Sign Out": "Abmelden",
-  "Select photos, then choose File → Upload to Flickr….": "Wähle Fotos aus und dann Datei → Zu Flickr hochladen….",
+  "Select photos, then choose File → Share → Flickr….": "Wähle Fotos aus und dann Datei → Teilen → Flickr….",
   "Code": "Code",
   "Finish Sign-In": "Anmeldung abschließen",
   "Open the Flickr Page Again": "Flickr-Seite erneut öffnen",
@@ -2140,8 +2140,6 @@
   "Save Key": "Schlüssel speichern",
   "Forget Key": "Schlüssel vergessen",
   "This session keeps the sign-in until LightCraft quits.": "Diese Sitzung behält die Anmeldung, bis LightCraft beendet wird.",
-  "Upload to Flickr": "Zu Flickr hochladen",
-  "Upload to Flickr…": "Zu Flickr hochladen…",
   "Upload": "Hochladen",
   "Visibility": "Sichtbarkeit",
   "Keywords as tags": "Stichwörter als Tags",
@@ -2163,5 +2161,10 @@
   "Reading Flickr albums": "Flickr-Alben werden gelesen",
   "Album name": "Albumname",
   "Name of the new album": "Name des neuen Albums",
-  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr erstellt das Album mit dem zuerst hochgeladenen Foto als Titelbild."
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr erstellt das Album mit dem zuerst hochgeladenen Foto als Titelbild.",
+  "Share to Flickr": "Auf Flickr teilen",
+  "Share to Flickr…": "Auf Flickr teilen…",
+  "Share": "Teilen",
+  "Accounts": "Konten",
+  "Export and share": "Exportieren und teilen"
 }

@@ -8,7 +8,7 @@
 //!   memory only.
 //! - **The API key**: Flickr gives one to every app (<https://www.flickr.com/services/apps/create/noncommercial/>).
 //!   A build may carry one (`LIGHTCRAFT_FLICKR_API_KEY` and `LIGHTCRAFT_FLICKR_API_SECRET` set when
-//!   compiling); otherwise, or to use their own, the user enters theirs in Settings → Flickr.
+//!   compiling); otherwise, or to use their own, the user enters theirs in Settings → Accounts.
 //! - **Uploads** ([`prepare_upload`] on the session, then [`UploadJob::run`] anywhere) render each
 //!   photo as a JPEG through the export pipeline, then send it with its title, caption and
 //!   keywords. Location is left out unless asked for: a showcase upload is usually public.
@@ -92,7 +92,7 @@ impl Session {
 
     /// A client for the API key in use: the user's own, else the build's.
     pub fn flickr_client(&self) -> Result<Client, String> {
-        let key = self.flickr.account.own_key().or_else(builtin_key).ok_or("enter a Flickr API key and its secret first (Settings → Flickr)")?;
+        let key = self.flickr.account.own_key().or_else(builtin_key).ok_or("enter a Flickr API key and its secret first (Settings → Accounts)")?;
         let mut c = Client::new(key);
         c.endpoints = self.flickr.endpoints.clone();
         Ok(c)
@@ -302,7 +302,7 @@ pub struct UploadJob {
 pub fn prepare_upload(s: &mut Session, p: &Value) -> Result<UploadJob, String> {
     let opts = UploadOptions::from_json(p)?;
     let client = s.flickr_client()?;
-    let token = s.flickr_token().cloned().ok_or("sign in to Flickr first (Settings → Flickr)")?;
+    let token = s.flickr_token().cloned().ok_or("sign in to Flickr first (Settings → Accounts)")?;
     let ids: Vec<PhotoId> = s.targets(p);
     if ids.is_empty() {
         return Err("no photos selected".into());
@@ -321,7 +321,7 @@ pub fn prepare_upload(s: &mut Session, p: &Value) -> Result<UploadJob, String> {
 /// What [`list_albums`] needs, taken from the session: the client and the signed-in account.
 pub fn albums_request(s: &Session) -> Result<(Client, Token), String> {
     let client = s.flickr_client()?;
-    let token = s.flickr_token().cloned().ok_or("sign in to Flickr first (Settings → Flickr)")?;
+    let token = s.flickr_token().cloned().ok_or("sign in to Flickr first (Settings → Accounts)")?;
     Ok((client, token))
 }
 

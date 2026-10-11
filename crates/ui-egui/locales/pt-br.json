@@ -1954,7 +1954,7 @@
   "Adding to Apple Photos": "Adicionando ao Fotos da Apple",
   "Sign in to Flickr first": "Conecte-se ao Flickr primeiro",
   "Enter the code Flickr shows": "Digite o código que o Flickr mostra",
-  "Flickr no longer accepts the sign-in: sign in again in Settings → Flickr": "O Flickr não aceita mais o login: conecte-se de novo em Configurações → Flickr",
+  "Flickr no longer accepts the sign-in: sign in again in Settings → Accounts": "O Flickr não aceita mais o login: conecte-se de novo em Configurações → Contas",
   " · cancelled": " · cancelado",
   "The upload to Flickr stopped unexpectedly": "O envio ao Flickr parou inesperadamente",
   "Contacting Flickr…": "Conectando ao Flickr…",
@@ -1969,7 +1969,7 @@
   "Flickr account": "Conta do Flickr",
   "Open Your Photostream": "Abrir seu photostream",
   "Sign Out": "Sair",
-  "Select photos, then choose File → Upload to Flickr….": "Selecione fotos e escolha Arquivo → Enviar ao Flickr….",
+  "Select photos, then choose File → Share → Flickr….": "Selecione fotos e escolha Arquivo → Compartilhar → Flickr….",
   "Code": "Código",
   "Finish Sign-In": "Concluir login",
   "Open the Flickr Page Again": "Abrir a página do Flickr de novo",
@@ -1982,8 +1982,6 @@
   "Save Key": "Salvar chave",
   "Forget Key": "Esquecer chave",
   "This session keeps the sign-in until LightCraft quits.": "Esta sessão mantém o login até o LightCraft ser fechado.",
-  "Upload to Flickr": "Enviar ao Flickr",
-  "Upload to Flickr…": "Enviar ao Flickr…",
   "Upload": "Enviar",
   "Visibility": "Visibilidade",
   "Keywords as tags": "Palavras-chave como tags",
@@ -2005,5 +2003,10 @@
   "Reading Flickr albums": "Lendo álbuns do Flickr",
   "Album name": "Nome do álbum",
   "Name of the new album": "Nome do novo álbum",
-  "Flickr makes the album with the first photo that goes up as its cover.": "O Flickr cria o álbum com a primeira foto enviada como capa."
+  "Flickr makes the album with the first photo that goes up as its cover.": "O Flickr cria o álbum com a primeira foto enviada como capa.",
+  "Share to Flickr": "Compartilhar no Flickr",
+  "Share to Flickr…": "Compartilhar no Flickr…",
+  "Share": "Compartilhar",
+  "Accounts": "Contas",
+  "Export and share": "Exportar e compartilhar"
 }

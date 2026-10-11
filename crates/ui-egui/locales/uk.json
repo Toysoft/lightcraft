@@ -2148,7 +2148,7 @@
   "Adding to Apple Photos": "Додавання до Apple Фото",
   "Sign in to Flickr first": "Спочатку увійдіть у Flickr",
   "Enter the code Flickr shows": "Введіть код, який показує Flickr",
-  "Flickr no longer accepts the sign-in: sign in again in Settings → Flickr": "Flickr більше не приймає вхід: увійдіть знову в Налаштування → Flickr",
+  "Flickr no longer accepts the sign-in: sign in again in Settings → Accounts": "Flickr більше не приймає вхід: увійдіть знову в Налаштування → Облікові записи",
   " · cancelled": " · скасовано",
   "The upload to Flickr stopped unexpectedly": "Завантаження у Flickr неочікувано зупинилося",
   "Contacting Flickr…": "Підключення до Flickr…",
@@ -2163,7 +2163,7 @@
   "Flickr account": "Обліковий запис Flickr",
   "Open Your Photostream": "Відкрити ваш фотопотік",
   "Sign Out": "Вийти",
-  "Select photos, then choose File → Upload to Flickr….": "Виберіть фото, потім Файл → Завантажити у Flickr….",
+  "Select photos, then choose File → Share → Flickr….": "Виберіть фото, потім Файл → Поширити → Flickr….",
   "Code": "Код",
   "Finish Sign-In": "Завершити вхід",
   "Open the Flickr Page Again": "Відкрити сторінку Flickr ще раз",
@@ -2176,8 +2176,6 @@
   "Save Key": "Зберегти ключ",
   "Forget Key": "Забути ключ",
   "This session keeps the sign-in until LightCraft quits.": "Цей сеанс зберігає вхід до виходу з LightCraft.",
-  "Upload to Flickr": "Завантажити у Flickr",
-  "Upload to Flickr…": "Завантажити у Flickr…",
   "Upload": "Завантажити",
   "Visibility": "Видимість",
   "Keywords as tags": "Ключові слова як теги",
@@ -2199,5 +2197,10 @@
   "Reading Flickr albums": "Читання альбомів Flickr",
   "Album name": "Назва альбому",
   "Name of the new album": "Назва нового альбому",
-  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr створює альбом із першим завантаженим фото як обкладинкою."
+  "Flickr makes the album with the first photo that goes up as its cover.": "Flickr створює альбом із першим завантаженим фото як обкладинкою.",
+  "Share to Flickr": "Поширити у Flickr",
+  "Share to Flickr…": "Поширити у Flickr…",
+  "Share": "Поширити",
+  "Accounts": "Облікові записи",
+  "Export and share": "Експорт і поширення"
 }
