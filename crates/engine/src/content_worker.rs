@@ -223,23 +223,33 @@ fn to_rgb(img: &lightcraft_raster::Rgba8) -> Rgb8 {
 }
 
 /// The picture of one photo, or why there is none. At most [`MAX_PREVIEW_READS`] previews and [`MAX_RENDERS`] renders
-/// run at once (`gates`), whatever the size of the pool.
-fn picture(item: Item, gates: &Gates) -> (PhotoId, Hash, Result<Rgb8, Outcome>) {
+/// run at once (`gates`), whatever the size of the pool. Once `gone` is set (the session let go of the worker: the
+/// model or the library changed, indexing stopped) nothing more is read: the photo comes back skipped.
+fn picture(item: Item, gates: &Gates, gone: &AtomicBool) -> (PhotoId, Hash, Result<Rgb8, Outcome>) {
     let Item { id, hash, preview, job, path } = item;
+    let unwanted = || gone.load(Ordering::SeqCst);
     let run = catch_unwind(AssertUnwindSafe(|| {
+        if unwanted() {
+            return Ok(None);
+        }
         let preview = preview.and_then(|(p, load)| {
             let _pass = gates.previews.enter();
-            load(&p, EDGE)
+            if unwanted() { None } else { load(&p, EDGE) }
         });
         if let Some(img) = preview.filter(|img| img.width.max(img.height) >= MIN_PREVIEW_EDGE) {
-            return Ok(to_rgb(&img));
+            return Ok(Some(to_rgb(&img)));
         }
         let Some(job) = job else { return Err("nothing to render it from".to_string()) };
+        // (the gates are shared by every scan of the process: the wait for one can be long)
         let _pass = gates.renders.enter();
-        job().map(|img| to_rgb(&img))
+        if unwanted() {
+            return Ok(None);
+        }
+        job().map(|img| Some(to_rgb(&img)))
     }));
     let r = match run {
-        Ok(Ok(img)) => Ok(img),
+        Ok(Ok(Some(img))) => Ok(img),
+        Ok(Ok(None)) => return (id, hash, Err(Outcome::Skipped)),
         Ok(Err(why)) => Err(why),
         Err(_) => Err("reading it stopped unexpectedly".into()),
     };
@@ -254,14 +264,16 @@ fn picture(item: Item, gates: &Gates) -> (PhotoId, Hash, Result<Rgb8, Outcome>) 
 }
 
 /// The pictures of a batch, read in parallel (within the gates).
-fn pictures(items: Vec<Item>, gates: &Gates) -> Vec<(PhotoId, Hash, Result<Rgb8, Outcome>)> {
+fn pictures(items: Vec<Item>, gates: &Gates, gone: &AtomicBool) -> Vec<(PhotoId, Hash, Result<Rgb8, Outcome>)> {
     use rayon::prelude::*;
-    items.into_par_iter().map(|i| picture(i, gates)).collect()
+    items.into_par_iter().map(|i| picture(i, gates, gone)).collect()
 }
 
-/// Embed one batch with `model` (already on the pace's pool).
-fn embed(model: &dyn ContentModel, items: Vec<Item>) -> Vec<(PhotoId, Hash, Outcome)> {
-    let pictures = pictures(items, &GATES);
+/// Embed one batch with `model` (already on the pace's pool). Once `gone` is set the rest of the batch is skipped:
+/// a worker the session dropped (another model, another library) stops after the photo it is reading, and never runs
+/// the model again.
+fn embed(model: &dyn ContentModel, items: Vec<Item>, gone: &AtomicBool) -> Vec<(PhotoId, Hash, Outcome)> {
+    let pictures = pictures(items, &GATES, gone);
     let (mut keys, mut images, mut out) = (Vec::new(), Vec::new(), Vec::new());
     for (id, hash, r) in pictures {
         match r {
@@ -271,6 +283,10 @@ fn embed(model: &dyn ContentModel, items: Vec<Item>) -> Vec<(PhotoId, Hash, Outc
             }
             Err(o) => out.push((id, hash, o)),
         }
+    }
+    if gone.load(Ordering::SeqCst) {
+        out.extend(keys.into_iter().map(|(id, hash)| (id, hash, Outcome::Skipped)));
+        return out;
     }
     for (keys, images) in keys.chunks(lightcraft_vision::MAX_BATCH).zip(images.chunks(lightcraft_vision::MAX_BATCH)) {
         let run = catch_unwind(AssertUnwindSafe(|| model.embed_images(images)));
@@ -348,7 +364,7 @@ impl Worker {
                         let _ = done_tx.send(Done { results: skip(batch.items), ms: 0.0, embedded: 0, model_error: model_error.clone() });
                         continue;
                     };
-                    let work = || embed(m, batch.items);
+                    let work = || embed(m, batch.items, &gone);
                     let results = match pool(batch.pace) {
                         Some(p) => p.install(work),
                         None => work(),
@@ -755,7 +771,7 @@ mod tests {
         // previews only: at most MAX_PREVIEW_READS at once
         let gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
         let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-        let out = pool.install(|| pictures(items(32, true, &live, &most), &gates));
+        let out = pool.install(|| pictures(items(32, true, &live, &most), &gates, &AtomicBool::new(false)));
         assert_eq!(out.len(), 32);
         assert!(out.iter().all(|(_, _, r)| r.as_ref().is_ok_and(|img| img.width == 300)));
         assert_eq!(gates.previews.peak(), MAX_PREVIEW_READS);
@@ -764,11 +780,60 @@ mod tests {
         // no usable preview: every photo is rendered, one at a time
         let gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
         let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-        let out = pool.install(|| pictures(items(12, false, &live, &most), &gates));
+        let out = pool.install(|| pictures(items(12, false, &live, &most), &gates, &AtomicBool::new(false)));
         assert!(out.iter().all(|(_, _, r)| r.as_ref().is_ok_and(|img| img.width == 320)));
         assert_eq!(gates.renders.peak(), MAX_RENDERS);
         // (a preview read and a render may overlap, never more than the two caps together)
         assert!(most.load(Ordering::SeqCst) <= MAX_PREVIEW_READS + MAX_RENDERS);
+    }
+
+    /// Counts the images it is asked to embed.
+    struct Counting(Arc<std::sync::atomic::AtomicUsize>, Manifest);
+
+    impl ContentModel for Counting {
+        fn embed_images(&self, batch: &[Rgb8]) -> lightcraft_vision::Result<Vec<Vec<f32>>> {
+            self.0.fetch_add(batch.len(), Ordering::SeqCst);
+            Ok(batch.iter().map(|_| vec![1.0, 0.0]).collect())
+        }
+        fn embed_texts(&self, _: &[&str]) -> lightcraft_vision::Result<Vec<Vec<f32>>> {
+            Ok(Vec::new())
+        }
+        fn score_cosine(&self, cosine: f32) -> f32 {
+            cosine
+        }
+        fn manifest(&self) -> &Manifest {
+            &self.1
+        }
+    }
+
+    #[test]
+    fn a_worker_the_session_let_go_of_reads_and_embeds_nothing_more() {
+        use std::sync::atomic::AtomicUsize;
+        let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let model = Counting(calls.clone(), lightcraft_vision::manifest::builtin_siglip2_b16_256());
+        // let go of before the batch: no picture is read, the model never runs, every photo comes back skipped
+        let gone = AtomicBool::new(true);
+        let out = embed(&model, items(6, false, &live, &most), &gone);
+        assert_eq!(out.len(), 6);
+        assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Skipped)));
+        assert_eq!((most.load(Ordering::SeqCst), calls.load(Ordering::SeqCst)), (0, 0));
+        // still wanted: read and embedded
+        let out = embed(&model, items(3, true, &live, &most), &AtomicBool::new(false));
+        assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Embedded(_))));
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        // let go of while its pictures were being read (waiting for the shared render gate): the model is not run
+        let gone = Arc::new(AtomicBool::new(false));
+        let flag = gone.clone();
+        let mut batch = items(4, false, &live, &most);
+        batch[0].job = Some(Box::new(move || {
+            flag.store(true, Ordering::SeqCst);
+            Ok(lightcraft_raster::Rgba8::new(320, 240))
+        }));
+        let out = embed(&model, batch, &gone);
+        assert_eq!(out.len(), 4);
+        assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Skipped)), "nothing embedded");
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "the model did not run again");
     }
 
     #[test]

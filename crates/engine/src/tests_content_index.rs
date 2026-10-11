@@ -30,12 +30,29 @@ fn temp(name: &str) -> PathBuf {
 struct Calls {
     images: AtomicUsize,
     loads: AtomicUsize,
+    /// Images embedded by each image model loaded, in the order they were loaded. (A worker the session let go of
+    /// may still finish the photo it was on, later: counting per instance keeps it apart from the next worker's.)
+    per_load: std::sync::Mutex<Vec<Arc<AtomicUsize>>>,
+}
+
+impl Calls {
+    /// Image models loaded so far.
+    fn loaded(&self) -> usize {
+        self.per_load.lock().unwrap().len()
+    }
+
+    /// Images embedded by the image models loaded after the first `n`.
+    fn images_since_load(&self, n: usize) -> usize {
+        self.per_load.lock().unwrap().iter().skip(n).map(|c| c.load(Ordering::SeqCst)).sum()
+    }
 }
 
 /// The stand-in: an image's embedding is its colour cast and brightness; a text's is the colour it names.
 struct Fake {
     manifest: Manifest,
     calls: Arc<Calls>,
+    /// This instance's images.
+    mine: Arc<AtomicUsize>,
     /// Milliseconds per image (to have a scan in progress to cancel).
     slow: u64,
 }
@@ -49,6 +66,7 @@ impl ContentModel for Fake {
     fn embed_images(&self, batch: &[Rgb8]) -> lightcraft_vision::Result<Vec<Vec<f32>>> {
         std::thread::sleep(Duration::from_millis(self.slow * batch.len() as u64));
         self.calls.images.fetch_add(batch.len(), Ordering::SeqCst);
+        self.mine.fetch_add(batch.len(), Ordering::SeqCst);
         Ok(batch
             .iter()
             .map(|img| {
@@ -87,10 +105,12 @@ impl ContentModel for Fake {
 fn loader(calls: Arc<Calls>, slow: u64) -> Loader {
     Arc::new(move |_: &Path, m: &Manifest, towers: Towers| {
         // (image towers: the text tower is loaded too, for searches and the auto-tag vocabulary)
+        let mine = Arc::new(AtomicUsize::new(0));
         if towers.image {
             calls.loads.fetch_add(1, Ordering::SeqCst);
+            calls.per_load.lock().unwrap().push(mine.clone());
         }
-        Ok(Box::new(Fake { manifest: m.clone(), calls: calls.clone(), slow }) as Box<dyn ContentModel>)
+        Ok(Box::new(Fake { manifest: m.clone(), calls: calls.clone(), mine, slow }) as Box<dyn ContentModel>)
     })
 }
 
@@ -299,13 +319,15 @@ fn another_model_has_its_own_index_and_switching_back_needs_no_rescan() {
     assert!(index_file(&d, "other").is_file());
     // back to the first: its file is read (what it had done is kept), and the scan finishes it
     s.execute("content.models.select", &json!({"id": "fake"})).unwrap();
-    let before = calls.images.load(Ordering::SeqCst);
+    let before = calls.loaded();
     let st = status(&mut s);
     assert_eq!(st["model"], "fake");
     let had = st["indexed"].as_u64().unwrap() as usize;
     assert!(had as u64 * 40 <= first, "{st}");
     pump_until(&mut s, done);
-    assert_eq!(calls.images.load(Ordering::SeqCst) - before, total - had, "only what the first model had not done");
+    // (counted on the models loaded from here: the first fake's worker, let go of mid-scan, may finish the photo it
+    // was on later, as the render gate is shared with every other scan of the process)
+    assert_eq!(calls.images_since_load(before), total - had, "only what the first model had not done");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -760,7 +782,7 @@ fn the_search_model_loads_off_the_session_thread_and_queries_typed_meanwhile_run
             std::thread::sleep(Duration::from_millis(400));
         }
         slow_calls.loads.fetch_add(1, Ordering::SeqCst);
-        Ok(Box::new(Fake { manifest: m.clone(), calls: slow_calls.clone(), slow: 0 }) as Box<dyn ContentModel>)
+        Ok(Box::new(Fake { manifest: m.clone(), calls: slow_calls.clone(), mine: Arc::default(), slow: 0 }) as Box<dyn ContentModel>)
     }));
     let prepared = s.execute("content.prepare", &json!({})).unwrap();
     assert_eq!(prepared["state"], "loading", "{prepared}");
