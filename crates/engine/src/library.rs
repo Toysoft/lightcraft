@@ -779,3 +779,14 @@ mod resolve_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+impl Session {
+    pub fn craft_checkpoint_library(&mut self) -> std::result::Result<(), String> {
+        if let Some(lib) = self.library.as_mut() {
+            lib.journal.snapshot(&self.catalog).map_err(|e| e.to_string())?;
+        }
+        self.pending_log.clear();
+        self.media.clear_sources();
+        Ok(())
+    }
+}

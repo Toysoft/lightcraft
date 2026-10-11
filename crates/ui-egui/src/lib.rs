@@ -37,6 +37,7 @@ pub mod tasks;
 pub mod text_field;
 pub mod theme;
 pub mod titlebar;
+pub mod web_clipboard;
 pub mod widgets;
 
 #[cfg(test)]
@@ -1897,3 +1898,19 @@ mod tests_model_setup;
 
 #[cfg(test)]
 mod tests_docking_acceptance;
+
+impl LightcraftApp {
+    pub fn craft_signature(&self) -> Result<String, String> {
+        Ok(self.session.craft_signature(&serde_json::to_value(&self.ui).map_err(|e| e.to_string())?))
+    }
+    pub fn craft_capture(&self) -> Result<Vec<u8>, String> {
+        self.session.craft_capture(serde_json::to_value(&self.ui).map_err(|e| e.to_string())?)
+    }
+    pub fn craft_restore(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let ui: UiState = serde_json::from_value(Session::craft_ui(bytes)?).map_err(|e| e.to_string())?;
+        self.session.craft_restore(bytes)?;
+        self.ui = ui.sanitized();
+        self.session.craft_checkpoint_library()?;
+        Ok(())
+    }
+}

@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:sessions": "node --test tests/session-storage.test.mjs"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.4"
+  }
+}
