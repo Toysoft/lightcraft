@@ -33,6 +33,7 @@ pub mod pick;
 pub mod print_view;
 pub mod recheck;
 pub mod region;
+pub mod relocate;
 pub mod render;
 pub mod shortcuts;
 pub mod sidebar;
@@ -145,6 +146,8 @@ mod tests_profiles_layout;
 mod tests_quit_unsaved;
 #[cfg(test)]
 mod tests_recheck;
+#[cfg(test)]
+mod tests_relocate;
 #[cfg(test)]
 mod tests_rename_person;
 #[cfg(test)]
@@ -437,6 +440,11 @@ pub struct LightcraftApp {
     pub sync_owns_changes: bool,
     /// A Synchronize Folder at work in the background.
     pub sync_run: Option<sync::SyncRun>,
+    /// A folder's files being looked for where the person said the folder is now.
+    pub relocate: Option<relocate::RelocateTask>,
+    /// What was found when only some of them are there, for the dialog that asks about it (and
+    /// whether that dialog was shown yet: it waits for another dialog to be done with).
+    pub relocate_asked: Option<(relocate::Request, lightcraft_engine::relocate::Located, bool)>,
     /// A Lightroom catalog inspect/import in progress.
     pub lightroom: Option<lightroom_import::LightroomTask>,
     /// Last terminal Lightroom result, exposed by the command's status/wait response.
@@ -537,6 +545,8 @@ impl LightcraftApp {
             sync: None,
             sync_owns_changes: false,
             sync_run: None,
+            relocate: None,
+            relocate_asked: None,
             lightroom: None,
             lightroom_last: None,
             lightroom_result: None,
@@ -1110,6 +1120,7 @@ impl LightcraftApp {
         import::poll_scan(self, ctx);
         sync::poll(self, ctx);
         sync::poll_run(self, ctx);
+        relocate::poll(self, ctx);
         import::tick(self, ctx);
         lightroom_import::tick(self, ctx);
         recheck::tick(self);

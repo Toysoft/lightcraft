@@ -465,6 +465,17 @@
 - With several photos selected, the Keywords panel says how many photos its keywords belong to. The × on a keyword
   is a larger target that lights up on its own, and taking a keyword off several photos at once now says which
   keyword left how many photos, and that Edit ▸ Undo puts it back.
+### Locate a folder that moved
+- A folder of the library that is somewhere else now can be pointed at its new place (issue #1112): it was moved or
+  renamed outside LightCraft, its disk is mounted under another name, or its catalog came from another computer (a
+  Lightroom catalog from Windows names `D:\Photos\…`, which is nowhere on Linux or macOS). **Synchronize Folder…**
+  on a folder that isn't there now offers **Locate Missing Folder…**, and every Folders row has **Update Folder
+  Location…**. Choose the folder: its photos, those in the folders inside it too, point at the same places below it,
+  colour labels follow, and Synchronize Folder then scans it there. Only the library changes, no file is touched,
+  and it is one undo step.
+- The photos' files are looked for in the chosen folder first, in the background (a row in the activity stack; ✕
+  stops it). A folder with none of them is not taken; one with only some asks before going on.
+- Agents and the CLI: `folder.updateLocation {folder, path}`.
 
 ### HDR and panorama merges of CR2 keep their colour
 - Photo Merge of Canon CR2 (and other raws whose colour LightCraft fits from the camera's own JPEG, such as NEF and

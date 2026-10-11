@@ -1,0 +1,219 @@
+//! Locating a library folder that is somewhere else now, in the app (`folder.locate`; see
+//! `lightcraft_engine::relocate`, issue #1112).
+//!
+//! The person says where the folder is (Synchronize Folder's button when the folder isn't
+//! there, or Update Folder Location… on a Folders row). Whether that is the folder is told by
+//! looking for the photos' files there, which can take a while on a network share: it runs on a
+//! worker thread under a row in the activity stack (its ✕ stops it), and no frame waits for it.
+//! Then:
+//!
+//! * every file is there: the photos are relinked (one undo step, no file touched);
+//! * none is: it is not the folder, and a toast says so (the dialog it came from stays open);
+//! * only some are: a dialog asks whether to locate the folder there anyway.
+
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+
+use lightcraft_engine::activity::{Cancel, TaskGuard};
+use lightcraft_engine::import::ScanProgress;
+use lightcraft_engine::relocate::{Located, Relocation};
+use serde_json::{Value, json};
+
+use crate::LightcraftApp;
+use crate::state::Dialog;
+use crate::theme::Tokens;
+
+/// What was asked (`folder.locate`'s parameters).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Request {
+    /// The folder as the library knows it.
+    pub path: String,
+    /// Where it is now.
+    pub to: String,
+    /// A whole disk, or a folder holding disks (`folder.updateLocation` `disk`).
+    pub disk: bool,
+    /// Locate it there even when only some of its files are (the person agreed).
+    pub incomplete: bool,
+    /// Open Synchronize Folder on it afterwards (it was asked from that dialog, which is still
+    /// open or gave way to the question).
+    pub synchronize: bool,
+}
+
+/// The files of a folder being looked for at its new place.
+pub struct RelocateTask {
+    request: Request,
+    progress: Arc<ScanProgress>,
+    rx: std::sync::mpsc::Receiver<Result<Located, String>>,
+    /// Its row in the activity stack; ✕ stops the looking and nothing is changed.
+    guard: TaskGuard,
+}
+
+impl Drop for RelocateTask {
+    /// A dropped task (the app closing) stops its worker at the next file.
+    fn drop(&mut self) {
+        self.progress.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Start looking for the folder's files at the new place. Refused while another folder is being
+/// located, and while an import or a Synchronize Folder runs (both add and relink photos of
+/// folders: the answer could be about a library that is no longer).
+pub fn start(app: &mut LightcraftApp, request: Request) -> Result<Value, String> {
+    if app.relocate.is_some() {
+        return Err(crate::i18n::tr("A folder is already being located").to_string());
+    }
+    if app.import.is_some() {
+        return Err(crate::i18n::tr("Wait for the import to finish").to_string());
+    }
+    if app.sync_run.is_some() {
+        return Err(crate::i18n::tr("A folder is being synchronized").to_string());
+    }
+    let plan = Relocation::new(&app.session, &request.path, &request.to, request.disk).map_err(|e| e.to_string())?;
+    let name = lightcraft_catalog::folders::folder_label(&plan.from);
+    let progress = Arc::new(ScanProgress::default());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let p = progress.clone();
+    let repaint = app.tasks.repaint.clone();
+    let job = move || {
+        // (a panic in the looking is its error, said in a toast; nothing was changed)
+        let found = lightcraft_engine::guard::catch("locating the folder", || plan.look(&p)).unwrap_or_else(Err);
+        let _ = tx.send(found);
+        if let Some(c) = repaint {
+            c.request_repaint();
+        }
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::Builder::new().name("lc-relocate".into()).spawn(job).map_err(|e| format!("could not start: {e}"))?;
+    #[cfg(target_arch = "wasm32")]
+    job();
+    let guard = app.session.activity.start("relocate", "Locating folder", Cancel::Flag(progress.cancel.clone()));
+    guard.detail(&name);
+    app.relocate = Some(RelocateTask { request, progress, rx, guard });
+    Ok(json!({"started": true}))
+}
+
+/// Each frame: when the looking is done, relink the photos, say why not, or ask.
+pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
+    // what the question is about: relinked once agreed to, let go of when the dialog was closed
+    if let Some((request, located, shown)) = &mut app.relocate_asked {
+        let asking = matches!(app.ui.dialog, Some(Dialog::LocateFolder { .. }));
+        if request.incomplete {
+            if let Some((request, located, _)) = app.relocate_asked.take() {
+                finish(app, ctx, request, located);
+            }
+        } else if !*shown {
+            // asked once nothing else is being filled in: another dialog (an export being set
+            // up while the files were looked for) is not taken away; the dialog of the folder
+            // that isn't there gives way to the question about it
+            let free = match &app.ui.dialog {
+                None => true,
+                Some(Dialog::SynchronizeFolder { path, .. }) => *path == request.path,
+                Some(_) => false,
+            };
+            if free {
+                *shown = true;
+                app.ui.dialog = Some(Dialog::LocateFolder {
+                    path: request.path.clone(),
+                    to: located.to.clone(),
+                    disk: request.disk,
+                    synchronize: request.synchronize,
+                    found: located.found,
+                    total: located.total,
+                });
+            }
+        } else if !asking {
+            app.relocate_asked = None;
+        }
+    }
+    let Some(task) = app.relocate.as_ref() else { return };
+    if task.guard.is_cancelled() {
+        // ✕ on its row: a count stopped part-way says nothing
+        app.relocate = None;
+        return;
+    }
+    let (done, total) = (task.progress.done.load(Ordering::Relaxed), task.progress.total.load(Ordering::Relaxed));
+    task.guard.progress(done as u64, total as u64);
+    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    let located = match task.rx.try_recv() {
+        Ok(l) => l,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return,
+        Err(_) => Err(crate::i18n::tr("Locating the folder failed").to_string()),
+    };
+    let Some(task) = app.relocate.take() else { return };
+    let request = task.request.clone();
+    // (the row goes before anything is said or asked)
+    drop(task);
+    let located = match located {
+        Ok(l) => l,
+        Err(e) => return app.toast_error(ctx, e),
+    };
+    if located.found == 0 {
+        let name = lightcraft_catalog::folders::folder_label(&located.to);
+        app.toast_error(ctx, crate::i18n::tr_format!("None of this folder's photos are in “{name}”: choose the folder it is now", name = name));
+        return;
+    }
+    if located.found < located.total && !request.incomplete {
+        // (asked on the next frame, see above)
+        app.relocate_asked = Some((request, located, false));
+        ctx.request_repaint();
+        return;
+    }
+    finish(app, ctx, request, located);
+}
+
+/// The dialog open now is Synchronize Folder for `folder`.
+fn synchronizing(app: &LightcraftApp, folder: &str) -> bool {
+    matches!(&app.ui.dialog, Some(Dialog::SynchronizeFolder { path, .. }) if path == folder)
+}
+
+/// Relink the photos (one undo step) and say so; then Synchronize Folder at the new place when
+/// it was asked from that dialog and nothing else was opened meanwhile.
+fn finish(app: &mut LightcraftApp, ctx: &egui::Context, request: Request, located: Located) {
+    let to = located.to.clone();
+    match app.session.execute_fn("folder.updateLocation", |s| located.commit(s, request.incomplete)) {
+        Ok(r) => {
+            app.toast(ctx, crate::i18n::tr_format!("Folder located. Photos relinked: {n}", n = r["relinked"].as_u64().unwrap_or(0)));
+            if request.synchronize && (app.ui.dialog.is_none() || synchronizing(app, &request.path)) {
+                let name = lightcraft_catalog::folders::folder_label(&to);
+                // the folder was chosen by the person, whatever it is: a disk too
+                let opened = crate::sync::open(app, &to, &name, request.disk).or_else(|_| crate::sync::open(app, &to, &name, true));
+                if let Err(e) = opened {
+                    // (the old folder's dialog has nothing left to say: its folder is located)
+                    app.ui.dialog = None;
+                    app.toast_error(ctx, e);
+                }
+            }
+        }
+        Err(e) => app.toast_error(ctx, e.to_string()),
+    }
+}
+
+/// The question when only some of the folder's files are at the new place.
+pub fn body(ui: &mut egui::Ui, dlg: &Dialog) {
+    let Dialog::LocateFolder { to, found, total, .. } = dlg else { return };
+    let t = Tokens::get(ui.ctx());
+    ui.set_min_width(420.0);
+    ui.label(crate::i18n::tr_format!("Only {found} of this folder's {total} photos are in:", found = found, total = total));
+    ui.label(egui::RichText::new(to.as_str()).strong());
+    ui.add_space(6.0);
+    ui.label(crate::i18n::tr("Locate the folder there anyway?"));
+    ui.label(
+        egui::RichText::new(crate::i18n::tr(
+            "The other photos stay missing there; Synchronize Folder can find them again or remove them from the library. No file is touched.",
+        ))
+        .color(t.text_dim),
+    );
+}
+
+/// "Locate Anyway": what was found is relinked on the next frame ([`poll`]); the files are not
+/// looked for a second time. A dialog with nothing behind it (set by an agent) looks first.
+pub fn confirm(app: &mut LightcraftApp, dlg: &Dialog) -> Result<Value, String> {
+    let Dialog::LocateFolder { path, to, disk, synchronize, .. } = dlg else { return Ok(Value::Null) };
+    match &mut app.relocate_asked {
+        Some((request, located, _)) if request.path == *path && located.to == *to => {
+            request.incomplete = true;
+            Ok(json!({"started": true}))
+        }
+        _ => start(app, Request { path: path.clone(), to: to.clone(), disk: *disk, incomplete: true, synchronize: *synchronize }),
+    }
+}

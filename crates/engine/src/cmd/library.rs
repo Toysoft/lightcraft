@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::{CommandSpec, always, bad, bool_or, cmd, has_active, has_library_selection, has_selection, ok, str_param};
 use crate::{LibrarySource, Result, Selection, Session};
 
-fn select_after_deletion(s: &mut Session, before: &[PhotoId]) {
+pub(crate) fn select_after_deletion(s: &mut Session, before: &[PhotoId]) {
     let at = before.iter().position(|id| Some(*id) == s.selection.active);
     let remaining: std::collections::HashSet<_> = s.visible_cloned().into_iter().collect();
     s.selection.ids.retain(|id| remaining.contains(id));
