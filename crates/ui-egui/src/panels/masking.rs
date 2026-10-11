@@ -47,15 +47,15 @@ fn kind_label(s: &MaskShape) -> (&'static str, Icon) {
         MaskShape::Linear { .. } => ("Linear Gradient", Icon::Linear),
         MaskShape::Radial { .. } => ("Radial Gradient", Icon::Radial),
         MaskShape::ColorRange { .. } => ("Color Range", Icon::Picker),
-        MaskShape::LuminanceRange { .. } => ("Luminance Range", Icon::Sliders),
-        MaskShape::DepthRange { .. } => ("Depth Range", Icon::Sliders),
+        MaskShape::LuminanceRange { .. } => ("Luminance Range", Icon::Luminance),
+        MaskShape::DepthRange { .. } => ("Depth Range", Icon::Depth),
         MaskShape::Subject => ("Subject", Icon::Subject),
         MaskShape::Sky => ("Sky", Icon::Sky),
-        MaskShape::Background => ("Background", Icon::Subject),
-        MaskShape::Object { .. } => ("Object", Icon::Subject),
-        MaskShape::Prompt { .. } => ("Describe", Icon::Subject),
-        MaskShape::People { .. } => ("People", Icon::Subject),
-        MaskShape::Landscape { .. } => ("Landscape", Icon::Sky),
+        MaskShape::Background => ("Background", Icon::Background),
+        MaskShape::Object { .. } => ("Object", Icon::Object),
+        MaskShape::Prompt { .. } => ("Describe", Icon::Describe),
+        MaskShape::People { .. } => ("People", Icon::People),
+        MaskShape::Landscape { .. } => ("Landscape", Icon::Landscape),
     }
 }
 
@@ -94,15 +94,15 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         ui.label(egui::RichText::new(crate::i18n::tr("Create New Mask")).color(t.text_dim));
         ui.add_space(6.0);
         let tiles: [(&str, &str, Icon); 10] = [
-            ("object", "Object", Icon::Subject),
-            ("prompt", "Describe", Icon::Subject),
+            ("object", "Object", Icon::Object),
+            ("prompt", "Describe", Icon::Describe),
             ("subject", "Subject", Icon::Subject),
             ("sky", "Sky", Icon::Sky),
-            ("background", "Background", Icon::Subject),
+            ("background", "Background", Icon::Background),
             ("brush", "Brush", Icon::Brush),
             ("linear", "Linear", Icon::Linear),
             ("radial", "Radial", Icon::Radial),
-            ("luminanceRange", "Luminance", Icon::Sliders),
+            ("luminanceRange", "Luminance", Icon::Luminance),
             ("colorRange", "Color", Icon::Picker),
         ];
         // four 52 pt tiles a row when they and their labels fit, else fewer (wider for a long label)
