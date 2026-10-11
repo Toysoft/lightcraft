@@ -771,12 +771,16 @@ fn main() -> eframe::Result {
     let gpu_crash = gpu_crash_check(in_memory);
     let gpu_on = prefs.as_ref().is_none_or(|u| u.settings.gpu) && gpu_crash.is_none();
     lightcraft_engine::gpu::set_enabled(gpu_on);
+    // Windows and Linux: no OS title bar; the app bar is the title bar (`lightcraft_ui_egui::titlebar`).
+    // macOS keeps its traffic lights over the integrated title strip.
+    let custom_titlebar = !cfg!(target_os = "macos");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("LightCraft")
             .with_inner_size([1600.0, 1000.0])
             .with_min_inner_size([900.0, 560.0])
             .with_drag_and_drop(true)
+            .with_decorations(!custom_titlebar)
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false)
@@ -805,6 +809,7 @@ fn main() -> eframe::Result {
             }
             lightcraft_ui_egui::i18n::set_language(app.ui.language);
             app.integrated_titlebar = cfg!(target_os = "macos");
+            app.custom_titlebar = custom_titlebar;
             app.notices.extend(prefs_warning);
             app.notices.extend(launch_notices);
             // what's on disk now: only changes are written

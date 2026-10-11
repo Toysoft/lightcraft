@@ -44,13 +44,17 @@ fn window_handle(app: &LightcraftApp, ui: &mut egui::Ui, content: Rect, margin_l
 
 pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
+    let custom = app.custom_titlebar;
     let left = if app.integrated_titlebar { 78 } else { 10 };
-    egui::Panel::top("top_bar")
+    let right_margin = if custom { 0 } else { 12 };
+    let bar = egui::Panel::top("top_bar")
         .exact_size(t.top_bar_h)
-        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin { left, right: 12, top: 0, bottom: 0 }))
+        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin { left, right: right_margin, top: 0, bottom: 0 }))
         .show(ui, |ui| {
             let full = ui.max_rect();
-            if app.integrated_titlebar {
+            if custom {
+                crate::titlebar::drag_area(ui, full);
+            } else if app.integrated_titlebar {
                 window_handle(app, ui, full, left as f32, 12.0);
             }
             let mut sw = 640.0f32.min(full.width() - 460.0).max(200.0);
@@ -145,7 +149,8 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 let _ = app.run("view.filterBar", json!({}));
             }
             // right icons
-            let mut x = full.right() - 18.0;
+            let right_offset = if custom { crate::titlebar::WIDTH + 14.0 } else { 18.0 };
+            let mut x = full.right() - right_offset;
             // saving is failing: the cloud icon turns into a warning until a save succeeds
             let unsaved = app.session.unsaved().map(|(n, e)| {
                 crate::i18n::tr_format!(
@@ -189,4 +194,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             }
             let _ = Align2::CENTER_CENTER;
         });
+    if custom {
+        crate::titlebar::caption_buttons(app, ui, bar.response.rect);
+    }
 }
