@@ -74,6 +74,8 @@ mod tests_map_geotag;
 #[cfg(test)]
 mod tests_map_locations;
 #[cfg(test)]
+mod tests_map_tracks;
+#[cfg(test)]
 mod tests_masking;
 #[cfg(test)]
 mod tests_masking_layout;

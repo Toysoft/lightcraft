@@ -30,7 +30,7 @@ Hours are Opus 5.5 agent wall-clock hours (see [target-app-parity.md](target-app
 | 13 | **Lightroom catalog migration is one-way and approximate**: unsupported Adobe profiles / AI settings archived, history kept as data | lightroom-catalog-import.md | switching users lose some looks | 8–12 | [file-format-parity](file-format-parity.md) |
 | 14 | **HDR display** (EDR / Windows HDR); HLG; HDR settings from `crs` XMP | HDR rows 70%; LR-VIEW-HDR-DISPLAY ⬜ | HDR editing works blind on HDR monitors | 12–25 | [hardware-parity](hardware-parity.md) |
 | 15 | **Print module**: custom packages, printer colour management (contact-sheet PDF only) | LRC-PRINT rows | Classic users who print | 25–40 | [target-app-parity](target-app-parity.md#features) |
-| 16 | **Map module (track logs on the map, location folders), Book, Slideshow module, publish services** | LRC-MAP rows mostly done (Map view, Info-panel map, geotagging by drag and the location filter bar ✅; saved locations 🟡, no folders), BOOK / SS rows ⬜ | Classic users; publish services matter for Flickr / SmugMug workflows | 60–100 | [target-app-parity](target-app-parity.md#features) |
+| 16 | **Map module (location folders), Book, Slideshow module, publish services** | LRC-MAP rows mostly done (Map view, Info-panel map, geotagging by drag, the location filter bar and track logs on the map ✅; saved locations 🟡, no folders), BOOK / SS rows ⬜ | Classic users; publish services matter for Flickr / SmugMug workflows | 60–100 | [target-app-parity](target-app-parity.md#features) |
 | 17 | **Tethered capture** | ⬜ | studio photographers | 25–45 + cameras | [hardware-parity](hardware-parity.md) |
 | 18 | **Video**: playback, trim, global edits, export | VID rows 0% | users who mix stills and clips | 25–45 | [target-app-parity](target-app-parity.md#features) |
 | 19 | **Plug-in ecosystem**: no Lightroom SDK equivalent (export / publish plug-ins, metadata plug-ins) | ⬜ | pro workflows built on plug-ins (LR/Enfuse, Jeffrey's exporters, Negative Lab Pro) | 40–80 + owner decision | [target-app-parity](target-app-parity.md#by-dimension) |
@@ -72,6 +72,7 @@ Beta-blocking gaps (B) total **~230–430 h**; with the stability and platform w
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Map track logs drawn on the map landed (LRC-MAP-TRACKLOG): dropped from gap 16 |
 | 2026-10-11 | minor | Map saved locations landed (LRC-MAP-LOCATIONS 🟡: no location folders): gap 16 now names track logs on the map and location folders |
 | 2026-10-10 | minor | Map location filter bar landed (LRC-MAP-FILTER): dropped from gap 16 |
 | 2026-10-10 | minor | Map geotagging by drag landed (LRC-MAP-GEOTAG): dropped from gap 16 |

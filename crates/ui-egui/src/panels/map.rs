@@ -49,6 +49,8 @@ use crate::icons::Icon;
 
 #[path = "map_locations.rs"]
 pub mod locations;
+#[path = "map_tracks.rs"]
+pub mod tracks;
 use crate::theme::Tokens;
 use crate::widgets::{icon_button, register};
 
@@ -215,6 +217,8 @@ pub struct MapView {
     pub count_ms: f64,
     /// Saved locations: the one selected, a handle being dragged, counts.
     pub loc: locations::LocState,
+    /// The track log drawn on the map.
+    pub trk: tracks::TrackState,
 }
 
 impl MapView {
@@ -465,6 +469,10 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     if app.map.camera.is_none() || std::mem::take(&mut app.map.fit_pending) {
         app.map.camera = Some(fit_camera(app, w, h));
     }
+    // a track log loaded before the map had a size
+    if app.map.trk.fit_pending {
+        tracks::fit(app);
+    }
     let resp = ui.interact(canvas, egui::Id::new("map-canvas"), Sense::click_and_drag());
     register(&ctx, "map:canvas", canvas);
     let local = |p: egui::Pos2| Point::new(f64::from(p.x - canvas.min.x), f64::from(p.y - canvas.min.y));
@@ -610,8 +618,9 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     app.map.tiles_drawn = tiles.drawn;
     app.map.tiles_missing = tiles.missing;
 
-    // ---- saved locations, under the pins
+    // ---- saved locations and the track log, under the pins
     locations::draw(app, &painter, &t, canvas, &vp);
+    tracks::draw(app, &painter, &t, canvas, &vp);
 
     // ---- pins
     let key = (
@@ -1044,13 +1053,15 @@ fn controls(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     let fit_w = ui.painter().layout_no_wrap(fit_label.clone(), t.font(12.5), t.text).size().x + 20.0;
     let lock_label = crate::i18n::tr("Lock Markers").to_string();
     let lock_w = ui.painter().layout_no_wrap(lock_label.clone(), t.font(12.5), t.text).size().x + 20.0;
-    let bar_w = lock_w + 6.0 + fit_w + 6.0 + 64.0;
+    let track_w = ui.painter().layout_no_wrap(crate::i18n::tr("Tracklog").to_string(), t.font(12.5), t.text).size().x + 20.0;
+    let bar_w = track_w + 6.0 + lock_w + 6.0 + fit_w + 6.0 + 64.0;
     let bar = Rect::from_min_size(pos2(canvas.right() - 12.0 - bar_w, canvas.top() + 12.0), vec2(bar_w, 30.0));
     if bar.left() < canvas.left() || bar.bottom() > canvas.bottom() {
         return;
     }
+    tracks::button(app, ui, Rect::from_min_size(bar.min, vec2(track_w, 30.0)));
     let locked = app.ui.map_lock_markers;
-    let lock_r = Rect::from_min_size(bar.min, vec2(lock_w, 30.0));
+    let lock_r = Rect::from_min_size(pos2(bar.left() + track_w + 6.0, bar.top()), vec2(lock_w, 30.0));
     let fill = if locked { t.tool_active } else { t.chrome.gamma_multiply(0.92) };
     let b = ui.put(lock_r, egui::Button::new(egui::RichText::new(lock_label).font(t.font(12.5))).fill(fill).selected(locked));
     register(ui.ctx(), "map:lockMarkers", b.rect);
@@ -1119,6 +1130,9 @@ pub fn command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Result<Va
         other => other,
     };
     if let Some(r) = locations::command(app, id, p) {
+        return Some(r);
+    }
+    if let Some(r) = tracks::command(app, id, p) {
         return Some(r);
     }
     let r = match id {
@@ -1220,6 +1234,7 @@ pub fn command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Result<Va
 pub fn state(app: &mut LightcraftApp) -> Value {
     let mut s = state_core(app);
     locations::state(app, &mut s);
+    tracks::state(app, &mut s);
     s
 }
 

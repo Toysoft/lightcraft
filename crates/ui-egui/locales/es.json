@@ -1940,5 +1940,22 @@
   "Photos in Saved Location": "Fotos de la ubicación guardada",
   "Show Saved Location": "Mostrar ubicación guardada",
   "Select Saved Location": "Seleccionar ubicación guardada",
-  "Select Photos in Saved Location": "Seleccionar fotos de la ubicación guardada"
+  "Select Photos in Saved Location": "Seleccionar fotos de la ubicación guardada",
+  "Tracklog": "Registro de ruta",
+  "Load a GPS track log (GPX) to show it on the map and tag photos from it": "Cargar un registro de ruta GPS (GPX) para verlo en el mapa y geoetiquetar fotos con él",
+  "Load Tracklog…": "Cargar registro de ruta…",
+  "Load Tracklog": "Cargar registro de ruta",
+  "points": "puntos",
+  "UTC: no time zone offset set": "UTC: sin desfase horario",
+  "Start:": "Inicio:",
+  "End:": "Fin:",
+  "Duration:": "Duración:",
+  "Set Time Zone Offset…": "Establecer desfase horario…",
+  "Set Time Zone Offset": "Establecer desfase horario",
+  "Auto-Tag Selected Photo": "Geoetiquetar la foto seleccionada",
+  "Fit Map to Tracklog": "Ajustar el mapa al registro de ruta",
+  "Load Another Tracklog…": "Cargar otro registro de ruta…",
+  "Clear Tracklog": "Quitar registro de ruta",
+  "Auto-Tag Selected Photos from Map Tracklog": "Geoetiquetar las fotos seleccionadas con el registro del mapa",
+  "Set Tracklog Time Zone Offset…": "Establecer desfase horario del registro…"
 }

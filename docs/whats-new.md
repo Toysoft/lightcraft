@@ -31,6 +31,12 @@
   are exported without their location, and the Info panel hides their map until you ask for it. Saved locations are
   kept with the library (`locations.json`). Smart albums gain **GPS Radius**. Agents: `map.locations`,
   `map.location.add`, `map.location.update`, `map.location.remove`, `map.location.photos`.
+- GPS track logs on the map, as in Lightroom Classic: **Tracklog** (top right of the map) ▸ **Load Tracklog…** draws a
+  GPX file's tracks as lines and fits the map to them; gaps in the logging stay gaps. Pick one of several tracks in the
+  menu, see its start, end and duration on the camera's clock, set the time zone offset, and **Auto-Tag N Selected
+  Photos** places them where the track was at their capture time, in one undo step. The selected photos are marked on
+  the track where they would go, so a wrong offset shows before anything is written. Files up to 50 MB (2 million
+  points) draw smoothly. Agents: `map.trackLog`, `photo.autoTagTracklog {loaded: true}`.
 
 ### Activity stack
 - Long-running tasks show in one place, top left under the top bar, as in Lightroom Classic (issue #345): imports and

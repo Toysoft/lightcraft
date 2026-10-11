@@ -1940,5 +1940,22 @@
   "Photos in Saved Location": "Photos du lieu enregistré",
   "Show Saved Location": "Afficher le lieu enregistré",
   "Select Saved Location": "Sélectionner le lieu enregistré",
-  "Select Photos in Saved Location": "Sélectionner les photos du lieu enregistré"
+  "Select Photos in Saved Location": "Sélectionner les photos du lieu enregistré",
+  "Tracklog": "Tracé GPS",
+  "Load a GPS track log (GPX) to show it on the map and tag photos from it": "Charger un tracé GPS (GPX) pour l'afficher sur la carte et géolocaliser des photos",
+  "Load Tracklog…": "Charger un tracé GPS…",
+  "Load Tracklog": "Charger un tracé GPS",
+  "points": "points",
+  "UTC: no time zone offset set": "UTC : aucun décalage horaire défini",
+  "Start:": "Début :",
+  "End:": "Fin :",
+  "Duration:": "Durée :",
+  "Set Time Zone Offset…": "Définir le décalage horaire…",
+  "Set Time Zone Offset": "Définir le décalage horaire",
+  "Auto-Tag Selected Photo": "Géolocaliser la photo sélectionnée",
+  "Fit Map to Tracklog": "Ajuster la carte au tracé",
+  "Load Another Tracklog…": "Charger un autre tracé…",
+  "Clear Tracklog": "Retirer le tracé",
+  "Auto-Tag Selected Photos from Map Tracklog": "Géolocaliser les photos sélectionnées d'après le tracé de la carte",
+  "Set Tracklog Time Zone Offset…": "Définir le décalage horaire du tracé…"
 }

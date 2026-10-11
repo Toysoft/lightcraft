@@ -1942,5 +1942,22 @@
   "Photos in Saved Location": "保存した場所の写真",
   "Show Saved Location": "保存した場所を表示",
   "Select Saved Location": "保存した場所を選択",
-  "Select Photos in Saved Location": "保存した場所の写真を選択"
+  "Select Photos in Saved Location": "保存した場所の写真を選択",
+  "Tracklog": "トラックログ",
+  "Load a GPS track log (GPX) to show it on the map and tag photos from it": "GPSトラックログ (GPX) を読み込み、地図に表示して写真に位置情報を付けます",
+  "Load Tracklog…": "トラックログを読み込み…",
+  "Load Tracklog": "トラックログを読み込み",
+  "points": "ポイント",
+  "UTC: no time zone offset set": "UTC：時差は未設定",
+  "Start:": "開始:",
+  "End:": "終了:",
+  "Duration:": "所要時間:",
+  "Set Time Zone Offset…": "時差を設定…",
+  "Set Time Zone Offset": "時差を設定",
+  "Auto-Tag Selected Photo": "選択した写真に自動で位置を付ける",
+  "Fit Map to Tracklog": "地図をトラックログに合わせる",
+  "Load Another Tracklog…": "別のトラックログを読み込み…",
+  "Clear Tracklog": "トラックログを消去",
+  "Auto-Tag Selected Photos from Map Tracklog": "地図のトラックログから選択した写真に位置を付ける",
+  "Set Tracklog Time Zone Offset…": "トラックログの時差を設定…"
 }

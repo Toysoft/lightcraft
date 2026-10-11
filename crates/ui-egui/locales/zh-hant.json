@@ -1940,5 +1940,22 @@
   "Photos in Saved Location": "已儲存位置內的照片",
   "Show Saved Location": "顯示已儲存的位置",
   "Select Saved Location": "選取已儲存的位置",
-  "Select Photos in Saved Location": "選取已儲存位置內的照片"
+  "Select Photos in Saved Location": "選取已儲存位置內的照片",
+  "Tracklog": "軌跡記錄",
+  "Load a GPS track log (GPX) to show it on the map and tag photos from it": "載入 GPS 軌跡記錄 (GPX)，在地圖上顯示並據此為照片加上位置",
+  "Load Tracklog…": "載入軌跡記錄…",
+  "Load Tracklog": "載入軌跡記錄",
+  "points": "個點",
+  "UTC: no time zone offset set": "UTC：未設定時區偏移",
+  "Start:": "開始：",
+  "End:": "結束：",
+  "Duration:": "時長：",
+  "Set Time Zone Offset…": "設定時區偏移…",
+  "Set Time Zone Offset": "設定時區偏移",
+  "Auto-Tag Selected Photo": "自動為所選照片加上位置",
+  "Fit Map to Tracklog": "地圖符合軌跡",
+  "Load Another Tracklog…": "載入其他軌跡記錄…",
+  "Clear Tracklog": "清除軌跡記錄",
+  "Auto-Tag Selected Photos from Map Tracklog": "依地圖軌跡為所選照片加上位置",
+  "Set Tracklog Time Zone Offset…": "設定軌跡記錄的時區偏移…"
 }

@@ -24,6 +24,10 @@ pub struct MapState {
     service: Option<TileService>,
     /// The library's saved locations (`locations.json`, see [`crate::locations`]).
     pub locations: crate::locations::SavedLocations,
+    /// The track log loaded into the Map view (session only, see [`crate::tracklog`]).
+    pub track: Option<crate::tracklog::LoadedTrack>,
+    /// Bumped by every change of [`MapState::track`] (load, active track, offset, clear).
+    pub track_generation: u64,
 }
 
 impl Default for MapState {
@@ -34,6 +38,8 @@ impl Default for MapState {
             cache_bytes: DEFAULT_CACHE_BYTES,
             service: None,
             locations: Default::default(),
+            track: None,
+            track_generation: 0,
         }
     }
 }

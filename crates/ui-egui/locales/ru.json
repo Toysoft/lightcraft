@@ -1654,5 +1654,22 @@
   "Photos in Saved Location": "Фото в сохранённом месте",
   "Show Saved Location": "Показать сохранённое место",
   "Select Saved Location": "Выбрать сохранённое место",
-  "Select Photos in Saved Location": "Выбрать фото в сохранённом месте"
+  "Select Photos in Saved Location": "Выбрать фото в сохранённом месте",
+  "Tracklog": "Трек",
+  "Load a GPS track log (GPX) to show it on the map and tag photos from it": "Загрузить GPS-трек (GPX), чтобы показать его на карте и привязать к нему фото",
+  "Load Tracklog…": "Загрузить трек…",
+  "Load Tracklog": "Загрузить трек",
+  "points": "точек",
+  "UTC: no time zone offset set": "UTC: смещение часового пояса не задано",
+  "Start:": "Начало:",
+  "End:": "Конец:",
+  "Duration:": "Длительность:",
+  "Set Time Zone Offset…": "Задать смещение часового пояса…",
+  "Set Time Zone Offset": "Задать смещение часового пояса",
+  "Auto-Tag Selected Photo": "Привязать выбранное фото",
+  "Fit Map to Tracklog": "Показать весь трек",
+  "Load Another Tracklog…": "Загрузить другой трек…",
+  "Clear Tracklog": "Убрать трек",
+  "Auto-Tag Selected Photos from Map Tracklog": "Привязать выбранные фото по треку на карте",
+  "Set Tracklog Time Zone Offset…": "Задать смещение часового пояса трека…"
 }

@@ -231,5 +231,12 @@
   "{what} merge cancelled": "{what} mesclagem cancelada",
   "Delete the saved location “{name}”?": "Excluir o local salvo “{name}”?",
   "In the private location “{name}”: its map is hidden.": "No local privado “{name}”: o mapa está oculto.",
-  "within {d} of {lat}, {lon}": "a até {d} de {lat}, {lon}"
+  "within {d} of {lat}, {lon}": "a até {d} de {lat}, {lon}",
+  "All Tracks ({n})": "Todas as trilhas ({n})",
+  "Track {n}": "Trilha {n}",
+  "camera time, UTC{o}": "hora da câmera, UTC{o}",
+  "Set Time Zone Offset… (UTC{o})": "Definir deslocamento de fuso… (UTC{o})",
+  "Auto-Tag {n} Selected Photos": "Geomarcar {n} fotos selecionadas",
+  "{m} of them fall within the track's time range": "{m} delas estão no intervalo de tempo da trilha",
+  "{n} more tracks": "mais {n} trilhas"
 }

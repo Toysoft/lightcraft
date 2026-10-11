@@ -7,6 +7,8 @@
 //!   out-of-range latitudes/longitudes are dropped, never propagated.
 //! - [`cluster`]: photo pins grouped per zoom ([`cluster()`]): points projected once
 //!   ([`MapPoint`]), grouped every frame into world-anchored screen cells.
+//! - [`track`]: GPS track logs drawn on the map ([`TrackShape`]): lines projected once, cut at the
+//!   antimeridian, simplified per zoom (Douglas–Peucker ranks computed once) and clipped to the view.
 //! - [`source`]: where tiles come from ([`TileSource`]): OpenStreetMap's standard tiles by default,
 //!   a user-configured `https://…/{z}/{x}/{y}.png` template, or offline (no network at all).
 //! - [`cache`]: the on-disk tile cache ([`TileCache`]): PNG bytes plus HTTP freshness metadata,
@@ -30,6 +32,7 @@ pub mod http_date;
 pub mod mercator;
 pub mod service;
 pub mod source;
+pub mod track;
 
 #[cfg(test)]
 mod tests_cluster;
@@ -37,12 +40,15 @@ mod tests_cluster;
 mod tests_mercator;
 #[cfg(test)]
 mod tests_service;
+#[cfg(test)]
+mod tests_track;
 
 pub use cache::{CacheInfo, CachedTile, DEFAULT_CACHE_BYTES, TileCache, TileMeta};
 pub use cluster::{CLUSTER_CELL, Cluster, MapPoint, cluster};
 pub use mercator::{Area, Bounds, LatLon, MAX_LATITUDE, MAX_ZOOM, TILE_SIZE, TileKey, Viewport, VisibleTile, fit_bounds};
 pub use service::{HttpResponse, ServiceStats, TileEvent, TileImage, TileService, Transport};
 pub use source::{OSM_ATTRIBUTION, OSM_TILE_URL, TileSource, USER_AGENT};
+pub use track::{Level, TrackShape};
 
 /// What went wrong in the map core.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

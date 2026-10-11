@@ -6,8 +6,8 @@ off.
 
 Status: the Map view (below) shows the photos in view as pins and clusters over the tiles, you can drag photos onto it
 to set their location (and move or remove pins), filter the filmstrip by location, save named places (saved locations,
-some of them private), and the Info panel shows a small map of the active photo's place. Still to come: track logs drawn
-on the map. Nothing is fetched until a map is on screen.
+some of them private), draw a GPS track log (GPX) and tag photos from it, and the Info panel shows a small map of the
+active photo's place. Nothing is fetched until a map is on screen.
 
 ## The Map view
 
@@ -191,6 +191,66 @@ Widgets: `map:locations` (the list), `map:locationsHeader`, `icon:locationNew`, 
 `map:location:<id>:centre` and `map:location:<id>:radius` (the handles on the map), `map:locationMenu:show`,
 `…:selectPhotos`, `…:rename`, `…:private`, `…:delete`, `button:showPrivateMap` (Info panel).
 
+## Track logs
+
+As in Lightroom Classic's Map module (the Tracklog button), a GPS track log (a GPX 1.0 / 1.1 file from a phone app,
+watch or logger) can be drawn on the map and used to tag photos:
+
+- **Tracklog** (top right of the map) ▸ **Load Tracklog…** opens a `.gpx` file. Its tracks are drawn as pink lines and
+  the map fits them. Each continuous logging span (a GPX track segment) is its own line: a gap where the logger was off
+  or lost reception is not joined. A line crossing the ±180° meridian is drawn the short way across it.
+- A file with several tracks lists them in the menu, with **All Tracks** (the default). Picking one draws the others
+  dimmed, fits the map to it and makes it the one tagging uses, as in Lightroom.
+- The menu shows the active track's **start, end and duration** on the camera's clock: GPX times are UTC, so they are
+  shifted by the **time zone offset** (Set Time Zone Offset…, e.g. `+02:00` or `-5`); with none set they are UTC and
+  say so. The offset is the one tagging uses for capture times without a recorded zone (a photo whose Exif records its
+  own offset uses that).
+- **Auto-Tag N Selected Photos** tags the selected photos from the active track by capture time
+  (`photo.autoTagTracklog`, as Photo ▸ Auto-Tag from Tracklog… does): interpolated between the points of a segment,
+  else the nearest point within 10 minutes, never across a gap; photos that already have a position keep it. If no
+  offset is set it asks for the camera's time zone first (and keeps it with the track). All the photos tagged are one
+  undo step; a message says how many were tagged and how many fell outside the track's time range.
+- The selected photos are **marked on the track** (white dots) where Auto-Tag would put them, so a wrong offset shows
+  before anything is written; the menu's Auto-Tag item says how many fall within the track. Marks are drawn for up to
+  5 000 selected photos.
+- **Fit Map to Tracklog**, **Load Another Tracklog…** and **Clear Tracklog** are in the same menu.
+- The track log belongs to the session: it is not saved in the catalog and is gone after a restart (a new file keeps
+  the offset chosen for the last one).
+
+Limits and errors: a file larger than 50 MB or with more than 2 million timed points is refused with a message saying
+so, as are a file that isn't GPX, one without tracks, and one whose points have no times (tagging needs them); the
+track already loaded stays. Points with invalid coordinates (NaN, out of range) are skipped; points beyond the map's
+±85.05° latitude are drawn on its edge; timestamps out of order are sorted.
+
+Drawing cost: each track is projected and ranked for simplification once when loaded (Douglas–Peucker ranks: keeping
+the points ranked above a tolerance is exactly the Douglas–Peucker line at that tolerance, so no dropped point is more
+than 0.6 px from the line drawn, and every line keeps its ends). Each zoom level then takes one pass over the points,
+and each view change clips only the chunks on screen. On a 2-million-point track (release build): loading's
+projection and ranking about 230 ms, a zoom level 1–10 ms, a frame's clipping well under 1 ms (0.5 ms with 38 000
+points on screen).
+
+Commands: `map.trackLog` (a library command, so it works headless and over MCP too):
+
+| Params | Does |
+|---|---|
+| `{path}` or `{gpx}` | Load a GPX file (or its text), replacing the one loaded; the Map view fits it (`fit: false` keeps the view) |
+| `{active: n \| "all"}` | The track tagging uses and the map highlights (index from `tracks`) |
+| `{offset: "+02:00" \| hours \| null}` | The camera clock's offset from UTC (null or `""`: UTC) |
+| `{clear: true}` | Remove the track log |
+| `{}` | Report |
+
+→ `{loaded, path, name, points, untimed, tracks: [{index, name, points, segments, start, end, duration}], active,
+activePoints, start, end, duration, offset, startLocal, endLocal, loadMs, generation}` (`start` / `end` in UTC,
+`startLocal` / `endLocal` on the camera's clock). Several params combine; a refused one changes nothing.
+`photo.autoTagTracklog {loaded: true, …}` tags from it (its active track, and its offset unless `offset` is given).
+UI commands: `map.loadTrackLog {path?}` (asks for the file without `path`), `map.trackLog.autoTag {ids?, offset?}`
+(asks for the offset when none is set), `map.trackLog.setOffset {offset?}`, `map.trackLog.fit`. `map.state` →
+`trackLog` adds what is drawn: `drawn: {lines (per track), points, levelPoints, zoom, levelMs, clipMs}`,
+`ticks: [{id, x, y}]` (the selected photos' marks, screen points) and `onTrack`.
+
+Widgets: `map:tracklog` (the button), `map:tracklog:load`, `…:track:all`, `…:track:<index>`, `…:info`, `…:offset`,
+`…:autoTag`, `…:fit`, `…:clear`.
+
 ## Map commands
 
 Commands (UI commands: they need the map's size, so the app, `lightcraft-cli snapshot` and `mcp --connect` have them):
@@ -201,10 +261,10 @@ Commands (UI commands: they need the map's size, so the app, `lightcraft-cli sna
 | `map.fit` | — | Fit the photos with a position (the world when there are none) → the map state |
 | `map.setView` | `{lat?, lon?, zoom?}` | Centre (degrees) and zoom (0 to the source's max zoom; fractional allowed); what is left out stays → the map state |
 | `map.zoomIn` / `map.zoomOut` | — | One zoom level in / out, around the centre → the map state |
-| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, lockMarkers, locationFilter, movingPin, drop, tiles: {drawn, missing, textures, uploads}, miniMap}` (`miniMap`: the Info panel's map, below); `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
+| `map.state` | — | `{lat, lon, zoom, maxZoom, width, height, tileZoom, source, offline, attribution, withGps, withoutGps, clusters: [{ids, count, x, y, lat, lon, selected}], clusterCount, clusterMs, lockMarkers, locationFilter, movingPin, drop, tiles: {drawn, missing, textures, uploads}, miniMap, trackLog}` (`miniMap`: the Info panel's map, below; `trackLog`: see Track logs); `x`, `y` are screen points (for `ui.click`), at most 500 clusters listed |
 
 Widgets (`ui.widgets`): `map:canvas`, `map:pin:<first photo id>`, `map:fit`, `icon:mapZoomIn`, `icon:mapZoomOut`,
-`map:attribution`, `map:withoutGps`, `map:hoverThumb`.
+`map:attribution`, `map:withoutGps`, `map:hoverThumb`, `map:tracklog`.
 
 ## The map in the Info panel
 
