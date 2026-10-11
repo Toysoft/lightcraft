@@ -2493,9 +2493,19 @@ mod tests {
         h.request("engine.execute", json!({"command": "library.select", "params": {"ids": [id.0]}}), t);
         h.request("ui.set", json!({"view": "detail", "right": "info"}), t);
         let before = h.app.session.catalog.photo(id).unwrap().captured.clone().unwrap();
+        // The dock header leaves less vertical space; bring the metadata action into view.
+        let panel = h.app.widgets.iter().find(|(id, _)| id == "panel:right_panel").unwrap().1;
+        let clipped_action = h.app.widgets.iter().find(|(id, _)| id == "icon:editCaptureTime").unwrap().1;
+        assert!(!panel.contains_rect(clipped_action), "the capture-time action starts below the visible panel: {clipped_action:?}");
+        h.request("ui.move", json!({"x": panel.center().x, "y": panel.center().y}), t);
+        h.request("ui.scroll", json!({"dy": -160.0}), t);
+        h.settle(SETTLE);
+        let action = h.app.widgets.iter().find(|(id, _)| id == "icon:editCaptureTime").unwrap().1;
+        assert!(panel.contains_rect(action), "capture-time action must be visible before clicking: {action:?} in {panel:?}");
         let r = h.request("ui.clickWidget", json!({"id": "icon:editCaptureTime"}), t);
         assert_eq!(r["ok"], true, "{r}");
-        h.request("ui.clickWidget", json!({"id": "button:captureMode-2"}), t);
+        let r = h.request("ui.clickWidget", json!({"id": "button:captureMode-2"}), t);
+        assert_eq!(r["ok"], true, "{r}");
         if let Some(crate::state::Dialog::CaptureTime { zone, .. }) = &mut h.app.ui.dialog {
             *zone = -3.0;
         } else {
@@ -3345,6 +3355,28 @@ mod tests {
         h.request("ui.scroll", json!({"dx": 100, "dy": 100}), t);
         assert_eq!(h.app.ui.zoom, Zoom::Fit);
         assert_eq!(h.app.ui.pan, (0.5, 0.5));
+    }
+
+    #[test]
+    fn mouse_wheel_zooms_the_loupe_with_and_without_ctrl() {
+        use crate::state::Zoom;
+        let mut h = demo([1000.0, 700.0]);
+        let t = Duration::from_secs(10);
+        h.request("ui.set", json!({"view": "detail", "right": "none", "leftPanel": false, "filmstrip": false}), t);
+        h.settle(SETTLE);
+        for (unit, y, modifiers) in [
+            (egui::MouseWheelUnit::Line, 1.0, egui::Modifiers::NONE),
+            (egui::MouseWheelUnit::Line, 1.0, egui::Modifiers::CTRL),
+            (egui::MouseWheelUnit::Point, 50.0, egui::Modifiers::CTRL),
+        ] {
+            h.request("ui.set", json!({"zoom": "fit", "pan": [0.5, 0.5]}), t);
+            h.request("ui.hoverWidget", json!({"id": "canvas:image"}), t);
+            h.app.synthetic.push(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, y), phase: egui::TouchPhase::Move, modifiers });
+            for _ in 0..10 {
+                h.step();
+            }
+            assert!(matches!(h.app.ui.zoom, Zoom::Percent(_)), "wheel {unit:?} {modifiers:?} must zoom in, got {:?}", h.app.ui.zoom);
+        }
     }
 
     #[test]
