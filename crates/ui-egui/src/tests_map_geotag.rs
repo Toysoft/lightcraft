@@ -254,3 +254,35 @@ fn hostile_drops_never_crash() {
     }
     assert!(h.settle(SETTLE));
 }
+
+#[test]
+fn a_floating_panel_over_the_map_refuses_the_drop_like_catalog_targets() {
+    let (mut h, _) = demo(None);
+    map_at(&mut h, 30.0, 0.0, 3.0);
+    let id = h.app.session.visible_cloned()[6].0;
+    let canvas = h.app.map.rect.expect("the map is drawn in the docked canvas");
+    let to = canvas.center();
+    let steps = h.app.session.undo.len();
+    // the Tools panel floats over the middle of the map: dropping there does nothing
+    h.app.run("ui.dock", json!({"operation": "float", "panel": "tools", "rect": [to.x - 150.0, to.y - 200.0, 330, 400]})).unwrap();
+    frames(&mut h, 4);
+    let from = film(&mut h, id);
+    hold(&mut h, from, to);
+    assert!(h.app.ui.dragging_photos.is_some(), "the filmstrip drag is under way");
+    assert!(state(&mut h)["drop"].is_null(), "no drop pin under the floating panel");
+    release(&mut h, to);
+    assert_eq!(gps(&h, id), None, "the covered map takes no drop");
+    assert_eq!(h.app.session.undo.len(), steps);
+    // moved off the map's middle, the same drop sets the position
+    h.app
+        .run("ui.dock", json!({"operation": "moveFloating", "panel": "tools", "rect": [canvas.left() + 5.0, canvas.top() + 5.0, 200, 200]}))
+        .unwrap();
+    frames(&mut h, 4);
+    let want = place_at(&mut h, to.x, to.y);
+    let from = film(&mut h, id);
+    hold(&mut h, from, to);
+    assert_eq!(state(&mut h)["drop"]["count"], 1, "the uncovered map shows the drop pin");
+    release(&mut h, to);
+    assert!(gps(&h, id).is_some_and(|g| close(g, want)), "{:?} vs {want:?}", gps(&h, id));
+    assert_eq!(h.app.session.undo.len(), steps + 1);
+}

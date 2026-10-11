@@ -356,9 +356,10 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
         }
     }
     // ---- photos dragged from the filmstrip: a pin at the pointer; a release sets their position
+    // (not under a floating panel, like the catalog's drop targets)
     app.map.drop_at = None;
     if let Some(ids) = app.ui.dragging_photos.clone()
-        && let Some(p) = pointer.filter(|p| canvas.contains(*p))
+        && let Some(p) = pointer.filter(|_| crate::docking::drop_target(ui, canvas, pointer))
     {
         if ui.input(|i| i.pointer.any_released()) {
             app.ui.dragging_photos = None;
