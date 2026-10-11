@@ -181,7 +181,7 @@ fn prepare(s: &mut Session, id: PhotoId) -> Option<Item> {
     // the unedited look, upright and uncropped; not written to the thumbnail cache (it is only read once)
     let job = s.variant_job(id, &DevelopSettings::default(), EDGE).map(|mut j| {
         j.cache = None;
-        j
+        crate::content_worker::render(j)
     });
     Some(Item { id, hash: photo_hash(&p), preview, job, path })
 }

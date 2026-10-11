@@ -139,6 +139,20 @@ fn candidates<'a>(data: &'a [u8], ifd: &Ifd, base: u64, out: &mut Vec<&'a [u8]>)
 /// The largest embedded preview, if any: a JPEG, or (DNG 1.7) a JPEG XL file — both decode with
 /// `lightcraft_codecs::decode`.
 pub fn embedded_preview(bytes: &[u8]) -> Option<Vec<u8>> {
+    preview_at_least(bytes, None)
+}
+
+/// The smallest embedded preview whose long edge is at least `min_edge` pixels, of the same shape as the largest
+/// (a letterboxed or cropped small preview is never chosen), else the largest ([`embedded_preview`]).
+///
+/// Why it exists: many raws carry a full-size JPEG beside a small one (a Sony α1's ARW: 8640 × 5760 in 5.6 MB and
+/// 1616 × 1080 in 170 KB); a 512 px thumbnail or a content-index picture needs only the small one, and decoding the
+/// big one costs about 30 times the time and memory.
+pub fn embedded_preview_at_least(bytes: &[u8], min_edge: u32) -> Option<Vec<u8>> {
+    preview_at_least(bytes, Some(min_edge))
+}
+
+fn preview_at_least(bytes: &[u8], min_edge: Option<u32>) -> Option<Vec<u8>> {
     if bytes.starts_with(b"FUJIFILMCCD-RAW") {
         let j = crate::vendor::raf::header(bytes).ok()?.jpeg?;
         return is_dct_jpeg(j).then(|| trim_eoi(j).to_vec());
@@ -173,13 +187,52 @@ pub fn embedded_preview(bytes: &[u8]) -> Option<Vec<u8>> {
     if let Some(p) = crate::vendor::orf::preview(bytes) {
         found.push(p);
     }
-    let best = found
-        .into_iter()
-        .filter(|s| is_dct_jpeg(s) || is_jxl(s))
-        .max_by_key(|s| s.len())
-        .map(|s| if is_jxl(s) { s.to_vec() } else { trim_eoi(s).to_vec() });
+    let usable: Vec<&[u8]> = found.into_iter().filter(|s| is_dct_jpeg(s) || is_jxl(s)).collect();
+    let largest = usable.iter().copied().max_by_key(|s| s.len());
+    let best = match (min_edge, largest) {
+        (Some(min), Some(big)) if is_dct_jpeg(big) => {
+            let shape = dct_jpeg_size(big).map(|(w, h)| f64::from(w) / f64::from(h.max(1)));
+            usable
+                .iter()
+                .copied()
+                .filter(|s| s.len() < big.len())
+                .filter_map(|s| dct_jpeg_size(s).map(|(w, h)| (s, w, h)))
+                .filter(|(_, w, h)| (*w).max(*h) >= min && *h > 0)
+                .filter(|(_, w, h)| shape.is_some_and(|r| (f64::from(*w) / f64::from(*h) / r - 1.0).abs() <= 0.02))
+                .min_by_key(|(s, _, _)| s.len())
+                .map(|(s, _, _)| s)
+                .or(Some(big))
+        }
+        (_, big) => big,
+    };
+    let best = best.map(|s| if is_jxl(s) { s.to_vec() } else { trim_eoi(s).to_vec() });
     // a TIFF raw we can't decode whose preview no tag points to (Leaf MOS, Epson ERF)
     best.or_else(|| format.filter(|f| !f.is_supported()).and_then(|_| scan_for_jpeg(bytes)))
+}
+
+/// Width and height of a displayable (DCT) JPEG, from its first SOF marker.
+fn dct_jpeg_size(b: &[u8]) -> Option<(u32, u32)> {
+    if !is_dct_jpeg(b) {
+        return None;
+    }
+    let mut i = 2usize;
+    loop {
+        let (&ff, &m) = (b.get(i)?, b.get(i + 1)?);
+        if ff != 0xff {
+            return None;
+        }
+        if m == 0xff {
+            i += 1;
+            continue;
+        }
+        if matches!(m, 0xc0..=0xc2) {
+            let s = b.get(i + 5..i + 9)?;
+            let (h, w) = (u16::from_be_bytes([s[0], s[1]]), u16::from_be_bytes([s[2], s[3]]));
+            return (w > 0 && h > 0).then_some((u32::from(w), u32::from(h)));
+        }
+        let len = b.get(i + 2..i + 4).map(|s| usize::from(u16::from_be_bytes([s[0], s[1]])))?;
+        i = i.checked_add(2 + len)?;
+    }
 }
 
 /// The end of the DCT JPEG whose SOI is at `soi` (exclusive index after its EOI) and its component count,

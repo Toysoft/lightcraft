@@ -55,7 +55,7 @@ pub use lightcraft_meta::Metadata;
 pub use lightcraft_raster::Rgb32f;
 pub use opcodes::{Opcode, OpcodeLists};
 pub use preview::{
-    PREVIEW_PREFIX, PreviewColorSpace, PreviewRange, bounded_preview, embedded_preview, embedded_preview_color_space,
+    PREVIEW_PREFIX, PreviewColorSpace, PreviewRange, bounded_preview, embedded_preview, embedded_preview_at_least, embedded_preview_color_space,
     embedded_preview_dynamic_range_optimized, embedded_preview_from_range,
 };
 pub use semantic::{SemanticMask, semantic_masks};
@@ -1030,6 +1030,54 @@ mod tests {
         // no pointer and no sub-IFDs: just a broken TIFF
         let g = write(&[IfdBuilder::new().with(t::MAKE, Value::Ascii("KODAK".into()))]);
         assert_eq!(probe(&g), None);
+    }
+
+    /// A TIFF with one JPEG preview per IFD (IFD0 → IFD1 → IFD2), each `w × h` (a fake JPEG: SOI, SOF0, filler).
+    fn tiff_with_previews(sizes: &[(u16, u16, usize)]) -> (Vec<u8>, Vec<Vec<u8>>) {
+        let jpegs: Vec<Vec<u8>> = sizes
+            .iter()
+            .map(|&(w, h, fill)| {
+                let [h0, h1] = h.to_be_bytes();
+                let [w0, w1] = w.to_be_bytes();
+                [&[0xffu8, 0xd8, 0xff, 0xc0, 0, 0x0b, 8, h0, h1, w0, w1, 1, 1, 0x11, 0][..], &vec![0x55; fill], &[0xff, 0xd9]].concat()
+            })
+            .collect();
+        let ifd_len = 2 + 2 * 12 + 4;
+        let mut f = b"II*\0\x08\0\0\0".to_vec();
+        let data_start = 8 + ifd_len * jpegs.len();
+        let mut at = data_start;
+        for (i, j) in jpegs.iter().enumerate() {
+            f.extend_from_slice(&2u16.to_le_bytes());
+            for (tag, v) in [(513u16, at as u32), (514, j.len() as u32)] {
+                f.extend_from_slice(&tag.to_le_bytes());
+                f.extend_from_slice(&[4, 0, 1, 0, 0, 0]);
+                f.extend_from_slice(&v.to_le_bytes());
+            }
+            let next = if i + 1 < jpegs.len() { (8 + ifd_len * (i + 1)) as u32 } else { 0 };
+            f.extend_from_slice(&next.to_le_bytes());
+            at += j.len();
+        }
+        for j in &jpegs {
+            f.extend_from_slice(j);
+        }
+        (f, jpegs)
+    }
+
+    #[test]
+    fn the_smallest_preview_big_enough_is_chosen_when_asked() {
+        // full size, a small one of the same shape, and a small letterboxed (square) one
+        let (f, j) = tiff_with_previews(&[(6000, 4000, 4000), (1616, 1077, 400), (640, 640, 100)]);
+        assert_eq!(embedded_preview(&f).as_ref(), Some(&j[0]), "without a size: the largest");
+        assert_eq!(embedded_preview_at_least(&f, 512).as_ref(), Some(&j[1]), "the small one of the same shape");
+        assert_eq!(embedded_preview_at_least(&f, 1616).as_ref(), Some(&j[1]));
+        assert_eq!(embedded_preview_at_least(&f, 1617).as_ref(), Some(&j[0]), "too small: the largest");
+        assert_eq!(embedded_preview_at_least(&f, 100).as_ref(), Some(&j[1]), "never the square one");
+        // one preview: that one, whatever is asked
+        let (g, k) = tiff_with_previews(&[(160, 120, 50)]);
+        assert_eq!(embedded_preview_at_least(&g, 4000).as_ref(), Some(&k[0]));
+        // damaged sizes are not trusted
+        let (h, l) = tiff_with_previews(&[(6000, 4000, 4000), (0, 0, 400)]);
+        assert_eq!(embedded_preview_at_least(&h, 16).as_ref(), Some(&l[0]));
     }
 
     /// A GoPro GPR (a DNG with VC-5 coded raw data, Compression 9) is refused by the full decode with

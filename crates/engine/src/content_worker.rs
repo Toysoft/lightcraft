@@ -14,7 +14,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::Instant;
 
 use lightcraft_catalog::PhotoId;
@@ -28,6 +28,61 @@ use crate::media::{PreviewLoader, RenderJob};
 pub(crate) const EDGE: usize = 512;
 /// A raw's embedded preview is used when its long edge is at least this.
 pub(crate) const MIN_PREVIEW_EDGE: usize = 256;
+/// Embedded previews read at once: each reads its raw file (a 50 MP raw is ~60 MB) and decodes the preview.
+pub(crate) const MAX_PREVIEW_READS: usize = 4;
+/// Photos rendered from their file at once (no usable preview: a JPEG, a TIFF, a raw without one). A render can hold
+/// the whole file and a full-size decode, so one at a time: a few big files at once were the 2–5 GB peaks of a scan.
+pub(crate) const MAX_RENDERS: usize = 1;
+
+/// A counting gate: at most `max` holders at once (the others wait), and the most there ever were.
+pub(crate) struct Gate {
+    max: usize,
+    /// Holders now, and the most at once.
+    state: Mutex<(usize, usize)>,
+    freed: Condvar,
+}
+
+/// Held while inside a [`Gate`].
+pub(crate) struct Pass<'a>(&'a Gate);
+
+impl Drop for Pass<'_> {
+    fn drop(&mut self) {
+        let mut st = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+        st.0 = st.0.saturating_sub(1);
+        self.0.freed.notify_one();
+    }
+}
+
+impl Gate {
+    pub const fn new(max: usize) -> Gate {
+        Gate { max, state: Mutex::new((0, 0)), freed: Condvar::new() }
+    }
+
+    /// Wait for a place, and hold it until the pass is dropped.
+    pub fn enter(&self) -> Pass<'_> {
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        while st.0 >= self.max.max(1) {
+            st = self.freed.wait(st).unwrap_or_else(PoisonError::into_inner);
+        }
+        st.0 += 1;
+        st.1 = st.1.max(st.0);
+        Pass(self)
+    }
+
+    /// The most holders there were at once.
+    #[cfg(test)]
+    pub fn peak(&self) -> usize {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).1
+    }
+}
+
+/// How many pictures are read at once, by kind (shared by every scan of the process).
+pub(crate) struct Gates {
+    pub previews: Gate,
+    pub renders: Gate,
+}
+
+pub(crate) static GATES: Gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
 
 /// How hard indexing may work: the user's choice (Settings ▸ Search, `content.pace`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -119,10 +174,22 @@ pub(crate) struct Item {
     pub hash: Hash,
     /// A raw's embedded preview (tried first).
     pub preview: Option<(String, PreviewLoader)>,
-    /// The photo rendered with default settings.
-    pub job: Option<RenderJob>,
+    /// The photo rendered with default settings ([`render`] of its job; tests bring their own).
+    pub job: Option<Render>,
     /// Its original, to tell an offline photo from an unreadable one.
     pub path: Option<String>,
+}
+
+/// Renders one photo's picture (display sRGB).
+pub(crate) type Render = Box<dyn FnOnce() -> Result<lightcraft_raster::Rgba8, String> + Send>;
+
+/// A render job as a [`Render`].
+pub(crate) fn render(job: RenderJob) -> Render {
+    Box::new(move || match job.run().rendered {
+        Ok(r) if r.image.width > 0 && r.image.height > 0 => Ok(r.image),
+        Ok(_) => Err("it rendered empty".into()),
+        Err(e) => Err(e),
+    })
 }
 
 pub(crate) struct Batch {
@@ -155,19 +222,21 @@ fn to_rgb(img: &lightcraft_raster::Rgba8) -> Rgb8 {
     Rgb8 { width: img.width, height: img.height, data: img.data.iter().map(|p| [p[0], p[1], p[2]]).collect() }
 }
 
-/// The picture of one photo, or why there is none.
-fn picture(item: Item) -> (PhotoId, Hash, Result<Rgb8, Outcome>) {
+/// The picture of one photo, or why there is none. At most [`MAX_PREVIEW_READS`] previews and [`MAX_RENDERS`] renders
+/// run at once (`gates`), whatever the size of the pool.
+fn picture(item: Item, gates: &Gates) -> (PhotoId, Hash, Result<Rgb8, Outcome>) {
     let Item { id, hash, preview, job, path } = item;
     let run = catch_unwind(AssertUnwindSafe(|| {
-        if let Some(img) = preview.and_then(|(p, load)| load(&p, EDGE)).filter(|img| img.width.max(img.height) >= MIN_PREVIEW_EDGE) {
+        let preview = preview.and_then(|(p, load)| {
+            let _pass = gates.previews.enter();
+            load(&p, EDGE)
+        });
+        if let Some(img) = preview.filter(|img| img.width.max(img.height) >= MIN_PREVIEW_EDGE) {
             return Ok(to_rgb(&img));
         }
         let Some(job) = job else { return Err("nothing to render it from".to_string()) };
-        match job.run().rendered {
-            Ok(r) if r.image.width > 0 && r.image.height > 0 => Ok(to_rgb(&r.image)),
-            Ok(_) => Err("it rendered empty".into()),
-            Err(e) => Err(e),
-        }
+        let _pass = gates.renders.enter();
+        job().map(|img| to_rgb(&img))
     }));
     let r = match run {
         Ok(Ok(img)) => Ok(img),
@@ -184,10 +253,15 @@ fn picture(item: Item) -> (PhotoId, Hash, Result<Rgb8, Outcome>) {
     )
 }
 
+/// The pictures of a batch, read in parallel (within the gates).
+fn pictures(items: Vec<Item>, gates: &Gates) -> Vec<(PhotoId, Hash, Result<Rgb8, Outcome>)> {
+    use rayon::prelude::*;
+    items.into_par_iter().map(|i| picture(i, gates)).collect()
+}
+
 /// Embed one batch with `model` (already on the pace's pool).
 fn embed(model: &dyn ContentModel, items: Vec<Item>) -> Vec<(PhotoId, Hash, Outcome)> {
-    use rayon::prelude::*;
-    let pictures: Vec<(PhotoId, Hash, Result<Rgb8, Outcome>)> = items.into_par_iter().map(picture).collect();
+    let pictures = pictures(items, &GATES);
     let (mut keys, mut images, mut out) = (Vec::new(), Vec::new(), Vec::new());
     for (id, hash, r) in pictures {
         match r {
@@ -436,6 +510,58 @@ impl crate::Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A batch of photos with previews (`preview`: usable or not) and renders that take a while and count how many
+    /// run at once.
+    fn items(n: usize, preview: bool, live: &Arc<std::sync::atomic::AtomicUsize>, most: &Arc<std::sync::atomic::AtomicUsize>) -> Vec<Item> {
+        use std::sync::atomic::AtomicUsize;
+        let busy = |live: Arc<AtomicUsize>, most: Arc<AtomicUsize>| {
+            move || {
+                let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(15));
+                live.fetch_sub(1, Ordering::SeqCst);
+            }
+        };
+        (0..n)
+            .map(|i| {
+                let b = busy(live.clone(), most.clone());
+                let load: PreviewLoader = Arc::new(move |_: &str, _: usize| {
+                    b();
+                    preview.then(|| lightcraft_raster::Rgba8::new(300, 200))
+                });
+                let r = busy(live.clone(), most.clone());
+                let job: Render = Box::new(move || {
+                    r();
+                    Ok(lightcraft_raster::Rgba8::new(320, 240))
+                });
+                Item { id: PhotoId(i as u64), hash: [0; 16], preview: Some(("x.arw".into(), load)), job: Some(job), path: None }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn previews_and_renders_run_a_few_at_a_time_whatever_the_pool() {
+        use std::sync::atomic::AtomicUsize;
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(16).build().unwrap();
+        // previews only: at most MAX_PREVIEW_READS at once
+        let gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
+        let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let out = pool.install(|| pictures(items(32, true, &live, &most), &gates));
+        assert_eq!(out.len(), 32);
+        assert!(out.iter().all(|(_, _, r)| r.as_ref().is_ok_and(|img| img.width == 300)));
+        assert_eq!(gates.previews.peak(), MAX_PREVIEW_READS);
+        assert!(most.load(Ordering::SeqCst) <= MAX_PREVIEW_READS);
+        assert_eq!(gates.renders.peak(), 0);
+        // no usable preview: every photo is rendered, one at a time
+        let gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
+        let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let out = pool.install(|| pictures(items(12, false, &live, &most), &gates));
+        assert!(out.iter().all(|(_, _, r)| r.as_ref().is_ok_and(|img| img.width == 320)));
+        assert_eq!(gates.renders.peak(), MAX_RENDERS);
+        // (a preview read and a render may overlap, never more than the two caps together)
+        assert!(most.load(Ordering::SeqCst) <= MAX_PREVIEW_READS + MAX_RENDERS);
+    }
 
     #[test]
     fn the_pace_sets_threads_and_batches() {

@@ -614,8 +614,13 @@ fn preview_orientation(raw_bytes: &[u8], jpeg_orientation: u16) -> Orientation {
 /// What stands in for a raw file we can't decode: its largest embedded JPEG, else, for a TIFF-based
 /// raw, the file's own first image when the TIFF reader can show it (a reduced RGB copy: the only
 /// preview some containers carry). Returns image bytes for [`lightcraft_codecs::decode`].
-fn stand_in_image(bytes: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
-    if let Some(jpeg) = lightcraft_raw::embedded_preview(bytes) {
+/// `min_edge`: take the smallest preview at least that large ([`lightcraft_raw::embedded_preview_at_least`]).
+fn stand_in_image(bytes: &[u8], min_edge: Option<u32>) -> Option<std::borrow::Cow<'_, [u8]>> {
+    let preview = match min_edge {
+        Some(e) => lightcraft_raw::embedded_preview_at_least(bytes, e),
+        None => lightcraft_raw::embedded_preview(bytes),
+    };
+    if let Some(jpeg) = preview {
         return Some(std::borrow::Cow::Owned(jpeg));
     }
     let undecodable = lightcraft_raw::probe(bytes).is_some_and(|f| !f.is_supported());
@@ -625,7 +630,12 @@ fn stand_in_image(bytes: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
 
 /// Shared colour interpretation for quick previews, unsupported RAW fallback and camera-look fitting.
 pub(crate) fn decode_raw_preview(bytes: &[u8], opts: lightcraft_codecs::DecodeOptions) -> Option<lightcraft_codecs::Decoded> {
-    let jpeg = stand_in_image(bytes)?;
+    decode_raw_preview_from(bytes, opts, None)
+}
+
+/// [`decode_raw_preview`] from the smallest embedded preview at least `min_edge` pixels long, when given.
+fn decode_raw_preview_from(bytes: &[u8], opts: lightcraft_codecs::DecodeOptions, min_edge: Option<u32>) -> Option<lightcraft_codecs::Decoded> {
+    let jpeg = stand_in_image(bytes, min_edge)?;
     // the colour space is a property of the JPEG; a TIFF stand-in is read by the TIFF reader
     let is_jpeg = matches!(jpeg, std::borrow::Cow::Owned(_));
     match lightcraft_raw::embedded_preview_color_space(bytes).filter(|_| is_jpeg) {
@@ -642,7 +652,7 @@ pub(crate) fn decode_raw_preview(bytes: &[u8], opts: lightcraft_codecs::DecodeOp
 
 /// Oriented size of the embedded preview of a raw file.
 fn embedded_preview_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    let jpeg = stand_in_image(bytes)?;
+    let jpeg = stand_in_image(bytes, None)?;
     let d = lightcraft_codecs::decode(&jpeg, lightcraft_codecs::DecodeOptions::fit(64, 64)).ok()?;
     let (mut w, mut h) = (d.source_width, d.source_height);
     if preview_orientation(bytes, d.orientation).swaps_axes() {
@@ -661,8 +671,12 @@ pub fn load_embedded_preview(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, S
 
 /// The embedded preview of a raw file for display (sRGB, oriented, no larger than `max_edge`): the
 /// loupe and grid show it until the raw itself has been developed ([`crate::media::QuickJob`]).
+///
+/// It is decoded from the smallest embedded preview that still covers `max_edge` (a raw with a full-size JPEG and a
+/// small one shows a thumbnail from the small one, at a fraction of the time and memory).
 pub fn embedded_preview_srgb(bytes: &[u8], max_edge: usize) -> Option<lightcraft_raster::Rgba8> {
-    let mut d = decode_raw_preview(bytes, fit_box(max_edge))?;
+    let min_edge = u32::try_from(max_edge).ok().filter(|e| *e < u32::MAX);
+    let mut d = decode_raw_preview_from(bytes, fit_box(max_edge), min_edge)?;
     if d.image.width.max(d.image.height) > max_edge {
         d.image = fit(&d.image, max_edge, max_edge, Filter::Box);
         d.alpha = None;
@@ -833,6 +847,37 @@ pub fn fs_pair_loader() -> PairLoader {
     })
 }
 
+/// TIFFs at least this large are read strip by strip for thumbnails and previews ([`load_big_tiff_reduced`]).
+const BIG_TIFF: usize = 64 << 20;
+
+/// A big TIFF (a layered Photoshop file can be gigabytes) for a thumbnail or preview of `max_edge` pixels, reduced as
+/// it is read ([`lightcraft_codecs::decode_tiff_reduced`]) instead of reading the whole file and decoding it at full
+/// size. `None`: not such a file, or a layout that path does not cover: load it the usual way.
+fn load_big_tiff_reduced(path: &str, len: usize, max_edge: usize) -> Option<Result<(Rgb32f, SourceInfo), String>> {
+    use std::io::Read;
+    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    if len < BIG_TIFF || max_edge > crate::media::SourceLevel::Preview.max_edge() || !matches!(ext.as_deref(), Some("tif" | "tiff")) {
+        return None;
+    }
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut head = vec![0u8; 64 << 10];
+    let n = file.read(&mut head).ok()?;
+    let head = head.get(..n)?;
+    // a raw that happens to be called .tif goes the raw way
+    if lightcraft_codecs::sniff(head) != Some(lightcraft_codecs::Format::Tiff) || lightcraft_raw::probe(head).is_some() {
+        return None;
+    }
+    let file = std::fs::File::open(path).ok()?;
+    let d = match lightcraft_codecs::decode_tiff_reduced(std::io::BufReader::new(file), fit_box(max_edge)) {
+        Ok(Some(d)) => d,
+        // not covered, or something the whole decode may read after all: that path says what is wrong
+        Ok(None) | Err(_) => return None,
+    };
+    let img = d.to_working();
+    let img = if img.width.max(img.height) > max_edge { fit(&img, max_edge, max_edge, Filter::Mitchell) } else { img };
+    Some(Ok((img.into_oriented(Orientation::from_exif(d.orientation)), SourceInfo::default())))
+}
+
 /// Filesystem-backed hooks (native). On the web the host installs bytes-based hooks instead.
 ///
 /// Their working memory is bounded by [`crate::memory::work_gate`]: background loads (grid
@@ -845,6 +890,9 @@ pub fn fs_hooks() -> (FileLoader, FileProbe) {
         let len = std::fs::metadata(path).map(|m| usize::try_from(m.len()).unwrap_or(usize::MAX)).unwrap_or(0);
         let weight = len * if max_edge <= crate::media::SourceLevel::Thumb.max_edge() { 3 } else { 6 };
         let gate = crate::memory::work_gate();
+        if let Some(r) = load_big_tiff_reduced(path, len, max_edge) {
+            return r;
+        }
         let _permit = if crate::memory::is_background() { gate.acquire(weight) } else { gate.acquire_urgent(weight) };
         let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
         let r = load_vec(bytes, max_edge);
