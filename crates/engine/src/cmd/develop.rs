@@ -234,18 +234,16 @@ pub fn specs() -> Vec<CommandSpec> {
                 .iter()
                 .filter_map(|id| s.develop_of(*id).map(|d| (*id, d)))
                 .filter_map(|(id, _d)| {
-                    // back to the photo's import defaults when a default preset gave it its look
-                    let look = s.catalog.photo(id).and_then(|p| p.import_look.clone());
-                    let fresh = match look {
-                        Some(l) => (*l).clone(),
-                        None => {
-                            let info = s.source_info(id);
-                            DevelopSettings {
-                                wb: lightcraft_develop::WhiteBalance { mode: WbMode::AsShot, temp: info.as_shot_temp, tint: info.as_shot_tint },
-                                ..Default::default()
-                            }
-                        }
-                    };
+                    // Restore the complete import baseline, including RAW capture sharpening,
+                    // colour NR and embedded lens corrections, or the recorded default preset.
+                    let photo = s.catalog.photo(id)?;
+                    let mut fresh =
+                        if photo.import_look.is_some() { photo.import_defaults() } else { photo.camera_defaults_for(ProcessVersion::LATEST) };
+                    if photo.import_look.is_none() {
+                        // Loaded source facts can correct stale as-shot metadata in older catalogs.
+                        let info = s.source_info(id);
+                        fresh.wb = lightcraft_develop::WhiteBalance { mode: WbMode::AsShot, temp: info.as_shot_temp, tint: info.as_shot_tint };
+                    }
                     // a fresh start renders with the current process (a section or slider reset doesn't change it)
                     s.develop_op(id, DevelopSettings { process: ProcessVersion::LATEST, ..fresh }, "Reset")
                 })

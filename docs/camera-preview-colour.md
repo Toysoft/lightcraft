@@ -1,6 +1,37 @@
 # Sony ARW, Nikon NEF, Panasonic RW2, Fujifilm RAF, Canon CR3/CR2, Pentax PEF, Samsung SRW and Olympus ORF starting look
 
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** major (V4 Nikon tone refinement)
+
 ARW, NEF, RW2, RAF, CR3, CR2, PEF, SRW and ORF decoding supply sensor data and camera white-balance multipliers, but currently no measured camera colour matrix. Treating camera RGB as linear sRGB produces a dark, muted default rendering. The loader now estimates a file-local starting look from that file's embedded camera JPEG, only when a usable camera matrix is absent. All output pixels still come from the RAW sensor data; there is no JPEG replacement or uniform saturation boost.
+
+## Nikon tone refinement (V4)
+
+An accepted NEF look may also carry a refined tone curve. Averaging a textured RAW and
+its rendered JPEG down to 96 px before estimating a nonlinear curve can lose the darker
+and brighter values that determine contrast. V4 keeps the established matrix, hue/saturation
+table and chroma curve, then fits tone from a fixed 768 px proxy with more knots near the
+luminance distribution's tails. This proxy size is independent of requested preview/export
+size; no full-resolution development is needed to fit it.
+
+The refinement is optional and checked per photo. On a bounded 16×12 grid, normalized patch
+correlation matches structure across the JPEG's lens geometry. The central 3×3 pixels are
+excluded from correspondence scoring and from tone training. At least 216 validation pixels
+must remain after clipping checks, and the new curve must reduce their gamma-RGB squared
+error by at least 2%. Flat, unrelated, malformed or insufficient evidence leaves the original
+curve in place. This checks selected image regions, not every pixel or every subject.
+
+The original curve and optional refinement are serialized together. V1–V3 always render
+the original; V4 opts into the refinement. Old smart previews without the optional field
+still load. Camera-look cache version 3 rebuilds older proxies from online originals;
+offline proxies keep their available curve. Presets, exposure and other edits operate on
+the RAW development as before. No Nikon or Adobe profile asset is copied.
+
+Four real-file checks (two private Z50 II photographs at ISO 100/2500, plus CC0 Z50 II and
+Z6 III samples) accepted the refinement and reduced held-out patch error. The private
+ISO 2500 file's V1, V2 and V3 native PNGs remain byte-identical to the preceding build.
+These are comparisons with each camera's embedded JPEG, not a Lightroom fidelity suite
+or measured camera colour calibration. Local tone mapping, lens processing, colour and
+noise differences remain.
 
 ## Colour and tone are separate
 
@@ -171,3 +202,9 @@ the neutral fallback): E-1 0.126 → 0.014, E-400 0.087 → 0.022, XZ-2 0.061 �
 still open from their embedded JPEG. Against Lightroom Classic's render of a CC0 E-1 photo (2000 px, ΔE00 of the
 unedited render) the starting look moved from 11.25 to 8.30. Lightroom frames that E-1 file about 4 × 11 sensor pixels
 differently from the crop the file records (`CropLeft`/`CropTop` 36, 34); the file's own crop is kept.
+
+## Revision history
+
+| Date | Change | Summary |
+|---|---|---|
+| 2026-10-11 | major | V4 guarded Nikon tone refinement, preserved legacy curves and smart-preview compatibility |

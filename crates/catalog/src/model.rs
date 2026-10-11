@@ -377,6 +377,12 @@ impl Photo {
     /// process a photo renders with is not an edit, so comparisons with its defaults (edited?
     /// still as imported?) don't change when a newer process exists. A new photo has the latest.
     pub fn camera_defaults(&self) -> DevelopSettings {
+        self.camera_defaults_for(self.develop.process)
+    }
+
+    /// Built-in import defaults for a particular process. Reset uses the current process,
+    /// while edit-state comparisons use the photo's saved process.
+    pub fn camera_defaults_for(&self, process: lightcraft_develop::ProcessVersion) -> DevelopSettings {
         let wb = if self.relative_wb() { Some((6500.0, 0.0)) } else { self.as_shot_wb };
         let mut d = match wb {
             Some((t, tint)) => DevelopSettings::for_raw(t, tint),
@@ -385,7 +391,10 @@ impl Photo {
         if self.embedded_lens.is_some() {
             d.optics.lens_profile = true;
         }
-        d.process = self.develop.process;
+        d.process = process;
+        if d.process.process() < lightcraft_develop::Process::V3 {
+            d.detail.nr_luminance = 0.0;
+        }
         d
     }
     /// The file name's extension without the dot, as written (`CR2` for `IMG_0042.CR2`); empty
@@ -487,6 +496,20 @@ impl Album {
 #[cfg(test)]
 mod edited_tests {
     use super::*;
+
+    #[test]
+    fn older_raw_defaults_remain_unedited_after_a_new_process_is_added() {
+        use lightcraft_develop::ProcessVersion;
+        let mut p = Photo::new(PhotoId(1), Source::Demo { scene: 0 }, "a.nef", "NEF", 64, 48, "2026-10-11");
+        p.kind = MediaKind::Raw;
+        for process in [1, 2] {
+            let old = p.camera_defaults_for(ProcessVersion(process));
+            assert_eq!(old.detail.nr_luminance, 0.0);
+            p.develop = Arc::new(old);
+            assert!(!p.is_edited());
+            assert_eq!(p.camera_defaults_for(ProcessVersion::LATEST).detail.nr_luminance, 25.0);
+        }
+    }
 
     #[test]
     fn raw_with_import_settings_is_not_edited() {

@@ -12,6 +12,9 @@ use lightcraft_raster::{
 };
 use lightcraft_raw::{RawFormat, RawImage, color::CameraTransform, profile::HsvTable};
 
+#[path = "camera_tone_refine.rs"]
+mod refine;
+
 /// The version of the camera-look fit: how a raw's colour matrix, hue/saturation table and tone
 /// and chroma curves are chosen. Smart previews record it in their header (`look_version`), because
 /// they keep the curve and the colour the fit produced; one written by an older version is rebuilt
@@ -22,8 +25,9 @@ use lightcraft_raw::{RawFormat, RawImage, color::CameraTransform, profile::HsvTa
 /// that leave the fitted look alone. `RENDER_CACHE_VERSION` covers renders; this covers proxies.
 ///
 /// 1: the fit as of #499's follow-up; 2: Sony DRO (tone curve lowered to Sony's curve without DRO)
-/// and the ILCE-7CR profile (#528, #583, #568, #616).
-pub const LOOK_VERSION: u32 = 2;
+/// and the ILCE-7CR profile (#528, #583, #568, #616); 3: an optional Nikon tone refinement,
+/// stored alongside the original curve for process V4. Legacy colour and tone are unchanged.
+pub const LOOK_VERSION: u32 = 3;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CameraLook {
@@ -110,6 +114,16 @@ pub(crate) fn fit_preview(raw: &RawImage, bytes: &[u8], transform: &CameraTransf
     // not the raw: keep the colour fitted to the JPEG, take the tone curve without DRO.
     let dro = lightcraft_raw::embedded_preview_dynamic_range_optimized(bytes) == Some(true);
     let look = if dro { with_dro_off_tone(look) } else { look };
+    // Preserve the original curve for earlier processes. A fixed proxy and held-out
+    // correspondences decide whether the Nikon refinement is useful for this photo.
+    let look = if raw.format == RawFormat::Nef {
+        match refine::fit(raw, bytes, transform, &look) {
+            Some(tone) => CameraLook { tone, ..look },
+            None => look,
+        }
+    } else {
+        look
+    };
     if lightcraft_pipeline::profiling() {
         eprintln!(
             "[profile] {:?} camera look: {:?}, {:?}, hue/sat table {}, camera profile available {}, DRO tone replaced {dro}",

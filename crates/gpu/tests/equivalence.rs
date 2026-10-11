@@ -14,6 +14,65 @@ use lightcraft_raster::{Rgb32f, Rgba8};
 const MEAN_LSB: f64 = 0.5;
 const MAX_LSB: u8 = 3;
 
+#[test]
+fn fine_sharpening_radius_detail_masking_and_legacy_match_cpu() {
+    if !gpu() {
+        return;
+    }
+    let src = Arc::new(Rgb32f::from_fn(6000, 24, |x, y| {
+        let v = (if x % 160 < 80 { 0.12 } else { 0.48 }) + ((x * 17 + y * 31) % 11) as f32 * 0.0005;
+        [v, v * 0.8, v * 0.6]
+    }));
+    let req = RenderRequest::fit(6000, 24);
+    let info = SourceInfo::default();
+    for process in [1, 2, 3, 4] {
+        for (radius, detail, masking, texture) in [(0.5, 0.0, 0.0, 0.0), (1.0, 25.0, 50.0, 0.0), (3.0, 100.0, 0.0, 30.0)] {
+            let mut s = DevelopSettings { process: lightcraft_develop::ProcessVersion(process), ..Default::default() };
+            s.detail.sharpen_amount = 80.0;
+            s.detail.nr_color = 25.0;
+            s.detail.sharpen_radius = radius;
+            s.detail.sharpen_detail = detail;
+            s.detail.sharpen_masking = masking;
+            s.effects.texture = texture;
+            check(&format!("detail P{process} r{radius} d{detail} m{masking}"), &src, &info, &s, &req);
+        }
+    }
+}
+
+#[test]
+fn adaptive_luminance_nr_matches_cpu_at_preview_native_and_window_sizes() {
+    if !gpu() {
+        return;
+    }
+    let src = Arc::new(Rgb32f::from_fn(640, 480, |x, y| {
+        let mut hash = (x + 640 * y) as u32 + 13287;
+        hash = (hash ^ (hash >> 16)).wrapping_mul(0x7feb352d);
+        hash = (hash ^ (hash >> 15)).wrapping_mul(0x846ca68b);
+        hash ^= hash >> 16;
+        let n = ((hash & 65535) as f32 / 65535.0 - 0.5) * 0.065;
+        let base = if x < 320 { 0.25f32 } else { 0.7f32 };
+        let v = (base + n + if y > 240 { (x as f32 * 0.8).sin() * 0.04 } else { 0.0 }).powi(2);
+        [v * 1.1, v, v * 0.7]
+    }));
+    let info = SourceInfo { raw: true, ..Default::default() };
+    let mut s = DevelopSettings::for_raw(6500.0, 0.0);
+    assert!(lightcraft_pipeline::plan(&src, &info, &s, &RenderRequest::fit(640, 480)).noise > 0.005);
+    for amount in [0.0, 25.0, 100.0] {
+        s.detail.nr_luminance = amount;
+        for detail in [0.0, 50.0, 100.0] {
+            s.detail.nr_detail = detail;
+            for edge in [320, 640] {
+                check(&format!("adaptive NR {amount} detail {detail} size {edge}"), &src, &info, &s, &RenderRequest::fit(edge, edge));
+            }
+        }
+    }
+    s.wb.mode = WbMode::Custom;
+    s.wb.temp = 8200.0;
+    s.light.exposure = 1.0;
+    let req = RenderRequest { window: Some(lightcraft_pipeline::PixelWindow { x: 290, y: 160, w: 220, h: 220 }), ..RenderRequest::fit(640, 480) };
+    check("adaptive NR window and WB", &src, &info, &s, &req);
+}
+
 fn gpu() -> bool {
     let ok = lightcraft_gpu::available();
     if !ok {
@@ -33,8 +92,13 @@ fn camera_tone_and_relative_wb() {
         [x, 1.0 - (-2.0 * x).exp()]
     }))
     .unwrap();
+    let curve = curve.with_refined_knots(curve.knots().map(|[x, y]| [x, y * 0.87])).unwrap();
     let info = SourceInfo { raw: true, relative_wb: true, camera_tone: Some(curve), ..Default::default() };
     let mut s = DevelopSettings::default();
+    for process in 1..=4 {
+        s.process = lightcraft_develop::ProcessVersion(process);
+        check(&format!("camera tone process {process}"), &src, &info, &s, &RenderRequest::fit(320, 240));
+    }
     check("camera tone neutral", &src, &info, &s, &RenderRequest::fit(320, 240));
     s.light.exposure = 1.0;
     s.light.contrast = 40.0;

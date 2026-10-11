@@ -383,7 +383,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let det = l_pre - tex[i];
         let tame = 1.0 - 0.6 * sstep(0.4, 1.6, abs(det));
         delta += tx * 1.1 * clamp(det, -1.0, 1.0) * tame;
-        if (sp != 0.0) {
+        if (sp != 0.0 && pu(F_HAS_SHARP) == 0u) {
             let sm = pf(F_SHARPEN_MASK);
             var mk = 1.0;
             if (sm > 0.0) {
@@ -391,6 +391,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
             delta += sp * 1.3 * clamp(det, -0.8, 0.8) * mk;
         }
+    }
+    if (sp != 0.0 && pu(F_HAS_SHARP) != 0u) {
+        let sharp_off = select(0u, pu(F_W) * pu(F_H), pu(F_HAS_TEX) != 0u);
+        let det = l_pre - tex[sharp_off + i];
+        let fine = sign(det) * max(abs(det) - pf(F_SHARPEN_THRESHOLD), 0.0);
+        let sm = pf(F_SHARPEN_MASK);
+        var mk = 1.0;
+        if (sm > 0.0) {
+            mk = sstep(sm * 0.25, sm * 0.25 + 0.15, abs(det));
+        }
+        delta += sp * 1.3 * clamp(fine, -0.5, 0.5) * mk;
     }
     // local Noise: smooth (or, negative, boost) small-amplitude detail, keep edges
     if (l_noise != 0.0 && pu(F_HAS_TEX) != 0u) {

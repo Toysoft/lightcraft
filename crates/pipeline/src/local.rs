@@ -3,7 +3,7 @@
 
 use lightcraft_color::cct::{temp_tint_to_xy, wb_matrix};
 use lightcraft_color::{REC2020, luminance_2020};
-use lightcraft_develop::DevelopSettings;
+use lightcraft_develop::{DevelopSettings, Process};
 use lightcraft_raster::blur::gaussian;
 use std::sync::Arc;
 
@@ -145,24 +145,34 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
     let lum = (s.detail.nr_luminance / 100.0) as f32;
     let col = (s.detail.nr_color / 100.0) as f32;
     let scale = (out_long as f32 / src_long.max(1) as f32).clamp(0.05, 1.0);
-    let l = (lum > 0.0).then(|| {
+    let l = (lum > 0.0 && s.process.process() < Process::V3).then(|| {
         let detail = (s.detail.nr_detail / 100.0) as f32;
         NrLum { sigma: (1.0 + 2.5 * lum) * scale.max(0.4), eps: 0.002 + lum * lum * 0.25 * (1.0 - 0.7 * detail), k: lum.sqrt() }
     });
     let c = (col > 0.0).then(|| {
         let sigma = (1.5 + 6.0 * col) * scale.max(0.35) * (1.0 + (s.detail.nr_color_smoothness / 100.0) as f32);
         let keep = (s.detail.nr_color_detail / 100.0) as f32 * 0.5;
-        NrColor { sigma, t: col * (1.0 - keep) }
+        // V1's linear blend leaves 81% of colour noise at the RAW default of 25.
+        // V2 gives low Amount settings a useful response while preserving the endpoints
+        // and the Detail control's retained chroma. Luminance is unchanged.
+        let amount = match s.process.process() {
+            Process::V1 => col,
+            Process::V2 | Process::V3 | Process::V4 => (1.0 - (-8.0 * col).exp()) / (1.0 - (-8.0f32).exp()),
+        };
+        NrColor { sigma, t: amount * (1.0 - keep) }
     });
     (l, c)
 }
 
-/// Noise reduction at output resolution: luminance via an edge-aware self-guided filter on
-/// log-luminance, colour by blurring chromaticity (rgb / Y) and re-applying the original luminance.
+/// Noise reduction at output resolution: V1/V2 luminance via a guided log-luminance filter,
+/// V3 via the noise-aware sqrt-luminance filter, and colour via blurred chromaticity (rgb / Y).
 /// Radii scale with how much the source was downsampled (preview noise is already averaged out).
-pub fn denoise(img: &mut Rgb32f, s: &DevelopSettings, src_long: usize, out_long: usize) {
+pub fn denoise(img: &mut Rgb32f, s: &DevelopSettings, src_long: usize, out_long: usize, noise: f32) {
     let (lum, col) = nr_params(s, src_long, out_long);
     let w = img.width;
+    if let Some(nr) = crate::noise::params(s, src_long, out_long, noise) {
+        crate::noise::reduce(img, nr);
+    }
     if let Some(nr) = lum {
         let _t = crate::profiling().then(std::time::Instant::now);
         let l = img.map(log_lum);
@@ -214,6 +224,7 @@ pub(crate) struct Planes {
     pub base: Option<(u32, Arc<Plane>)>,
     pub clarity: Option<(u32, Arc<Plane>)>,
     pub texture: Option<(u32, Arc<Plane>)>,
+    pub sharpen: Option<(u32, Arc<Plane>)>,
     /// Dark channel and its airlight.
     pub dark: Option<(u32, Arc<Plane>, f32)>,
     /// Blurred chromaticity (local Moiré / Noise).
@@ -254,6 +265,8 @@ pub struct PlaneSigmas {
     pub clarity: Option<f32>,
     /// Texture / sharpening band (Gaussian).
     pub texture: Option<f32>,
+    /// Fine sharpening band, independent of the broader Texture band in process V2.
+    pub sharpen: Option<f32>,
     /// Dehaze dark channel (Gaussian).
     pub dark: Option<f32>,
     /// Chromaticity blur for local Moiré / colour noise (Gaussian).
@@ -263,6 +276,8 @@ pub struct PlaneSigmas {
 pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneSigmas {
     let ppl = px_per_long as f32;
     let local_any = |f: fn(&lightcraft_develop::LocalAdjustments) -> f64| s.masks.iter().any(|m| f(&m.adjust) != 0.0);
+    let fine_sharpen = s.process.process() != Process::V1;
+    let sharpening = s.detail.sharpen_amount != 0.0 || local_any(|a| a.sharpness);
     let tone_active =
         s.light.highlights != 0.0 || s.light.shadows != 0.0 || s.masks.iter().any(|m| m.adjust.highlights != 0.0 || m.adjust.shadows != 0.0);
     // Edge-aware base at ~1.5% of the long edge (EV² epsilon: edges of > ~0.6 EV are preserved).
@@ -273,15 +288,17 @@ pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneS
     let clarity = (s.effects.clarity != 0.0 || local_any(|a| a.clarity)).then(|| (0.012 * ppl).max(1.0));
     // local Noise and Defringe read the fine detail band too
     let texture = (s.effects.texture != 0.0
-        || s.detail.sharpen_amount != 0.0
+        || (!fine_sharpen && sharpening)
         || local_any(|a| a.texture)
-        || local_any(|a| a.sharpness)
         || local_any(|a| a.noise)
         || s.masks.iter().any(|m| m.adjust.defringe > 0.0))
     .then(|| (0.0018 * ppl).max(0.6));
+    // Radii are relative to a 6000 px reference frame, like the other spatial controls.
+    // Keep a nonzero fine-detail filter when fitting the whole frame onto a small display.
+    let sharpen = (fine_sharpen && sharpening).then(|| ((s.detail.sharpen_radius.clamp(0.5, 3.0) as f32) * ppl / 6000.0).max(0.6));
     let dark = (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze)).then(|| (0.02 * ppl).max(1.0));
     let chroma = (local_any(|a| a.moire) || s.masks.iter().any(|m| m.adjust.noise > 0.0)).then(|| (CHROMA_SIGMA * ppl).max(1.0));
-    PlaneSigmas { base, clarity, texture, dark, chroma }
+    PlaneSigmas { base, clarity, texture, sharpen, dark, chroma }
 }
 
 /// The spatial planes the per-pixel stage needs for `img` (white-balanced, before exposure),
@@ -298,10 +315,17 @@ pub(crate) fn prepare(
     mattes: Option<&masks::Mattes>,
 ) -> Prepared {
     let log_l = planes.log_l.get_or_insert_with(|| Arc::new(timed("log_l", || img.map(log_lum)))).clone();
-    let PlaneSigmas { base: base_sigma, clarity: clarity_sigma, texture: texture_sigma, dark: dark_sigma, chroma: chroma_sigma } =
-        plane_sigmas(s, px_per_long, q);
+    let PlaneSigmas {
+        base: base_sigma,
+        clarity: clarity_sigma,
+        texture: texture_sigma,
+        sharpen: sharpen_sigma,
+        dark: dark_sigma,
+        chroma: chroma_sigma,
+    } = plane_sigmas(s, px_per_long, q);
 
-    let Planes { base: sb, clarity: sc, texture: st, dark: sd, chroma: sch, .. } = planes;
+    let Planes { base: sb, clarity: sc, texture: st, sharpen: ssh, dark: sd, chroma: sch, .. } = planes;
+    let sharpen_blur = sharpen_sigma.map(|sg| plane_at(ssh, sg, || timed("sharpen", || gaussian(&log_l, sg))));
     let chroma_blur = chroma_sigma.map(|sg| match sch {
         Some((k, c)) if *k == sg.to_bits() => c.clone(),
         _ => {
@@ -342,7 +366,7 @@ pub(crate) fn prepare(
     };
     let ev = s.light.exposure as f32;
     let masks = timed("masks", || masks::evaluate(&s.masks, frame, img.width, img.height, &img, &log_l, ev, mattes));
-    Prepared { img, log_l, base, clarity_blur, texture_blur, dark, chroma_blur, air, masks, px_per_long }
+    Prepared { img, log_l, base, clarity_blur, texture_blur, sharpen_blur, dark, chroma_blur, air, masks, px_per_long }
 }
 
 /// The airlight of the whole output frame, estimated on a small render of it (`proxy_w` px wide):
@@ -446,7 +470,8 @@ mod nr_tests {
         let (v0, m0) = var(&img);
         let mut s = DevelopSettings::default();
         s.detail.nr_luminance = 80.0;
-        denoise(&mut img, &s, 64, 64);
+        let noise = crate::noise::estimate(&img, None);
+        denoise(&mut img, &s, 64, 64, noise);
         let (v1, m1) = var(&img);
         assert!(v1 < v0 * 0.5, "{v0} -> {v1}");
         assert!((m1 - m0).abs() < 0.01);

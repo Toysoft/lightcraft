@@ -316,6 +316,7 @@ mod tests {
             [x, 0.95 * (1.0 - (-2.7 * x).exp())]
         }))
         .unwrap();
+        let tone = tone.with_refined_knots(tone.knots().map(|[x, y]| [x, y * 0.9])).unwrap();
         let img = lightcraft_scenes::demo_library()[0].render(64, 40);
         let bytes = encode(&img, Some(&tone)).unwrap();
         assert_eq!(decode(&bytes).unwrap().1, Some(tone));

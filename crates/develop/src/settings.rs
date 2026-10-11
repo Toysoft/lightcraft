@@ -81,16 +81,25 @@ impl ProcessVersion {
 pub enum Process {
     /// The rendering of LightCraft before process versions existed (2026-10).
     V1,
+    /// Fine-detail sharpening and stronger colour-noise reduction at low Amount settings.
+    V2,
+    /// Noise-aware luminance reduction in a variance-stabilized domain.
+    V3,
+    /// Validated higher-resolution Nikon starting tone, retaining earlier curves for old edits.
+    V4,
 }
 
 impl Process {
     /// Every process, oldest first.
-    pub const ALL: [Process; 1] = [Process::V1];
-    pub const LATEST: Process = Process::V1;
+    pub const ALL: [Process; 4] = [Process::V1, Process::V2, Process::V3, Process::V4];
+    pub const LATEST: Process = Process::V4;
 
     pub const fn version(self) -> ProcessVersion {
         match self {
             Process::V1 => ProcessVersion(1),
+            Process::V2 => ProcessVersion(2),
+            Process::V3 => ProcessVersion(3),
+            Process::V4 => ProcessVersion(4),
         }
     }
 }

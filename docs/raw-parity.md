@@ -6,7 +6,7 @@ Raw processing is the deepest single dimension of Lightroom parity: a photograph
 does not decode, or decodes with the wrong colour, cannot switch. This document measures it model by
 model. The numbers feed [target-app-parity.md](target-app-parity.md); individual shortfalls are
 ranked in [gaps.md](gaps.md). Details per format: [cr3.md](cr3.md),
-[raf-compression.md](raf-compression.md), [sony-lens-corrections.md](sony-lens-corrections.md),
+[raf-compression.md](raf-compression.md), [nikon-he.md](nikon-he.md), [sony-lens-corrections.md](sony-lens-corrections.md),
 [camera-preview-colour.md](camera-preview-colour.md), [denoise.md](denoise.md).
 
 ## Headline
@@ -67,7 +67,7 @@ committed table is stale.
 | Samsung | 128 | 1 | 118 | 9 | 0 | compressed SRW (NX1, NX30, NX300, NX500, NX2000, NX3000, NX3300, NX mini, Galaxy NX) |
 | Apple | 113 | 1 | 112 | 0 | 0 | — (DNG / ProRAW) |
 | Panasonic | 104 | 93 | 11 | 0 | 0 | — |
-| Nikon | 99 | 5 | 94 | 0 | 0 | — (HE / HE★ is a per-shot setting, preview-only) |
+| Nikon | 99 | 5 | 94 | 0 | 0 | — (HE / HE★ is a per-shot setting; verified profile now decodes, see nikon-he.md) |
 | Fujifilm | 97 | 16 | 55 | 26 | 0 | pre-X FinePix RAF without a raw IFD (estimated split) |
 | Google | 88 | 1 | 87 | 0 | 0 | — |
 | Olympus | 71 | 3 | 9 | 59 | 0 | **compressed ORF** |
@@ -119,7 +119,7 @@ checked, and Canon, the largest bucket, is the weakest of the big four.
 | CRW | all | ⬜ | preview |
 | NEF | uncompressed, lossless, lossy type 1 / 2, lossy after split | ✅ | D5100, D7000, D7500, Z f corpus; ~60 NEFs by hand; #633 |
 | NEF | packed 14-bit stored under a compressed tag (Z 6II uncompressed) | ⬜ | #769; fix in PR #671 (not merged) |
-| NEF | High Efficiency / HE★ (JPEG XS) | ⬜ | named, preview (#193); needs a JPEG XS decoder |
+| NEF | High Efficiency / HE★ (JPEG XS) | 🟡 | native pure-Rust decoding; all sensor pixels exact on Z50 II HE/HE★ and Z6 III HE★; other profiles/bodies unverified ([evidence](nikon-he.md), #193) |
 | ARW | uncompressed, cRAW (ARW2), lossless LJ92 (L / M / S) | ✅ | 86 bodies (#535); M/S black level 1024 |
 | ARW | packed 12-bit (A900) | ✅ | one CC0 file; A850 unmeasured |
 | ARW | 12-bit compressed of DSLR-A200…A390 | ⬜ | preview (#535) |
@@ -233,7 +233,7 @@ works, from [raw/usage-weights.tsv](raw/usage-weights.tsv).
 | 6 | Pre-X FinePix RAF | +0.6 | 4–8 | ~0.08 | samples |
 | 7 | Sony A100 and DSC-F828 regression (#702) | +0.1 | 1–2 | ~0.07 | samples on raw.pixls.us |
 | 8 | Canon CRW (2000–2004 bodies) | +1.2 by the uniform tail weight, far less by real use | 6–12 | ≤ 0.1 | samples |
-| 9 | Nikon HE / HE★ NEF (Z 8, Z 9, Z 6III, Z f, Z50II, Z5II set to HE) | +1.1 | 20–40 | ~0.04 | a pure-Rust JPEG XS decoder |
+| 9 | Nikon HE / HE★ coverage beyond verified Z50 II and Z6 III samples | not re-measured | unestimated | — | reference samples for other bodies/crops/profiles; native decoder exists ([evidence](nikon-he.md)) |
 | 10 | Compressed SRW, Hasselblad 3FR, IIQ, X3F, MRW, KDC, ERF, DCR, MEF, GPR | +0.6 together | 45–85 | ~0.01 | samples; low use |
 
 Beyond decoding:
@@ -249,5 +249,6 @@ Beyond decoding:
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-10 | minor | Nikon HE/HE★ now decodes its verified profile; Z50 II/Z6 III exact sensor evidence in nikon-he.md; model-wide headline totals retained pending a full coverage re-measurement |
 | 2026-10-10 (later) | major | Model-by-model measurement against Adobe's published list (1,446 models: 234 verified, 943 unverified, 233 preview, 36 unsupported); `docs/raw/` data and re-measure script; use-weighted share 84% (40% on verified bodies); variant matrix; colour and lens sections with scores; ranked next cameras; RAW readiness ~56% from written parts |
 | 2026-10-10 | major | Created: formats, makers, demosaic, colour and lens checklists; target counts from the installed Lightroom 9.6 bundle listing |

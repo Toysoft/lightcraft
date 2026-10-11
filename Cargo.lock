@@ -3383,6 +3383,7 @@ dependencies = [
  "lightcraft-raster",
  "lightcraft-tiff",
  "miniz_oxide 0.8.9",
+ "oxideav-jpegxs",
  "proptest",
  "rayon",
  "serde",
@@ -4309,6 +4310,12 @@ checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
 dependencies = [
  "ttf-parser",
 ]
+
+[[package]]
+name = "oxideav-jpegxs"
+version = "0.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e0e6600faa598e04d089d3d4c77337bac8addd3f9674662d673e22627c9e85d"
 
 [[package]]
 name = "p256"

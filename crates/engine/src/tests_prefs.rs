@@ -45,6 +45,37 @@ fn photo_named<'a>(s: &'a Session, name: &str) -> &'a lightcraft_catalog::Photo 
 }
 
 #[test]
+fn reset_restores_raw_capture_detail_and_is_undoable() {
+    let src = temp_dir("reset-raw-detail");
+    dng(&src, "nikon.dng", "Nikon", "Z 50_2");
+    png(&src.join("plain.png"));
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [src]})).unwrap();
+    let id = photo_named(&s, "nikon.dng").id;
+    let jpeg = photo_named(&s, "plain.png").id;
+    let before = (*s.develop_of(id).unwrap()).clone();
+    assert_eq!(before.detail.sharpen_amount, 40.0);
+    assert_eq!(before.detail.nr_color, 25.0);
+    assert_eq!(before.detail.nr_luminance, 25.0);
+    s.execute("library.select", &json!({"ids": [id.0, jpeg.0]})).unwrap();
+    s.execute("develop.merge", &json!({"settings": {"light": {"exposure": 1.0}, "detail": {"sharpen_amount": 80.0, "nr_color": 60.0}}})).unwrap();
+    let edited = (*s.develop_of(id).unwrap()).clone();
+    // A photo saved before the new baseline also receives current defaults on Reset.
+    s.execute("develop.merge", &json!({"settings": {"process": 1, "detail": {"nr_luminance": 0.0}}})).unwrap();
+    let legacy = (*s.develop_of(id).unwrap()).clone();
+    s.execute("develop.reset", &json!({})).unwrap();
+    assert_eq!(*s.develop_of(id).unwrap(), before);
+    assert!(!s.catalog.photo(id).unwrap().is_edited());
+    assert_eq!(s.develop_of(jpeg).unwrap().detail.sharpen_amount, 0.0);
+    assert_eq!(s.develop_of(jpeg).unwrap().detail.nr_color, 0.0);
+    assert_eq!(s.develop_of(jpeg).unwrap().detail.nr_luminance, 0.0);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(*s.develop_of(id).unwrap(), legacy);
+    assert_ne!(legacy, edited);
+    std::fs::remove_dir_all(src).unwrap();
+}
+
+#[test]
 fn raw_and_other_defaults_are_applied_on_import() {
     let src = temp_dir("apply");
     dng(&src, "nikon.dng", "Nikon", "Z 9");
