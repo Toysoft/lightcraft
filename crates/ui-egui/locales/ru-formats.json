@@ -228,5 +228,8 @@
   "+{n} more": "ещё {n}",
   "1 task is still running: {names}. Quitting stops it.": "Ещё выполняется задача: {names}. Выход прервёт её.",
   "{n} tasks are still running: {names}. Quitting stops them.": "Ещё выполняется задач: {n} — {names}. Выход прервёт их.",
-  "{what} merge cancelled": "{what}: слияние отменено"
+  "{what} merge cancelled": "{what}: слияние отменено",
+  "Delete the saved location “{name}”?": "Удалить сохранённое место «{name}»?",
+  "In the private location “{name}”: its map is hidden.": "В частном месте «{name}»: карта скрыта.",
+  "within {d} of {lat}, {lon}": "в пределах {d} от {lat}, {lon}"
 }

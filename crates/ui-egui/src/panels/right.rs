@@ -664,7 +664,21 @@ fn info(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             // click on it opens the Map view there, the button below opens OpenStreetMap's site
             if let Some(pos) = lightcraft_map::LatLon::from_gps(m.gps) {
                 ui.add_space(6.0);
-                super::map::mini_map(app, ui, id, pos, width);
+                // in a private saved location the map stays hidden until asked for
+                let pass = ui.ctx().cumulative_pass_nr();
+                match super::map::locations::hides_mini_map(app, id, m.gps, pass) {
+                    Some(loc) => {
+                        ui.label(
+                            egui::RichText::new(crate::i18n::tr_format!("In the private location “{name}”: its map is hidden.", name = loc.name))
+                                .size(11.0)
+                                .color(t.text_dim),
+                        );
+                        if text_button(ui, "showPrivateMap", crate::i18n::tr("Show Map"), false).clicked() {
+                            app.map.loc.reveal_private = Some(id);
+                        }
+                    }
+                    None => super::map::mini_map(app, ui, id, pos, width),
+                }
             }
             ui.add_space(6.0);
             if text_button(ui, "showOnMap", crate::i18n::tr("Open in Browser"), false)

@@ -22,11 +22,19 @@ pub struct MapState {
     /// Size cap of the tile cache, all sources together.
     pub cache_bytes: u64,
     service: Option<TileService>,
+    /// The library's saved locations (`locations.json`, see [`crate::locations`]).
+    pub locations: crate::locations::SavedLocations,
 }
 
 impl Default for MapState {
     fn default() -> Self {
-        MapState { source: TileSource::openstreetmap(), cache_root: None, cache_bytes: DEFAULT_CACHE_BYTES, service: None }
+        MapState {
+            source: TileSource::openstreetmap(),
+            cache_root: None,
+            cache_bytes: DEFAULT_CACHE_BYTES,
+            service: None,
+            locations: Default::default(),
+        }
     }
 }
 

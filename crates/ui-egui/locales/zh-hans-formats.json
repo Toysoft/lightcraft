@@ -228,5 +228,8 @@
   "+{n} more": "还有 {n} 项",
   "1 task is still running: {names}. Quitting stops it.": "仍有 1 个任务在运行：{names}。退出将停止它。",
   "{n} tasks are still running: {names}. Quitting stops them.": "仍有 {n} 个任务在运行：{names}。退出将停止它们。",
-  "{what} merge cancelled": "已取消 {what} 合并"
+  "{what} merge cancelled": "已取消 {what} 合并",
+  "Delete the saved location “{name}”?": "删除已存储的位置“{name}”？",
+  "In the private location “{name}”: its map is hidden.": "位于私人位置“{name}”中：其地图已隐藏。",
+  "within {d} of {lat}, {lon}": "距 {lat}, {lon} {d} 以内"
 }

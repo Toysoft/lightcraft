@@ -56,6 +56,9 @@ pub enum Kind {
     /// A place on Earth, `{south, west, north, east}` in degrees ([`GpsArea`]): the photo's GPS
     /// position is inside it or outside it.
     Area,
+    /// A circle on Earth, `{lat, lon, radius}` (degrees, metres; [`GpsCircle`]): the photo's GPS
+    /// position is within `radius` of the centre (along the Earth's surface) or not.
+    Circle,
 }
 
 /// The fields rules can test: (id, label, kind), in field-menu order ([`TOP_LEVEL_FIELDS`], then
@@ -115,6 +118,7 @@ pub const FIELDS: &[(&str, &str, Kind)] = &[
     ("country", "Country", Kind::Text),
     ("hasGps", "Has GPS", Kind::Bool),
     ("gpsArea", "GPS Area", Kind::Area),
+    ("gpsRadius", "GPS Radius", Kind::Circle),
     // Size
     ("longEdge", "Long Edge", Kind::Number),
     ("shortEdge", "Short Edge", Kind::Number),
@@ -141,7 +145,7 @@ pub const FIELD_GROUPS: &[(&str, &[&str])] = &[
     ("Keywords & People", &["keywords", "keywordCount", "person", "personCount"]),
     ("Description", &["title", "caption", "altText", "creator", "copyright", "copyrightStatus"]),
     ("Camera Info", &["camera", "lens", "focalLength", "aperture", "shutterSpeed", "iso"]),
-    ("Location", &["location", "city", "state", "country", "hasGps", "gpsArea"]),
+    ("Location", &["location", "city", "state", "country", "hasGps", "gpsArea", "gpsRadius"]),
     ("Size", &["longEdge", "shortEdge", "aspect", "megapixels"]),
     ("Develop", &["edited", "cropped", "treatment"]),
     ("Assisted Culling", &["sharpness", "bestOfGroup"]),
@@ -204,10 +208,12 @@ pub enum Issue {
     NeedsArea,
     /// GPS Area: its south edge is north of its north edge.
     AreaReversed,
+    /// GPS Radius: not a centre in range and a radius of 1 m to 1000 km.
+    NeedsCircle,
 }
 
 impl Issue {
-    pub const ALL: [Issue; 24] = [
+    pub const ALL: [Issue; 25] = [
         Issue::UnknownField,
         Issue::NoSuchOperator,
         Issue::NotYesNo,
@@ -232,6 +238,7 @@ impl Issue {
         Issue::EmptyGroup,
         Issue::NeedsArea,
         Issue::AreaReversed,
+        Issue::NeedsCircle,
     ];
 
     /// The issue in a few words, to follow the field's name; a message for translation catalogs.
@@ -261,6 +268,7 @@ impl Issue {
             Issue::EmptyGroup => "This group is empty: add a rule or remove it.",
             Issue::NeedsArea => "needs south, west, north and east in degrees (latitude −90…90, longitude −180…180)",
             Issue::AreaReversed => "has its south edge north of its north edge",
+            Issue::NeedsCircle => "needs a centre (latitude −90…90, longitude −180…180) and a radius of 1 m to 1000 km",
         }
     }
 }
@@ -286,6 +294,9 @@ fn field_problem(field: &str, op: &str, value: &Value, cat: &Catalog, owner: Opt
                 _ => format!("`{field}` needs {{south, west, north, east}} in degrees (latitude −90…90, longitude −180…180), not {value}"),
             };
             (issue, message)
+        }),
+        Kind::Circle => GpsCircle::parse(value).err().map(|issue| {
+            (issue, format!("`{field}` needs {{lat, lon, radius}}: a centre in degrees (latitude −90…90, longitude −180…180) and a radius of 1 m to 1000 km, not {value}"))
         }),
         Kind::Number => {
             let each = match value {
@@ -599,6 +610,115 @@ impl GpsArea {
     }
 }
 
+/// Mean radius of the Earth in metres (IUGG), for distances along its surface.
+pub const EARTH_RADIUS_M: f64 = 6_371_008.8;
+/// The smallest and largest radius of a [`GpsCircle`] (metres): 1 m to 1000 km.
+pub const MIN_RADIUS_M: f64 = 1.0;
+pub const MAX_RADIUS_M: f64 = 1_000_000.0;
+
+/// The distance in metres between two positions (degrees) along the Earth's surface (haversine,
+/// on a sphere of [`EARTH_RADIUS_M`]). Exact across the antimeridian and at the poles; NaN in,
+/// NaN out (and NaN compares as "not within" anything).
+pub fn distance_m(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let (p1, p2) = (lat1.to_radians(), lat2.to_radians());
+    let dp = p2 - p1;
+    let dl = (lon2 - lon1).to_radians();
+    let a = (dp / 2.0).sin().powi(2) + p1.cos() * p2.cos() * (dl / 2.0).sin().powi(2);
+    2.0 * EARTH_RADIUS_M * a.clamp(0.0, 1.0).sqrt().asin()
+}
+
+/// The position `dist_m` metres from `lat, lon` (degrees) heading `bearing_deg` (0 = north,
+/// clockwise), along a great circle. The longitude is returned *unwrapped* (`lon` plus the
+/// change, possibly beyond ±180) so that a ring of points around a centre stays continuous.
+pub fn destination(lat: f64, lon: f64, bearing_deg: f64, dist_m: f64) -> (f64, f64) {
+    let d = dist_m / EARTH_RADIUS_M;
+    let (p1, b) = (lat.to_radians(), bearing_deg.to_radians());
+    let p2 = (p1.sin() * d.cos() + p1.cos() * d.sin() * b.cos()).clamp(-1.0, 1.0).asin();
+    let dl = (b.sin() * d.sin() * p1.cos()).atan2(d.cos() - p1.sin() * p2.sin());
+    (p2.to_degrees(), lon + dl.to_degrees())
+}
+
+/// The value of a GPS Radius rule and the shape of a saved location: the positions within
+/// `radius` metres of `lat, lon` (degrees) along the Earth's surface, edge included. Measured on
+/// the sphere, so a circle across the antimeridian or around a pole needs nothing special.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GpsCircle {
+    pub lat: f64,
+    pub lon: f64,
+    /// Metres, [`MIN_RADIUS_M`]…[`MAX_RADIUS_M`].
+    pub radius: f64,
+}
+
+impl GpsCircle {
+    /// A circle when the numbers make one: all finite, latitude −90…90, longitude −180…180,
+    /// radius 1 m…1000 km. Anything else is [`Issue::NeedsCircle`].
+    pub fn new(lat: f64, lon: f64, radius: f64) -> Result<GpsCircle, Issue> {
+        let ok = lat.is_finite()
+            && lon.is_finite()
+            && radius.is_finite()
+            && (-90.0..=90.0).contains(&lat)
+            && (-180.0..=180.0).contains(&lon)
+            && (MIN_RADIUS_M..=MAX_RADIUS_M).contains(&radius);
+        if ok { Ok(GpsCircle { lat, lon, radius }) } else { Err(Issue::NeedsCircle) }
+    }
+
+    /// A rule's value `{lat, lon, radius}` as a circle ([`GpsCircle::new`]'s checks).
+    pub fn parse(value: &Value) -> Result<GpsCircle, Issue> {
+        let n = |k: &str| value.get(k).and_then(Value::as_f64).ok_or(Issue::NeedsCircle);
+        GpsCircle::new(n("lat")?, n("lon")?, n("radius")?)
+    }
+
+    /// The rule value: `{lat, lon, radius}`.
+    pub fn to_value(self) -> Value {
+        serde_json::json!({"lat": self.lat, "lon": self.lon, "radius": self.radius})
+    }
+
+    /// Whether `lat, lon` (degrees) is within the radius, edge included (a millimetre of slack
+    /// for rounding). A position that isn't one (NaN) is not.
+    pub fn contains(&self, lat: f64, lon: f64) -> bool {
+        distance_m(self.lat, self.lon, lat, lon) <= self.radius + 1e-3
+    }
+
+    /// The latitudes the circle reaches, `(south, north)` in degrees, clamped to the poles: every
+    /// position inside has a latitude in this range (a cheap first test before
+    /// [`GpsCircle::contains`]).
+    pub fn lat_range(&self) -> (f64, f64) {
+        let d = (self.radius / EARTH_RADIUS_M).to_degrees();
+        ((self.lat - d).max(-90.0), (self.lat + d).min(90.0))
+    }
+
+    /// The pole inside the circle, if any: `Some(true)` the north pole, `Some(false)` the south.
+    pub fn pole(&self) -> Option<bool> {
+        if self.contains(90.0, 0.0) {
+            Some(true)
+        } else if self.contains(-90.0, 0.0) {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
+    /// `within 500 m of 48.8584, 2.2945`, as rule summaries show it.
+    pub fn describe(&self) -> String {
+        format!("within {} of {}, {}", format_distance(self.radius), self.lat, self.lon)
+    }
+}
+
+/// `850 m`, `1.5 km`, `120 km`: a radius as people read it.
+pub fn format_distance(m: f64) -> String {
+    if !m.is_finite() {
+        return "? m".into();
+    }
+    if m < 1000.0 {
+        format!("{} m", m.round())
+    } else if m < 10_000.0 {
+        let km = (m / 100.0).round() / 10.0;
+        format!("{km} km")
+    } else {
+        format!("{} km", (m / 1000.0).round())
+    }
+}
+
 /// The display label of choice `id` of `field` ("Public Domain" for `publicDomain`); `None` when
 /// `field` isn't a choice field or has no such choice.
 pub fn choice_label(field: &str, id: &str) -> Option<&'static str> {
@@ -646,7 +766,7 @@ pub fn ops_for(kind: Kind) -> &'static [(&'static str, &'static str)] {
         ],
         Kind::Choice(_) | Kind::Album => &[("is", "is"), ("isNot", "isn't")],
         Kind::Bool => &[("is", "is")],
-        Kind::Area => &[("inside", "is inside"), ("outside", "is outside")],
+        Kind::Area | Kind::Circle => &[("inside", "is inside"), ("outside", "is outside")],
     }
 }
 
@@ -862,6 +982,13 @@ impl Rule {
             "gpsArea" => {
                 return match (valid_gps(m.gps), GpsArea::parse(value)) {
                     (Some((lat, lon)), Ok(area)) => area.contains(lat, lon) == (op == "inside"),
+                    _ => false,
+                };
+            }
+            // within a distance of a point (a saved location's circle)
+            "gpsRadius" => {
+                return match (valid_gps(m.gps), GpsCircle::parse(value)) {
+                    (Some((lat, lon)), Ok(c)) => c.contains(lat, lon) == (op == "inside"),
                     _ => false,
                 };
             }
@@ -1086,6 +1213,7 @@ impl RuleSet {
                     let v = match value {
                         _ if field == "album" && cat.is_some() => album_name(value, cat),
                         _ if field_kind(field) == Some(Kind::Area) => GpsArea::parse(value).map_or_else(|_| value.to_string(), |a| a.describe()),
+                        _ if field_kind(field) == Some(Kind::Circle) => GpsCircle::parse(value).map_or_else(|_| value.to_string(), |c| c.describe()),
                         _ if field_kind(field) == Some(Kind::Bool) => {
                             bool_value(value).map_or_else(|| value.to_string(), |b| bool_label(b).to_lowercase())
                         }
@@ -1751,7 +1879,7 @@ mod tests {
         same(&["captureDate", "importDate", "editDate"], "Date");
         same(&["keywords", "keywordCount", "person", "personCount"], "Keywords & People");
         same(&["title", "caption", "altText", "creator", "copyright", "copyrightStatus"], "Description");
-        same(&["location", "city", "state", "country", "hasGps", "gpsArea"], "Location");
+        same(&["location", "city", "state", "country", "hasGps", "gpsArea", "gpsRadius"], "Location");
         for f in ["rating", "flag", "label", "text"] {
             assert_eq!(field_group(f), None, "{f} stays at the top level");
         }
@@ -1772,6 +1900,93 @@ mod tests {
 
     fn in_area(p: &Photo, op: &str, value: serde_json::Value) -> bool {
         rs(json!({"rules": [{"field": "gpsArea", "op": op, "value": value}]})).matches(p, &Catalog::new())
+    }
+
+    fn in_circle(p: &Photo, op: &str, value: serde_json::Value) -> bool {
+        rs(json!({"rules": [{"field": "gpsRadius", "op": op, "value": value}]})).matches(p, &Catalog::new())
+    }
+
+    /// GPS Radius: within a distance of a point, measured on the sphere: across the antimeridian
+    /// and around a pole as anywhere else; a photo without a position is in no circle and outside
+    /// none; a circle that isn't one matches nothing and is reported.
+    #[test]
+    fn gps_radius_matches_positions_within_the_distance() {
+        let eiffel = (48.8584, 2.2945);
+        let notre_dame = (48.8530, 2.3499);
+        // ~4.1 km apart
+        let d = distance_m(eiffel.0, eiffel.1, notre_dame.0, notre_dame.1);
+        assert!((4000.0..4200.0).contains(&d), "{d}");
+        let c = |lat: f64, lon: f64, r: f64| json!({"lat": lat, "lon": lon, "radius": r});
+        assert!(in_circle(&at(Some(notre_dame)), "inside", c(eiffel.0, eiffel.1, 5000.0)));
+        assert!(!in_circle(&at(Some(notre_dame)), "inside", c(eiffel.0, eiffel.1, 3000.0)));
+        assert!(in_circle(&at(Some(notre_dame)), "outside", c(eiffel.0, eiffel.1, 3000.0)));
+        // the centre itself, and a radius of exactly the distance (edge included)
+        assert!(in_circle(&at(Some(eiffel)), "inside", c(eiffel.0, eiffel.1, 1.0)));
+        assert!(in_circle(&at(Some(notre_dame)), "inside", c(eiffel.0, eiffel.1, d)));
+        // across the antimeridian: Fiji's 179.9° E and 179.9° W are 22 km apart, not 40 000
+        let east = at(Some((-17.0, 179.9)));
+        let west = at(Some((-17.0, -179.9)));
+        assert!(in_circle(&west, "inside", c(-17.0, 179.9, 25_000.0)));
+        assert!(in_circle(&east, "inside", c(-17.0, -179.9, 25_000.0)));
+        assert!(in_circle(&at(Some((-17.0, 180.0))), "inside", c(-17.0, -180.0, 1.0)));
+        // around a pole: a 500 km circle at 87° N holds the pole and the far side of it
+        let polar = c(87.0, 0.0, 500_000.0);
+        assert!(in_circle(&at(Some((90.0, 0.0))), "inside", polar.clone()));
+        // over the pole: 3° + 1° ≈ 445 km away; 3° + 2° ≈ 556 km is outside
+        assert!(in_circle(&at(Some((89.0, 180.0))), "inside", polar.clone()));
+        assert!(in_circle(&at(Some((88.0, 180.0))), "outside", polar.clone()));
+        assert_eq!(GpsCircle::parse(&polar).unwrap().pole(), Some(true));
+        assert_eq!(GpsCircle::parse(&c(-89.0, 10.0, 200_000.0)).unwrap().pole(), Some(false));
+        assert_eq!(GpsCircle::parse(&c(48.0, 2.0, 1_000_000.0)).unwrap().pole(), None);
+        // no position, or not one: neither inside nor outside
+        for gps in [None, Some((f64::NAN, 2.0)), Some((91.0, 2.0)), Some((48.0, -181.0))] {
+            assert!(!in_circle(&at(gps), "inside", c(0.0, 0.0, MAX_RADIUS_M)), "{gps:?}");
+            assert!(!in_circle(&at(gps), "outside", c(0.0, 0.0, 1.0)), "{gps:?}");
+        }
+        // hostile values match nothing and are reported
+        let check = |v: serde_json::Value| {
+            rs(json!({"rules": [{"field": "gpsRadius", "op": "inside", "value": v}]}))
+                .check(&Catalog::new())
+                .into_iter()
+                .map(|p| p.issue)
+                .collect::<Vec<_>>()
+        };
+        assert!(check(c(48.0, 2.0, 500.0)).is_empty());
+        for bad in [
+            c(91.0, 0.0, 500.0),
+            c(0.0, 181.0, 500.0),
+            c(0.0, 0.0, 0.5),
+            c(0.0, 0.0, 1_000_001.0),
+            c(0.0, 0.0, -5.0),
+            json!({"lat": 0.0, "lon": 0.0}),
+            json!({"lat": "0", "lon": 0.0, "radius": 10.0}),
+            json!(null),
+            json!([1, 2, 3]),
+        ] {
+            assert_eq!(check(bad.clone()), vec![Issue::NeedsCircle], "{bad}");
+            assert!(!in_circle(&at(Some(eiffel)), "inside", bad.clone()) && !in_circle(&at(Some(eiffel)), "outside", bad), "matches nothing");
+        }
+        assert_eq!(GpsCircle::new(f64::NAN, 0.0, 10.0), Err(Issue::NeedsCircle));
+        assert_eq!(GpsCircle::new(0.0, 0.0, f64::INFINITY), Err(Issue::NeedsCircle));
+        // the latitude band holds every position inside, clamped at the poles
+        let (s, n) = GpsCircle::parse(&polar).unwrap().lat_range();
+        assert!(n == 90.0 && (82.0..83.0).contains(&s), "{s} {n}");
+        // a summary people can read
+        assert_eq!(GpsCircle::new(48.5, 2.25, 1500.0).unwrap().describe(), "within 1.5 km of 48.5, 2.25");
+        assert_eq!(format_distance(850.0), "850 m");
+        assert_eq!(format_distance(120_400.0), "120 km");
+    }
+
+    /// The point `destination` gives is at the distance asked, and its longitude stays continuous
+    /// (unwrapped) past ±180.
+    #[test]
+    fn destination_is_at_the_distance_and_unwrapped() {
+        for (lat, lon, b, d) in [(48.0, 2.0, 0.0, 1000.0), (0.0, 179.9, 90.0, 50_000.0), (-60.0, -10.0, 225.0, 900_000.0), (89.0, 0.0, 180.0, 10.0)] {
+            let (la, lo) = destination(lat, lon, b, d);
+            assert!((distance_m(lat, lon, la, lo) - d).abs() < 0.01 * d.max(1.0), "{lat} {lon} {b} {d} → {la} {lo}");
+        }
+        let (_, lo) = destination(0.0, 179.9, 90.0, 50_000.0);
+        assert!(lo > 180.0, "unwrapped: {lo}");
     }
 
     /// GPS Area: inside / outside a box, edges included; a photo without a position (or with one

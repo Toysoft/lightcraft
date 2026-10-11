@@ -6,6 +6,7 @@
 //!   catalog.snap   catalog.log      (lightcraft-catalog journal)
 //!   presets.json   view.json        (user presets + favourites; last source/sort/selection)
 //!   prefs.json     (library preferences: XMP sidecars, import defaults, cache size, last export)
+//!   locations.json (the map's saved locations, see `locations.rs`)
 //!   thumbs/        (rendered thumbnail cache, safe to delete)
 //!   Originals/     (photos imported with "copy into library")
 //! ```
@@ -215,6 +216,26 @@ struct SettingsLoad {
 }
 
 impl SettingsLoad {
+    /// Keep a copy of `name` as `<name>.corrupt-<unix time>` before it is written again without
+    /// some of its content (`why`), with a warning; when the copy can't be made the file isn't
+    /// overwritten this session.
+    fn set_aside(&mut self, store: &mut dyn Store, name: &'static str, why: &str) {
+        let bytes = match store.read(name) {
+            Ok(Some(b)) => b,
+            _ => return,
+        };
+        let secs = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let keep = format!("{name}.corrupt-{secs}");
+        log::error!("library: {name}: {why}");
+        match store.write_atomic(&keep, &bytes) {
+            Ok(()) => self.warnings.push(format!("{name}: {why}. The file was kept as {keep}.")),
+            Err(w) => {
+                self.blocked.push(name);
+                self.warnings.push(format!("{name}: {why}, and it couldn't be set aside ({w}). LightCraft won't overwrite the file."));
+            }
+        }
+    }
+
     fn read<T: serde::de::DeserializeOwned>(&mut self, store: &mut dyn Store, name: &'static str) -> Option<T> {
         let bytes = match store.read(name) {
             Ok(b) => b?,
@@ -344,6 +365,13 @@ impl Session {
         self.cache_mb = prefs.cache_mb;
         self.forget_local_days = prefs.forget_local_days.unwrap_or(lightcraft_catalog::DEFAULT_FORGET_DAYS);
         self.map.load_source(prefs.map_source);
+        // saved locations: hostile input, checked entry by entry
+        let file = settings.read::<crate::locations::LocationsFile>(files.as_mut(), crate::locations::FILE).unwrap_or_default();
+        let (locations, dropped) = crate::locations::SavedLocations::load(file, self.map.locations.revision());
+        if dropped > 0 {
+            settings.set_aside(files.as_mut(), crate::locations::FILE, &format!("{dropped} saved location(s) in it aren't valid and were left out"));
+        }
+        self.map.locations.replace(locations);
         self.smart_previews_dir = prefs.smart_previews_dir.filter(|_| on_disk).map(PathBuf::from);
         if let Some(d) = &self.smart_previews_dir {
             self.media.smart_dir = Some(d.clone());
@@ -589,6 +617,19 @@ impl Session {
             ));
         }
         lib.files.write_atomic("prefs.json", &v).map_err(|e| EngineError::Other(format!("prefs: {e}")))
+    }
+
+    /// Save the saved locations (`locations.json`, atomically; no-op for in-memory sessions).
+    pub fn save_locations(&mut self) -> Result<()> {
+        let v = self.map.locations.to_file();
+        let Some(lib) = self.library.as_mut() else { return Ok(()) };
+        if lib.blocked.contains(&crate::locations::FILE) {
+            return Err(EngineError::Other(format!(
+                "{0} couldn't be read when the library opened, so it isn't overwritten; reopen the library to save locations",
+                crate::locations::FILE
+            )));
+        }
+        lib.files.write_atomic(crate::locations::FILE, &v).map_err(|e| EngineError::Other(format!("saved locations: {e}")))
     }
 
     /// Warnings about the open library not handed out yet: its settings files, and a lock that

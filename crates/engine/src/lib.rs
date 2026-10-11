@@ -43,6 +43,7 @@ mod lightroom_archive;
 pub mod lightroom_catalog;
 pub mod lightroom_job;
 mod lightroom_sqlite;
+pub mod locations;
 pub mod logging;
 pub mod map;
 pub mod media;
@@ -952,6 +953,8 @@ mod tests_persist;
 mod tests_prefs;
 #[cfg(test)]
 mod tests_process;
+#[cfg(test)]
+mod tests_saved_locations;
 #[cfg(test)]
 mod tests_segment;
 #[cfg(test)]

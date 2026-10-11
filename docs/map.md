@@ -5,9 +5,9 @@ fetches, from where, how it follows the tile provider's rules, what that means f
 off.
 
 Status: the Map view (below) shows the photos in view as pins and clusters over the tiles, you can drag photos onto it
-to set their location (and move or remove pins), filter the filmstrip by location, and the Info panel shows a small map
-of the active photo's place. Still to come: saved locations and track logs drawn on the map. Nothing is fetched until a
-map is on screen.
+to set their location (and move or remove pins), filter the filmstrip by location, save named places (saved locations,
+some of them private), and the Info panel shows a small map of the active photo's place. Still to come: track logs drawn
+on the map. Nothing is fetched until a map is on screen.
 
 ## The Map view
 
@@ -113,6 +113,83 @@ the rule editor.
 
 `map.state` reports the same as `locationFilter`. Widgets: `map:filterBar`, `map:filter:visible`, `map:filter:tagged`,
 `map:filter:untagged`, `map:filter:none`.
+
+## Saved locations
+
+As Lightroom Classic's Saved Locations: a saved location is a name, a centre and a radius (1 m to 1000 km), drawn on
+the map as a circle with its name above it. A location can be **private**.
+
+- **The list** sits over the map's top-left corner (a click on its header folds it): every saved location with the
+  number of photos in view inside it (the photos the map shows: the current source and filter, before the location
+  filter bar), private ones marked "private" and drawn with a dashed purple edge. It is on the map, not in a docked
+  panel, because the docked panels are shared by every view and the Library panel is closed by default; the map's
+  canvas can't be closed, so the list is there whenever the map is. On a map narrower than about 470 points or lower
+  than 200 the list waits until there is room (the circles and the commands still work).
+- **A click on a row** shows the location: it is selected and the map centres on it at a zoom that holds the whole
+  circle. **The checkbox** selects the photos in view inside it (ticked while exactly those are selected; a second
+  click clears the selection). Right-click a row for Go to Location, Select Photos in Location, Rename…, Private and
+  Delete Location… (which asks first: there is no undo for it).
+- **New Location** (+ in the list's header): at the map's centre (a radius of a sixth of the map's shorter side), or
+  from the selection (centred on the selected photos' positions, with a radius that holds them all, 10 % to spare,
+  at least 100 m). Either asks for the name.
+- **On the map**, a click on a location's centre dot or its name selects it; a click on the empty map drops the
+  selection. The selected location has a handle at its centre (drag to move it) and one on its east edge (drag to
+  change the radius). The change is saved when the button is released over the map (released elsewhere, nothing
+  changes). **Lock Markers** locks these handles as it locks photo pins (a drag on them pans the map instead): the lock
+  is there so that a drag over the map can't move anything by accident, and a location's centre and edge are markers
+  too. Rename and Private still work from the list.
+- **Measured on the Earth**: "inside" means within the radius along the Earth's surface (great-circle distance on a
+  sphere of 6 371 km), edge included, so a circle across the antimeridian holds photos on both sides of ±180° and one
+  that covers a pole holds every longitude near it. On the map, such a circle is drawn whole: across ±180° as one
+  shape, around a pole as a band reaching the map's top (or bottom) edge, since the map stops at ±85.05°.
+
+**Private locations.** A photo inside any private location:
+
+- is exported **without its location**, exactly as if Export ▸ "Remove location info" were on for that photo alone:
+  no GPS position, and no sublocation / city / state / country fields. Photos outside every private location export
+  as before, and the photo's position in the library is never touched. Making the location public again (or deleting
+  it) brings the location back to later exports. This applies to the rendered formats (JPEG, PNG, TIFF, AVIF…),
+  like "Remove location info"; **Original** and **DNG** exports copy the file (with its own embedded EXIF GPS) and its
+  edits as they are, so choose a rendered format for photos you want to share without their place;
+- hides the **Info panel's map** (the panel says "In the private location “Home”: its map is hidden" with **Show Map**
+  next to it, which shows it for that photo until another one becomes active). The GPS field, its text and Open in
+  Browser stay, and the Map view still shows the photo's pin: private is about what leaves the computer and what is
+  on screen by default, not about hiding the photo from you.
+
+**Where they are kept.** Saved locations belong to the library, in `locations.json` next to the catalog (written
+atomically on every change, as `prefs.json` is). They are not part of the catalog's journal: changing them is not an
+undo step (Lightroom Classic's saved-location edits aren't part of a photo's history either), so Delete Location asks
+first. The file is checked as it is read: if it doesn't parse it is kept aside as `locations.json.corrupt-<time>` and
+the library opens without saved locations (a warning says so); entries that aren't valid (a missing or NaN number, a
+latitude outside ±90, a radius outside 1 m…1000 km, an empty or over-long name, a repeated id, past 10 000 locations)
+are left out, and the file is kept aside the same way before it is written again. A file that can't be read at all is
+never overwritten that session. A library holds at most 10 000 saved locations; counting them over the photos uses a
+latitude-sorted index, and the map counts again only when the photos or the locations change (`map.locations` with 3 000 locations: about 16 ms in a test build).
+
+**Smart albums and filters** gain **GPS Radius** (`gpsRadius`, Location group): `inside` / `outside` a circle
+`{lat, lon, radius}` (degrees, metres; the same checks), measured the same way. It is what a saved location tests,
+written into the rule, so a smart album keeps working when the location is renamed or deleted.
+
+| Command | Params | Result |
+|---|---|---|
+| `map.locations` | — | `{locations: [{id, name, lat, lon, radius, private, photos, inView}], count, countMs}`: `photos` inside it in the library (not counting deleted photos), `inView` of the photos in view |
+| `map.location.add` | `{name, lat, lon, radius?, private?}` or `{name, fromSelection: true, ids?, radius?, private?}` | Save a location: `name` 1–200 characters (trimmed), `lat` −90…90, `lon` −180…180, `radius` in metres 1–1 000 000 (default 1000), all finite; `fromSelection` centres it on the selected (or `ids`) photos' positions with a radius that holds them → the location with `photos` and `inView` |
+| `map.location.update` | `{id, name?, lat?, lon?, radius?, private?}` | Change a location, checked as a whole (nothing changes when any part is refused) → the location with its counts |
+| `map.location.remove` | `{id}` | Delete it (the photos keep their positions) → `{removed, name}` |
+| `map.location.photos` | `{id, inView?}` | `{id, ids, count}`: the library's photos inside it (`inView: true`: only the photos in view, in their order) |
+| `map.location.show` | `{id}` | (UI) Select it and centre the map on it → the map state |
+| `map.location.select` | `{id}` or `{id: null}` | (UI) Select it on the map (handles), or none → `{selected}` |
+| `map.location.selectPhotos` | `{id}` | (UI) Select the photos in view inside it (the checkbox) → `{selected}` |
+
+The first five are library commands (`lightcraft-cli`, the headless MCP server, the app); the others need the map.
+When `locations.json` couldn't be written the change stays for the session and the result carries `notSaved` with
+the reason. `map.state` reports `locations` (those drawn: `{id, name, private, x, y, radiusPx, handle: {x, y},
+inView, selected}`, screen points, at most 500), `selectedLocation`, `movingLocation` (`{id, lat, lon, radius,
+part}` while a handle is dragged) and `privateMiniMap` (`{photo, location}` while the Info panel hides its map).
+Widgets: `map:locations` (the list), `map:locationsHeader`, `icon:locationNew`, `map:locationNew:centre`,
+`map:locationNew:selection`, `map:location:<id>` (a row), `map:location:<id>:check`, `map:location:<id>:count`,
+`map:location:<id>:centre` and `map:location:<id>:radius` (the handles on the map), `map:locationMenu:show`,
+`…:selectPhotos`, `…:rename`, `…:private`, `…:delete`, `button:showPrivateMap` (Info panel).
 
 ## Map commands
 

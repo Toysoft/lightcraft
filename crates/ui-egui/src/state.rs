@@ -634,6 +634,11 @@ pub enum Dialog {
         /// Photos that have it (or one below it).
         count: usize,
     },
+    /// Delete a saved location (Map view), after asking: it isn't an undo step.
+    DeleteLocation {
+        id: u64,
+        name: String,
+    },
     /// Merge keywords into another one on every photo.
     MergeKeywords {
         from: Vec<String>,

@@ -46,6 +46,9 @@ use serde_json::{Value, json};
 
 use crate::LightcraftApp;
 use crate::icons::Icon;
+
+#[path = "map_locations.rs"]
+pub mod locations;
 use crate::theme::Tokens;
 use crate::widgets::{icon_button, register};
 
@@ -210,6 +213,8 @@ pub struct MapView {
     in_view_for: Option<(u64, [u64; 4])>,
     /// Time the last count of the photos in view took (ms).
     pub count_ms: f64,
+    /// Saved locations: the one selected, a handle being dragged, counts.
+    pub loc: locations::LocState,
 }
 
 impl MapView {
@@ -468,8 +473,12 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     // other drag (empty map, a cluster) pans
     if resp.drag_started() {
         app.map.pin_drag = None;
-        if !app.ui.map_lock_markers
-            && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+        let origin = ui.input(|i| i.pointer.press_origin());
+        // the selected saved location's handles come first (they sit on top of the pins)
+        let on_location = origin.is_some_and(|o| locations::drag_start(app, o));
+        if !on_location
+            && !app.ui.map_lock_markers
+            && let Some(origin) = origin
             && let Some(c) = pin_at(&app.map.clusters, local(origin))
             && c.ids.len() == 1
             && let Some(&id) = c.ids.first()
@@ -479,6 +488,7 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
         }
     } else if !resp.dragged() && !resp.drag_stopped() {
         app.map.pin_drag = None;
+        locations::drag_end(app, &ctx, false);
     }
     let pointer = ui.input(|i| i.pointer.latest_pos());
     if let Some(d) = app.map.pin_drag.as_mut()
@@ -490,7 +500,7 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
 
     // ---- moving the map
     let mut vp = viewport(app);
-    if resp.dragged() && app.map.pin_drag.is_none() {
+    if resp.dragged() && app.map.pin_drag.is_none() && !locations::dragging(app) {
         let d = resp.drag_delta();
         vp = vp.panned(f64::from(d.x), f64::from(d.y));
     }
@@ -532,6 +542,11 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     }
     let vp = Viewport::new(vp.center, vp.zoom, w, h);
     set_viewport(app, vp);
+    // a saved location's centre or radius follows the pointer
+    if let Some(p) = pointer.filter(|_| locations::dragging(app)) {
+        locations::drag_update(app, canvas, &vp, p);
+        ctx.request_repaint();
+    }
     // ---- Visible on Map follows the view once it rests (a pan or zoom doesn't refilter the
     // filmstrip every frame); the first view applies at once
     if app.map.location == LocationFilter::Visible {
@@ -556,6 +571,10 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
         }
     }
 
+    // ---- a moved saved location lands (outside the map: nothing changes)
+    if resp.drag_stopped() {
+        locations::drag_end(app, &ctx, pointer.is_some_and(|p| canvas.contains(p)));
+    }
     // ---- a moved pin lands (outside the map: nothing changes)
     if resp.drag_stopped()
         && let Some(d) = app.map.pin_drag.take()
@@ -570,7 +589,7 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     // (not under a floating panel, like the catalog's drop targets)
     app.map.drop_at = None;
     if let Some(ids) = app.ui.dragging_photos.clone()
-        && let Some(p) = pointer.filter(|_| crate::docking::drop_target(ui, canvas, pointer))
+        && let Some(p) = pointer.filter(|p| crate::docking::drop_target(ui, canvas, pointer) && !app.map.loc.overlay.is_some_and(|r| r.contains(*p)))
     {
         if ui.input(|i| i.pointer.any_released()) {
             app.ui.dragging_photos = None;
@@ -590,6 +609,9 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     let tiles = draw_tiles(app, &ctx, &painter, canvas, &vp, Surface::View);
     app.map.tiles_drawn = tiles.drawn;
     app.map.tiles_missing = tiles.missing;
+
+    // ---- saved locations, under the pins
+    locations::draw(app, &painter, &t, canvas, &vp);
 
     // ---- pins
     let key = (
@@ -640,7 +662,9 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     if let Some((n, p)) = app.map.drop_at {
         drop_indicator(&painter, &t, p, n);
     }
-    if let Some(c) = hovered.and_then(|i| app.map.clusters.get(i)).filter(|_| app.map.pin_drag.is_none()) {
+    if let Some(cursor) = resp.hover_pos().and_then(|p| locations::hover_cursor(app, p)) {
+        ctx.set_cursor_icon(cursor);
+    } else if let Some(c) = hovered.and_then(|i| app.map.clusters.get(i)).filter(|_| app.map.pin_drag.is_none()) {
         // a single photo's pin can be picked up (unless markers are locked); a cluster is clicked
         let movable = c.len() == 1 && !app.ui.map_lock_markers;
         ctx.set_cursor_icon(if movable { egui::CursorIcon::Grab } else { egui::CursorIcon::PointingHand });
@@ -659,6 +683,12 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
                 let _ = app.run("library.select", json!({"ids": c.ids, "mode": mode, "active": first}));
                 if resp.double_clicked() {
                     let _ = app.run("view.detail", json!({}));
+                }
+            }
+            // a saved location's centre or name selects it (anywhere else drops the selection)
+            None if resp.clicked() && !resp.double_clicked() => {
+                if let Some(at) = resp.interact_pointer_pos() {
+                    locations::click(app, at);
                 }
             }
             None if resp.double_clicked() => {
@@ -727,6 +757,7 @@ fn map_canvas(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
     }
     draw_attribution(&painter, &t, canvas, tiles.attribution, 11.0, "map:attribution");
     controls(app, ui, canvas);
+    locations::overlay(app, ui, canvas);
 }
 
 /// The pin (or cluster) under canvas point `p`, as a click finds it.
@@ -880,6 +911,9 @@ pub fn end_pass(app: &mut LightcraftApp, ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
     if app.map.mini.as_ref().is_some_and(|m| m.pass != pass) {
         app.map.mini = None;
+    }
+    if app.map.loc.private_mini.is_some_and(|(_, _, p)| p != pass) {
+        app.map.loc.private_mini = None;
     }
     if app.map.wanting && !app.map.wanted.iter().any(|(p, _)| *p == pass) {
         app.map.wanting = false;
@@ -1084,6 +1118,9 @@ pub fn command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Result<Va
         },
         other => other,
     };
+    if let Some(r) = locations::command(app, id, p) {
+        return Some(r);
+    }
     let r = match id {
         "view.map" => {
             app.ui.view = crate::state::ViewMode::Map;
@@ -1181,6 +1218,12 @@ pub fn command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Result<Va
 
 /// What the map shows: `map.state`.
 pub fn state(app: &mut LightcraftApp) -> Value {
+    let mut s = state_core(app);
+    locations::state(app, &mut s);
+    s
+}
+
+fn state_core(app: &mut LightcraftApp) -> Value {
     let v = viewport(app);
     let origin = app.map.rect.map(|r| r.min).unwrap_or(egui::Pos2::ZERO);
     let selected: HashSet<u64> = app.session.selection.ids.iter().map(|p| p.0).collect();

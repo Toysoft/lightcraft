@@ -24,6 +24,13 @@
   filmstrip on top of your library filter and goes away when you leave the Map view. Smart albums and filters gain
   **GPS Area** (a south / west / north / east box) next to Has GPS. Agents: `map.locationFilter {mode}`, and the
   `gpsArea` rule field.
+- Saved locations, as in Lightroom Classic: name a place and a radius, and it is drawn on the map as a circle. The list
+  over the map's top-left corner shows how many of your photos are inside each; click one to go there, tick it to
+  select its photos, or use + to save the place the map shows (or the place of the selected photos). Drag the selected
+  location's centre or edge to move or resize it. Mark a location **Private** (right-click it) and the photos inside
+  are exported without their location, and the Info panel hides their map until you ask for it. Saved locations are
+  kept with the library (`locations.json`). Smart albums gain **GPS Radius**. Agents: `map.locations`,
+  `map.location.add`, `map.location.update`, `map.location.remove`, `map.location.photos`.
 
 ### Activity stack
 - Long-running tasks show in one place, top left under the top bar, as in Lightroom Classic (issue #345): imports and
