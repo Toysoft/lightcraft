@@ -1458,7 +1458,7 @@ fn lens_note(app: &mut LightcraftApp, ui: &mut egui::Ui, id: lightcraft_catalog:
         Match::NoLensName => tr("No lens named in this photo's metadata.").to_string(),
         Match::NotFound(lens) => tr("No profile for {lens} in the lens database.").replace("{lens}", &lens),
         // found: the photo picks it up when it is looked up again
-        Match::Found(_) => return,
+        Match::Found(_) | Match::Chosen(_) => return,
     };
     let r = ui.label(egui::RichText::new(text).size(11.0).color(t.text_dim));
     crate::widgets::register(ui.ctx(), "label:lensNote", r.rect);

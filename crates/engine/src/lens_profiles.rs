@@ -118,20 +118,103 @@ pub enum Match {
     NotRaw,
     /// The photo's metadata names no lens.
     NoLensName,
-    /// The database has no profile for the lens (its name).
+    /// The database has no profile for the lens (its name): the one named in the metadata, or the chosen one.
     NotFound(String),
-    /// The database's profile (its name).
+    /// The database's profile matched by the lens name in the metadata (its name).
     Found(String),
+    /// The database's profile for the lens given by the caller ([`GivenLens`], its name).
+    Chosen(String),
+}
+
+/// Most characters of a given lens name (longer names are refused, never matched).
+pub const MAX_NAME: usize = 256;
+
+/// A lens stated by the caller instead of read from the file (a lens picker, an adapted or manual lens, stripped
+/// metadata), plus the focal length and aperture such files usually lack. It wins over the automatic match by name,
+/// but not over a correction the file carries itself ([`resolve_raw`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GivenLens {
+    /// The lens maker as the database names it (optional; narrows the match).
+    pub maker: Option<String>,
+    /// The lens model: one of a profile's names ([`LensDb`]'s `models`), as `lens.db.list` reports them.
+    pub model: String,
+    /// Focal length, mm; the file's when `None`.
+    pub focal: Option<f64>,
+    /// F-number; the file's when `None`.
+    pub aperture: Option<f64>,
+}
+
+impl GivenLens {
+    /// Check a lens given from outside (a command or agent): a nonempty name of at most [`MAX_NAME`] characters,
+    /// a finite focal length in 0–10000 mm and an f-number in 0.5–256.
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        let ok_name = |n: &str| n.chars().count() <= MAX_NAME;
+        if self.model.trim().is_empty() {
+            return Err("the lens model is empty".into());
+        }
+        if !ok_name(&self.model) || !self.maker.as_deref().is_none_or(ok_name) {
+            return Err(format!("lens names are at most {MAX_NAME} characters"));
+        }
+        if self.focal.is_some_and(|f| !(f.is_finite() && f > 0.0 && f <= 10_000.0)) {
+            return Err("focal must be a focal length in mm (0–10000)".into());
+        }
+        if self.aperture.is_some_and(|a| !(a.is_finite() && (0.5..=256.0).contains(&a))) {
+            return Err("aperture must be an f-number (0.5–256)".into());
+        }
+        Ok(())
+    }
+}
+
+/// Which correction applies to a photo ([`resolve_raw`]), in this order: the file's own, a lens given by the
+/// caller, the automatic match by the lens name in the metadata (none: no correction).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Applied {
+    /// The file's embedded correction (DNG opcodes, a converted camera correction).
+    Embedded,
+    /// The database profile of the given lens (its name).
+    Chosen(String),
+    /// The database profile matched by the metadata's lens name (its name).
+    Found(String),
+}
+
+fn profile_name(p: &lightcraft_lensdb::Profile, fallback: &str) -> String {
+    p.models.first().cloned().unwrap_or_else(|| fallback.trim().to_string())
+}
+
+/// The profile for a given lens: one whose name (and maker, when given) equals it, ignoring case and outer spaces,
+/// else the best match by name ([`LensDb::find_lens`]).
+pub fn find_given<'a>(db: &'a LensDb, given: &GivenLens) -> Option<&'a lightcraft_lensdb::Profile> {
+    let model = given.model.trim();
+    if model.is_empty() || given.validate().is_err() {
+        return None;
+    }
+    let maker = given.maker.as_deref().map(str::trim).filter(|m| !m.is_empty());
+    db.lenses
+        .iter()
+        .find(|l| maker.is_none_or(|mk| l.maker.trim().eq_ignore_ascii_case(mk)) && l.models.iter().any(|n| n.trim().eq_ignore_ascii_case(model)))
+        .or_else(|| db.find_lens(maker, model, None))
 }
 
 /// Look `lens_model` (and its maker, when known) up in the database in use.
 pub fn match_lens(lens_make: Option<&str>, lens_model: &str) -> Match {
+    match_lens_with(lens_make, lens_model, None)
+}
+
+/// [`match_lens`], with a lens given by the caller taking the place of the name match: [`Match::Chosen`] when the
+/// database has it, else [`Match::NotFound`] with its name (a chosen lens never falls back to the name match).
+pub fn match_lens_with(lens_make: Option<&str>, lens_model: &str, given: Option<&GivenLens>) -> Match {
     let Some(db) = database() else { return Match::NoDatabase };
+    if let Some(g) = given {
+        return match find_given(&db, g) {
+            Some(p) => Match::Chosen(profile_name(p, &g.model)),
+            None => Match::NotFound(g.model.trim().chars().take(MAX_NAME).collect()),
+        };
+    }
     if lens_model.trim().is_empty() {
         return Match::NoLensName;
     }
     match db.find_lens(lens_make, lens_model, None) {
-        Some(p) => Match::Found(p.models.first().cloned().unwrap_or_else(|| lens_model.trim().to_string())),
+        Some(p) => Match::Found(profile_name(p, lens_model)),
         None => Match::NotFound(lens_model.trim().to_string()),
     }
 }
@@ -143,25 +226,145 @@ pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
 /// The database profile for a photo with metadata `m`, for its `w × h` (unoriented, default-cropped) image,
 /// re-expressed after `orientation`. `None` without a database, lens name, focal length or matching profile.
 pub fn lookup(db: &LensDb, m: &lightcraft_meta::Metadata, w: f64, h: f64, orientation: lightcraft_geom::Orientation) -> Option<EmbeddedLens> {
-    let focal = m.focal_length.filter(|f| f.is_finite() && *f > 0.0)?;
+    lookup_with(db, m, None, w, h, orientation).map(|(l, _)| l)
+}
+
+/// [`lookup`] with an optional lens given by the caller ([`GivenLens`]): its profile (and its focal length and
+/// aperture, else the file's) when given, else the profile matched by the metadata's lens name. A given lens the
+/// database lacks, or one without a focal length, gives no correction (it never falls back to the name match).
+pub fn lookup_with(
+    db: &LensDb,
+    m: &lightcraft_meta::Metadata,
+    given: Option<&GivenLens>,
+    w: f64,
+    h: f64,
+    orientation: lightcraft_geom::Orientation,
+) -> Option<(EmbeddedLens, Applied)> {
+    let valid = |f: f64| f.is_finite() && f > 0.0;
     let camera = db.find_camera(m.make.as_deref().unwrap_or_default(), m.model.as_deref().unwrap_or_default());
-    let lens = db.find_lens(m.lens_make.as_deref(), m.lens_model.as_deref()?, camera)?;
+    let (lens, focal, aperture, applied) = match given {
+        Some(g) => {
+            let lens = find_given(db, g)?;
+            let focal = g.focal.or(m.focal_length).filter(|f| valid(*f))?;
+            (lens, focal, g.aperture.or(m.f_number), Applied::Chosen(profile_name(lens, &g.model)))
+        }
+        None => {
+            let focal = m.focal_length.filter(|f| valid(*f))?;
+            let model = m.lens_model.as_deref()?;
+            let lens = db.find_lens(m.lens_make.as_deref(), model, camera)?;
+            (lens, focal, m.f_number, Applied::Found(profile_name(lens, model)))
+        }
+    };
+    let aperture = aperture.filter(|a| valid(*a));
     // the crop factor: the camera's, else what the 35 mm equivalent focal length implies
     let crop =
         camera.map(|c| c.crop_factor).or_else(|| m.focal_length_35mm.map(|f35| f35 / focal).filter(|c| c.is_finite() && (0.1..=20.0).contains(c)));
-    let shot = Shot { focal, aperture: m.f_number, distance: None, crop_factor: crop, width: w, height: h };
+    let shot = Shot { focal, aperture, distance: None, crop_factor: crop, width: w, height: h };
     let corr = lens.correction(&shot)?;
-    Some(lightcraft_pipeline::optics::reorient_lens(&corr, orientation, w, h))
+    Some((lightcraft_pipeline::optics::reorient_lens(&corr, orientation, w, h), applied))
 }
 
 /// [`crate::files::embedded_lens`], else the database profile ([`lookup`]) for a raw with metadata `meta`.
 pub fn for_raw(raw: &lightcraft_raw::RawInfo, meta: impl FnOnce() -> lightcraft_meta::Metadata) -> Option<EmbeddedLens> {
-    crate::files::embedded_lens(raw).or_else(|| {
+    resolve_raw(raw, meta, None).map(|(l, _)| l)
+}
+
+/// The lens correction for a raw and where it comes from, first that applies: the file's embedded correction,
+/// the lens `given` by the caller ([`GivenLens`]), the automatic match by the metadata's lens name; else `None`.
+pub fn resolve_raw(
+    raw: &lightcraft_raw::RawInfo,
+    meta: impl FnOnce() -> lightcraft_meta::Metadata,
+    given: Option<&GivenLens>,
+) -> Option<(EmbeddedLens, Applied)> {
+    resolve(crate::files::embedded_lens(raw), || {
         let db = database()?;
         let c = raw.crop.clipped(raw.active_area.width, raw.active_area.height);
         let (w, h) = if c.width == 0 || c.height == 0 { (raw.active_area.width, raw.active_area.height) } else { (c.width, c.height) };
-        lookup(&db, &meta(), w as f64, h as f64, raw.orientation)
+        lookup_with(&db, &meta(), given, w as f64, h as f64, raw.orientation)
     })
+}
+
+/// The order itself: the file's own correction (`file`) wins; else the database's (`database`, which applies a
+/// given lens before the name match).
+pub fn resolve(file: Option<EmbeddedLens>, database: impl FnOnce() -> Option<(EmbeddedLens, Applied)>) -> Option<(EmbeddedLens, Applied)> {
+    match file {
+        Some(l) => Some((l, Applied::Embedded)),
+        None => database(),
+    }
+}
+
+/// One lens of [`list`].
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListedLens {
+    pub maker: String,
+    /// The name to pass back as [`GivenLens::model`].
+    pub model: String,
+    /// Every name the lens goes by.
+    pub models: Vec<String>,
+    pub mounts: Vec<String>,
+    pub crop_factor: f64,
+    /// Calibrated focal lengths, mm (`[min, max]`; none when the profile has no calibration points).
+    pub focal: Option<[f64; 2]>,
+    pub distortion: bool,
+    pub vignetting: bool,
+    pub tca: bool,
+}
+
+/// What [`list`] filters by.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ListFilter {
+    /// A camera mount (ignoring case); lenses that name no mount are kept.
+    pub mount: Option<String>,
+    /// The camera's crop factor: lenses calibrated on a smaller crop (a larger frame) or the same are kept, since
+    /// their profile covers the frame.
+    pub crop: Option<f64>,
+    /// Words that must all appear in the maker or a name (ignoring case).
+    pub query: Option<String>,
+}
+
+/// The database's lenses that pass `filter`, sorted by maker and name: the total that match, and at most `limit`
+/// of them from `offset`.
+pub fn list(db: &LensDb, filter: &ListFilter, offset: usize, limit: usize) -> (usize, Vec<ListedLens>) {
+    let words: Vec<String> = filter.query.as_deref().unwrap_or_default().split_whitespace().take(16).map(str::to_lowercase).collect();
+    let mount = filter.mount.as_deref().map(str::trim).filter(|m| !m.is_empty());
+    let crop = filter.crop.filter(|c| c.is_finite() && *c > 0.0);
+    let mut hits: Vec<&lightcraft_lensdb::Profile> = db
+        .lenses
+        .iter()
+        .filter(|l| mount.is_none_or(|m| l.mounts.is_empty() || l.mounts.iter().any(|x| x.trim().eq_ignore_ascii_case(m))))
+        .filter(|l| crop.is_none_or(|c| !l.crop_factor.is_finite() || l.crop_factor <= 0.0 || l.crop_factor <= c * 1.02))
+        .filter(|l| {
+            let hay = format!("{} {}", l.maker, l.models.join(" ")).to_lowercase();
+            words.iter().all(|w| hay.contains(w.as_str()))
+        })
+        .collect();
+    hits.sort_by(|a, b| {
+        let key = |l: &lightcraft_lensdb::Profile| (l.maker.to_lowercase(), l.models.first().map(|m| m.to_lowercase()).unwrap_or_default());
+        key(a).cmp(&key(b))
+    });
+    let total = hits.len();
+    let out = hits
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|l| {
+            let focals = l.distortion.iter().map(|(f, _)| *f).chain(l.tca.iter().map(|(f, _)| *f)).chain(l.vignetting.iter().map(|v| v.focal));
+            let (lo, hi) = focals.filter(|f| f.is_finite()).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), f| (lo.min(f), hi.max(f)));
+            ListedLens {
+                maker: l.maker.clone(),
+                model: l.models.first().cloned().unwrap_or_default(),
+                models: l.models.clone(),
+                mounts: l.mounts.clone(),
+                crop_factor: l.crop_factor,
+                focal: (lo <= hi).then_some([lo, hi]),
+                distortion: !l.distortion.is_empty(),
+                vignetting: !l.vignetting.is_empty(),
+                tca: !l.tca.is_empty(),
+            }
+        })
+        .collect();
+    (total, out)
 }
 
 #[cfg(test)]
@@ -239,6 +442,87 @@ mod tests {
         assert!(lookup(&db, &lightcraft_meta::Metadata { focal_length: None, ..meta() }, 6000.0, 4000.0, Orientation::Normal).is_none());
         let other = lightcraft_meta::Metadata { lens_model: Some("70-200mm F4".into()), ..meta() };
         assert!(lookup(&db, &other, 6000.0, 4000.0, Orientation::Normal).is_none());
+    }
+
+    const DB3: &str = r#"<lensdatabase>
+      <camera><maker>Testcam</maker><model>TC-1</model><mount>T</mount><cropfactor>1.5</cropfactor></camera>
+      <lens><maker>Testcam</maker><model>Testcam 18-55mm f/3.5-5.6</model><mount>T</mount><cropfactor>1.5</cropfactor>
+        <calibration><distortion model="poly3" focal="18" k1="-0.03" /></calibration></lens>
+      <lens><maker>Oldglass</maker><model>Oldglass 50mm f/1.8</model><mount>M42</mount><cropfactor>1.0</cropfactor>
+        <calibration><distortion model="poly3" focal="50" k1="0.02" />
+          <vignetting model="pa" focal="50" aperture="1.8" distance="1000" k1="-0.5" k2="0" k3="0" /></calibration></lens>
+      <lens><maker>Tiny</maker><model>Tiny 8mm</model><mount>T</mount><cropfactor>5.0</cropfactor>
+        <calibration><distortion model="poly3" focal="8" k1="0.01" /></calibration></lens>
+      </lensdatabase>"#;
+
+    fn given(model: &str, focal: Option<f64>) -> GivenLens {
+        GivenLens { model: model.into(), focal, ..Default::default() }
+    }
+
+    /// The file's own correction wins over a chosen lens, a chosen lens over the match by name, and a chosen lens
+    /// the database lacks gives nothing (it never falls back to the name match).
+    #[test]
+    fn corrections_apply_in_order() {
+        let db = LensDb::parse(DB3).unwrap();
+        let m = lightcraft_meta::Metadata { lens_model: Some("18-55mm F3.5-5.6".into()), ..meta() };
+        let o = Orientation::Normal;
+        let (_, a) = lookup_with(&db, &m, None, 600.0, 400.0, o).unwrap();
+        assert_eq!(a, Applied::Found("Testcam 18-55mm f/3.5-5.6".into()));
+        let chosen = given("Oldglass 50mm f/1.8", Some(50.0));
+        let (lens, a) = lookup_with(&db, &m, Some(&chosen), 600.0, 400.0, o).unwrap();
+        assert_eq!(a, Applied::Chosen("Oldglass 50mm f/1.8".into()));
+        assert!(lens.vignette.is_some(), "the chosen lens's own calibration");
+        assert!(lookup_with(&db, &m, Some(&given("Nonesuch 1000mm", Some(50.0))), 600.0, 400.0, o).is_none());
+        // a chosen lens takes the file's focal length when it gives none, and needs one from somewhere
+        assert!(lookup_with(&db, &m, Some(&given("Oldglass 50mm f/1.8", None)), 600.0, 400.0, o).is_some());
+        let no_focal = lightcraft_meta::Metadata { focal_length: None, lens_model: None, ..meta() };
+        assert!(lookup_with(&db, &no_focal, Some(&given("Oldglass 50mm f/1.8", None)), 600.0, 400.0, o).is_none());
+        assert!(lookup_with(&db, &no_focal, Some(&chosen), 600.0, 400.0, o).is_some(), "a file naming no lens, focal given");
+        // the file's own correction comes first, whatever was chosen
+        let own = EmbeddedLens::default();
+        let db_lens = || lookup_with(&db, &m, Some(&chosen), 600.0, 400.0, o);
+        assert_eq!(resolve(Some(own), db_lens).map(|(_, a)| a), Some(Applied::Embedded));
+        assert_eq!(resolve(None, db_lens).map(|(_, a)| a), Some(Applied::Chosen("Oldglass 50mm f/1.8".into())));
+    }
+
+    #[test]
+    fn hostile_given_lenses_are_refused_or_match_nothing() {
+        let db = LensDb::parse(DB3).unwrap();
+        for g in [
+            given("", Some(50.0)),
+            given(&"x".repeat(MAX_NAME + 1), None),
+            given("Oldglass 50mm f/1.8", Some(f64::NAN)),
+            given("Oldglass 50mm f/1.8", Some(-3.0)),
+            given("Oldglass 50mm f/1.8", Some(f64::INFINITY)),
+            GivenLens { aperture: Some(0.0), ..given("Oldglass 50mm f/1.8", Some(50.0)) },
+        ] {
+            assert!(g.validate().is_err(), "{g:?}");
+            assert!(find_given(&db, &g).is_none());
+            assert!(lookup_with(&db, &meta(), Some(&g), 600.0, 400.0, Orientation::Normal).is_none());
+        }
+        // degenerate image sizes never panic
+        let g = given("Oldglass 50mm f/1.8", Some(50.0));
+        for (w, h) in [(0.0, 0.0), (1.0, 0.0), (f64::NAN, 4.0)] {
+            let _ = lookup_with(&db, &meta(), Some(&g), w, h, Orientation::Normal);
+        }
+    }
+
+    #[test]
+    fn lenses_are_listed_by_mount_crop_and_words() {
+        let db = LensDb::parse(DB3).unwrap();
+        let names = |f: ListFilter| list(&db, &f, 0, 100).1.into_iter().map(|l| l.model).collect::<Vec<_>>();
+        assert_eq!(names(ListFilter::default()).len(), 3);
+        assert_eq!(names(ListFilter { mount: Some("t".into()), ..Default::default() }), ["Testcam 18-55mm f/3.5-5.6", "Tiny 8mm"]);
+        // a 1.5× body takes lenses calibrated on 1.5× or a larger frame, not the 5× one
+        assert_eq!(names(ListFilter { crop: Some(1.5), ..Default::default() }), ["Oldglass 50mm f/1.8", "Testcam 18-55mm f/3.5-5.6"]);
+        assert_eq!(names(ListFilter { query: Some("OLDGLASS 50".into()), ..Default::default() }), ["Oldglass 50mm f/1.8"]);
+        let (total, page) = list(&db, &ListFilter::default(), 1, 1);
+        assert_eq!((total, page.len()), (3, 1));
+        assert_eq!(page[0].model, "Testcam 18-55mm f/3.5-5.6");
+        assert_eq!(list(&db, &ListFilter::default(), usize::MAX, usize::MAX).1.len(), 0);
+        let old = &list(&db, &ListFilter { mount: Some("M42".into()), ..Default::default() }, 0, 10).1[0];
+        assert_eq!((old.focal, old.vignetting, old.tca), (Some([50.0, 50.0]), true, false));
+        assert!(names(ListFilter { crop: Some(f64::NAN), mount: Some(String::new()), query: Some("  ".into()) }).len() == 3);
     }
 
     /// A synthetic grid recorded through the profile's barrel distortion comes out of the pipeline's geometry

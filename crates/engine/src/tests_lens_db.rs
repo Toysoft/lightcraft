@@ -241,3 +241,74 @@ fn optics_is_told_why_there_is_no_correction() {
     assert!(s.lens_profiles_stale(id));
     crate::lens_profiles::set_dir(before);
 }
+
+/// `lens.db.photo` reports a given lens as `chosen` (over a name match, never over the file's own correction) and
+/// `lens.db.list` lists the database for a picker; hostile parameters are errors, never panics.
+#[test]
+fn a_chosen_lens_and_the_lens_list() {
+    let _g = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    if skip_for_env() {
+        return;
+    }
+    let before = crate::lens_profiles::configured_dir();
+    crate::lens_profiles::set_dir(None);
+    let mut s = Session::new();
+    let none = s.execute("lens.db.list", &json!({})).unwrap();
+    assert_eq!(none["database"], json!(false));
+    let db = scratch("chosen");
+    std::fs::write(db.join("lenses.xml"), DB).unwrap();
+    s.lens_db.set_dir(Some(db)).unwrap();
+    let add = |s: &mut Session, lens: &str, own: bool| {
+        let id = s.catalog.alloc_photo_id();
+        let mut p = lightcraft_catalog::Photo::new(id, lightcraft_catalog::Source::Demo { scene: 0 }, "a.nef", "NEF", 10, 10, "now");
+        p.kind = lightcraft_catalog::MediaKind::Raw;
+        p.meta.lens = lens.into();
+        if own {
+            p.embedded_lens = Some(Default::default());
+            s.lens_from_file.insert(id, true);
+        }
+        s.catalog.apply(lightcraft_catalog::Op::AddPhoto { photo: Box::new(p) }).unwrap();
+        id.0
+    };
+    let nameless = add(&mut s, "", false);
+    let named = add(&mut s, "18-55mm F3.5-5.6", false);
+    let own = add(&mut s, "", true);
+    let chosen = json!({"model": "Testcam 18-55mm f/3.5-5.6", "focal": 18});
+    let photo = |s: &mut Session, id: u64, lens: Value| s.execute("lens.db.photo", &json!({"ids": [id], "lens": lens}));
+    assert_eq!(photo(&mut s, nameless, Value::Null).unwrap()["state"], "noLensName");
+    assert_eq!(photo(&mut s, nameless, chosen.clone()).unwrap(), json!({"state": "chosen", "lens": "Testcam 18-55mm f/3.5-5.6"}));
+    assert_eq!(photo(&mut s, nameless, json!("Testcam 18-55mm f/3.5-5.6")).unwrap()["state"], "chosen");
+    assert_eq!(photo(&mut s, named, Value::Null).unwrap()["state"], "found");
+    assert_eq!(photo(&mut s, named, chosen.clone()).unwrap()["state"], "chosen");
+    assert_eq!(photo(&mut s, named, json!({"model": "Nonesuch 1000mm"})).unwrap(), json!({"state": "notFound", "lens": "Nonesuch 1000mm"}));
+    assert_eq!(photo(&mut s, own, chosen).unwrap()["state"], "embedded");
+    for bad in [
+        json!(7),
+        json!({}),
+        json!({"model": ""}),
+        json!({"model": "x", "focal": -1}),
+        json!({"model": "x", "focal": "wide"}),
+        json!({"model": "x", "aperture": 1e308}),
+        json!({"model": "x".repeat(10_000)}),
+    ] {
+        assert!(photo(&mut s, nameless, bad.clone()).is_err(), "{bad}");
+    }
+    let v = s.execute("lens.db.list", &json!({"mount": "T", "crop": 1.5, "query": "18-55"})).unwrap();
+    assert_eq!(
+        (v["total"].clone(), v["lenses"][0]["model"].clone(), v["more"].clone()),
+        (json!(1), json!("Testcam 18-55mm f/3.5-5.6"), json!(false))
+    );
+    assert_eq!(s.execute("lens.db.list", &json!({"mount": "Other"})).unwrap()["total"], json!(0));
+    assert_eq!(s.execute("lens.db.list", &json!({"limit": 1_000_000_000_000u64, "offset": u64::MAX})).unwrap()["lenses"], json!([]));
+    for bad in [
+        json!({"crop": -1}),
+        json!({"crop": "aps"}),
+        json!({"limit": -5}),
+        json!({"limit": 1.5}),
+        json!({"mount": 3}),
+        json!({"query": "q".repeat(10_000)}),
+    ] {
+        assert!(s.execute("lens.db.list", &bad).is_err(), "{bad}");
+    }
+    crate::lens_profiles::set_dir(before);
+}

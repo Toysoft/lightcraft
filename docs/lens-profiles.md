@@ -29,8 +29,33 @@ Develop ▸ Optics says why **Enable Lens Corrections** has nothing to apply to 
 lens database (a link to the Settings section), no lens named in the photo's metadata, or no profile for its lens.
 
 Commands: `lens.db.status`, `lens.db.setDir {dir}`, `lens.db.download {wait?}`, `lens.db.downloadCancel`,
-`lens.db.remove`, `lens.db.refresh {ids}`, `lens.db.photo {id}`; `app.settings {section: "lensProfiles"}` opens the
-section. Invalid files are skipped with a warning in the log.
+`lens.db.remove`, `lens.db.refresh {ids}`, `lens.db.photo {id, lens?}`, `lens.db.list {mount?, crop?, query?, limit?,
+offset?}`; `app.settings {section: "lensProfiles"}` opens the section. Invalid files are skipped with a warning in the
+log.
+
+## Which correction applies
+
+In this order, the first that applies wins:
+
+1. the file's own correction (DNG opcodes, a camera correction a raw reader converts);
+2. a lens given by the caller (a lens picker's choice: maker, model, and the focal length and aperture such files
+   often lack, else the file's), found in the database by one of its names;
+3. the automatic match by the lens name in the photo's metadata;
+4. none.
+
+A given lens the database lacks gives no correction; it does not fall back to the name match. `lens.db.photo`
+reports which one applies: `embedded`, `chosen` (when called with `lens: {maker?, model, focal?, aperture?}`, or
+just the model name), `found`, or why there is none (`noDatabase`, `notRaw`, `noLensName`, `notFound`). In code the
+order is `lens_profiles::resolve_raw(raw, meta, given)` (`lookup_with` for the database part,
+`Session::lens_match_with` for the status). Nothing stores a choice on the photo yet: the given lens is a parameter.
+
+`lens.db.list` lists the database's lenses for a picker, sorted by maker and name: `mount` keeps lenses for that
+camera mount (and those naming none), `crop` (the camera's crop factor) keeps lenses calibrated on that frame or a
+larger one, and `query` keeps lenses whose maker or names contain every word. It returns at most `limit` lenses
+(100 by default, never more than 500) from `offset`, with the `total` that match and whether there are `more`;
+each lens has `maker`, `model` (the name to pass back as `lens.model`), `models`, `mounts`, `cropFactor`, the
+calibrated `focal` range and which corrections it has (`distortion`, `vignetting`, `tca`). Malformed parameters
+(non-numbers, negative or non-finite values, names over 256 characters) are errors, never a crash.
 
 ## What is applied
 

@@ -125,6 +125,7 @@ impl Session {
         let mut changed = Vec::new();
         for ((id, _), info) in files.into_iter().zip(probed) {
             let (Ok(info), Some(ph)) = (info, self.catalog.photo(id)) else { continue };
+            self.lens_from_file.insert(id, info.lens_from_file);
             let mine = crate::cmd::convert::lens_ops(id, ph, &info);
             if !mine.is_empty() {
                 ops.extend(mine);
@@ -153,13 +154,35 @@ impl Session {
     /// What the lens database says about `p`'s lens, for Develop ▸ Optics; `None` when the photo carries a lens
     /// correction already (its own, or one found earlier).
     pub fn lens_match(&self, p: &lightcraft_catalog::Photo) -> Option<crate::lens_profiles::Match> {
-        if p.embedded_lens.is_some() {
-            return None;
-        }
+        self.lens_match_with(p, None)
+    }
+
+    /// [`Session::lens_match`] for a lens given by the caller (a lens picker's choice) instead of the one the
+    /// metadata names, in the order corrections apply ([`crate::lens_profiles::resolve_raw`]): `None` when the
+    /// file carries its own correction, else [`crate::lens_profiles::Match::Chosen`] (or `NotFound`) for the given
+    /// lens, else the match by name. A correction found earlier by name gives way to a given lens.
+    pub fn lens_match_with(
+        &self,
+        p: &lightcraft_catalog::Photo,
+        given: Option<&crate::lens_profiles::GivenLens>,
+    ) -> Option<crate::lens_profiles::Match> {
+        use crate::lens_profiles::Match;
         if !p.develops_raw() {
-            return Some(crate::lens_profiles::Match::NotRaw);
+            return if p.embedded_lens.is_some() { None } else { Some(Match::NotRaw) };
         }
-        Some(crate::lens_profiles::match_lens(None, &p.meta.lens))
+        if p.embedded_lens.is_some() {
+            // the file's own, as this session recorded when it looked the photo up; unrecorded, the file's unless
+            // the database matches its lens name (only then could the correction have come from there)
+            let from_file = self
+                .lens_from_file
+                .get(&p.id)
+                .copied()
+                .unwrap_or_else(|| !matches!(crate::lens_profiles::match_lens(None, &p.meta.lens), Match::Found(_)));
+            if from_file {
+                return None;
+            }
+        }
+        Some(crate::lens_profiles::match_lens_with(None, &p.meta.lens, given))
     }
 
     /// Point AI denoise at `dir` (or at no folder), dropping what was learned about the old one.
