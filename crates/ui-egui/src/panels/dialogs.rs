@@ -411,6 +411,12 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     let folder = id.and_then(|id| app.session.catalog.album(lightcraft_catalog::AlbumId(id))).and_then(|a| a.smart.as_deref().and_then(|f| f.library_folder.clone()));
                     // problems, count and albums: cached until the catalog or the rules change (not per frame)
                     let now = (app.session.clock)();
+                    // contents rules ask the content index: their texts are read before the count is made
+                    let asked = rules.contents_asked();
+                    app.session.content_rules_ask(asked.clone());
+                    if !asked.is_empty() {
+                        app.session.content_rules_refresh();
+                    }
                     let view = app.caches.rules_view(&app.session.catalog, rules, *id, folder, &now);
                     let env = crate::panels::rules_editor::Env { problems: view.problems.clone(), today: now, albums: view.albums.clone() };
                     egui::ScrollArea::vertical().max_height(list_height(ui, 360.0)).auto_shrink([false, true]).show(ui, |ui| {
@@ -425,6 +431,18 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         );
                     } else {
                         ui.label(egui::RichText::new(crate::i18n::tr("Fix the marked rules to save this album.")).color(t.caution));
+                    }
+                    if !asked.is_empty() && !app.session.content_rules_usable() {
+                        let r = ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(crate::i18n::tr(
+                                    "Contents rules match nothing until photos are indexed: turn on Index photo contents in Settings → Search.",
+                                ))
+                                .color(t.caution),
+                            )
+                            .wrap(),
+                        );
+                        crate::widgets::register(ui.ctx(), "label:contentsRuleNote", r.rect);
                     }
                 }
                 Dialog::NewSmartAlbum { name, .. } => {

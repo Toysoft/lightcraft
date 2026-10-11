@@ -58,6 +58,12 @@ pub struct Settings {
     /// How hard indexing works: `low`, `normal` (the default) or `fast`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pace: Option<String>,
+    /// The keyword parent of accepted auto-tags (`None`: `Contents`; empty: none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag_parent: Option<String>,
+    /// The auto-tags' cut-off chosen by the user (`None`: the model's).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag_threshold: Option<f32>,
 }
 
 /// Read at most `max` bytes of a small file (`None` when it is missing, unreadable or larger).

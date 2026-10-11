@@ -52,6 +52,8 @@ mod tests_compare;
 #[cfg(test)]
 mod tests_content_search;
 #[cfg(test)]
+mod tests_content_tags;
+#[cfg(test)]
 mod tests_copy_paste_dialogs;
 #[cfg(test)]
 mod tests_crop_rotate;
@@ -1471,6 +1473,8 @@ pub struct Caches {
     folder_tree: Option<(u64, std::sync::Arc<Vec<lightcraft_catalog::FolderNode>>)>,
     people: Option<(u64, lightcraft_catalog::Filter, std::sync::Arc<Vec<lightcraft_catalog::Person>>)>,
     suggestions: Option<(u64, std::sync::Arc<Vec<String>>)>,
+    /// "Suggested from contents" (auto-tags) for the selection, by selection, library revision and tags.
+    content_suggestions: Option<(u64, std::sync::Arc<Vec<lightcraft_engine::ContentSuggestion>>)>,
     counts: Option<(u64, LibraryCounts)>,
     date_groups: Option<(u64, std::sync::Arc<Vec<lightcraft_catalog::DateGroup>>)>,
     filter_values: Option<(u64, std::sync::Arc<FilterValues>)>,
@@ -1707,6 +1711,23 @@ impl Caches {
             }
         }
     }
+    /// The auto-tags suggested for `photos` (the Keywording panel's "Suggested from contents"), worked out again only
+    /// when the selection, the library or the tags change.
+    pub fn content_suggestions(
+        &mut self,
+        session: &mut lightcraft_engine::Session,
+        photos: &[lightcraft_catalog::PhotoId],
+    ) -> std::sync::Arc<Vec<lightcraft_engine::ContentSuggestion>> {
+        let k = key_of((session.catalog.revision, photos, session.content_tags_generation()));
+        match &self.content_suggestions {
+            Some((h, v)) if *h == k => v.clone(),
+            _ => {
+                let v = std::sync::Arc::new(session.content_suggestions(photos));
+                self.content_suggestions = Some((k, v.clone()));
+                v
+            }
+        }
+    }
     /// Keyword suggestions for a photo with `current` keywords and the typed `prefix`.
     pub fn suggestions(&mut self, cat: &lightcraft_catalog::Catalog, current: &[String], prefix: &str, n: usize) -> std::sync::Arc<Vec<String>> {
         let k = key_of((cat.revision, current, prefix, n));
@@ -1737,7 +1758,16 @@ impl Caches {
     ) -> std::sync::Arc<RulesView> {
         let relative = rules.depends_on_now();
         let minute = if relative { now.get(..16).unwrap_or(now) } else { "" };
-        let k = key_of((cat.revision, serde_json::to_string(rules).unwrap_or_default(), editing, &folder, minute, i18n::language().code()));
+        // (and what contents rules see, when the engine's content index changes)
+        let k = key_of((
+            cat.revision,
+            serde_json::to_string(rules).unwrap_or_default(),
+            editing,
+            &folder,
+            minute,
+            i18n::language().code(),
+            lightcraft_catalog::rules::context_generation(),
+        ));
         if let Some((key, v)) = &self.rules_view
             && *key == k
         {
@@ -1781,7 +1811,8 @@ impl Caches {
     ) -> std::sync::Arc<std::collections::HashMap<lightcraft_catalog::AlbumId, usize>> {
         let relative = cat.albums().any(|a| a.smart.as_ref().is_some_and(|f| f.depends_on_now()));
         let minute = if relative { now.get(..16).unwrap_or(now) } else { "" };
-        let k = key_of((cat.revision, minute));
+        // (and what contents rules see: auto-tags, texts, from the engine's content index)
+        let k = key_of((cat.revision, minute, lightcraft_catalog::rules::context_generation()));
         match &self.album_counts {
             Some((h, v)) if *h == k => v.clone(),
             _ => {

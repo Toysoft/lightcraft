@@ -2,6 +2,23 @@
 
 ## 2026-10-11
 
+### Search by content: auto-tags
+- Indexed photos now get **tags** from a vocabulary of about 1,500 things a photo can show (beach, forest, rocks,
+  flower, crowd, heron, scorpion, camper van, wedding, sunset, snow…), arranged in levels (`animal › bird › heron`).
+  They are suggestions: nothing is written to your photos until you accept one.
+- **Library Filter ▸ Contents** (Shift+F) lists the library's tags with how many photos show each, a level counting
+  everything below it (`animal` covers every bird and dog). Pick one to see its photos, with every other filter.
+- **Keywording ▸ Suggested from contents**: the tags of the selected photos. Click one to make it a keyword
+  (`Contents|heron`, written to XMP and exported like any keyword; one undo step for the whole selection), or ✕ to
+  never suggest it for those photos again.
+- **Smart Collections** have a *Contents* criterion: *shows* a text (`red car`) or *is tagged* with a tag.
+- Settings ▸ Search ▸ **Auto-tags**: the keyword parent accepted tags go under (`Contents`, or none), the tags' cut-off
+  (Advanced) and the **vocabulary** itself, editable as text (one tag per line, synonyms after `=`) with Restore
+  Defaults. The vocabulary is prepared once per model in the background (*Preparing auto-tags* in the activity stack);
+  after that, tagging a large library takes about a second.
+- Agents: `content.tags`, `content.tagCounts`, `content.acceptTags`, `content.dismissTags`, `content.vocabulary`,
+  `content.setVocabulary`, `content.tagOptions`, and `library.filter {contentTag}` (docs/content-search.md).
+
 ### Search by content: from the search bar
 - The search field's magnifier now opens **Search Text** / **Search Contents**. In Contents mode, type what is in the
   photo (*beach at sunset*, *a dog on a jetty*, *trees seen from above*; other languages work too) and the grid shows

@@ -262,5 +262,8 @@
   "Indexed {percent} % of photos": "{percent} % des photos indexées",
   "{n} matches": "{n} résultats",
   "Best {n} matches": "Les {n} meilleurs résultats",
-  "Similar to {name}": "Semblable à {name}"
+  "Similar to {name}": "Semblable à {name}",
+  "Preparing {n} tags…": "Préparation de {n} balises…",
+  "{n} tags in the vocabulary.": "{n} balises dans le vocabulaire.",
+  "Vocabulary saved; {n} lines were skipped": "Vocabulaire enregistré ; {n} lignes ignorées"
 }

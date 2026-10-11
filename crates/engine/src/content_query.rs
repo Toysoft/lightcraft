@@ -165,6 +165,20 @@ impl Session {
         }
     }
 
+    /// Bring what the catalog's contents rules and the Contents filter see (auto-tags, texts' scores) up to date and
+    /// install it for this thread's queries ([`lightcraft_catalog::rules::set_context`]); returns a number that changes
+    /// with it ([`Session::content_rules_generation`]).
+    pub fn content_rules_refresh(&mut self) -> u64 {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            crate::cmd::content_tags::refresh_rules(self)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            0
+        }
+    }
+
     /// How well photo `id` matched the search by contents in view (`None`: no such search, or not in its ranking).
     pub fn content_score(&self, id: PhotoId) -> Option<f32> {
         self.content_query.scores.get(&id).copied()
@@ -269,4 +283,42 @@ impl Session {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Session {
+    /// The web build has no content index: no suggestions.
+    pub fn content_suggestions(&mut self, _photos: &[PhotoId]) -> Vec<crate::ContentSuggestion> {
+        Vec::new()
+    }
+
+    /// The web build has no content index: no tags.
+    pub fn content_tag_counts(&mut self) -> std::sync::Arc<Vec<(String, usize)>> {
+        Default::default()
+    }
+
+    pub fn content_tags_generation(&mut self) -> u64 {
+        0
+    }
+
+    pub fn content_rules_generation(&self) -> u64 {
+        0
+    }
+
+    pub fn content_rules_ask(&mut self, _asked: Vec<(bool, String)>) {}
+
+    /// The web build has no content index: contents rules match nothing.
+    pub fn content_rules_usable(&mut self) -> bool {
+        false
+    }
+}
+
+/// A tag suggested for some photos (the web build has none).
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Suggestion {
+    pub tag: String,
+    pub label: String,
+    pub photos: Vec<PhotoId>,
+    pub score: f32,
 }

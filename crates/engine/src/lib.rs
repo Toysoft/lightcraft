@@ -28,6 +28,8 @@ mod content_index;
 pub mod content_models;
 pub mod content_query;
 #[cfg(not(target_arch = "wasm32"))]
+mod content_tags;
+#[cfg(not(target_arch = "wasm32"))]
 mod content_worker;
 pub mod crs;
 pub mod crs_masks;
@@ -73,7 +75,12 @@ pub mod walk;
 
 use std::sync::Arc;
 
+/// A tag suggested from photo contents (the Keywording panel's "Suggested from contents").
+#[cfg(not(target_arch = "wasm32"))]
+pub use cmd::content_tags::Suggestion as ContentSuggestion;
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
+#[cfg(target_arch = "wasm32")]
+pub use content_query::Suggestion as ContentSuggestion;
 pub use fonts::{CRAFT_FONTS, CraftFont};
 use lightcraft_catalog::{Catalog, Filter, Op, PhotoId, Sort};
 use lightcraft_develop::DevelopSettings;
@@ -861,9 +868,11 @@ impl Session {
     pub fn visible(&mut self) -> &[PhotoId] {
         // the search by contents first: it can change the sort (Relevance), and its ranking is part of the filter
         let contents = self.content_refresh();
+        // (and what the filter's and smart albums' contents rules see: auto-tags, texts)
+        let rules = self.content_rules_refresh();
         let mut key = (
             self.catalog.revision,
-            format!("{:?}|{:?}|{:?}|{:?}|{:?}|c{contents}", self.source, self.filter, self.sort, self.browse, self.library_folder),
+            format!("{:?}|{:?}|{:?}|{:?}|{:?}|c{contents}|r{rules}", self.source, self.filter, self.sort, self.browse, self.library_folder),
         );
         if self.source == LibrarySource::Missing && self.media.availability.is_background() {
             // the view fills in as the background checks find files gone
@@ -1014,6 +1023,8 @@ mod tests_color;
 mod tests_content_index;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests_content_models;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests_content_tags;
 #[cfg(test)]
 mod tests_crop_angle;
 #[cfg(test)]

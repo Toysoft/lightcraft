@@ -445,6 +445,12 @@ impl ContentModel for Siglip {
         }
     }
 
+    fn scoring(&self) -> Option<crate::Scoring> {
+        let sigmoid = self.manifest.score.kind == ScoreKind::Sigmoid;
+        // (as score_cosine: a softmax model's score is the scaled cosine)
+        Some(crate::Scoring { scale: self.scale, bias: if sigmoid { self.bias } else { 0.0 }, sigmoid })
+    }
+
     fn manifest(&self) -> &Manifest {
         &self.manifest
     }

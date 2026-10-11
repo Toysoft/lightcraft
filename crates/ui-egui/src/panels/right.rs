@@ -893,6 +893,8 @@ fn keywords(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
                 }
             });
         }
+        ui.add_space(6.0);
+        super::keywording::content_suggestions(app, ui);
     });
     super::keyword_list::show(app, ui);
 }

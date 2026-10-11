@@ -147,6 +147,47 @@ pub fn chip_row(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     });
 }
 
+/// "Suggested from contents": the auto-tags of the selected photos that are not keywords yet. Clicking one makes it a
+/// keyword (under the parent chosen in Settings → Search) of the photos it is suggested for, in one undo step; its ✕
+/// dismisses it for them for good. One suggested for only some of the selected photos is marked with an asterisk.
+pub fn content_suggestions(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    let selection = app.session.targets(&serde_json::Value::Null);
+    if selection.is_empty() {
+        return;
+    }
+    let sug = app.caches.content_suggestions(&mut app.session, &selection);
+    if sug.is_empty() {
+        return;
+    }
+    let caption = ui.label(egui::RichText::new(crate::i18n::tr("Suggested from contents")).color(t.text_dim));
+    register(ui.ctx(), "label:contentSuggestions", caption.rect);
+    ui.horizontal_wrapped(|ui| {
+        for s in sug.iter().take(24) {
+            let partial = s.photos.len() < selection.len();
+            let (body, x) = chip(ui, &format!("+ {}", s.label), partial, true);
+            register(ui.ctx(), format!("contentSuggest:{}", s.tag), body.rect);
+            let full = s.tag.replace('|', " › ");
+            let tip = if partial {
+                format!("{full}\n{}", crate::i18n::tr_format!("On {have} of {of} selected photos", have = s.photos.len(), of = selection.len()))
+            } else {
+                full
+            };
+            if body.on_hover_text(format!("{tip}\n{}", crate::i18n::tr("Click to add it as a keyword"))).clicked() {
+                let ids: Vec<u64> = s.photos.iter().map(|p| p.0).collect();
+                let _ = app.run("content.acceptTags", json!({"ids": ids, "tags": [s.tag]}));
+            }
+            if let Some(x) = x {
+                register(ui.ctx(), format!("contentSuggestDismiss:{}", s.tag), x.rect);
+                if x.on_hover_text(crate::i18n::tr("Don't suggest it for these photos again")).clicked() {
+                    let ids: Vec<u64> = s.photos.iter().map(|p| p.0).collect();
+                    let _ = app.run("content.dismissTags", json!({"ids": ids, "tags": [s.tag]}));
+                }
+            }
+        }
+    });
+}
+
 /// A chip's label within `room` (as `measure` measures text): the keyword's path with " › "
 /// between its levels, and an asterisk when it is `partial`. Too long, it is cut from the front so
 /// that the keyword's own name and the asterisk stay ("…Lisbon › Belém tower *").

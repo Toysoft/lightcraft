@@ -262,5 +262,8 @@
   "Indexed {percent} % of photos": "已为 {percent} % 的照片建立索引",
   "{n} matches": "{n} 个匹配",
   "Best {n} matches": "最佳 {n} 个匹配",
-  "Similar to {name}": "与 {name} 相似"
+  "Similar to {name}": "与 {name} 相似",
+  "Preparing {n} tags…": "正在准备 {n} 个标签…",
+  "{n} tags in the vocabulary.": "词汇表中有 {n} 个标签。",
+  "Vocabulary saved; {n} lines were skipped": "词汇表已保存；跳过了 {n} 行"
 }

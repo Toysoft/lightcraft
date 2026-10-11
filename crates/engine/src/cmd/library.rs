@@ -368,7 +368,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Filter",
             [],
             None,
-            "partial Filter: {text?, rating?, ratingOp?: atLeast|exactly|atMost, flag?: pick|reject|none|null, label?, kind?, merged?: hdr|panorama|hdrPanorama|any, edited?, date?, libraryFolder?: a path from library.folders, keyword?, person?, camera?, contents?: text | null, wait?: bool (true)} → {count, contents?} — `contents` (the search bar's Contents mode) and `contents:` / `shows:` words in `text` (`contents:\"red car\" rating:>=3`) search photos by what they show, with the content index (Settings ▸ Search): the photos that match, ANDed with the rest of the filter, sorted by Relevance until another sort is chosen; `contents` in the answer says how it went (state ready | preparing | problem, matches, bestMatches, hint). `wait: false` answers at once while the search model loads (the app); otherwise it waits for the ranking",
+            "partial Filter: {text?, rating?, ratingOp?: atLeast|exactly|atMost, flag?: pick|reject|none|null, label?, kind?, merged?: hdr|panorama|hdrPanorama|any, edited?, date?, libraryFolder?: a path from library.folders, keyword?, person?, camera?, contents?: text | null, contentTag?: auto-tag | null, wait?: bool (true)} → {count, contents?} — `contentTag` shows the photos auto-tagged with it (`animal|bird`, its levels below included; content.tagCounts lists them);  `contents` (the search bar's Contents mode) and `contents:` / `shows:` words in `text` (`contents:\"red car\" rating:>=3`) search photos by what they show, with the content index (Settings ▸ Search): the photos that match, ANDed with the rest of the filter, sorted by Relevance until another sort is chosen; `contents` in the answer says how it went (state ready | preparing | problem, matches, bestMatches, hint). `wait: false` answers at once while the search model loads (the app); otherwise it waits for the ranking",
             always,
             |s, p| {
                 let mut p = p.clone();
@@ -967,7 +967,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"id": id.0, "count": s.catalog.album_count(id)}))
             }
         ),
-        cmd!(query "album.ruleFields", "Smart Album Rule Fields", [], None, "{} → [{field, label, kind (text|keywords|number|date|choice|bool|album: an album id), group (field-menu submenu, null at the top level), ops: [{op, label}], choices? (ids), choiceLabels? ({id: label})}] for ruleSet rules, in menu order", always, |_, _| {
+        cmd!(query "album.ruleFields", "Smart Album Rule Fields", [], None, "{} → [{field, label, kind (text|keywords|number|date|choice|bool|album: an album id|contents: a text the photo shows, or an auto-tag; `{text, min}` sets the score needed), group (field-menu submenu, null at the top level), ops: [{op, label}], choices? (ids), choiceLabels? ({id: label})}] for ruleSet rules, in menu order", always, |_, _| {
             use lightcraft_catalog::rules::{FIELDS, Kind, field_group, ops_for};
             Ok(json!(FIELDS
                 .iter()
@@ -980,6 +980,7 @@ pub fn specs() -> Vec<CommandSpec> {
                         Kind::Date => "date",
                         Kind::Choice(_) => "choice",
                         Kind::Bool => "bool",
+                        Kind::Contents => "contents",
                     };
                     let mut v = json!({"field": id, "label": label, "kind": k, "group": field_group(id), "ops": ops_for(*kind).iter().map(|(o, l)| json!({"op": o, "label": l})).collect::<Vec<_>>()});
                     if let Kind::Choice(c) = kind {

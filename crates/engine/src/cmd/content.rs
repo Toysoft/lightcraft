@@ -554,6 +554,11 @@ mod scan {
         cs::step(s, false);
         Ok(r)
     }
+
+    pub(crate) use super::super::content_tags::{
+        accept as accept_tags, counts as tag_counts, dismiss as dismiss_tags, options as tag_options, set_vocabulary, tags,
+        vocabulary_cmd as vocabulary,
+    };
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -589,6 +594,34 @@ mod scan {
 
     pub fn clear(_: &mut Session, _: &Value) -> Result<Value> {
         unavailable("content.clearIndex")
+    }
+
+    pub fn tags(_: &mut Session, _: &Value) -> Result<Value> {
+        Ok(serde_json::json!({"state": "unavailable", "photos": []}))
+    }
+
+    pub fn tag_counts(_: &mut Session, _: &Value) -> Result<Value> {
+        Ok(serde_json::json!({"state": "unavailable", "tags": []}))
+    }
+
+    pub fn accept_tags(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.acceptTags")
+    }
+
+    pub fn dismiss_tags(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.dismissTags")
+    }
+
+    pub fn vocabulary(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.vocabulary")
+    }
+
+    pub fn set_vocabulary(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.setVocabulary")
+    }
+
+    pub fn tag_options(_: &mut Session, _: &Value) -> Result<Value> {
+        unavailable("content.tagOptions")
     }
 }
 
@@ -644,5 +677,20 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(query "content.query", "Search by Contents in View", [], None, "{} → null | {kind: text | similar, text, id, label, state: ready | preparing | problem, problem, matches, bestMatches, step, canMore, canFewer, min, indexed, total, hint: null | {kind: turnOnIndexing | partial, percent}} — the library view's search by contents, as its chip shows it", always, query_status),
         cmd!(query "content.reindex", "Index Photo Contents Again", [], None, "{ids?: [photo ids]} → {queued} — embed these photos (or every photo) again, failed ones included; also restarts a stopped scan. Indexing must be on for it to run", always, scan::reindex),
         cmd!(query "content.clearIndex", "Clear Content Index", [], None, "{} → {cleared, file} — forget the index of the model in use for this library and delete its file; with indexing on it starts over", always, scan::clear),
+        cmd!(query "content.tags", "Content Tags", [], None, "{id? | ids?: [photo ids] (default: the selection), wait?: bool, min?: score} → {state: ready | preparing | noIndex | noModel | stopped | error | unavailable, error, threshold, photos: [{id, tags: [{tag, label, score, accepted}]}]} — the auto-tags of these photos, best first: the vocabulary's tags (`animal|bird|owl`) whose score reaches the cut-off (at most 8 per photo; dismissed ones left out). `accepted`: the photo already has a keyword of that name. Tags are worked out in the background from the content index (`preparing` while the vocabulary is embedded or new photos are scored; `wait` waits for them). `min`: every kept score at or above it instead (at most 16 per photo, whatever the cut-off and dismissals), to choose a cut-off", always, scan::tags),
+        cmd!(query "content.tagCounts", "Content Tag Counts", [], None, "{} → {state, error, threshold, tags: [{tag, label, count, depth, inVocabulary}]} — every auto-tag of the library with its photo count (a level counts the photos of the tags below it: `animal` includes `animal|bird|owl`), in path order: the Library Filter's Contents column. Pick one with library.filter {contentTag}", always, scan::tag_counts),
+        cmd!(
+            "content.acceptTags",
+            "Accept Content Tags",
+            [],
+            None,
+            "{ids?: [photo ids] (default: the selection), tags: [tag | name | synonym], all?: false} → {changed, keywords} — make auto-tags keywords: each tag becomes the keyword `<parent>|<its name>` (parent `Contents` unless changed with content.tagOptions; written to XMP and exported like any keyword) on the photos it is suggested for (`all`: on every photo given), as one undo step",
+            always,
+            scan::accept_tags
+        ),
+        cmd!(query "content.dismissTags", "Dismiss Content Tags", [], None, "{ids?: [photo ids] (default: the selection), tags: [tag | name | synonym]} → {dismissed} — never suggest these tags for these photos again (kept in content-dismissed.bin beside the catalog)", always, scan::dismiss_tags),
+        cmd!(query "content.vocabulary", "Content Tag Vocabulary", [], None, "{text?: bool} → {custom, count, hash, notes, state, error, embedded, cacheNote, file, templates, terms: [{tag, label, prompts, threshold}], text?} — the auto-tag vocabulary in use (the built-in English list, or the user's own `vocabulary.txt` in the content models folder); `embedded`: tags whose text embedding is ready for the model in use. `text`: the vocabulary as editable text", always, scan::vocabulary),
+        cmd!(query "content.setVocabulary", "Set Content Tag Vocabulary", [], None, "{text? | terms?: [lines] | path? | reset?: true} → {count, custom, notes, hash} — replace the user's auto-tag vocabulary, one tag per line: `animal|bird|owl` (described by its last level), `animal|dog = dog, puppy` (synonyms: one tag, their embeddings averaged; typing any finds it), `… @0.05` (its own cut-off). At most 5000 tags of at most 6 levels; lines that can't be read are skipped with a note. `reset` restores the built-in list. New tags are embedded in the background (an activity row), then the library's tags are worked out again", always, scan::set_vocabulary),
+        cmd!(query "content.tagOptions", "Content Tag Options", [], None, "{parent?: keyword | \"\" | null, threshold?: number | null} → {parent, threshold, modelThreshold, custom} — the keyword parent accepted tags go under (default `Contents`; \"\" for none) and the cut-off a tag's score must reach (0–1; null: the model's own)", always, scan::tag_options),
     ]
 }

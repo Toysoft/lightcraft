@@ -85,8 +85,11 @@ impl ContentModel for Fake {
 }
 
 fn loader(calls: Arc<Calls>, slow: u64) -> Loader {
-    Arc::new(move |_: &Path, m: &Manifest, _: Towers| {
-        calls.loads.fetch_add(1, Ordering::SeqCst);
+    Arc::new(move |_: &Path, m: &Manifest, towers: Towers| {
+        // (image towers: the text tower is loaded too, for searches and the auto-tag vocabulary)
+        if towers.image {
+            calls.loads.fetch_add(1, Ordering::SeqCst);
+        }
         Ok(Box::new(Fake { manifest: m.clone(), calls: calls.clone(), slow }) as Box<dyn ContentModel>)
     })
 }
@@ -111,7 +114,7 @@ fn install(content: &Path, id: &str) -> Manifest {
 }
 
 fn choose(content: &Path, id: &str, enabled: bool, pace: Option<&str>) {
-    let st = cm::Settings { enabled, model: Some(id.into()), pace: pace.map(str::to_string) };
+    let st = cm::Settings { enabled, model: Some(id.into()), pace: pace.map(str::to_string), ..Default::default() };
     cm::write_settings(content, &st).unwrap();
 }
 
@@ -176,7 +179,7 @@ fn a_scan_fills_the_index_shows_in_the_activity_stack_and_a_reopened_library_doe
     assert_eq!(last["indexed"].as_u64().unwrap() as usize, total, "{last}");
     assert!(s.activity.list().iter().all(|t| t.kind != "content"), "the row goes when the scan is done");
     assert_eq!(calls.images.load(Ordering::SeqCst), total, "each photo embedded once");
-    assert_eq!(calls.loads.load(Ordering::SeqCst), 1, "one model instance");
+    assert_eq!(calls.loads.load(Ordering::SeqCst), 1, "one image model instance");
     let st = status(&mut s);
     assert_eq!((st["indexed"].as_u64(), st["total"].as_u64(), st["stale"].as_u64()), (Some(total as u64), Some(total as u64), Some(0)));
     assert_eq!((st["indexing"].as_bool(), st["failed"].as_u64(), st["pace"].as_str()), (Some(false), Some(0), Some("low")));

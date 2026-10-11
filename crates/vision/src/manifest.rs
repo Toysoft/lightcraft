@@ -153,6 +153,12 @@ pub struct Manifest {
 /// "a dog", a rocky coast 0.03 for "the sea", while unrelated photos stay below 0.005.
 pub const DEFAULT_MATCH_THRESHOLD: f32 = 0.02;
 
+/// The auto-tag cut-off of SigLIP 2 base (256 px) with the built-in vocabulary (one prompt, "this is a photo of
+/// {}."), chosen on 343 labelled photos (319 real, 24 procedural): precision 0.74, recall 0.69 (see
+/// `docs/content-search.md`). Specific tags (bird species, dog breeds, roles) carry their own, higher cut-offs in the
+/// vocabulary.
+pub const DEFAULT_TAG_THRESHOLD: f32 = 0.01;
+
 fn default_match_threshold() -> f32 {
     DEFAULT_MATCH_THRESHOLD
 }
@@ -185,7 +191,7 @@ pub fn builtin_siglip2_b16_256() -> Manifest {
         text: TextSpec { tokenizer: TokenizerKind::Sentencepiece, context: 64, lowercase: true, template: "a photo of {}".into() },
         embedding: EmbeddingSpec { dim: 768 },
         score: ScoreSpec { kind: ScoreKind::Sigmoid },
-        tag_threshold: 0.10,
+        tag_threshold: DEFAULT_TAG_THRESHOLD,
         match_threshold: DEFAULT_MATCH_THRESHOLD,
         speed: Speed::default(),
     }

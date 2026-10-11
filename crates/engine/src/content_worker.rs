@@ -140,7 +140,7 @@ fn cores() -> usize {
 
 /// The thread pool for `pace`: made when first needed, its idle threads cost nothing. The model's matrix products and
 /// the decodes run inside it (rayon's global pool serves the interactive work, which must not wait behind a scan).
-fn pool(pace: Pace) -> Option<&'static rayon::ThreadPool> {
+pub(crate) fn pool(pace: Pace) -> Option<&'static rayon::ThreadPool> {
     static POOLS: [OnceLock<Option<rayon::ThreadPool>>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
     let i = match pace {
         Pace::Low => 0,
@@ -390,23 +390,40 @@ pub(crate) struct Current {
     pub manifest: Manifest,
 }
 
+/// What the text thread is asked.
+enum TextJob {
+    /// One search text.
+    Query(String),
+    /// Many texts (the auto-tag vocabulary's sentences), embedded [`VOCAB_CHUNK`] at a time with searches served in
+    /// between, until done or `cancel` is set.
+    Vocab { id: u64, texts: Vec<String>, cancel: Arc<AtomicBool> },
+}
+
 /// What the text thread sends back.
 enum TextMsg {
     Loaded(Arc<dyn ContentModel>),
     LoadFailed(String),
     Embedded(String, Result<Vec<f32>, String>),
+    /// Embeddings of a vocabulary job's texts `start..start + n`.
+    VocabPart {
+        id: u64,
+        start: usize,
+        vectors: Result<Vec<Vec<f32>>, String>,
+    },
 }
 
 /// Recent search texts whose embeddings are kept.
 const QUERY_CACHE: usize = 64;
+/// Texts of a vocabulary job embedded in one forward pass (a search typed meanwhile waits at most one of these).
+pub(crate) const VOCAB_CHUNK: usize = 16;
 
-/// The text tower (for searches), loaded and run on a thread of its own so the window never waits for it: loading
-/// takes about half a second, embedding a text a few tens of milliseconds. Searches typed while it loads are embedded
-/// once it is ready.
+/// The text tower (for searches and the auto-tag vocabulary), loaded and run on a thread of its own so the window never
+/// waits for it: loading takes about half a second, embedding a text a few tens of milliseconds. Searches typed while
+/// it loads are embedded once it is ready; a search typed while the vocabulary is being embedded goes first.
 pub(crate) struct TextWorker {
     /// `<model id>@<sha256>` of the model it loads.
     pub tag: String,
-    jobs: Sender<String>,
+    jobs: Sender<TextJob>,
     done: Receiver<TextMsg>,
     /// The model, once loaded (scores are computed with it on the session thread: [`ContentModel::score_cosine`]).
     pub model: Option<Arc<dyn ContentModel>>,
@@ -416,6 +433,8 @@ pub(crate) struct TextWorker {
     pending: HashSet<String>,
     /// Embeddings of recent texts, or why a text could not be embedded.
     queries: HashMap<String, Result<Vec<f32>, String>>,
+    /// Parts of vocabulary jobs that came back: (job, first text, embeddings).
+    pub vocab_parts: Vec<(u64, usize, Result<Vec<Vec<f32>>, String>)>,
     pub used: Instant,
 }
 
@@ -427,10 +446,23 @@ pub(crate) enum TextVector {
     Failed(String),
 }
 
+/// Embed `texts` with `model`, one way of failing.
+fn embed_with(model: &Result<Arc<dyn ContentModel>, String>, texts: &[&str]) -> Result<Vec<Vec<f32>>, String> {
+    match model {
+        Ok(m) => match catch_unwind(AssertUnwindSafe(|| m.embed_texts(texts))) {
+            Ok(Ok(v)) if v.len() == texts.len() => Ok(v),
+            Ok(Ok(_)) => Err("the model made no embedding for the text".to_string()),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => Err("the model stopped unexpectedly".to_string()),
+        },
+        Err(e) => Err(e.clone()),
+    }
+}
+
 impl TextWorker {
     /// Start the thread for the model in `home`: it loads the text tower right away.
     pub fn start(tag: String, home: PathBuf, manifest: Manifest, loader: Loader) -> Result<TextWorker, String> {
-        let (jobs, job_rx) = channel::<String>();
+        let (jobs, job_rx) = channel::<TextJob>();
         let (done_tx, done) = channel::<TextMsg>();
         std::thread::Builder::new()
             .name("lightcraft-content-text".into())
@@ -448,23 +480,67 @@ impl TextWorker {
                 if sent.is_err() {
                     return;
                 }
-                // ends when the session drops its sender (the model changed, or no search for a while)
-                while let Ok(text) = job_rx.recv() {
-                    let v = match &model {
-                        Ok(m) => match catch_unwind(AssertUnwindSafe(|| m.embed_texts(&[text.as_str()]))) {
-                            Ok(Ok(v)) => v.into_iter().next().ok_or_else(|| "the model made no embedding for the text".to_string()),
-                            Ok(Err(e)) => Err(e.to_string()),
-                            Err(_) => Err("the model stopped unexpectedly".to_string()),
-                        },
-                        Err(e) => Err(e.clone()),
-                    };
-                    if done_tx.send(TextMsg::Embedded(text, v)).is_err() {
+                let mut queries: std::collections::VecDeque<String> = Default::default();
+                // (job, texts, next text, cancel)
+                let mut vocab: std::collections::VecDeque<(u64, Vec<String>, usize, Arc<AtomicBool>)> = Default::default();
+                let take = |job: TextJob, queries: &mut std::collections::VecDeque<String>, vocab: &mut std::collections::VecDeque<_>| match job {
+                    TextJob::Query(t) => queries.push_back(t),
+                    TextJob::Vocab { id, texts, cancel } => vocab.push_back((id, texts, 0usize, cancel)),
+                };
+                // ends when the session drops its sender (the model changed, or nothing asked for a while)
+                loop {
+                    if queries.is_empty() && vocab.is_empty() {
+                        match job_rx.recv() {
+                            Ok(job) => take(job, &mut queries, &mut vocab),
+                            Err(_) => break,
+                        }
+                    }
+                    loop {
+                        match job_rx.try_recv() {
+                            Ok(job) => take(job, &mut queries, &mut vocab),
+                            Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                            Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                        }
+                    }
+                    // searches first: someone is waiting for them
+                    if let Some(text) = queries.pop_front() {
+                        let v = embed_with(&model, &[text.as_str()]).and_then(|v| v.into_iter().next().ok_or_else(|| "no embedding".to_string()));
+                        if done_tx.send(TextMsg::Embedded(text, v)).is_err() {
+                            break;
+                        }
+                        continue;
+                    }
+                    let Some((id, texts, next, cancel)) = vocab.front_mut() else { continue };
+                    let (id, start) = (*id, *next);
+                    let chunk: Vec<&str> = texts.iter().skip(start).take(VOCAB_CHUNK).map(String::as_str).collect();
+                    if cancel.load(Ordering::SeqCst) || chunk.is_empty() {
+                        vocab.pop_front();
+                        continue;
+                    }
+                    let n = chunk.len();
+                    let vectors = embed_with(&model, &chunk);
+                    let failed = vectors.is_err();
+                    *next += n;
+                    if failed || *next >= texts.len() {
+                        vocab.pop_front();
+                    }
+                    if done_tx.send(TextMsg::VocabPart { id, start, vectors }).is_err() {
                         break;
                     }
                 }
             })
             .map_err(|e| format!("could not start the search model: {e}"))?;
-        Ok(TextWorker { tag, jobs, done, model: None, error: None, pending: HashSet::new(), queries: HashMap::new(), used: Instant::now() })
+        Ok(TextWorker {
+            tag,
+            jobs,
+            done,
+            model: None,
+            error: None,
+            pending: HashSet::new(),
+            queries: HashMap::new(),
+            vocab_parts: Vec::new(),
+            used: Instant::now(),
+        })
     }
 
     /// Take in what the thread finished.
@@ -480,8 +556,16 @@ impl TextWorker {
                     }
                     self.queries.insert(text, v);
                 }
+                TextMsg::VocabPart { id, start, vectors } => self.vocab_parts.push((id, start, vectors)),
             }
         }
+    }
+
+    /// Embed `texts` (job `id`) in the background; the parts come back in [`Self::vocab_parts`]. `false` when the
+    /// thread has stopped.
+    pub fn embed_vocab(&mut self, id: u64, texts: Vec<String>, cancel: Arc<AtomicBool>) -> bool {
+        self.used = Instant::now();
+        self.jobs.send(TextJob::Vocab { id, texts, cancel }).is_ok()
     }
 
     /// The embedding of `text`, asking the thread for it when it is not known yet.
@@ -497,7 +581,7 @@ impl TextWorker {
             None => {}
         }
         if !self.pending.contains(text) {
-            if self.jobs.send(text.to_string()).is_err() {
+            if self.jobs.send(TextJob::Query(text.to_string())).is_err() {
                 return TextVector::Failed("the search model stopped".into());
             }
             self.pending.insert(text.to_string());
@@ -571,6 +655,10 @@ pub(crate) struct State {
     pub loader: Option<Loader>,
     /// Bumped when another library opens.
     pub epoch: u64,
+    /// Auto-tags, and their settings (Settings ▸ Search; read with the others by the pump).
+    pub tags: crate::cmd::content_tags::TagState,
+    pub tag_parent: Option<String>,
+    pub tag_threshold: Option<f32>,
 }
 
 impl State {
@@ -608,6 +696,7 @@ impl State {
         self.counts_stamp = None;
         self.cancel = Arc::new(AtomicBool::new(false));
         self.epoch = self.epoch.wrapping_add(1);
+        self.tags.library_changed();
     }
 
     pub fn loader(&self) -> Loader {

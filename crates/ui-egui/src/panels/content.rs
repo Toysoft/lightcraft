@@ -119,6 +119,7 @@ pub fn settings_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     }
     if runtime && in_use.is_some() {
         index_section(app, ui, t, on);
+        tags_section(app, ui, t);
     }
     heading(ui, t, "Models");
     for m in &all {
@@ -239,6 +240,161 @@ fn index_section(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, on: boo
             ui.label(RichText::new(tr_format!("Index: {size}", size = size(Some(bytes)))).font(t.font(11.5)).color(t.text_dim));
         }
     });
+}
+
+/// The auto-tag vocabulary's state and options (`content.vocabulary` + `content.tagOptions`), re-read at most every
+/// [`REFRESH_SECS`].
+fn tags_status(app: &mut LightcraftApp, ctx: &egui::Context) -> (Value, Value) {
+    let now = ctx.input(|i| i.time);
+    let id = egui::Id::new("content-tags-status");
+    if let Some((at, v, o)) = ctx.data(|d| d.get_temp::<(f64, Value, Value)>(id))
+        && now - at < REFRESH_SECS
+        && now >= at
+    {
+        return (v, o);
+    }
+    let v = app.run("content.vocabulary", json!({})).map(|mut v| {
+        // (the terms are not needed here)
+        if let Some(o) = v.as_object_mut() {
+            o.remove("terms");
+        }
+        v
+    });
+    let o = app.run("content.tagOptions", json!({})).unwrap_or(Value::Null);
+    let v = v.unwrap_or(Value::Null);
+    ctx.data_mut(|d| d.insert_temp(id, (now, v.clone(), o.clone())));
+    (v, o)
+}
+
+fn forget_tags(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<(f64, Value, Value)>(egui::Id::new("content-tags-status")));
+}
+
+/// Auto-tags: how far they are, the keyword parent accepted tags go under, the cut-off (advanced) and the vocabulary.
+fn tags_section(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    let (voc, opts) = tags_status(app, ui.ctx());
+    heading(ui, t, "Auto-tags");
+    hint(
+        ui,
+        t,
+        "Photos get tags from a vocabulary of things they can show (beach, forest, bird, car…): filter by them in the Library Filter (Contents), or accept them as keywords in the Keywording panel.",
+    );
+    let count = voc["count"].as_u64().unwrap_or(0);
+    let line = match voc["state"].as_str() {
+        Some("preparing") => {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(REFRESH_SECS));
+            tr_format!("Preparing {n} tags…", n = count)
+        }
+        Some("ready") => tr_format!("{n} tags in the vocabulary.", n = count),
+        Some("stopped") => tr("Preparing the tags was stopped.").to_string(),
+        Some("noIndex") => tr("Tags appear once photos are indexed.").to_string(),
+        Some("error") => sentence(voc["error"].as_str().unwrap_or("")),
+        _ => String::new(),
+    };
+    if !line.is_empty() {
+        let r = ui.label(RichText::new(line).font(t.font(11.5)).color(if voc["state"] == "error" { t.caution } else { t.text_dim }));
+        register(ui.ctx(), "label:contentTagsState", r.rect);
+    }
+    // the keyword parent of accepted tags
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(tr("Accepted tags go under the keyword")).color(t.text_label));
+        let id = egui::Id::new("content-tag-parent");
+        let current = opts["parent"].as_str().unwrap_or("Contents").to_string();
+        let mut text: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| current.clone());
+        let r = crate::text_field::TextField::singleline("field:contentTagParent", &mut text).hint(tr("none")).width(140.0).show(ui);
+        if r.committed() && text.trim() != current {
+            if let Err(e) = app.run("content.tagOptions", json!({"parent": text.trim()})) {
+                app.toast(ui.ctx(), e);
+            }
+            forget_tags(ui.ctx());
+            ui.data_mut(|d| d.remove::<String>(id));
+        } else if r.response.has_focus() {
+            ui.data_mut(|d| d.insert_temp(id, text));
+        } else {
+            ui.data_mut(|d| d.remove::<String>(id));
+        }
+    });
+    hint(ui, t, "Empty: the tag's name alone. Accepted tags are ordinary keywords: written to XMP and exported.");
+    // the cut-off (advanced)
+    egui::CollapsingHeader::new(tr("Advanced")).id_salt("content-tags-advanced").show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("Tag cut-off")).color(t.text_label));
+            let model = opts["modelThreshold"].as_f64().unwrap_or(0.01);
+            let mut v = opts["threshold"].as_f64().unwrap_or(model);
+            let r = ui.add(egui::Slider::new(&mut v, 0.001..=0.3).logarithmic(true).max_decimals(3));
+            register(ui.ctx(), "slider:contentTagThreshold", r.rect);
+            if r.drag_stopped() || (r.changed() && !r.dragged()) {
+                if let Err(e) = app.run("content.tagOptions", json!({"threshold": v})) {
+                    app.toast(ui.ctx(), e);
+                }
+                forget_tags(ui.ctx());
+            }
+            if opts["custom"] == true {
+                let b = ui.button(tr("Use the model's"));
+                register(ui.ctx(), "button:contentTagThresholdReset", b.rect);
+                if b.clicked() {
+                    let _ = app.run("content.tagOptions", json!({"threshold": Value::Null}));
+                    forget_tags(ui.ctx());
+                }
+            }
+        });
+        hint(ui, t, "Lower shows more tags (and more wrong ones); higher shows fewer, surer ones.");
+    });
+    // the vocabulary
+    let open = egui::CollapsingHeader::new(tr("Vocabulary")).id_salt("content-tags-vocabulary").show(ui, |ui| vocabulary_editor(app, ui, t, &voc));
+    register(ui.ctx(), "content:vocabulary", open.header_response.rect);
+}
+
+/// The vocabulary as text: one tag per line, `path|of|tag = synonym, synonym`.
+fn vocabulary_editor(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, voc: &Value) {
+    hint(ui, t, "One tag per line: animal|bird|owl, or animal|dog = dog, puppy (synonyms: one tag). Levels above a tag count its photos too.");
+    let id = egui::Id::new("content-vocab-text");
+    let mut text: String = match ui.data(|d| d.get_temp(id)) {
+        Some(t) => t,
+        None => {
+            let t =
+                app.run("content.vocabulary", json!({"text": true})).ok().and_then(|v| v["text"].as_str().map(str::to_string)).unwrap_or_default();
+            ui.data_mut(|d| d.insert_temp(id, t.clone()));
+            t
+        }
+    };
+    egui::ScrollArea::vertical().id_salt("content-vocab-scroll").max_height(220.0).show(ui, |ui| {
+        crate::text_field::TextField::multiline("field:contentVocabulary", &mut text).rows(10).width(f32::INFINITY).font(t.font(11.5)).show(ui);
+    });
+    ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    ui.horizontal(|ui| {
+        let save = ui.button(tr("Save Vocabulary"));
+        register(ui.ctx(), "button:contentVocabularySave", save.rect);
+        if save.clicked() {
+            match app.run("content.setVocabulary", json!({"text": text})) {
+                Ok(r) => {
+                    let notes = r["notes"].as_array().map_or(0, Vec::len);
+                    let msg = if notes > 0 {
+                        tr_format!("Vocabulary saved; {n} lines were skipped", n = notes)
+                    } else {
+                        tr("Vocabulary saved").to_string()
+                    };
+                    app.toast(ui.ctx(), msg);
+                    ui.data_mut(|d| d.remove::<String>(id));
+                }
+                Err(e) => app.toast(ui.ctx(), e),
+            }
+            forget_tags(ui.ctx());
+        }
+        let reset = ui.add_enabled(voc["custom"] == true, egui::Button::new(tr("Restore Defaults")));
+        register(ui.ctx(), "button:contentVocabularyReset", reset.rect);
+        if reset.clicked() {
+            match app.run("content.setVocabulary", json!({"reset": true})) {
+                Ok(_) => app.toast(ui.ctx(), tr("The built-in vocabulary is back")),
+                Err(e) => app.toast(ui.ctx(), e),
+            }
+            ui.data_mut(|d| d.remove::<String>(id));
+            forget_tags(ui.ctx());
+        }
+    });
+    if voc["custom"] == true {
+        hint(ui, t, "Your own vocabulary is in use (kept for every library).");
+    }
 }
 
 /// Called every frame: keeps content indexing going while it is on. The scan's work runs on its own thread; this only

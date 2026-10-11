@@ -64,6 +64,10 @@ pub struct Filter {
     /// Smart-album rules (all / any / none, nested groups; see [`crate::rules`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_set: Option<crate::RuleSet>,
+    /// An auto-tag (`animal|bird`; its levels below count too): the photos the engine's content index tags with it,
+    /// through the thread's [`crate::rules::RuleContext`] (none: nothing matches).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_tag: Option<String>,
     /// Only these photos, each with a score (a search by photo contents, which the engine resolves outside the
     /// catalog), ANDed with everything else like [`Filter::only`]; [`SortKey::Relevance`] orders by the score.
     /// Never saved: it is worked out again from the query that made it.
@@ -295,6 +299,7 @@ impl Filter {
             ("date", &self.date),
             ("folder", &self.library_folder),
             ("imported", &self.imported),
+            ("contents", &self.content_tag),
         ] {
             if let Some(x) = val {
                 v.push(format!("{name} {x}"));
@@ -319,6 +324,13 @@ impl Filter {
     pub fn albums_tested(&self) -> Vec<crate::AlbumId> {
         let mut out: Vec<crate::AlbumId> = self.album.into_iter().collect();
         out.extend(self.rule_set.as_ref().map(crate::RuleSet::albums_tested).unwrap_or_default());
+        out
+    }
+
+    /// What this filter asks of photo contents: its auto-tag, and its Contents rules (`shows`: a text; else a tag).
+    pub fn contents_asked(&self) -> Vec<(bool, String)> {
+        let mut out: Vec<(bool, String)> = self.content_tag.iter().map(|t| (false, t.clone())).collect();
+        out.extend(self.rule_set.as_ref().map(crate::RuleSet::contents_asked).unwrap_or_default());
         out
     }
 
@@ -385,6 +397,11 @@ impl Filter {
             return false;
         }
         if ranked.is_some_and(|r| !r.contains_key(&p.id)) {
+            return false;
+        }
+        if let Some(t) = &self.content_tag
+            && !crate::rules::has_content_tag(p.id, t)
+        {
             return false;
         }
         if let Some(want) = &self.merged {
@@ -459,6 +476,13 @@ impl Filter {
 }
 
 impl Catalog {
+    /// [`Catalog::query`] with `ctx` answering the rules and filters about photo contents (installed for this thread,
+    /// where it stays for the album counts and smart albums asked after).
+    pub fn query_with(&self, filter: &Filter, sort: &Sort, ctx: Option<std::sync::Arc<dyn crate::rules::RuleContext>>) -> Vec<PhotoId> {
+        crate::rules::set_context(ctx);
+        self.query(filter, sort)
+    }
+
     /// Photos matching `filter`, in `sort` order (ties broken by id for stability).
     pub fn query(&self, filter: &Filter, sort: &Sort) -> Vec<PhotoId> {
         let root = filter.library_root();

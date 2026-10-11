@@ -41,7 +41,16 @@ the file, so the 256k × 768 table (≈790 MB) is not held in memory.
   on images written by `cargo run -p lightcraft-vision --example siglip_inputs -- <dir>`.
 - Speed: `cargo run --release -p lightcraft-vision --example vision_bench -- <model dir> [image|text|both]`.
 
+## Auto-tag vocabulary
+
+`vocab.rs` reads the auto-tag vocabulary (one hierarchical tag per line, synonyms after `=`, an own cut-off after `@`;
+bounded: 5,000 tags, 6 levels, 120 characters, 8 phrases); `vocab/en.txt` is the built-in English list of ~1,560 tags,
+original work written for LightCraft (not derived from any published label set), with the prompt template it is
+embedded in (`TEMPLATES`). `similarities` is the matrix product the engine scores a library's photos against it with.
+How the cut-off was chosen: `docs/content-search.md` ▸ Auto-tags.
+
 ## Licence
 
 Apache-2.0 only (the towers are ported from Hugging Face Transformers' Apache-2.0 SigLIP code;
-see `NOTICE`).
+see `NOTICE`). The vocabulary (`vocab.rs`, `vocab/en.txt`) is LightCraft's own work and also available under MIT, like
+the rest of the repository.

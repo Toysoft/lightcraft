@@ -262,5 +262,8 @@
   "Indexed {percent} % of photos": "写真の {percent} % をインデックス化済み",
   "{n} matches": "{n} 件の一致",
   "Best {n} matches": "上位 {n} 件の一致",
-  "Similar to {name}": "{name} に類似"
+  "Similar to {name}": "{name} に類似",
+  "Preparing {n} tags…": "{n} 個のタグを準備中…",
+  "{n} tags in the vocabulary.": "語彙のタグ：{n} 個。",
+  "Vocabulary saved; {n} lines were skipped": "語彙を保存しました（{n} 行をスキップ）"
 }

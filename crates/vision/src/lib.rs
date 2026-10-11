@@ -22,6 +22,7 @@ pub mod preprocess;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod siglip;
 pub mod tokenizer;
+pub mod vocab;
 #[cfg(not(target_arch = "wasm32"))]
 mod weights;
 
@@ -69,7 +70,48 @@ pub trait ContentModel: Send + Sync {
     /// [`ContentModel::score`] from the cosine of the two (normalised) embeddings, so an index
     /// can compute the cosines itself (from f16 rows, in parallel) and score them after.
     fn score_cosine(&self, cosine: f32) -> f32;
+    /// How [`ContentModel::score_cosine`] turns a cosine into a score, when it is an affine map (and a sigmoid), so
+    /// scores can be computed without the model loaded (auto-tags keep it beside the tags' embeddings). `None`: only
+    /// the model knows.
+    fn scoring(&self) -> Option<Scoring> {
+        None
+    }
     fn manifest(&self) -> &Manifest;
+}
+
+/// A score as `scale · cosine + bias`, through a sigmoid for a sigmoid model ([`ContentModel::scoring`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Scoring {
+    pub scale: f32,
+    pub bias: f32,
+    pub sigmoid: bool,
+}
+
+impl Scoring {
+    /// The cosine itself.
+    pub const COSINE: Scoring = Scoring { scale: 1.0, bias: 0.0, sigmoid: false };
+
+    pub fn score(&self, cosine: f32) -> f32 {
+        let logit = self.scale * cosine + self.bias;
+        if self.sigmoid { 1.0 / (1.0 + (-logit).exp()) } else { logit }
+    }
+
+    /// The smallest cosine that scores at least `score` (`-inf` when every cosine does, `+inf` when none can); the
+    /// scale is positive for every model LightCraft knows.
+    pub fn cosine_for(&self, score: f32) -> f32 {
+        let logit = if self.sigmoid {
+            if score <= 0.0 {
+                return f32::NEG_INFINITY;
+            }
+            if score >= 1.0 {
+                return f32::INFINITY;
+            }
+            (score / (1.0 - score)).ln()
+        } else {
+            score
+        };
+        if self.scale > 0.0 && self.scale.is_finite() { (logit - self.bias) / self.scale } else { f32::NEG_INFINITY }
+    }
 }
 
 /// Which towers to load: indexing needs only the image tower, a search only the text tower.
@@ -114,6 +156,34 @@ pub fn best_device() -> candle_core::Device {
     candle_core::Device::Cpu
 }
 
+/// The dot products of every row of `a` (`n` rows of `dim` numbers) with every row of `b` (`m` rows): `n × m` numbers,
+/// row-major (`out[i * m + j] = a_i · b_j`). An empty answer when a size does not fit. Natively a matrix product on
+/// candle's CPU kernels (80,000 photos × 1,500 tags × 768 numbers in about a second on a desktop processor).
+pub fn similarities(a: &[f32], n: usize, b: &[f32], m: usize, dim: usize) -> Vec<f32> {
+    if n == 0 || m == 0 || dim == 0 || a.len() != n.saturating_mul(dim) || b.len() != m.saturating_mul(dim) {
+        return Vec::new();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let product = || -> candle_core::Result<Vec<f32>> {
+            let dev = candle_core::Device::Cpu;
+            let a = candle_core::Tensor::from_slice(a, (n, dim), &dev)?;
+            let b = candle_core::Tensor::from_slice(b, (m, dim), &dev)?;
+            a.matmul(&b.t()?)?.flatten_all()?.to_vec1::<f32>()
+        };
+        if let Ok(v) = product()
+            && v.len() == n * m
+        {
+            return v;
+        }
+    }
+    let mut out = Vec::with_capacity(n * m);
+    for row in a.chunks_exact(dim) {
+        out.extend(b.chunks_exact(dim).map(|col| dot(row, col)));
+    }
+    out
+}
+
 /// `v / |v|` (unchanged when `v` is zero or not finite).
 pub fn normalize(v: &mut [f32]) {
     let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -143,6 +213,28 @@ mod tests {
         normalize(&mut v);
         assert!((dot(&v, &v) - 1.0).abs() < 1e-6);
         assert_eq!(dot(&v, &[1.0]), 0.0);
+    }
+
+    #[test]
+    fn scoring_and_its_inverse_agree() {
+        let s = Scoring { scale: 112.9, bias: -16.77, sigmoid: true };
+        for score in [1e-4f32, 0.01, 0.02, 0.5, 0.9] {
+            let c = s.cosine_for(score);
+            assert!((s.score(c) - score).abs() < 1e-3 * score.max(0.01), "{score}");
+        }
+        assert_eq!(s.cosine_for(0.0), f32::NEG_INFINITY);
+        assert_eq!(s.cosine_for(1.0), f32::INFINITY);
+        assert_eq!(Scoring::COSINE.score(0.25), 0.25);
+        assert_eq!(Scoring::COSINE.cosine_for(0.25), 0.25);
+    }
+
+    #[test]
+    fn similarities_are_every_dot_product() {
+        let a = [1.0f32, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let b = [2.0f32, 3.0, -1.0, 0.5];
+        assert_eq!(similarities(&a, 3, &b, 2, 2), vec![2.0, -1.0, 3.0, 0.5, 5.0, -0.5]);
+        assert!(similarities(&a, 4, &b, 2, 2).is_empty(), "sizes that do not fit");
+        assert!(similarities(&[], 0, &b, 2, 2).is_empty());
     }
 
     #[cfg(target_arch = "wasm32")]

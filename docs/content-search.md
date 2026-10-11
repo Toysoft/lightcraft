@@ -4,11 +4,13 @@ LightCraft is learning to find photos by what they show: type `beach at sunset` 
 match, with no keywords needed. It runs a content model (an image and text embedding model) on this computer; no photo,
 embedding or search ever leaves it.
 
-**Where it stands (phase 4 of 6):** the models and their download are done (Settings ▸ Search lists them, downloads
+**Where it stands (phase 5 of 6):** the models and their download are done (Settings ▸ Search lists them, downloads
 one behind its licence, checks it and tests it), and so is the index: with **Index photo contents** on, LightCraft
 embeds every photo of the library in the background. **You can search by contents from the search bar** (its Contents
 mode, or `contents:` words in any search), mixed with every other filter, sorted by Relevance, and find photos with
-similar contents from any photo. Auto-tags (suggested keywords) come next (phase 5).
+similar contents from any photo. **Photos get auto-tags** from a vocabulary of about 1,500 things they can show: the
+Library Filter has a Contents column, the Keywording panel suggests them as keywords, and Smart Collections can ask
+what a photo shows. A second model family (CLIP) comes next (phase 6).
 
 ## Models
 
@@ -59,7 +61,10 @@ any folder (copying it into place when it is elsewhere).
 
 - `<id>/`: the model's files, `content-model.json` (its manifest) and `installed.json` (when its licence was accepted,
   and its last self-test with the speed measured on this computer).
-- `settings.json`: `{"enabled": false, "model": "siglip2-b16-256", "pace": "low"}` (`pace` only when not normal).
+- `settings.json`: `{"enabled": false, "model": "siglip2-b16-256", "pace": "low", "tagParent": "Contents",
+  "tagThreshold": 0.02}` (`pace`, `tagParent` and `tagThreshold` only when changed).
+- `vocabulary.txt` (optional): your own auto-tag vocabulary (see *Auto-tags*); without it the built-in one is used.
+- `content-vocab-<model id>.bin`: the vocabulary's text embeddings for that model (see *Auto-tags*).
 - `catalog.json` (optional): `{"models": [<manifest>, …]}`, more models to offer; they download only from your mirrors.
 
 Folders and manifests are treated as hostile input: ids are checked before they become folder names, manifests are
@@ -189,6 +194,88 @@ does not resolve `contents:` words (use `library.filter`, then `catalog.query` w
 `content.search` / `content.similar` work while the index is incomplete; their answer says how many photos were
 searched (`indexed` of `total`, `complete`).
 
+## Auto-tags
+
+Every indexed photo gets tags from a **vocabulary** of things a photo can show: about 1,500 hierarchical tags
+(`scene|beach`, `nature|rocks`, `plant|flower|tulip`, `people|crowd`, `animal|bird|heron`, `animal|arachnid|scorpion`,
+`vehicle|car|camper van`, `object|kitchen|teapot`, `event|wedding`, `time|sunset`, `weather|snow`, `food|pizza`,
+`architecture|bridge`, `style|aerial view`…). The list (`crates/vision/vocab/en.txt`) is original work written for
+LightCraft, not taken from any published label set. Tags are suggestions: nothing is written to a photo until you accept
+one.
+
+### Where you see them
+
+- **Library Filter ▸ Contents** (the filter bar, Shift+F): the library's tags with their photo counts, each level above
+  its tags (`animal` counts every bird, dog and insect). Picking one shows its photos, ANDed with every other filter; a
+  chip says *Contents: heron* and its ✕ ends it (`library.filter {contentTag: "animal|bird"}`).
+- **Keywording ▸ Suggested from contents** (the Keywords panel): the tags of the selected photos that are not keywords
+  yet, most photos first. Click one to make it a keyword of the photos it is suggested for (one undo step, however many
+  photos); its ✕ dismisses it for those photos for good. A tag suggested for only some of the selection is marked `*`.
+- **Smart Collections**: the *Contents* criterion (its own group in the field menu): *shows* a text (`red car`; the
+  model's search cut-off unless the rule gives `{text, min}`), *is tagged* / *isn't tagged* with a tag (`animal|bird`).
+  Without an index (no model, nothing indexed yet) these rules match nothing, and the editor says so.
+
+### Accepting a tag
+
+An accepted tag becomes an ordinary keyword: `Contents|<its name>` (`Contents|heron`), so accepted tags stay together in
+the Keyword List and can be removed in one go. The parent is a setting (Settings ▸ Search ▸ *Accepted tags go under the
+keyword*; empty: the tag's name alone). Like any keyword it is written to XMP and exported. A photo that already has a
+keyword of that name (`heron`, or `Birds|heron`) is not suggested the tag again.
+
+### How tags are worked out
+
+- The vocabulary's phrases are embedded by the model's text tower once per model, in the background (an activity row,
+  *Preparing auto-tags*, cancellable), each in the sentence "this is a photo of {}." A tag with synonyms
+  (`animal|mammal|dog = dog, puppy`) gets the mean of their embeddings. The embeddings are cached in
+  `content-vocab-<model id>.bin` in the content models folder: they belong to the model and the vocabulary, not to a
+  library, so every library and every later start reuses them, and an edited vocabulary only embeds the tags that
+  changed. A cache made by another model or version, or a damaged one, is rebuilt.
+- Every indexed photo is scored against every tag (a matrix product over the index; 80,000 photos × 1,500 tags take
+  about 0.35 s on a busy 16-core desktop processor, a 500-photo library about 10 ms), on a thread of its own, after
+  each batch the scan adds and when the vocabulary or the model changes. Each photo keeps its 16 best scores in memory;
+  nothing is stored. Once the vocabulary is cached, no model needs to be loaded for this.
+- A photo shows the tags whose score reaches the cut-off, at most 8. The cut-off is the model's (0.01 for SigLIP 2
+  base, chosen below) or yours (Settings ▸ Search ▸ Advanced ▸ *Tag cut-off*: lower shows more tags and more wrong ones).
+  Moving it applies at once. Specific tags carry their own, higher cut-off in the vocabulary (bird species, dog breeds,
+  people's roles: `@0.1`, `@0.05`); one that reaches the model's cut-off but not its own counts for the tag above it, so
+  a photo the model thinks shows a spaniel is still tagged *dog*.
+- Dismissed suggestions are remembered per library in `content-dismissed.bin` beside the catalog (photo and tag); a
+  damaged file is ignored and written again with the next dismissal.
+
+### The vocabulary
+
+Settings ▸ Search ▸ *Vocabulary* edits it as text, one tag per line (`content.setVocabulary` does the same):
+
+```text
+# a comment
+animal|bird|owl                  described by its last level ("owl")
+animal|dog = dog, puppy          synonyms: one tag, their embeddings averaged; typing any of them finds it
+scene|beach = beach @0.03        its own cut-off
+```
+
+Levels above a tag need no line of their own. A vocabulary has at most 5,000 tags of at most 6 levels and 120
+characters, 8 phrases per tag; lines that can't be read (too long, repeated, empty) are skipped and reported. Your
+vocabulary is kept in `vocabulary.txt` in the content models folder (for every library); *Restore Defaults* goes back to
+the built-in one. Non-English terms work with SigLIP 2's multilingual text tower.
+
+### The cut-off, measured
+
+On 343 labelled photos (319 real photos of three scratch libraries, labelled by hand, and the 24 procedural demo
+scenes), SigLIP 2 base (256 px), the built-in vocabulary, at most 8 tags per photo:
+
+| Cut-off | Precision | Recall | Scenes P / R | Animals P / R | Objects P / R | People P / R | Vehicles P / R |
+|---|---|---|---|---|---|---|---|
+| 0.005 | 0.69 | 0.78 | 0.73 / 0.74 | 0.70 / 0.95 | 0.53 / 0.74 | 0.44 / 0.50 | 0.52 / 0.83 |
+| **0.01** | **0.74** | **0.69** | 0.77 / 0.64 | 0.74 / 0.90 | 0.61 / 0.68 | 0.70 / 0.50 | 0.60 / 0.83 |
+| 0.02 | 0.79 | 0.58 | 0.82 / 0.53 | 0.78 / 0.84 | 0.66 / 0.45 | 0.71 / 0.50 | 0.75 / 0.33 |
+| 0.05 | 0.83 | 0.40 | 0.86 / 0.33 | 0.85 / 0.78 | 0.69 / 0.26 | 0.50 / 0.17 | — |
+
+Precision: the share of shown tags that are right (a level above a right tag counts); recall: the share of the photos'
+main subjects found (a tag below one counts). Scenes include nature, time of day, weather and light; objects include
+buildings, rooms and things. People and vehicles had only 6 labelled subjects each, so their numbers are rough. Most
+wrong tags are near misses (a cottage for a house seen from above, the wrong small bird), which is why species carry
+their own cut-off. Chosen: 0.01 (suggestions are confirmed by the user, so recall matters).
+
 ## Privacy
 
 Everything runs on this computer. The model is downloaded once from Hugging Face (or your mirror); after that nothing
@@ -220,6 +307,14 @@ Reachable from the control channel, `lightcraft-cli run` and MCP (`cmd_content_m
 | `content.clearQuery` | | end the view's search by contents (the Contents text, `contents:` words, Find Similar Contents) |
 | `content.query` | | the view's search by contents as its chip shows it, or `null` |
 | `content.reindex` | `{ids?}` | embed these photos (or all) again, failed ones included |
+| `content.tags` | `{id? \| ids?, wait?, min?}` | the photos' auto-tags `[{tag, label, score, accepted}]` (`min`: every kept score instead, to choose a cut-off) |
+| `content.tagCounts` | | every tag of the library with its photo count (levels included): the Contents column |
+| `content.acceptTags` | `{ids?, tags, all?}` | make tags keywords (`Contents\|<name>`) of the photos they are suggested for (`all`: of every photo given), one undo step |
+| `content.dismissTags` | `{ids?, tags}` | never suggest these tags for these photos again |
+| `content.vocabulary` | `{text?}` | the vocabulary in use: `{custom, count, notes, state, embedded, terms, text?}` |
+| `content.setVocabulary` | `{text? \| terms? \| path? \| reset?}` | replace your vocabulary (or restore the built-in one) |
+| `content.tagOptions` | `{parent?, threshold?}` | the keyword parent of accepted tags and the tags' cut-off (`null`: the default) |
+| `library.filter` | `{contentTag: tag \| null}` | the Contents filter: the photos tagged with it (levels below included) |
 | `content.clearIndex` | | forget the index of the model in use and delete its file |
 
 The other `content.*` commands move the scan along too, so a headless session (CLI, MCP) indexes as it is used;
@@ -234,5 +329,6 @@ lightcraft-cli run --demo content.models.install path=~/.config/lightcraft/model
 
 ## Not yet
 
-Auto-tags and a Contents column in the Library Filter, Keywording suggestions and a Smart Collection rule (phase 5), and
-a second model family, CLIP (phase 6). The web build has no content search (the towers run natively only).
+A second model family, CLIP (phase 6); the 384 px and So400m models use the base model's cut-offs (not measured); the
+vocabulary is English only (other languages can be added as user vocabularies). The web build has no content search
+(the towers run natively only).

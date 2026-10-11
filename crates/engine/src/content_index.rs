@@ -176,6 +176,19 @@ impl Index {
         self.photos.iter().copied().zip(self.hashes.iter().copied())
     }
 
+    /// The rows of `photos` (those indexed, in that order): their ids, content hashes and vectors (`n × dim`).
+    pub fn rows(&self, photos: &[u64]) -> (Vec<u64>, Vec<Hash>, Vec<f16>) {
+        let (mut ids, mut hashes, mut data) = (Vec::new(), Vec::new(), Vec::new());
+        for p in photos {
+            let Some(&r) = self.rows.get(p) else { continue };
+            let (Some(h), Some(row)) = (self.hashes.get(r), self.data.get(r * self.dim..(r + 1) * self.dim)) else { continue };
+            ids.push(*p);
+            hashes.push(*h);
+            data.extend_from_slice(row);
+        }
+        (ids, hashes, data)
+    }
+
     /// Bytes the vectors take in memory.
     pub fn matrix_bytes(&self) -> usize {
         self.data.len() * 2

@@ -262,5 +262,8 @@
   "Indexed {percent} % of photos": "Проиндексировано {percent} % фото",
   "{n} matches": "Совпадений: {n}",
   "Best {n} matches": "Лучшие совпадения: {n}",
-  "Similar to {name}": "Похожие на {name}"
+  "Similar to {name}": "Похожие на {name}",
+  "Preparing {n} tags…": "Подготовка тегов: {n}…",
+  "{n} tags in the vocabulary.": "Тегов в словаре: {n}.",
+  "Vocabulary saved; {n} lines were skipped": "Словарь сохранён; пропущено строк: {n}"
 }

@@ -82,6 +82,8 @@ pub(crate) fn refresh(s: &mut Session, fresh: bool) {
             let st = read_settings(&dir);
             let current = st.model.as_deref().and_then(|id| installed_current(&dir, id));
             let pace = st.pace.as_deref().and_then(Pace::parse).unwrap_or_default();
+            s.content.tag_parent = st.tag_parent.clone();
+            s.content.tag_threshold = st.tag_threshold;
             (current, st.enabled, pace)
         }
         None => (None, false, Pace::default()),
@@ -285,6 +287,8 @@ pub(crate) fn step(s: &mut Session, pause: bool) {
     if st.text.as_ref().is_some_and(|t| t.used.elapsed() >= TEXT_IDLE) && s.content_query.view.is_none() {
         s.content.text = None;
     }
+    // auto-tags follow the index (also when indexing is off: the index is still there)
+    super::content_tags::step(s);
     let st = &mut s.content;
     let tag = st.current.as_ref().map(|c| c.tag.clone());
     let failed = st.error.as_ref().is_some_and(|(t, _)| Some(t) == tag.as_ref());
@@ -403,6 +407,7 @@ fn recount(s: &mut Session) {
 /// What `content.status` and the pump report about the index.
 pub(crate) fn report(s: &mut Session) -> Value {
     recount(s);
+    let tags = super::content_tags::report(s);
     let st = &s.content;
     let pending = pending(s);
     let eta = st.ms_per_photo.filter(|_| indexing(s)).map(|ms| (ms * pending as f64 / 1000.0).round());
@@ -434,6 +439,7 @@ pub(crate) fn report(s: &mut Session) -> Value {
         "embeddedThisSession": st.embedded,
         "error": st.error.as_ref().filter(|(t, _)| st.current.as_ref().is_some_and(|c| &c.tag == t)).map(|(_, e)| e.clone()),
         "index": index,
+        "tags": tags,
     })
 }
 
