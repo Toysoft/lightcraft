@@ -43,6 +43,7 @@
 //! numbers: docs/sony-ilce7rm6-lens-corrections.md.
 
 use super::fit_radial_warp;
+use crate::lateral_ca::interpolate;
 use crate::opcodes::max_radius;
 use crate::{Opcode, Rect};
 use lightcraft_tiff::Ifd;
@@ -110,18 +111,6 @@ pub(crate) fn read_tables(raw: &Ifd) -> LensTables {
 fn knot_spacing(model: &str) -> Option<f64> {
     let model = model.trim();
     FULL_FRAME_CROP.iter().find(|(m, _)| *m == model).map(|&(_, (w, h))| w.hypot(h) / 30.0)
-}
-
-/// The knot table at radius `r` px: knot `i` at `i · spacing`, linear in between, the last segment extended beyond
-/// the last knot. NaN with fewer than two knots.
-fn interpolate(knots: &[f64], spacing: f64, r: f64) -> f64 {
-    let t = r / spacing;
-    // `as` saturates, so a huge `t` lands on the last segment; NaN fails `t > 0`
-    let i = if t > 0.0 { (t as usize).min(knots.len().saturating_sub(2)) } else { 0 };
-    match (knots.get(i), knots.get(i + 1)) {
-        (Some(a), Some(b)) => a + (b - a) * (t - i as f64),
-        _ => f64::NAN,
-    }
 }
 
 /// The camera's frame-filling zoom `z` for the source radius map `source` and a crop of half size `x × y`: the

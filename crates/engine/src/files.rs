@@ -10,6 +10,7 @@ use lightcraft_geom::Orientation;
 use lightcraft_pipeline::SourceInfo;
 use lightcraft_raster::Rgb32f;
 use lightcraft_raster::resample::{Filter, fit};
+use lightcraft_raw::highlight::CLIP as HIGHLIGHT_CLIP;
 
 use crate::media::{DenoiseSpec, FileLoader, FileProbe, PairLoader, PreviewLoader, ProbeInfo};
 
@@ -232,9 +233,6 @@ fn preview_reason(bytes: &[u8], e: lightcraft_raw::RawError) -> Result<String, S
         e => Ok(e.to_string()),
     }
 }
-
-/// Sensor clip level (normalised) for highlight reconstruction.
-const HIGHLIGHT_CLIP: f32 = 0.99;
 
 /// How a raw's camera RGB becomes the linear Rec.2020 the pipeline takes.
 pub(crate) struct CameraColourModel<'a> {

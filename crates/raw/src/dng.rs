@@ -309,8 +309,12 @@ pub(crate) fn decode_as(bytes: &[u8], mode: Mode, format: RawFormat) -> Result<R
     };
 
     let opcode_list = |tag| raw.bytes(tag).map(opcodes::parse_list).unwrap_or_default();
-    let opcodes =
-        crate::OpcodeLists { list1: opcode_list(t::OPCODE_LIST_1), list2: opcode_list(t::OPCODE_LIST_2), list3: opcode_list(t::OPCODE_LIST_3) };
+    let opcodes = crate::OpcodeLists {
+        list1: opcode_list(t::OPCODE_LIST_1),
+        list2: opcode_list(t::OPCODE_LIST_2),
+        list3: opcode_list(t::OPCODE_LIST_3),
+        lateral_ca: None,
+    };
 
     let mut metadata = lightcraft_meta::from_tiff(&tiff);
     metadata.width = Some(crop.width as u32);
