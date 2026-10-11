@@ -29,10 +29,10 @@ and the WASM web app. The platform scripts in [`packaging/`](../packaging/) writ
 - macOS: app DMG and CLI ZIP.
 - Windows: MSI installer and portable ZIP for each architecture.
 - Linux: AppImage (with its `.AppImage.zsync`), `.deb`, `.rpm`, and `.tar.gz` for each
-  architecture (`packaging/linux/package.sh`). Each AppImage embeds
+  architecture (`packaging/linux/package.sh`; riscv64 produces `.deb`, `.rpm`, and `.tar.gz`). Each AppImage embeds
   `gh-releases-zsync|storytold|lightcraft|latest|lightcraft-*-linux-<arch>.AppImage.zsync`, so
   AppImageUpdate fetches only the changed blocks from the latest published (non-pre-) release.
-- Flatpak: a single-file `.flatpak` bundle for each architecture, repackaged from that
+- Flatpak: a single-file `.flatpak` bundle for x86_64 and aarch64, repackaged from that
   architecture's Linux tarball (`packaging/linux/flatpak-bundle.sh` with
   `packaging/linux/flatpak/ai.storyteller.lightcraft.bundle.yml`; no Rust build). The from-source
   manifest `ai.storyteller.lightcraft.yml` is for Flathub; packaging-lint keeps their runtime and
@@ -47,7 +47,8 @@ nothing, so dispatching the workflow on a branch (`gh workflow run release.yml -
 dry-runs them: the signing jobs are refused by the environment's branch rule, and the release job,
 which needs them, is skipped.
 
-The Linux builds run on Ubuntu 22.04 and target glibc 2.35 or newer. AppImages and binaries may
+The Linux x86_64 and aarch64 builds run on Ubuntu 22.04 and target glibc 2.35 or newer; the riscv64
+build runs on Ubuntu 26.04. AppImages and binaries may
 also require system libraries for the windowing stack; the `.deb` and `.rpm` packages declare
 their runtime dependencies.
 
