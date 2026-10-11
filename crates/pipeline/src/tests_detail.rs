@@ -101,7 +101,7 @@ fn default_colour_denoise_removes_speckles_without_blurring_luminance() {
         let mut img = src.clone();
         let mut s = settings(process);
         s.detail.nr_color = 25.0;
-        local::denoise(&mut img, &s, 192, 192);
+        local::denoise(&mut img, &s, 192, 192, 0.0);
         img
     };
     let (old, new) = (clean(1), clean(2));

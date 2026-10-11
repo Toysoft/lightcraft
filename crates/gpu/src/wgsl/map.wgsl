@@ -144,6 +144,35 @@ fn nr_lum(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups) 
     put_rgb(i, rgb_a(i) * exp2(d));
 }
 
+// V3 noise reduction works on sqrt luminance (variance stabilization for shot noise).
+@compute @workgroup_size(256)
+fn sqrt_lum_k(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>) {
+    let i = lin_index(g, nw);
+    if (i >= pu(0u)) { return; }
+    dst[i] = sqrt(max(lum2020(rgb_a(i)), 1e-7));
+}
+
+// Local variance minus estimated noise variance. a: blurred (mean, mean-square).
+@compute @workgroup_size(256)
+fn noise_ab(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>) {
+    let i = lin_index(g, nw);
+    if (i >= pu(0u)) { return; }
+    let m = a[2u * i];
+    let v = max(a[2u * i + 1u] - m * m, 0.0);
+    let k = max(1.0 - pf(1u) / max(v, 1e-12), 0.0);
+    dst[2u * i] = k;
+    dst[2u * i + 1u] = m * (1.0 - k);
+}
+
+// a: RGB, b: sqrt luminance, c: filtered sqrt luminance. Match noise::reduce's bounded gain.
+@compute @workgroup_size(256)
+fn noise_apply(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>) {
+    let i = lin_index(g, nw);
+    if (i >= pu(0u)) { return; }
+    let gain = clamp(c[i] * c[i] / max(b[i] * b[i], 1e-7), 0.05, 20.0);
+    put_rgb(i, rgb_a(i) * gain);
+}
+
 // Chromaticity rgb / Y.
 @compute @workgroup_size(256)
 fn chroma_k(@builtin(global_invocation_id) g: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>) {

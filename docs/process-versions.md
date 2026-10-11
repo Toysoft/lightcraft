@@ -1,13 +1,17 @@
 # Process versions
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V2 detail processing)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V3 noise-aware luminance reduction)
 
 Every photo's develop settings record the **rendering process** they are interpreted by
 (`DevelopSettings::process`, a `ProcessVersion` in `crates/develop/src/settings.rs`). Lightroom calls
 this the process version. It lets the look of LightCraft improve (a new default tone curve, issue #146;
 stronger Light sliders, issue #196) without changing a single photo someone has already edited.
 
-**V2** is the current process. It separates fine sharpening from the broader Texture filter,
+**V3** is the current process. It adds noise-aware luminance reduction and starts new RAW imports
+at Amount 25. Existing photos keep their process and settings; Update Process alone does not
+change slider values. Reset uses current RAW defaults unless an import preset was recorded.
+
+**V2** separates fine sharpening from the broader Texture filter,
 makes Sharpening Radius and Detail effective, and strengthens colour-noise reduction at low
 Amount values. **V1** preserves LightCraft's earlier rendering, including its old detail behaviour.
 See [detail processing](detail-processing.md) for the algorithms, evidence and remaining limits.
@@ -83,4 +87,5 @@ states the process.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Add V3 adaptive luminance NR; preserve V1/V2 rendering and defaults |
 | 2026-10-11 | minor | Add V2 detail processing; preserve V1 edits and restore RAW capture defaults on Reset |

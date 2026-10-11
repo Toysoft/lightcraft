@@ -785,6 +785,23 @@ fn denoise(cx: &mut Cx<'_>, img: Buf, plan: &Plan<'_>) -> Buf {
     let n = w * h;
     let (lum, col) = local::nr_params(&plan.settings, plan.src_long, plan.frame.output_long(w, h));
     let mut img = img;
+    if let Some(nr) = lightcraft_pipeline::noise::params(&plan.settings, plan.src_long, plan.frame.output_long(w, h), plan.noise) {
+        let l = cx.gpu.buffer(n);
+        map(cx, "sqrt_lum_k", n, &[], [Some(&img), None, None], &l);
+        let pp = cx.gpu.buffer(n * 2);
+        map(cx, "guided_pre", n, &[], [Some(&l), None, None], &pp);
+        let m = gaussian(cx, &pp, w, h, 2, nr.sigma);
+        let m = gaussian(cx, &m, w, h, 2, nr.sigma);
+        let ab = cx.gpu.buffer(n * 2);
+        map(cx, "noise_ab", n, &[nr.variance.to_bits()], [Some(&m), None, None], &ab);
+        let ab = gaussian(cx, &ab, w, h, 2, 0.7);
+        let ab = gaussian(cx, &ab, w, h, 2, 0.7);
+        let f = cx.gpu.buffer(n);
+        map(cx, "guided_apply", n, &[], [Some(&l), Some(&ab), None], &f);
+        let out = cx.gpu.buffer(n * 3);
+        map(cx, "noise_apply", n, &[], [Some(&img), Some(&l), Some(&f)], &out);
+        img = out;
+    }
     if let Some(nr) = lum {
         let l = cx.gpu.buffer(n);
         map(cx, "log_lum_k", n, &[], [Some(&img), None, None], &l);

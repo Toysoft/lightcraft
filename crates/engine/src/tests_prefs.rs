@@ -56,16 +56,22 @@ fn reset_restores_raw_capture_detail_and_is_undoable() {
     let before = (*s.develop_of(id).unwrap()).clone();
     assert_eq!(before.detail.sharpen_amount, 40.0);
     assert_eq!(before.detail.nr_color, 25.0);
+    assert_eq!(before.detail.nr_luminance, 25.0);
     s.execute("library.select", &json!({"ids": [id.0, jpeg.0]})).unwrap();
     s.execute("develop.merge", &json!({"settings": {"light": {"exposure": 1.0}, "detail": {"sharpen_amount": 80.0, "nr_color": 60.0}}})).unwrap();
     let edited = (*s.develop_of(id).unwrap()).clone();
+    // A photo saved before the new baseline also receives current defaults on Reset.
+    s.execute("develop.merge", &json!({"settings": {"process": 1, "detail": {"nr_luminance": 0.0}}})).unwrap();
+    let legacy = (*s.develop_of(id).unwrap()).clone();
     s.execute("develop.reset", &json!({})).unwrap();
     assert_eq!(*s.develop_of(id).unwrap(), before);
     assert!(!s.catalog.photo(id).unwrap().is_edited());
     assert_eq!(s.develop_of(jpeg).unwrap().detail.sharpen_amount, 0.0);
     assert_eq!(s.develop_of(jpeg).unwrap().detail.nr_color, 0.0);
+    assert_eq!(s.develop_of(jpeg).unwrap().detail.nr_luminance, 0.0);
     s.execute("edit.undo", &json!({})).unwrap();
-    assert_eq!(*s.develop_of(id).unwrap(), edited);
+    assert_eq!(*s.develop_of(id).unwrap(), legacy);
+    assert_ne!(legacy, edited);
     std::fs::remove_dir_all(src).unwrap();
 }
 

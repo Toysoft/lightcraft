@@ -25,7 +25,7 @@ fn fine_sharpening_radius_detail_masking_and_legacy_match_cpu() {
     }));
     let req = RenderRequest::fit(6000, 24);
     let info = SourceInfo::default();
-    for process in [1, 2] {
+    for process in [1, 2, 3] {
         for (radius, detail, masking, texture) in [(0.5, 0.0, 0.0, 0.0), (1.0, 25.0, 50.0, 0.0), (3.0, 100.0, 0.0, 30.0)] {
             let mut s = DevelopSettings { process: lightcraft_develop::ProcessVersion(process), ..Default::default() };
             s.detail.sharpen_amount = 80.0;
@@ -37,6 +37,40 @@ fn fine_sharpening_radius_detail_masking_and_legacy_match_cpu() {
             check(&format!("detail P{process} r{radius} d{detail} m{masking}"), &src, &info, &s, &req);
         }
     }
+}
+
+#[test]
+fn adaptive_luminance_nr_matches_cpu_at_preview_native_and_window_sizes() {
+    if !gpu() {
+        return;
+    }
+    let src = Arc::new(Rgb32f::from_fn(640, 480, |x, y| {
+        let mut hash = (x + 640 * y) as u32 + 13287;
+        hash = (hash ^ (hash >> 16)).wrapping_mul(0x7feb352d);
+        hash = (hash ^ (hash >> 15)).wrapping_mul(0x846ca68b);
+        hash ^= hash >> 16;
+        let n = ((hash & 65535) as f32 / 65535.0 - 0.5) * 0.065;
+        let base = if x < 320 { 0.25f32 } else { 0.7f32 };
+        let v = (base + n + if y > 240 { (x as f32 * 0.8).sin() * 0.04 } else { 0.0 }).powi(2);
+        [v * 1.1, v, v * 0.7]
+    }));
+    let info = SourceInfo { raw: true, ..Default::default() };
+    let mut s = DevelopSettings::for_raw(6500.0, 0.0);
+    assert!(lightcraft_pipeline::plan(&src, &info, &s, &RenderRequest::fit(640, 480)).noise > 0.005);
+    for amount in [0.0, 25.0, 100.0] {
+        s.detail.nr_luminance = amount;
+        for detail in [0.0, 50.0, 100.0] {
+            s.detail.nr_detail = detail;
+            for edge in [320, 640] {
+                check(&format!("adaptive NR {amount} detail {detail} size {edge}"), &src, &info, &s, &RenderRequest::fit(edge, edge));
+            }
+        }
+    }
+    s.wb.mode = WbMode::Custom;
+    s.wb.temp = 8200.0;
+    s.light.exposure = 1.0;
+    let req = RenderRequest { window: Some(lightcraft_pipeline::PixelWindow { x: 290, y: 160, w: 220, h: 220 }), ..RenderRequest::fit(640, 480) };
+    check("adaptive NR window and WB", &src, &info, &s, &req);
 }
 
 fn gpu() -> bool {

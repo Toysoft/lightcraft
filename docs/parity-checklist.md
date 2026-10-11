@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V2 detail processing; luminance-NR Contrast marked incomplete) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (V3 noise-aware luminance NR; Contrast remains incomplete) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -203,7 +203,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-EDIT-EFFECTS-VIGNETTE | Post-crop vignette | P0 | ✅ | `ctl:vignette.*`, `crates/pipeline/src/finish.rs`, `crates/ui-egui/src/panels/edit.rs` | style picker (Highlight / Color / Paint) in the Effects section |
 | LR-EDIT-EFFECTS-GRAIN | Grain | P1 | ✅ | `ctl:grain.*` | |
 | LR-EDIT-DETAIL-SHARPEN | Sharpening | P0 | ✅ | `ctl:detail.sharpenAmount`, `ctl:detail.sharpenRadius`, `ctl:detail.sharpenDetail`, `ctl:detail.sharpenMasking`, `docs/detail-processing.md` | V2 separates fine sharpening from Texture and makes Radius/Detail effective; V1 retained for existing edits; no Alt-drag mask preview or measured Lightroom fidelity |
-| LR-EDIT-DETAIL-NR | Luminance noise reduction | P0 | 🟡 | `ctl:detail.nrLuminance`, `ctl:detail.nrDetail`, `ctl:detail.nrContrast` | Amount and Detail work; Contrast is stored but not rendered |
+| LR-EDIT-DETAIL-NR | Luminance noise reduction | P0 | 🟡 | `ctl:detail.nrLuminance`, `ctl:detail.nrDetail`, `ctl:detail.nrContrast` | V3 noise-aware Amount/Detail; RAW default 25; V1/V2 preserved. Contrast is stored but not rendered (`docs/detail-processing.md`) |
 | LR-EDIT-DETAIL-CNR | Colour noise reduction | P0 | ✅ | `ctl:detail.nrColor`, `ctl:detail.nrColorDetail`, `ctl:detail.nrColorSmoothness` | |
 | LR-EDIT-DETAIL-DENOISE | AI denoise | P2 | 🟡 | cmd:denoise.toggle, cmd:denoise.models.install, cmd:denoise.queue, ctl:enhance.denoise, `crates/denoise/`, `docs/denoise.md` | non-destructive Bayer RAW, opt-in weights, pure-Rust CPU/GPU; GPU convolution uses independently written shared scalars (Metal equivalence regression, issue #479); X-Trans/linear RGB, model policy and Lightroom fidelity remain |
 | LR-EDIT-DETAIL-RAWDETAILS | Improved demosaic toggle | P2 | ⬜ | | |
@@ -776,6 +776,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | V3 noise-aware luminance reduction and current RAW defaults; quality/Contrast gaps remain open |
 | 2026-10-11 | minor | V2 detail processing; Radius/Detail now affect sharpening, stronger colour NR; downgrade luminance NR because Contrast remains ineffective |
 | 2026-10-10 | minor | LR-IMP-FORMATS records native Nikon HE/HE★ decoding and exact Z50 II/Z6 III sensor evidence; format row remains partial for other gaps |
 | 2026-10-10 | minor | Renamed from `parity.md` (progress-docs standard); Top gaps moved to gaps.md (its duplicated items 1–2 from a bad merge resolved there), shortcut notes moved to ui-parity.md. Rows unchanged; a recount of the rows gives 81.1% of 517 in-scope rows (P0 98.0%, P1 95.1%, P2 46.9%), so the generated summary above is due a `cargo xtask parity --write` |

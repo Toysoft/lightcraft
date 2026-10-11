@@ -145,7 +145,7 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
     let lum = (s.detail.nr_luminance / 100.0) as f32;
     let col = (s.detail.nr_color / 100.0) as f32;
     let scale = (out_long as f32 / src_long.max(1) as f32).clamp(0.05, 1.0);
-    let l = (lum > 0.0).then(|| {
+    let l = (lum > 0.0 && s.process.process() != Process::V3).then(|| {
         let detail = (s.detail.nr_detail / 100.0) as f32;
         NrLum { sigma: (1.0 + 2.5 * lum) * scale.max(0.4), eps: 0.002 + lum * lum * 0.25 * (1.0 - 0.7 * detail), k: lum.sqrt() }
     });
@@ -157,19 +157,22 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
         // and the Detail control's retained chroma. Luminance is unchanged.
         let amount = match s.process.process() {
             Process::V1 => col,
-            Process::V2 => (1.0 - (-8.0 * col).exp()) / (1.0 - (-8.0f32).exp()),
+            Process::V2 | Process::V3 => (1.0 - (-8.0 * col).exp()) / (1.0 - (-8.0f32).exp()),
         };
         NrColor { sigma, t: amount * (1.0 - keep) }
     });
     (l, c)
 }
 
-/// Noise reduction at output resolution: luminance via an edge-aware self-guided filter on
-/// log-luminance, colour by blurring chromaticity (rgb / Y) and re-applying the original luminance.
+/// Noise reduction at output resolution: V1/V2 luminance via a guided log-luminance filter,
+/// V3 via the noise-aware sqrt-luminance filter, and colour via blurred chromaticity (rgb / Y).
 /// Radii scale with how much the source was downsampled (preview noise is already averaged out).
-pub fn denoise(img: &mut Rgb32f, s: &DevelopSettings, src_long: usize, out_long: usize) {
+pub fn denoise(img: &mut Rgb32f, s: &DevelopSettings, src_long: usize, out_long: usize, noise: f32) {
     let (lum, col) = nr_params(s, src_long, out_long);
     let w = img.width;
+    if let Some(nr) = crate::noise::params(s, src_long, out_long, noise) {
+        crate::noise::reduce(img, nr);
+    }
     if let Some(nr) = lum {
         let _t = crate::profiling().then(std::time::Instant::now);
         let l = img.map(log_lum);
@@ -273,7 +276,7 @@ pub struct PlaneSigmas {
 pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneSigmas {
     let ppl = px_per_long as f32;
     let local_any = |f: fn(&lightcraft_develop::LocalAdjustments) -> f64| s.masks.iter().any(|m| f(&m.adjust) != 0.0);
-    let fine_sharpen = s.process.process() == Process::V2;
+    let fine_sharpen = s.process.process() != Process::V1;
     let sharpening = s.detail.sharpen_amount != 0.0 || local_any(|a| a.sharpness);
     let tone_active =
         s.light.highlights != 0.0 || s.light.shadows != 0.0 || s.masks.iter().any(|m| m.adjust.highlights != 0.0 || m.adjust.shadows != 0.0);
@@ -467,7 +470,8 @@ mod nr_tests {
         let (v0, m0) = var(&img);
         let mut s = DevelopSettings::default();
         s.detail.nr_luminance = 80.0;
-        denoise(&mut img, &s, 64, 64);
+        let noise = crate::noise::estimate(&img, None);
+        denoise(&mut img, &s, 64, 64, noise);
         let (v1, m1) = var(&img);
         assert!(v1 < v0 * 0.5, "{v0} -> {v1}");
         assert!((m1 - m0).abs() < 0.01);

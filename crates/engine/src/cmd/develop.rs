@@ -237,7 +237,8 @@ pub fn specs() -> Vec<CommandSpec> {
                     // Restore the complete import baseline, including RAW capture sharpening,
                     // colour NR and embedded lens corrections, or the recorded default preset.
                     let photo = s.catalog.photo(id)?;
-                    let mut fresh = photo.import_defaults();
+                    let mut fresh =
+                        if photo.import_look.is_some() { photo.import_defaults() } else { photo.camera_defaults_for(ProcessVersion::LATEST) };
                     if photo.import_look.is_none() {
                         // Loaded source facts can correct stale as-shot metadata in older catalogs.
                         let info = s.source_info(id);

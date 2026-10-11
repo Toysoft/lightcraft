@@ -19,14 +19,15 @@ pub use settings::*;
 use serde_json::Value;
 
 impl DevelopSettings {
-    /// Settings for a freshly imported raw file (Lightroom applies capture sharpening and colour
-    /// noise reduction by default to raw files).
+    /// Settings for a freshly imported raw file: capture sharpening, colour reduction,
+    /// and V3 noise-aware luminance reduction. Saved V1/V2 defaults are handled by the catalog.
     pub fn for_raw(as_shot_temp: f64, as_shot_tint: f64) -> DevelopSettings {
         let mut s = DevelopSettings::default();
         s.wb.temp = as_shot_temp;
         s.wb.tint = as_shot_tint;
         s.detail.sharpen_amount = 40.0;
         s.detail.nr_color = 25.0;
+        s.detail.nr_luminance = 25.0;
         s
     }
 
