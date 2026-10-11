@@ -1395,6 +1395,8 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                             &dlg,
                             Dialog::DenoiseModel { accepted: false, .. } | Dialog::FaceModel { accepted: false, .. } | Dialog::SynchronizeFolder { counts: None, .. }
                         )
+                            // erasing files waits a moment after its question came up
+                            && !matches!(&dlg, Dialog::TrashFiles(ask) if !super::trash_files::armed(ui.ctx(), ask))
                             // smart-album rules that can't mean anything wait to be fixed
                             && !matches!(&dlg, Dialog::SmartRules { id, rules, .. } if !rules.check_for(&app.session.catalog, id.map(lightcraft_catalog::AlbumId)).is_empty()));
                 let primary = !informational && can_confirm && confirm_style(&dlg) == ConfirmStyle::Primary;

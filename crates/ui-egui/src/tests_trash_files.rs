@@ -130,6 +130,14 @@ fn exists(path: &str) -> bool {
     Path::new(path).exists()
 }
 
+/// Let the Erase question's button become available (by the app's own clock).
+fn wait_for_erase(h: &mut Headless) {
+    let Some(Dialog::TrashFiles(TrashAsk::Erase { since, .. })) = h.app.ui.dialog.clone() else { panic!("no Erase question: {:?}", h.app.ui.dialog) };
+    let ready = since + crate::panels::trash_files::ERASE_SETTLE_SECONDS + 0.05;
+    assert!(h.step_until(T, |h| h.app.now() >= ready), "the app's clock moves on");
+    h.step();
+}
+
 fn toast(h: &Headless) -> String {
     h.app.ui.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default()
 }
@@ -172,7 +180,8 @@ fn a_photo_s_menu_in_the_grid_offers_it_in_the_library_and_in_recently_deleted()
     click(&mut h, "button:contextTrashFiles");
     click(&mut h, "button:dialogOk");
     assert!(!in_library(&h, ids[0]) && !exists(&paths[0]) && exists(&paths[1]));
-    run(&mut h, "dialog.trashFiles", json!({"recentlyDeleted": true}));
+    ask(&mut h, "ui.clickWidget", json!({"id": format!("thumb:{}", ids[1]), "button": "right"}));
+    click(&mut h, "button:contextEmptyTrashFiles");
     assert_eq!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Trash { ids: vec![ids[1], ids[2]], emptying: true })));
     let undo = h.app.session.undo.len();
     click(&mut h, "button:dialogOk");
@@ -212,7 +221,14 @@ fn photos_on_a_disk_without_a_trash_get_a_second_question_before_anything_is_era
     run(&mut h, "dialog.trashFiles", json!({}));
     click(&mut h, "button:dialogOk");
     assert!(!in_library(&h, ids[0]) && !exists(&paths[0]), "the one that could go went");
-    assert_eq!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Erase { ids: vec![ids[1], ids[2]] })), "the others are asked about");
+    assert!(
+        matches!(&h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Erase { ids: asked, .. })) if *asked == vec![ids[1], ids[2]]),
+        "the others are asked about"
+    );
+    // a second click meant for the first question does not answer this one
+    click(&mut h, "button:dialogOk");
+    assert!(in_library(&h, ids[1]) && exists(&paths[1]), "its button waits a moment");
+    assert!(matches!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Erase { .. }))));
     assert!(in_library(&h, ids[1]) && exists(&paths[1]) && exists(&paths[2]), "nothing of them is touched yet");
     ask(&mut h, "ui.dialog.cancel", json!({}));
     assert!(in_library(&h, ids[1]) && in_library(&h, ids[2]) && exists(&paths[1]) && exists(&paths[2]), "Cancel leaves them");
@@ -221,6 +237,7 @@ fn photos_on_a_disk_without_a_trash_get_a_second_question_before_anything_is_era
     run(&mut h, "dialog.trashFiles", json!({}));
     click(&mut h, "button:dialogOk");
     assert!(matches!(h.app.ui.dialog, Some(Dialog::TrashFiles(TrashAsk::Erase { .. }))));
+    wait_for_erase(&mut h);
     click(&mut h, "button:dialogOk");
     assert!(!in_library(&h, ids[1]) && !in_library(&h, ids[2]) && !exists(&paths[1]) && !exists(&paths[2]));
     assert_eq!(h.app.ui.dialog, None);
@@ -253,4 +270,11 @@ fn nothing_to_move_is_not_asked_about() {
     let r = h.request("engine.execute", json!({"command": "dialog.trashFiles", "params": {"recentlyDeleted": true}}), T);
     assert_eq!(r["ok"], false, "{r}");
     assert_eq!(h.app.ui.dialog, None);
+}
+
+/// A key can open the question; no key can be given to the command behind it.
+#[test]
+fn no_shortcut_can_move_files_without_the_question() {
+    let ids: Vec<&str> = crate::shortcuts::bindable().iter().map(|b| b.id).collect();
+    assert!(ids.contains(&"dialog.trashFiles") && !ids.contains(&"photo.trashFiles"), "only the question");
 }

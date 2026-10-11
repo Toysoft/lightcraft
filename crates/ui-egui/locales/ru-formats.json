@@ -301,5 +301,7 @@
   "…and {n} more": "…и ещё {n}",
   "Files erased: {files} (photos out of the library: {photos})": "Стёрто файлов: {files} (фото убрано из библиотеки: {photos})",
   "Files moved to the Trash: {files} (photos out of the library: {photos})": "Перемещено файлов в корзину: {files} (фото убрано из библиотеки: {photos})",
-  "{n} could not be moved and stay in the library: {why}": "Не удалось переместить ({n}), они остаются в библиотеке: {why}"
+  "{n} could not be moved and stay in the library: {why}": "Не удалось переместить ({n}), они остаются в библиотеке: {why}",
+  "Photos whose file was already gone: {n}": "Фото, файла которых уже не было: {n}",
+  "Sidecars left in place: {n}": "Оставлено сопроводительных файлов: {n}"
 }

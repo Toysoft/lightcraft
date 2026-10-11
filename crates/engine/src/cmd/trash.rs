@@ -1,7 +1,7 @@
 //! `photo.trashFiles`: photos leave the library for good and their files go to the system Trash
 //! (see [`crate::trash`]). The one command that touches a photo's file on the way out.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use lightcraft_catalog::{PhotoId, Source};
@@ -35,29 +35,68 @@ fn no_trash_param(p: &Value, c: &str) -> Result<NoTrash> {
     }
 }
 
-/// The sidecars beside `original` that are there now (both namings; `.xmp` and `.XMP` are one
-/// file on a disk that ignores case), with whether a photo beside it still uses it: a sidecar
-/// named for the stem (`IMG_1.xmp`) is also `IMG_1.dng`'s while that file is there.
-fn sidecars_now(original: &str) -> Vec<(PathBuf, bool)> {
+/// A path's folder and its name without the last extension, lower-cased: what a sidecar named
+/// for the stem (`IMG_1.xmp`) is shared by.
+fn folder_and_stem(path: &Path) -> Option<(PathBuf, String)> {
+    Some((path.parent()?.to_path_buf(), path.file_stem()?.to_string_lossy().to_lowercase()))
+}
+
+/// The sidecars beside `original` that are there now and are this photo's alone, and how many
+/// are there but may be another file's (those stay). `.xmp` and `.XMP` are one file on a disk
+/// that ignores case.
+///
+/// A sidecar named for the whole file (`IMG_1.jpg.xmp`) is this photo's. One named for the stem
+/// (`IMG_1.xmp`) is also the sidecar of anything else of that stem: it is this photo's alone
+/// only when no other file of that stem is in the folder (a raw, a video, anything: other apps
+/// write stem sidecars for files LightCraft does not import) and no photo that stays in the
+/// library is of that stem there (`kept_stems`: its file may be on a disk that is away).
+fn own_sidecars(original: &str, kept_stems: &HashSet<(PathBuf, String)>) -> (Vec<PathBuf>, usize) {
     let fs = crate::rename::RealFs;
-    let mut out: Vec<(PathBuf, bool)> = Vec::new();
+    let (mut own, mut left): (Vec<PathBuf>, usize) = (Vec::new(), 0);
+    let mut seen: Vec<PathBuf> = Vec::new();
     for naming in [crate::sidecar::SidecarNaming::Stem, crate::sidecar::SidecarNaming::Full] {
         let lower = crate::sidecar::sidecar_path(original, naming);
         for path in [lower.clone(), lower.with_extension("XMP")] {
-            if !fs.is_file(&path) || out.iter().any(|(o, _)| fs.same_file(o, &path)) {
+            if !fs.is_file(&path) || seen.iter().any(|o| fs.same_file(o, &path)) {
                 continue;
             }
-            let shared = naming == crate::sidecar::SidecarNaming::Stem && fs.stem_sibling(&path).is_some();
-            out.push((path, shared));
+            seen.push(path.clone());
+            if naming == crate::sidecar::SidecarNaming::Full || stem_is_free(Path::new(original), &path, kept_stems) {
+                own.push(path);
+            } else {
+                left += 1;
+            }
         }
     }
-    out
+    (own, left)
+}
+
+/// Whether the stem sidecar `sidecar` of the photo that was at `original` (gone by now) is
+/// nobody else's: see [`own_sidecars`]. When in doubt (a folder that can't be listed): no.
+fn stem_is_free(original: &Path, sidecar: &Path, kept_stems: &HashSet<(PathBuf, String)>) -> bool {
+    let Some(key) = folder_and_stem(original) else { return false };
+    if kept_stems.contains(&key) {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(&key.0) else { return false };
+    for entry in entries {
+        let Ok(entry) = entry else { return false };
+        let path = entry.path();
+        let is_sidecar = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("xmp"));
+        if !is_sidecar && path != sidecar && path.file_stem().is_some_and(|st| st.to_string_lossy().to_lowercase() == key.1) {
+            return false;
+        }
+    }
+    true
 }
 
 /// Take `ids` out of the library for good and move their files to the Trash, as one undo step.
 /// Everything that can go goes; what can't is named in the answer and stays, photo and file.
 pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashParam, c: &str) -> Result<Value> {
     let no_trash = no_trash.0;
+    if !s.trash.works_here() {
+        return Err(bad(c, "moving files to the Trash is not available here yet: nothing was changed"));
+    }
     if ids.is_empty() {
         return Err(bad(c, "no photos to move to the Trash"));
     }
@@ -67,61 +106,96 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
     if let Some(gone) = ids.iter().find(|id| s.catalog.photo(**id).is_none()) {
         return Err(bad(c, format!("no such photo {}", gone.0)));
     }
-    let named: HashSet<PhotoId> = ids.iter().copied().collect();
-    // photos only browsed in Local are not the library's to take out
-    let browsed = ids.iter().filter(|id| s.catalog.photo(**id).is_some_and(|p| p.local)).count();
-    if browsed == named.len() {
+    // each photo once; photos only browsed in Local are not the library's to take out
+    let mut named: Vec<PhotoId> = Vec::new();
+    let mut once: HashSet<PhotoId> = HashSet::new();
+    let mut browsed = 0usize;
+    for id in ids.iter().filter(|id| once.insert(**id)) {
+        if s.catalog.photo(*id).is_some_and(|p| p.local) {
+            browsed += 1;
+        } else {
+            named.push(*id);
+        }
+    }
+    if named.is_empty() {
         return Err(bad(c, "photos browsed in Local are not in the library: add them to My Photos first"));
     }
-    // a file other photos of the library are (copies), which stay: it stays with them
-    let mut kept_paths: HashSet<&str> = HashSet::new();
-    for p in s.catalog.photos().filter(|p| !named.contains(&p.id)) {
-        if let Source::File { path } = &p.source {
-            kept_paths.insert(path.as_str());
+    let going: HashSet<PhotoId> = named.iter().copied().collect();
+    // what stays (every other record, browsed ones too): a file one of them is stays with it,
+    // and so does a stem sidecar one of them may share
+    let fs = crate::rename::RealFs;
+    let mut kept_names: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut kept_stems: HashSet<(PathBuf, String)> = HashSet::new();
+    for p in s.catalog.photos().filter(|p| !going.contains(&p.id)) {
+        let Source::File { path } = &p.source else { continue };
+        let path = PathBuf::from(path);
+        if let Some(key) = folder_and_stem(&path) {
+            kept_stems.insert(key);
+        }
+        if let Some(name) = path.file_name() {
+            kept_names.entry(name.to_string_lossy().to_lowercase()).or_default().push(path);
         }
     }
+    // (the same file under another spelling of its path counts: file identity, not text)
+    let kept = |path: &Path| {
+        let Some(name) = path.file_name() else { return false };
+        kept_names.get(&name.to_string_lossy().to_lowercase()).is_some_and(|same| same.iter().any(|k| k == path || fs.same_file(k, path)))
+    };
     let bin = s.trash.clone();
-    let fs = crate::rename::RealFs;
     let (mut removed, mut no_trash_ids, mut failed): (Vec<PhotoId>, Vec<u64>, Vec<Value>) = (Vec::new(), Vec::new(), Vec::new());
     let (mut taken, mut gone_paths): (Vec<Trashed>, Vec<String>) = (Vec::new(), Vec::new());
-    let (mut missing, mut shared) = (0usize, 0usize);
-    let mut done: HashSet<String> = HashSet::new();
-    let mut seen: HashSet<PhotoId> = HashSet::new();
+    let (mut missing, mut shared, mut sidecars_left) = (0usize, 0usize, 0usize);
+    let mut done: Vec<PathBuf> = Vec::new();
     // the photos' own files first; the sidecars after, once it is known which photos stay
-    for id in ids.iter().filter(|id| seen.insert(**id)) {
+    for id in &named {
         let Some(p) = s.catalog.photo(*id) else { continue };
-        if p.local {
-            continue;
-        }
         let Source::File { path } = &p.source else {
             // no file of its own (a demo scene): it just leaves
             removed.push(*id);
             continue;
         };
-        if kept_paths.contains(path.as_str()) {
+        let file = Path::new(path);
+        let fail = |failed: &mut Vec<Value>, why: String| failed.push(json!({"id": id.0, "path": path, "why": why}));
+        if kept(file) {
             shared += 1;
             removed.push(*id);
             continue;
         }
-        if done.contains(path) {
+        if done.iter().any(|d| d == file) {
             // another of the photos named is this file, which went with it
             removed.push(*id);
             continue;
         }
-        if !fs.exists(Path::new(path)) {
-            missing += 1;
-            removed.push(*id);
+        if !fs.exists(file) {
+            // gone from a folder that is there: the photo just leaves. A folder that isn't
+            // there says nothing about the file (a disk that is away): the photo stays
+            if file.parent().is_some_and(Path::is_dir) {
+                missing += 1;
+                removed.push(*id);
+            } else {
+                fail(&mut failed, format!("{path}: its folder can't be reached (is the disk connected?)"));
+            }
             continue;
         }
-        match bin.trash(Path::new(path)) {
+        if !fs.is_file(file) {
+            fail(&mut failed, format!("{path}: not a file"));
+            continue;
+        }
+        match bin.trash(file) {
             Ok(at) => {
                 taken
                     .push(Trashed { from: path.clone(), now: at.map_or(Whereabouts::InTrash, |a| Whereabouts::At(a.to_string_lossy().to_string())) });
+                gone_paths.push(path.clone());
             }
-            Err(BinError::NoTrash) if no_trash == NoTrash::Erase => match bin.erase(Path::new(path)) {
-                Ok(()) => taken.push(Trashed { from: path.clone(), now: Whereabouts::Erased }),
+            Err(BinError::NoTrash) if no_trash == NoTrash::Erase => match bin.erase(file) {
+                // (its sidecars stay: only the file that was asked about is erased)
+                Ok(()) => {
+                    taken.push(Trashed { from: path.clone(), now: Whereabouts::Erased });
+                    let (own, left) = own_sidecars(path, &kept_stems);
+                    sidecars_left += own.len() + left;
+                }
                 Err(e) => {
-                    failed.push(json!({"id": id.0, "path": path, "why": format!("{path}: can't be erased: {e}")}));
+                    fail(&mut failed, format!("{path}: can't be erased: {e}"));
                     continue;
                 }
             },
@@ -130,30 +204,25 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
                 continue;
             }
             Err(BinError::Failed(why)) => {
-                failed.push(json!({"id": id.0, "path": path, "why": why}));
+                fail(&mut failed, why);
                 continue;
             }
         }
-        done.insert(path.clone());
-        gone_paths.push(path.clone());
+        done.push(file.to_path_buf());
         removed.push(*id);
     }
-    // a file a photo that could not go is: not gone after all? (it was never taken: the paths
-    // in `gone_paths` are those of photos that went). Their sidecars follow them, but for a
-    // sidecar a photo beside it still uses. One that can't go stays behind; nothing is lost.
-    let erased_originals: HashSet<String> = taken.iter().filter(|t| t.now == Whereabouts::Erased).map(|t| t.from.clone()).collect();
+    // the sidecars of the files that went to the Trash follow them there: those that are theirs
+    // alone. One that can't go stays behind (and is counted); nothing is lost by that.
     for original in &gone_paths {
-        for (sidecar, in_use) in sidecars_now(original) {
-            if in_use {
-                continue;
-            }
-            let from = sidecar.to_string_lossy().to_string();
-            if erased_originals.contains(original) {
-                if bin.erase(&sidecar).is_ok() {
-                    taken.push(Trashed { from, now: Whereabouts::Erased });
-                }
-            } else if let Ok(at) = bin.trash(&sidecar) {
-                taken.push(Trashed { from, now: at.map_or(Whereabouts::InTrash, |a| Whereabouts::At(a.to_string_lossy().to_string())) });
+        let (own, left) = own_sidecars(original, &kept_stems);
+        sidecars_left += left;
+        for sidecar in own {
+            match bin.trash(&sidecar) {
+                Ok(at) => taken.push(Trashed {
+                    from: sidecar.to_string_lossy().to_string(),
+                    now: at.map_or(Whereabouts::InTrash, |a| Whereabouts::At(a.to_string_lossy().to_string())),
+                }),
+                Err(_) => sidecars_left += 1,
             }
         }
     }
@@ -163,9 +232,9 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
         // nothing went. A disk without a Trash is a question to ask, not an error; anything
         // else says why
         if failed.is_empty() {
-            return Ok(
-                json!({"removed": 0, "trashed": 0, "erased": 0, "missing": 0, "shared": 0, "noTrash": no_trash_ids, "failed": [], "skipped": browsed}),
-            );
+            return Ok(json!({
+                "removed": 0, "trashed": 0, "erased": 0, "missing": 0, "shared": 0, "sidecarsLeft": 0, "noTrash": no_trash_ids, "failed": [], "skipped": browsed
+            }));
         }
         let why = failed.first().and_then(|f| f["why"].as_str()).unwrap_or("the files could not be moved to the Trash").to_string();
         let more = if failed.len() > 1 { format!(" (and {} more)", failed.len() - 1) } else { String::new() };
@@ -194,6 +263,7 @@ pub(crate) fn trash_files(s: &mut Session, ids: &[PhotoId], no_trash: NoTrashPar
         "erased": erased,
         "missing": missing,
         "shared": shared,
+        "sidecarsLeft": sidecars_left,
         "noTrash": no_trash_ids,
         "failed": failed,
         "skipped": browsed,
@@ -215,7 +285,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Move Files to Trash",
         [],
         None,
-        "{ids?, noTrash?: keep|delete} → {removed, trashed, erased, missing, shared, noTrash: [ids], failed: [{id, path, why}], skipped} — the photos (the selection, or `ids`; in the library or in Recently Deleted) leave the library for good and their files, with their XMP sidecars, go to the system Trash; one undo step, and undo moves the files back when the Trash says where they are. `trashed` and `erased` count files. A file other photos of the library are (copies) stays with them (`shared`), as does a sidecar a photo beside it still uses; a file already gone is `missing`. Photos on a disk without a Trash stay, file and all, and are named in `noTrash`: only a second call with `noTrash: \"delete\"` erases their files for good (undo then brings the photos back as missing). A photo whose file can't be moved stays and is in `failed`; when nothing could go, that is the error. Photos only browsed in Local are skipped. Not available on Windows or in the browser yet. Delete, Delete Permanently, Empty Recently Deleted and Remove Folder from Library never touch a file",
+        "{ids?, noTrash?: keep|delete} → {removed, trashed, erased, missing, shared, sidecarsLeft, noTrash: [ids], failed: [{id, path, why}], skipped} — the photos (the selection, or `ids`; in the library or in Recently Deleted) leave the library for good and their files, with their XMP sidecars, go to the system Trash; one undo step, and undo moves the files back when the Trash says where they are. `trashed` and `erased` count files. A file other photos of the library are (copies, by file identity) stays with them (`shared`). A sidecar goes only when it is the photo's alone: one named for the stem (`IMG_1.xmp`) stays while any other file of that stem is beside it or a photo of that stem stays in the library, and the sidecars of erased files always stay (`sidecarsLeft`). A file gone from a folder that is there is `missing` and its photo leaves; a photo whose folder can't be reached (a disk that is away) stays and is in `failed`. Photos on a disk without a Trash stay, file and all, and are named in `noTrash`: only a second call with `noTrash: \"delete\"` erases their files for good (undo then brings the photos back as missing). A photo whose file can't be moved stays and is in `failed`; when nothing could go, that is the error. Photos only browsed in Local are skipped. Not available on Windows or in the browser yet. Delete, Delete Permanently, Empty Recently Deleted and Remove Folder from Library never touch a file",
         // (not `has_selection`: the photos are named by `ids` as often as selected, and what is
         // there to do is decided, and said, below)
         always,

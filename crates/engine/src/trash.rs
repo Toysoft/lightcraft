@@ -49,6 +49,12 @@ pub trait Bin: Send + Sync {
     fn erase(&self, path: &Path) -> std::io::Result<()> {
         std::fs::remove_file(path)
     }
+
+    /// Whether this Trash can take files at all here (the system's can't on Windows or in the
+    /// browser yet: asking is then refused before any photo leaves the library).
+    fn works_here(&self) -> bool {
+        true
+    }
 }
 
 /// The system's Trash.
@@ -57,6 +63,10 @@ pub struct SystemBin;
 impl Bin for SystemBin {
     fn trash(&self, path: &Path) -> Result<Option<PathBuf>, BinError> {
         system_trash(path)
+    }
+
+    fn works_here(&self) -> bool {
+        available()
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -93,13 +103,14 @@ pub enum Whereabouts {
     Erased,
 }
 
-/// The file work of an undo or redo step of `photo.trashFiles`, done before its catalog op.
+/// The file work of an undo or redo step of `photo.trashFiles`, done with its catalog op.
 #[derive(Clone, Debug)]
 pub(crate) enum TrashStep {
     /// Undo: put these files back where they were.
     PutBack(Vec<Trashed>),
-    /// Redo: move these files (the ones undo put back) to the Trash again.
-    Again(Vec<String>),
+    /// Redo: move `back` (the files undo put back) to the Trash again. `still_out` did not come
+    /// back at that undo (still in the Trash, or erased): the next undo tries them again.
+    Again { back: Vec<String>, still_out: Vec<Trashed> },
 }
 
 /// "1 file" / "3 files".
@@ -114,61 +125,55 @@ impl TrashStep {
     pub(crate) fn run(&self, bin: &dyn Bin) -> (TrashStep, Option<String>) {
         match self {
             TrashStep::PutBack(list) => {
-                let (mut back, mut failed, mut elsewhere, mut erased) = (Vec::new(), 0usize, 0usize, 0usize);
+                let (mut back, mut still_out) = (Vec::new(), Vec::new());
+                let (mut failed, mut elsewhere, mut erased) = (0usize, 0usize, 0usize);
+                let mut why = None;
                 for t in list {
                     match &t.now {
                         Whereabouts::At(at) => match bin.put_back(Path::new(at), Path::new(&t.from)) {
-                            Ok(()) => back.push(t.from.clone()),
-                            Err(_) => failed += 1,
+                            Ok(()) => {
+                                back.push(t.from.clone());
+                                continue;
+                            }
+                            Err(e) => {
+                                failed += 1;
+                                why.get_or_insert(e.to_string());
+                            }
                         },
                         Whereabouts::InTrash => elsewhere += 1,
                         Whereabouts::Erased => erased += 1,
                     }
+                    still_out.push(t.clone());
                 }
                 let mut notes = Vec::new();
                 if failed > 0 {
-                    let them = if failed == 1 {
-                        "it is no longer in the Trash, or something else is in its place"
-                    } else {
-                        "they are no longer in the Trash, or something else is in their place"
-                    };
-                    notes.push(format!("{} could not be put back: {them}", files(failed)));
+                    notes.push(format!("{} could not be put back from the Trash ({})", files(failed), why.unwrap_or_default()));
                 }
                 if elsewhere > 0 {
-                    notes.push(format!(
-                        "{} still in the Trash: put {} back from there",
-                        if elsewhere == 1 { "1 file is".to_string() } else { format!("{elsewhere} files are") },
-                        if elsewhere == 1 { "it" } else { "them" }
-                    ));
+                    let (are, them) = if elsewhere == 1 { ("1 file is".to_string(), "it") } else { (format!("{elsewhere} files are"), "them") };
+                    notes.push(format!("{are} still in the Trash: put {them} back from there"));
                 }
                 if erased > 0 {
-                    notes.push(format!(
-                        "{} erased and {} not coming back",
-                        if erased == 1 { "1 file was".to_string() } else { format!("{erased} files were") },
-                        if erased == 1 { "is" } else { "are" }
-                    ));
+                    let (were, are) = if erased == 1 { ("1 file was".to_string(), "is") } else { (format!("{erased} files were"), "are") };
+                    notes.push(format!("{were} erased and {are} not coming back"));
                 }
-                (TrashStep::Again(back), (!notes.is_empty()).then(|| notes.join("; ")))
+                (TrashStep::Again { back, still_out }, (!notes.is_empty()).then(|| notes.join("; ")))
             }
-            TrashStep::Again(paths) => {
-                let (mut list, mut failed) = (Vec::new(), 0usize);
-                for from in paths {
+            TrashStep::Again { back, still_out } => {
+                let (mut list, mut failed) = (still_out.clone(), 0usize);
+                for from in back {
                     match bin.trash(Path::new(from)) {
                         Ok(at) => list.push(Trashed {
                             from: from.clone(),
                             now: at.map_or(Whereabouts::InTrash, |p| Whereabouts::At(p.to_string_lossy().to_string())),
                         }),
-                        // (never erased again without being asked: the file stays)
+                        // (never erased without being asked: the file stays where it is)
                         Err(_) => failed += 1,
                     }
                 }
                 let note = (failed > 0).then(|| {
-                    format!(
-                        "{} could not be moved to the Trash and {} where {} was",
-                        files(failed),
-                        if failed == 1 { "stays" } else { "stay" },
-                        if failed == 1 { "it" } else { "they" }
-                    )
+                    let (stay, it) = if failed == 1 { ("stays", "it was") } else { ("stay", "they were") };
+                    format!("{} could not be moved to the Trash and {stay} where {it}", files(failed))
                 });
                 (TrashStep::PutBack(list), note)
             }
@@ -179,21 +184,25 @@ impl TrashStep {
 #[cfg(target_os = "macos")]
 fn system_trash(path: &Path) -> Result<Option<PathBuf>, BinError> {
     use objc2_foundation::{NSFileManager, NSString, NSURL};
-    /// `NSFeatureUnsupportedError`: what a volume without a Trash answers.
+    /// `NSFeatureUnsupportedError` (in `NSCocoaErrorDomain`): what a volume without a Trash answers.
     const FEATURE_UNSUPPORTED: isize = 3328;
     let Some(text) = path.to_str() else { return Err(BinError::Failed(format!("{}: not a name the Trash can take", path.display()))) };
     let url = NSURL::fileURLWithPath(&NSString::from_str(text));
     let mut at = None;
     match NSFileManager::defaultManager().trashItemAtURL_resultingItemURL_error(&url, Some(&mut at)) {
         Ok(()) => Ok(at.and_then(|u| u.path()).map(|p| PathBuf::from(p.to_string()))),
-        Err(e) if e.code() == FEATURE_UNSUPPORTED => Err(BinError::NoTrash),
+        // (only that one answer means "no Trash": anything else leaves the file not erasable)
+        Err(e) if e.code() == FEATURE_UNSUPPORTED && e.domain().to_string() == "NSCocoaErrorDomain" => Err(BinError::NoTrash),
         Err(e) => Err(BinError::Failed(e.localizedDescription().to_string())),
     }
 }
 
 #[cfg(all(unix, not(target_os = "macos"), not(target_arch = "wasm32")))]
 fn system_trash(path: &Path) -> Result<Option<PathBuf>, BinError> {
-    xdg::trash(path, &xdg::Places::of_this_user()).map(Some)
+    let Some(places) = xdg::Places::of_this_user() else {
+        return Err(BinError::Failed("there is no home folder to keep a Trash in (HOME is not set): nothing was changed".into()));
+    };
+    xdg::trash(path, &places).map(Some)
 }
 
 #[cfg(not(any(unix, target_arch = "wasm32")))]
@@ -232,21 +241,34 @@ pub mod xdg {
     }
 
     impl Places {
-        pub fn of_this_user() -> Places {
-            let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        /// `None` without a home folder to keep the Trash in (`HOME` unset or not absolute).
+        pub fn of_this_user() -> Option<Places> {
+            let home = std::env::var_os("HOME").map(PathBuf::from).filter(|h| h.is_absolute())?;
             let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(".local/share"));
             // (the owner of the home folder: std has no getuid)
             let uid = std::fs::metadata(&home).map(|m| m.uid()).unwrap_or(0);
             let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
             let day = secs.rem_euclid(86_400);
             let now = format!("{}T{:02}:{:02}:{:02}", lightcraft_catalog::dates::civil(secs), day / 3600, day % 3600 / 60, day % 60);
-            Places { home_trash: data.join("Trash"), uid, now }
+            Some(Places { home_trash: data.join("Trash"), uid, now })
         }
     }
 
     /// The device a path is on (`None`: it can't be asked).
+    /// (Of what the path leads to: a folder reached through a link is on the disk it is on.)
     fn device(p: &Path) -> Option<u64> {
-        std::fs::symlink_metadata(p).ok().map(|m| m.dev())
+        std::fs::metadata(p).ok().map(|m| m.dev())
+    }
+
+    /// A folder for the Trash could not be made. Only a disk that takes no such folder at all
+    /// (read-only, not ours to write to, no such thing there) has no Trash; a full disk or any
+    /// other trouble is a failure, and the file is then never offered for erasing.
+    fn no_place(path: &Path, e: std::io::Error) -> BinError {
+        use std::io::ErrorKind as K;
+        match e.kind() {
+            K::PermissionDenied | K::ReadOnlyFilesystem | K::Unsupported => BinError::NoTrash,
+            _ => BinError::Failed(format!("{}: the Trash can't be written to: {e}", path.display())),
+        }
     }
 
     /// The top folder of the disk `dir` is on: the highest folder above it still on that device.
@@ -289,13 +311,11 @@ pub mod xdg {
         let (bin, relative_to) = if home_dev == Some(dev) {
             (places.home_trash.clone(), None)
         } else {
-            let Some(top) = top_of_disk(dir) else { return Err(BinError::NoTrash) };
+            let Some(top) = top_of_disk(dir) else { return Err(BinError::Failed(format!("{}: its disk can't be found", path.display()))) };
             (top.join(format!(".Trash-{}", places.uid)), Some(top))
         };
         let (files, info) = (bin.join("files"), bin.join("info"));
-        if std::fs::create_dir_all(&files).is_err() || std::fs::create_dir_all(&info).is_err() {
-            return Err(BinError::NoTrash);
-        }
+        std::fs::create_dir_all(&files).and_then(|()| std::fs::create_dir_all(&info)).map_err(|e| no_place(&path, e))?;
         // in a disk's own Trash the path is written from the disk's top
         let original = relative_to.as_deref().and_then(|top| path.strip_prefix(top).ok()).unwrap_or(&path);
         let record = format!("[Trash Info]\nPath={}\nDeletionDate={}\n", encoded(original), places.now);
@@ -308,12 +328,13 @@ pub mod xdg {
             match std::fs::OpenOptions::new().write(true).create_new(true).open(&info_file) {
                 Ok(mut f) => {
                     use std::io::Write;
-                    let moved = f.write_all(record.as_bytes()).and_then(|()| f.sync_all()).and_then(|()| {
-                        if std::fs::symlink_metadata(&to).is_ok() {
-                            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the Trash has a file of that name"));
-                        }
-                        std::fs::rename(&path, &to)
-                    });
+                    // (a file of that name left in the Trash without its note: the next name)
+                    if std::fs::symlink_metadata(&to).is_ok() {
+                        drop(f);
+                        let _ = std::fs::remove_file(&info_file);
+                        continue;
+                    }
+                    let moved = f.write_all(record.as_bytes()).and_then(|()| f.sync_all()).and_then(|()| std::fs::rename(&path, &to));
                     return match moved {
                         Ok(()) => Ok(to),
                         Err(e) => {
@@ -324,7 +345,8 @@ pub mod xdg {
                     };
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(_) => return Err(BinError::NoTrash),
+                // (a full disk, a name too long…: a failure, never "no Trash")
+                Err(e) => return Err(failed("the Trash can't take a note about it", e)),
             }
         }
         Err(BinError::Failed(format!("{}: the Trash holds too many files of that name", path.display())))

@@ -468,17 +468,22 @@
 ### Move Files to Trash
 - **Photo ▸ Move Files to Trash…** (also in a photo's menu in the grid) takes the selected photos out of the library
   and moves their files to the system Trash, with their XMP sidecars. It always asks first and lists the files.
-  It works on photos in the library and in Recently Deleted; from Recently Deleted all of them can go at once.
+  It works on photos in the library and in Recently Deleted; from Recently Deleted all of them can go at once
+  (right-click a photo there ▸ Move All Files in Recently Deleted to Trash…).
 - Nothing else changed: Delete still moves photos to Recently Deleted, and Delete Permanently, Empty Recently
   Deleted and Remove Folder from Library still leave every file where it is. With "Confirm before deleting" on,
   the Delete question now has Move Files to Trash… as a second answer.
 - Undo brings the photos back and moves the files back out of the Trash, as long as they are still there. It
   never replaces a file that is at their place now, and says what it could not put back.
-- A file that other photos of the library use (copies) stays until the last of them goes. A sidecar shared by a
-  raw and a JPEG stays with the one that stays.
+- A file that other photos of the library use (copies) stays until the last of them goes. A sidecar goes only
+  when it is that photo's alone: `IMG_1.xmp` stays while a raw, a video or anything else called `IMG_1` is beside
+  it, or a photo of that name stays in the library.
+- Photos whose folder can't be reached (a disk that is not connected) stay in the library: nothing says their
+  files are gone. A file that is gone from a folder that is there just lets its photo leave.
 - On a disk without a Trash (many network shares) the photos stay, and a second question asks whether their
-  files may be erased for good. That cannot be undone as far as the files go; Undo brings the photos back, shown
-  as missing, with their edits and keywords.
+  files may be erased for good (its button waits a moment before it can be pressed). Only those files are erased;
+  sidecars beside them stay. That cannot be undone as far as the files go; Undo brings the photos back, shown as
+  missing, with their edits and keywords.
 - macOS and Linux for now. On Windows and in the browser the command says it is not available and changes
   nothing.
 - For agents: `photo.trashFiles {ids?, noTrash?: keep|delete}` and `library.emptyRecentlyDeleted {files: "trash"}`.

@@ -301,5 +301,7 @@
   "…and {n} more": "…以及另外 {n} 個",
   "Files erased: {files} (photos out of the library: {photos})": "已清除的檔案：{files} 個（移出照片庫的照片：{photos} 張）",
   "Files moved to the Trash: {files} (photos out of the library: {photos})": "已移至垃圾桶的檔案：{files} 個（移出照片庫的照片：{photos} 張）",
-  "{n} could not be moved and stay in the library: {why}": "有 {n} 個無法移動，仍留在照片庫中：{why}"
+  "{n} could not be moved and stay in the library: {why}": "有 {n} 個無法移動，仍留在照片庫中：{why}",
+  "Photos whose file was already gone: {n}": "檔案已不存在的照片：{n} 張",
+  "Sidecars left in place: {n}": "保留在原處的附屬檔案：{n} 個"
 }

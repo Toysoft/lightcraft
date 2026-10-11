@@ -275,8 +275,11 @@ fn photos_on_a_disk_without_a_trash_stay_unless_their_files_may_be_erased() {
     assert!(has(&s, ib) && exists(&far));
     let steps = s.undo.len();
     let r = run(&mut s, "photo.trashFiles", &[ib], json!({"noTrash": "delete"})).unwrap();
-    assert_eq!((r["removed"].as_u64(), r["erased"].as_u64(), r["trashed"].as_u64()), (Some(1), Some(2), Some(0)), "{r}");
-    assert!(!has(&s, ib) && !exists(&far) && !exists(&far_sidecar));
+    assert_eq!((r["removed"].as_u64(), r["erased"].as_u64(), r["trashed"].as_u64()), (Some(1), Some(1), Some(0)), "{r}");
+    assert!(!has(&s, ib) && !exists(&far));
+    // only what was asked about is erased: the photo's own file. Its sidecar stays, and is counted
+    assert!(exists(&far_sidecar));
+    assert_eq!(r["sidecarsLeft"], 1, "{r}");
     assert_eq!(in_bin(&dir), vec!["1-a.jpg"], "nothing of it is in the Trash");
     assert_eq!(s.undo.len(), steps + 1);
     assert_eq!(s.undo.last().unwrap().label, "Erase Photo's Files");
@@ -366,4 +369,135 @@ fn browsed_photos_are_left_alone_and_photos_without_a_file_just_leave() {
     assert!(e.contains("4242"), "{e}");
     assert!(s.execute("photo.trashFiles", &json!({"ids": "all"})).is_err());
     assert!(exists(&local_path));
+}
+
+// ---- What an independent review found
+
+#[test]
+fn a_sidecar_stays_while_anything_beside_it_or_in_the_library_may_use_it() {
+    let dir = Scratch::new("sidecar-owner");
+    // a video beside the JPEG, which the library does not import: the stem sidecar may be its
+    let (jpg, _mov, shared) = (dir.file("clip/IMG_1.jpg", "J"), dir.file("clip/IMG_1.mov", "V"), dir.file("clip/IMG_1.xmp", "<xmp/>"));
+    // a raw of the library whose file is not there now (its disk is away), beside another JPEG
+    let (jpg2, shared2) = (dir.file("away/IMG_2.jpg", "J"), dir.file("away/IMG_2.xmp", "<xmp/>"));
+    let mut s = session(&dir);
+    let (ij, ij2) = (add(&mut s, &jpg), add(&mut s, &jpg2));
+    let raw_gone = add(&mut s, &dir.at("away/IMG_2.dng"));
+    let r = trash(&mut s, &[ij, ij2]);
+    assert_eq!((r["removed"].as_u64(), r["trashed"].as_u64()), (Some(2), Some(2)), "the two JPEGs, no sidecar: {r}");
+    assert!(exists(&shared), "the video's sidecar stays");
+    assert!(exists(&shared2), "the sidecar of a photo that stays in the library stays, though its file is away");
+    assert!(has(&s, raw_gone));
+    assert_eq!(r["sidecarsLeft"], 2, "{r}");
+}
+
+#[test]
+fn photos_whose_folder_can_t_be_reached_stay_in_the_library() {
+    let dir = Scratch::new("offline");
+    let near = dir.file("a.jpg", "A");
+    let mut s = session(&dir);
+    let (ia, far) = (add(&mut s, &near), add(&mut s, &dir.at("unplugged/b.jpg")));
+    // the folder is not there (a disk that is away): nothing says the file is gone for good
+    let r = trash(&mut s, &[ia, far]);
+    assert_eq!((r["removed"].as_u64(), r["missing"].as_u64()), (Some(1), Some(0)), "{r}");
+    assert!(has(&s, far), "it stays in the library");
+    assert!(r["failed"][0]["why"].as_str().unwrap().contains("can't be reached"), "{r}");
+    // a file gone from a folder that is there is missing, as before
+    std::fs::create_dir_all(dir.0.join("photos/unplugged")).unwrap();
+    let r = trash(&mut s, &[far]);
+    assert_eq!((r["removed"].as_u64(), r["missing"].as_u64()), (Some(1), Some(1)), "{r}");
+}
+
+#[test]
+fn a_path_that_is_a_folder_is_never_moved() {
+    let dir = Scratch::new("folder-path");
+    let inside = dir.file("album/keep.jpg", "K");
+    let mut s = session(&dir);
+    let id = add(&mut s, &dir.at("album"));
+    let e = run(&mut s, "photo.trashFiles", &[id], json!({})).unwrap_err().to_string();
+    assert!(e.contains("not a file"), "{e}");
+    assert!(exists(&inside) && has(&s, id) && in_bin(&dir).is_empty());
+}
+
+#[test]
+fn a_file_a_browsed_photo_or_another_spelling_of_its_path_still_uses_stays() {
+    let dir = Scratch::new("same-file");
+    let a = dir.file("a.jpg", "A");
+    let mut s = session(&dir);
+    let lib = add(&mut s, &a);
+    // the same file again, browsed in Local, and named in the same call
+    let local = s.catalog.alloc_photo_id();
+    let mut p = Photo::new(local, Source::File { path: a.clone() }, "a.jpg", "JPEG", 60, 40, "2026-01-01T10:00:00");
+    p.local = true;
+    s.commit("Browse", Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    let r = run(&mut s, "photo.trashFiles", &[lib, local.0, local.0], json!({})).unwrap();
+    assert_eq!(
+        (r["removed"].as_u64(), r["trashed"].as_u64(), r["shared"].as_u64(), r["skipped"].as_u64()),
+        (Some(1), Some(0), Some(1), Some(1)),
+        "{r}"
+    );
+    assert!(exists(&a) && has(&s, local.0) && !has(&s, lib));
+    // the same file under another spelling of its path (a doubled separator) in a photo that stays
+    let b = dir.file("b.jpg", "B");
+    let (one, _other) = (add(&mut s, &b), add(&mut s, &b.replace("/b.jpg", "//b.jpg")));
+    let r = trash(&mut s, &[one]);
+    assert_eq!((r["trashed"].as_u64(), r["shared"].as_u64()), (Some(0), Some(1)), "{r}");
+    assert!(exists(&b));
+}
+
+#[test]
+fn a_file_that_did_not_come_back_is_tried_again_at_the_next_undo() {
+    let dir = Scratch::new("retry");
+    let (a, b) = (dir.file("a.jpg", "A"), dir.file("b.jpg", "B"));
+    let mut s = session(&dir);
+    let ids = [add(&mut s, &a), add(&mut s, &b)];
+    trash(&mut s, &ids);
+    // something is in a's place for now
+    std::fs::write(&a, "IN THE WAY").unwrap();
+    let undone = s.execute("edit.undo", &json!({})).unwrap()["undone"].as_str().unwrap().to_string();
+    assert!(undone.contains("1 file could not be put back"), "{undone}");
+    assert!(exists(&b));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "IN THE WAY", "redo leaves what is not the photo's");
+    // the way is clear now: the next undo brings a back too
+    std::fs::remove_file(&a).unwrap();
+    let undone = s.execute("edit.undo", &json!({})).unwrap()["undone"].as_str().unwrap().to_string();
+    assert_eq!(undone, "Move 2 Photos' Files to Trash", "nothing left to say");
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "A");
+    assert!(exists(&b) && in_bin(&dir).is_empty());
+}
+
+#[test]
+fn a_trash_step_is_never_folded_into_another_undo_step() {
+    let dir = Scratch::new("merge");
+    let a = dir.file("a.jpg", "A");
+    let mut s = session(&dir);
+    let id = add(&mut s, &a);
+    let other = add(&mut s, &dir.file("b.jpg", "B"));
+    trash(&mut s, &[id]);
+    select(&mut s, &[other]);
+    s.execute("photo.rate", &json!({"rating": 1})).unwrap();
+    let steps = s.undo.len();
+    // (what a background import does with the steps made while it ran)
+    s.merge_undo(2, "Add Photos");
+    assert_eq!(s.undo.len(), steps, "left as they were");
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(has(&s, id) && exists(&a), "undo still brings the file back");
+}
+
+#[test]
+fn redo_never_erases_and_duplicate_ids_are_one_photo() {
+    let dir = Scratch::new("redo-far-disk");
+    let far = dir.file("nas/b.jpg", "B");
+    let mut s = session(&dir);
+    let id = add(&mut s, &far);
+    run(&mut s, "photo.trashFiles", &[id, id], json!({"noTrash": "delete"})).unwrap();
+    assert!(!exists(&far));
+    s.execute("edit.undo", &json!({})).unwrap();
+    // the person put a file there again (from a backup)
+    std::fs::write(&far, "RESTORED").unwrap();
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert!(!has(&s, id));
+    assert_eq!(std::fs::read_to_string(&far).unwrap(), "RESTORED", "redo touches no file it did not put back itself");
 }

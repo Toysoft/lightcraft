@@ -301,5 +301,7 @@
   "…and {n} more": "…ほか{n}個",
   "Files erased: {files} (photos out of the library: {photos})": "消去したファイル: {files}個（ライブラリから除いた写真: {photos}枚）",
   "Files moved to the Trash: {files} (photos out of the library: {photos})": "ゴミ箱に移動したファイル: {files}個（ライブラリから除いた写真: {photos}枚）",
-  "{n} could not be moved and stay in the library: {why}": "{n}個は移動できず、ライブラリに残ります: {why}"
+  "{n} could not be moved and stay in the library: {why}": "{n}個は移動できず、ライブラリに残ります: {why}",
+  "Photos whose file was already gone: {n}": "ファイルがすでになかった写真: {n}枚",
+  "Sidecars left in place: {n}": "そのまま残したサイドカー: {n}個"
 }

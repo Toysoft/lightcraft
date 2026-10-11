@@ -1262,6 +1262,14 @@ pub fn context_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             crate::menubar::act_item(app, "photo.delete", json!({}));
         }
     }
+    // from Recently Deleted, all of them at once
+    if app.session.source == lightcraft_engine::LibrarySource::RecentlyDeleted && crate::panels::trash_files::available() {
+        let r = ui.button(crate::i18n::tr("Move All Files in Recently Deleted to Trash…"));
+        register(ui.ctx(), "button:contextEmptyTrashFiles", r.rect);
+        if r.clicked() {
+            app.act("dialog.trashFiles", json!({"recentlyDeleted": true}));
+        }
+    }
     // the files too: always asks first, in the library and in Recently Deleted alike
     if crate::menus::ui_enabled(app, "dialog.trashFiles") {
         let r = ui.button(crate::i18n::tr("Move Files to Trash…"));

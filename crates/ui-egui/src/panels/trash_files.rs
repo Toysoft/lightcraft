@@ -14,8 +14,27 @@ use crate::state::Dialog;
 pub enum TrashAsk {
     /// Move these photos' files to the Trash? (`emptying`: they are all of Recently Deleted.)
     Trash { ids: Vec<u64>, emptying: bool },
-    /// These photos are on a disk without a Trash: erase their files for good?
-    Erase { ids: Vec<u64> },
+    /// These photos are on a disk without a Trash: erase their files for good? `since`: when it
+    /// came up (its button waits a moment, so a second click meant for the question before it
+    /// does not answer this one).
+    Erase { ids: Vec<u64>, since: f64 },
+}
+
+/// How long the Erase question's button stays unavailable after it came up (s).
+pub const ERASE_SETTLE_SECONDS: f64 = 1.0;
+
+/// Whether the question's button can be pressed yet.
+pub(crate) fn armed(ctx: &egui::Context, ask: &TrashAsk) -> bool {
+    match ask {
+        TrashAsk::Trash { .. } => true,
+        TrashAsk::Erase { since, .. } => {
+            let left = since + ERASE_SETTLE_SECONDS - ctx.input(|i| i.time);
+            if left > 0.0 {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+            }
+            left <= 0.0
+        }
+    }
 }
 
 /// Whether this build can move files to a Trash at all (not on Windows or in the browser yet).
@@ -74,7 +93,7 @@ pub(crate) fn body(app: &LightcraftApp, ui: &mut egui::Ui, ask: &TrashAsk) {
             dim(ui, "The photos leave the library, also Recently Deleted. Their files go to the system Trash, with their XMP sidecars.");
             dim(ui, "Undo brings the photos back and moves the files back, as long as they are still in the Trash.");
         }
-        TrashAsk::Erase { ids } => {
+        TrashAsk::Erase { ids, .. } => {
             ui.label(match ids.len() {
                 1 => crate::i18n::tr("This photo is on a disk that has no Trash. Erase its file for good?").to_string(),
                 n => crate::i18n::tr_format!("{n} photos are on a disk that has no Trash. Erase their files for good?", n = n),
@@ -84,6 +103,7 @@ pub(crate) fn body(app: &LightcraftApp, ui: &mut egui::Ui, ask: &TrashAsk) {
                 egui::RichText::new(crate::i18n::tr("This cannot be undone: the files are not kept anywhere."))
                     .color(crate::theme::label_color(lightcraft_catalog::ColorLabel::Red)),
             );
+            dim(ui, "Only these files are erased; XMP sidecars beside them stay.");
             dim(ui, "Cancel leaves these photos in the library and their files where they are.");
         }
     }
@@ -111,12 +131,9 @@ fn names(app: &LightcraftApp, ui: &mut egui::Ui, ids: &[u64]) {
 /// what could not go is said in a notice.
 pub(crate) fn run(app: &mut LightcraftApp, ask: &TrashAsk) -> Result<Value, String> {
     let (r, erasing) = match ask {
-        TrashAsk::Trash { ids, emptying: true } => {
-            let _ = ids;
-            (app.run("library.emptyRecentlyDeleted", json!({"files": "trash"}))?, false)
-        }
-        TrashAsk::Trash { ids, emptying: false } => (app.run("photo.trashFiles", json!({"ids": ids}))?, false),
-        TrashAsk::Erase { ids } => (app.run("photo.trashFiles", json!({"ids": ids, "noTrash": "delete"}))?, true),
+        // (the photos the question listed, also when it was about all of Recently Deleted)
+        TrashAsk::Trash { ids, .. } => (app.run("photo.trashFiles", json!({"ids": ids}))?, false),
+        TrashAsk::Erase { ids, .. } => (app.run("photo.trashFiles", json!({"ids": ids, "noTrash": "delete"}))?, true),
     };
     let n = |key: &str| r[key].as_u64().unwrap_or(0);
     let mut said = Vec::new();
@@ -139,13 +156,22 @@ pub(crate) fn run(app: &mut LightcraftApp, ask: &TrashAsk) -> Result<Value, Stri
             why = first["why"].as_str().unwrap_or_default()
         ));
     }
+    // what left the library without a file being moved, and sidecars that were left
+    if n("missing") > 0 {
+        said.push(crate::i18n::tr_format!("Photos whose file was already gone: {n}", n = n("missing")));
+    }
+    if n("sidecarsLeft") > 0 {
+        said.push(crate::i18n::tr_format!("Sidecars left in place: {n}", n = n("sidecarsLeft")));
+    }
+    let plain = failed.is_empty() && n("missing") == 0 && n("sidecarsLeft") == 0;
     if !said.is_empty() {
-        app.say(said.join(" · "), if failed.is_empty() { 4.0 } else { 12.0 });
+        app.say(said.join(" · "), if plain { 4.0 } else { 12.0 });
     }
     // a disk without a Trash: asked about separately, and nothing of it was touched
     let no_trash: Vec<u64> = r["noTrash"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
     if !erasing && !no_trash.is_empty() {
-        app.ui.dialog = Some(Dialog::TrashFiles(TrashAsk::Erase { ids: no_trash }));
+        let since = app.now();
+        app.ui.dialog = Some(Dialog::TrashFiles(TrashAsk::Erase { ids: no_trash, since }));
     }
     Ok(r)
 }

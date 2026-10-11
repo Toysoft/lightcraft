@@ -301,5 +301,7 @@
   "…and {n} more": "…e mais {n}",
   "Files erased: {files} (photos out of the library: {photos})": "Arquivos apagados: {files} (fotos fora da biblioteca: {photos})",
   "Files moved to the Trash: {files} (photos out of the library: {photos})": "Arquivos movidos para o Lixo: {files} (fotos fora da biblioteca: {photos})",
-  "{n} could not be moved and stay in the library: {why}": "{n} não puderam ser movidos e continuam na biblioteca: {why}"
+  "{n} could not be moved and stay in the library: {why}": "{n} não puderam ser movidos e continuam na biblioteca: {why}",
+  "Photos whose file was already gone: {n}": "Fotos cujo arquivo já não existia: {n}",
+  "Sidecars left in place: {n}": "Arquivos sidecar deixados no lugar: {n}"
 }
