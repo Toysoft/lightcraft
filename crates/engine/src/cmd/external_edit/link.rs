@@ -6,11 +6,11 @@
 //! re-import, a moved catalog or an upload to a server: importing a folder stacks each edit on the
 //! photo it came from again ([`stack_derived`]).
 //!
-//! Reading is cheap and bounded: only TIFF files are opened, and only IFD0's XMP tag (700) is
-//! read, by seeking.
+//! Reading is cheap and bounded: only TIFF and PSD files are opened, and only IFD0's XMP tag (700)
+//! or the PSD's XMP image resource (1060) is read, by seeking.
 //!
 //! Sources: own design; XMP Specification Part 2 (xmpMM namespace, stRef ResourceRef type); TIFF
-//! 6.0 (IFD layout).
+//! 6.0 (IFD layout); Adobe Photoshop File Formats Specification (header, image resources).
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -26,6 +26,8 @@ const STREF_NS: &str = "http://ns.adobe.com/xap/1.0/sType/ResourceRef#";
 const MAX_PACKET: u64 = 16 << 20;
 /// Most IFD0 entries looked at.
 const MAX_ENTRIES: u64 = 4096;
+/// Most PSD image resources looked at.
+const MAX_RESOURCES: usize = 4096;
 
 /// The source an edit copy names in its `xmpMM:DerivedFrom` (set on
 /// [`crate::export::ExportOptions::derived_from`]).
@@ -218,19 +220,67 @@ fn tiff_xmp(f: &mut std::fs::File) -> Option<String> {
     None
 }
 
-fn is_tiff(path: &Path) -> bool {
-    matches!(path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).as_deref(), Some("tif" | "tiff"))
-}
-
-/// The main XMP packet embedded in a TIFF file (`None` for other files or when it can't be read).
-pub fn file_xmp(path: &Path) -> Option<String> {
-    if !is_tiff(path) {
+/// PSD/PSB: the XMP image resource (1060), read by seeking: the 26-byte header, the colour mode
+/// data (skipped), then the image resources (`8BIM`, id, padded Pascal name, padded data).
+fn psd_xmp(f: &mut std::fs::File) -> Option<String> {
+    let h = read_range(f, 0, 26)?;
+    if h.get(..4)? != b"8BPS" {
         return None;
     }
-    tiff_xmp(&mut std::fs::File::open(path).ok()?)
+    let u32_at =
+        |b: &[u8], i: usize| -> Option<u64> { Some(u64::from(u32::from_be_bytes([*b.get(i)?, *b.get(i + 1)?, *b.get(i + 2)?, *b.get(i + 3)?]))) };
+    let mode_len = u32_at(&read_range(f, 26, 4)?, 0)?;
+    let res_at = 30u64.checked_add(mode_len)?;
+    let res_len = u32_at(&read_range(f, res_at, 4)?, 0)?;
+    let mut at = res_at.checked_add(4)?;
+    let end = at.checked_add(res_len)?;
+    for _ in 0..MAX_RESOURCES {
+        if at.checked_add(12)? > end {
+            return None;
+        }
+        // signature (4), id (2), Pascal name length (1) + name, padded to even
+        let head = read_range(f, at, 7)?;
+        if head.get(..4)? != b"8BIM" {
+            return None;
+        }
+        let id = u16::from_be_bytes([*head.get(4)?, *head.get(5)?]);
+        let name_len = u64::from(*head.get(6)?);
+        let name_field = (1 + name_len + 1) & !1;
+        let size_at = at.checked_add(6)?.checked_add(name_field)?;
+        let size = u32_at(&read_range(f, size_at, 4)?, 0)?;
+        let data_at = size_at.checked_add(4)?;
+        if id == 1060 {
+            let b = read_range(f, data_at, size)?;
+            return scan_packet(&b)
+                .or_else(|| Some(String::from_utf8_lossy(&b).trim_end_matches('\0').to_string()).filter(|s| s.contains("xmpmeta")));
+        }
+        at = data_at.checked_add(size.checked_add(size & 1)?)?;
+    }
+    None
 }
 
-/// After an import: stack each new TIFF whose XMP says it was derived from a photo in the library
+fn extension(path: &Path) -> Option<String> {
+    path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase())
+}
+
+/// Files an edit copy can be (`photo.editExternal` writes TIFF or PSD).
+fn is_edit_copy_kind(path: &Path) -> bool {
+    matches!(extension(path).as_deref(), Some("tif" | "tiff" | "psd" | "psb"))
+}
+
+/// The main XMP packet embedded in a TIFF or PSD file (`None` for other files or when it can't be
+/// read).
+pub fn file_xmp(path: &Path) -> Option<String> {
+    let ext = extension(path)?;
+    let mut f = std::fs::File::open(path).ok()?;
+    match ext.as_str() {
+        "tif" | "tiff" => tiff_xmp(&mut f),
+        "psd" | "psb" => psd_xmp(&mut f),
+        _ => None,
+    }
+}
+
+/// After an import: stack each new TIFF or PSD whose XMP says it was derived from a photo in the library
 /// on that photo (found by file name in the same folder, else by document id), as
 /// `photo.editExternal` would have. Photos already stacked with their source are left alone. → the photos stacked
 pub fn stack_derived(s: &mut Session, imported: &[PhotoId]) -> Vec<PhotoId> {
@@ -239,7 +289,7 @@ pub fn stack_derived(s: &mut Session, imported: &[PhotoId]) -> Vec<PhotoId> {
         let Some(ph) = s.catalog.photo(*id) else { continue };
         let Source::File { path } = &ph.source else { continue };
         let p = Path::new(path);
-        if !is_tiff(p) {
+        if !is_edit_copy_kind(p) {
             continue;
         }
         let Some(link) = file_xmp(p).map(|x| read_link(&x)) else { continue };
@@ -356,6 +406,10 @@ mod tests {
             ("b.tif", b"MM\0*\0\0\0\x08\xff\xff".to_vec()),
             ("c.tif", b"II*\0\x08\0\0\0\x01\0\xbc\x02\x01\0\xff\xff\xff\xff\xff\xff\xff\xff".to_vec()),
             ("d.jpg", b"\xff\xd8<x:xmpmeta></x:xmpmeta>".to_vec()),
+            ("e.psd", b"8BPS\0\x01".to_vec()),
+            ("f.psd", [&b"8BPS"[..], &[0; 22], &[0xff; 4]].concat()),
+            ("g.psd", [&b"8BPS"[..], &[0; 22], &[0; 4], &[0, 0, 0, 40], b"8BIM\x04\x24\xff", &[0xff; 4]].concat()),
+            ("h.psd", [&b"8BPS"[..], &[0; 22], &[0; 4], &[0xff, 0xff, 0xff, 0xff], b"8BIM\x04\x24\0\0\xff\xff\xff\xff"].concat()),
         ] {
             let p = d.join(name);
             std::fs::write(&p, bytes).unwrap();

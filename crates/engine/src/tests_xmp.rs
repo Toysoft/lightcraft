@@ -818,6 +818,38 @@ fn external_edit_stacks_above_its_source_and_relinks_on_import() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A PSD edit copy (Edit in PhotoCraft) carries the same DerivedFrom link in its XMP resource
+/// (1060), survives PhotoCraft saving the document back in place when the editor keeps the XMP,
+/// and is stacked on its source again when the folder is imported into a new library.
+#[test]
+fn external_edit_psd_copy_links_and_restacks_on_import() {
+    let dir = temp_dir("extedit-psd-link");
+    let src = dir.join("reef.png");
+    write_png(&src, 6);
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [src.to_string_lossy()]})).unwrap();
+    let orig = s.active().unwrap();
+    let e = PhotoId(s.execute("photo.editExternal", &json!({"format": "psd"})).unwrap()["id"].as_u64().unwrap());
+    assert_eq!(s.catalog.stack_of(orig).unwrap().photos, vec![e, orig]);
+    let psd = dir.join("reef-Edit.psd");
+    let xmp = crate::cmd::external_edit::link::file_xmp(&psd).expect("an XMP resource");
+    let link = crate::cmd::external_edit::link::read_link(&xmp);
+    assert_eq!(link.derived_path.as_deref(), Some("reef.png"));
+    assert!(link.document_id.is_some_and(|d| d.starts_with("xmp.did:")));
+    // an edit of the PSD copy joins the stack directly above it
+    s.selection = crate::Selection::single(e);
+    let e2 = PhotoId(s.execute("photo.editExternal", &json!({"format": "psd"})).unwrap()["id"].as_u64().unwrap());
+    assert_eq!(s.catalog.stack_of(orig).unwrap().photos, vec![e2, e, orig]);
+
+    let mut t = Session::new().with_fs();
+    t.execute("library.import", &json!({"paths": [dir.to_string_lossy()]})).unwrap();
+    let by_name = |n: &str| t.catalog.photos().find(|p| p.file_name == n).map(|p| p.id).unwrap();
+    let (o, a, b) = (by_name("reef.png"), by_name("reef-Edit.psd"), by_name("reef-Edit-Edit.psd"));
+    let st = t.catalog.stack_of(o).expect("restacked");
+    assert!(st.photos.contains(&a) && st.photos.contains(&b) && st.photos.len() == 3, "{:?}", st.photos);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn external_edit_of_a_virtual_copy_stacks_with_its_master() {
     let dir = temp_dir("extedit-vc");
