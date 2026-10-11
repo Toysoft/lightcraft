@@ -64,7 +64,7 @@ impl eframe::App for App {
             // Quit from the menu bar: save exactly what closing the window saves (settings and
             // library, after the unsaved-changes check; otherwise its prompt shows), then end the
             // process instead of closing the viewport while AppKit is terminating (PR #444).
-            eframe::App::on_exit(self);
+            self.save_and_shut_down();
             std::process::exit(0);
         }
         self.0.logic(ctx);
@@ -77,6 +77,15 @@ impl eframe::App for App {
         self.0.ui(ui);
     }
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_and_shut_down();
+    }
+}
+
+impl App {
+    /// Save settings and the library, then wait for background work: closing the window, or Quit
+    /// from the macOS menu bar (which can't call `on_exit`, whose signature depends on eframe's
+    /// features).
+    fn save_and_shut_down(&mut self) {
         if let Err(e) = self.1.save(&self.0) {
             log::error!("{e}");
         }
