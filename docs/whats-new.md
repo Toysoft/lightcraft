@@ -46,6 +46,14 @@
   in, instead of moving it back to Program Files (issue #399). If that folder has been deleted since, the upgrade
   installs to Program Files.
 
+### Vignette styles
+- The Highlight, Color and Paint styles of Effects ▸ Vignette now look different (issue #905). Paint darkens the
+  corners like a flat black overlay that also takes their colour out, where it used to match Color. A lightening
+  vignette now follows the style too: Color brightens like exposure and keeps the colours, Highlight lets bright
+  colours run towards white, and Paint washes the corners out towards white as before.
+- This is part of rendering process 2, with the Highlights and Shadows change. Photos you have already edited stay
+  on process 1 and keep their look until you run Photo ▸ Update to Current Process; new photos and Reset get process 2.
+
 ## 2026-10-10
 
 ### Dialogs fit the window

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use lightcraft_develop::{
-    BrushStroke, DevelopSettings, Mask, MaskComponent, MaskOp, MaskShape, Process, Spot, Treatment, VignetteStyle, WbMode, Wheel,
+    BrushStroke, DevelopSettings, Mask, MaskComponent, MaskOp, MaskShape, Process, ProcessVersion, Spot, Treatment, VignetteStyle, WbMode, Wheel,
 };
 use lightcraft_geom::{Orientation, Point, Rect};
 use lightcraft_pipeline::{Quality, RenderRequest, SourceInfo, StageCache, render};
@@ -183,6 +183,15 @@ fn cases() -> Vec<(&'static str, Edit)> {
             s.vignette.highlights = 50.0;
             s.vignette.roundness = -40.0;
         }),
+        ("vignette (highlight, +)", |s| s.vignette.amount = 50.0),
+        ("vignette (color, +)", |s| {
+            s.vignette.amount = 50.0;
+            s.vignette.style = VignetteStyle::ColorPriority;
+        }),
+        ("vignette (color, -)", |s| {
+            s.vignette.amount = -40.0;
+            s.vignette.style = VignetteStyle::ColorPriority;
+        }),
         ("vignette (paint, +)", |s| {
             s.vignette.amount = 40.0;
             s.vignette.style = VignetteStyle::PaintOverlay;
@@ -190,6 +199,15 @@ fn cases() -> Vec<(&'static str, Edit)> {
         ("vignette (paint, -)", |s| {
             s.vignette.amount = -40.0;
             s.vignette.style = VignetteStyle::PaintOverlay;
+        }),
+        ("vignette (paint, -, V1)", |s| {
+            s.process = ProcessVersion::V1;
+            s.vignette.amount = -40.0;
+            s.vignette.style = VignetteStyle::PaintOverlay;
+        }),
+        ("vignette (highlight, +, V1)", |s| {
+            s.process = ProcessVersion::V1;
+            s.vignette.amount = 50.0;
         }),
         ("grain", |s| {
             s.grain.amount = 50.0;

@@ -685,7 +685,14 @@ fn stored_process_numbers_render_with_a_known_process() {
         SourceInfo { raw: true, relative_wb: true, camera_tone: Some(curve), ..Default::default() },
     ];
     let mut edited = DevelopSettings::for_raw(5200.0, 4.0);
-    for (id, v) in [("light.exposure", 0.4), ("light.contrast", 30.0), ("light.highlights", -60.0), ("light.whites", 15.0), ("light.blacks", -20.0)] {
+    for (id, v) in [
+        ("light.exposure", 0.4),
+        ("light.contrast", 30.0),
+        ("light.highlights", -60.0),
+        ("light.whites", 15.0),
+        ("light.blacks", -20.0),
+        ("vignette.amount", 30.0),
+    ] {
         controls::set(&mut edited, id, v);
     }
     let legacy = |s: &DevelopSettings| {
@@ -710,4 +717,32 @@ fn stored_process_numbers_render_with_a_known_process() {
             }
         }
     }
+}
+
+/// Issue #905: under process V2 the vignette styles render differently; a photo on V1 keeps the
+/// look it had, where Paint darkened like Color and every style lightened alike.
+#[test]
+fn vignette_styles_differ_from_process_v2() {
+    use lightcraft_develop::{Process, ProcessVersion, VignetteStyle};
+    let src = scene();
+    let info = SourceInfo::default();
+    let req = RenderRequest::fit(96, 96);
+    let out = |process: ProcessVersion, amount: f64, style: VignetteStyle| {
+        let mut s = DevelopSettings { process, ..Default::default() };
+        (s.vignette.amount, s.vignette.style) = (amount, style);
+        render(&src, &info, &s, &req).image.data
+    };
+    let (v1, v2) = (ProcessVersion::V1, Process::V2.version());
+    assert_eq!(Process::LATEST, Process::V2);
+    // darkening: Paint is Color on V1, its own look on V2
+    assert!(out(v1, -60.0, VignetteStyle::PaintOverlay) == out(v1, -60.0, VignetteStyle::ColorPriority));
+    assert!(out(v2, -60.0, VignetteStyle::PaintOverlay) != out(v2, -60.0, VignetteStyle::ColorPriority));
+    assert!(out(v2, -60.0, VignetteStyle::ColorPriority) == out(v1, -60.0, VignetteStyle::ColorPriority));
+    // lightening: every style alike on V1, three looks on V2
+    let styles = [VignetteStyle::HighlightPriority, VignetteStyle::ColorPriority, VignetteStyle::PaintOverlay];
+    let [h1, c1, p1] = styles.map(|st| out(v1, 60.0, st));
+    assert!(h1 == p1 && c1 == p1);
+    let [h2, c2, p2] = styles.map(|st| out(v2, 60.0, st));
+    assert!(h2 != c2 && c2 != p2 && h2 != p2);
+    assert!(p2 == p1, "Paint lightens as before");
 }

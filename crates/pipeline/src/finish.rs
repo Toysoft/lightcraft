@@ -68,6 +68,47 @@ pub struct Vig {
     pub style: VignetteStyle,
 }
 
+/// Applies the post-crop vignette at strength `t` (0 in the frame centre, 1 in its corners) to
+/// one display-linear pixel.
+///
+/// The styles follow Lightroom's: Color scales the pixel like an exposure change, keeping its hue
+/// and saturation; Highlight does the same per channel (so bright colours drift towards white when
+/// lightening) and, when darkening, lets the Highlights slider hold bright areas back; Paint lays a
+/// flat black or white over the corners, so they lose colour and contrast as well as brightness.
+fn vignette_px(d: [f32; 3], t: f32, v: &Vig, hdr: bool) -> [f32; 3] {
+    let y = luminance_2020(d);
+    let lum = y.clamp(0.0, 1.0);
+    if v.amount < 0.0 {
+        let k = -v.amount * t;
+        if v.style == VignetteStyle::PaintOverlay {
+            // black paint covers the colour too: mix towards grey as it darkens
+            return d.map(|c| (c + (y - c) * k) * (1.0 - k));
+        }
+        let mut f = 1.0 - k;
+        if v.style == VignetteStyle::HighlightPriority {
+            f += (1.0 - f) * v.highlights * smooth(0.4, 1.0, lum);
+        }
+        d.map(|c| c * f)
+    } else if v.style == VignetteStyle::PaintOverlay {
+        if hdr {
+            // lighten towards SDR white; never pull HDR highlights down to it
+            d.map(|c| c + (1.0 - c).max(0.0) * v.amount * t * 0.85)
+        } else {
+            d.map(|c| c + (1.0 - c) * v.amount * t * 0.85)
+        }
+    } else {
+        // up to +2 stops, rolled off so that white stays white (and HDR highlights stay put)
+        let g = (2.0 * v.amount * t).exp2();
+        let lift = |c: f32| g / (1.0 + (g - 1.0) * c.clamp(0.0, 1.0));
+        if v.style == VignetteStyle::ColorPriority {
+            let r = lift(y);
+            d.map(|c| c * r)
+        } else {
+            d.map(|c| c * lift(c))
+        }
+    }
+}
+
 fn vignette(s: &DevelopSettings) -> Option<Vig> {
     let v = &s.vignette;
     (v.amount != 0.0).then(|| {
@@ -79,9 +120,20 @@ fn vignette(s: &DevelopSettings) -> Option<Vig> {
             aspect_mix: ((r + 1.0) / 2.0).clamp(0.0, 1.0),
             power: if r >= 0.0 { 2.0 } else { 2.0 + (-r) * 6.0 },
             highlights: (v.highlights / 100.0) as f32,
-            style: v.style,
+            style: vignette_style(s.process.process(), v.style, v.amount),
         }
     })
+}
+
+/// The style [`vignette_px`] renders `style` with under `process`. V1 (frozen) predates distinct
+/// styles: Paint darkened exactly like Color, and every style lightened like Paint. Mapping the
+/// style reproduces that bit for bit, so CPU and GPU need no process of their own here.
+fn vignette_style(process: Process, style: VignetteStyle, amount: f64) -> VignetteStyle {
+    match process {
+        Process::V1 if amount > 0.0 => VignetteStyle::PaintOverlay,
+        Process::V1 if style == VignetteStyle::PaintOverlay => VignetteStyle::ColorPriority,
+        Process::V1 | Process::V2 => style,
+    }
 }
 
 /// Hash constants of [`grain_noise`] (shared with the GPU kernel).
@@ -561,23 +613,7 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
                 let dist = (ax.powf(v.power) + ay.powf(v.power)).powf(1.0 / v.power);
                 let t = smooth(v.start, v.start + v.width, dist);
                 if t > 0.0 {
-                    let lum = luminance_2020(d).clamp(0.0, 1.0);
-                    if v.amount < 0.0 {
-                        let mut f = 1.0 + v.amount * t;
-                        if v.style == VignetteStyle::HighlightPriority {
-                            f += (1.0 - f) * v.highlights * smooth(0.4, 1.0, lum);
-                        }
-                        if v.style == VignetteStyle::PaintOverlay {
-                            d = d.map(|c| c * (1.0 - (-v.amount) * t) + 0.0);
-                        } else {
-                            d = d.map(|c| c * f);
-                        }
-                    } else if hdr {
-                        // lighten towards SDR white; never pull HDR highlights down to it
-                        d = d.map(|c| c + (1.0 - c).max(0.0) * v.amount * t * 0.85);
-                    } else {
-                        d = d.map(|c| c + (1.0 - c) * v.amount * t * 0.85);
-                    }
+                    d = vignette_px(d, t, v, hdr);
                 }
             }
 
@@ -786,6 +822,128 @@ mod tests {
         // luma is kept
         let y = |e: [f32; 3]| 0.2126 * e[0] + 0.7152 * e[1] + 0.0722 * e[2];
         assert!((y(r) - y(after)).abs() < 1e-5);
+    }
+
+    fn vig(amount: f32, style: VignetteStyle) -> Vig {
+        Vig { amount, start: 0.5, width: 0.5, aspect_mix: 0.5, power: 2.0, highlights: 0.0, style }
+    }
+
+    /// (max - min) / luminance: how colourful a display-linear pixel is.
+    fn colourfulness(c: [f32; 3]) -> f32 {
+        (c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2])) / luminance_2020(c)
+    }
+
+    // Issue #905: Paint used to compute the same multiply as Color.
+    #[test]
+    fn paint_darkening_flattens_the_colour_that_color_keeps() {
+        let px = [0.6, 0.25, 0.1];
+        let color = vignette_px(px, 1.0, &vig(-0.6, VignetteStyle::ColorPriority), false);
+        let paint = vignette_px(px, 1.0, &vig(-0.6, VignetteStyle::PaintOverlay), false);
+        // Color darkens and keeps the colour
+        assert!((colourfulness(color) - colourfulness(px)).abs() < 1e-4, "{color:?}");
+        assert!(luminance_2020(color) < luminance_2020(px) * 0.5);
+        // Paint darkens as much, and the corner loses colour too
+        assert!((luminance_2020(paint) - luminance_2020(color)).abs() < 1e-3, "{paint:?} vs {color:?}");
+        assert!(colourfulness(paint) < colourfulness(color) * 0.6, "{paint:?} vs {color:?}");
+        // the centre of the frame is untouched
+        assert_eq!(vignette_px(px, 0.0, &vig(-0.6, VignetteStyle::PaintOverlay), false), px);
+    }
+
+    #[test]
+    fn highlight_priority_darkens_like_color_until_highlights_are_raised() {
+        let px = [0.9, 0.85, 0.8];
+        let color = vignette_px(px, 1.0, &vig(-0.5, VignetteStyle::ColorPriority), false);
+        let mut v = vig(-0.5, VignetteStyle::HighlightPriority);
+        assert_eq!(vignette_px(px, 1.0, &v, false), color);
+        v.highlights = 1.0;
+        assert!(luminance_2020(vignette_px(px, 1.0, &v, false)) > luminance_2020(color) + 0.1);
+    }
+
+    // Issue #905: a lightening vignette ignored the style.
+    #[test]
+    fn lightening_styles_differ() {
+        let (dark, light) = ([0.05, 0.05, 0.05], [0.3, 0.3, 0.3]);
+        let red = [0.7, 0.15, 0.1];
+        let run = |px, style| vignette_px(px, 1.0, &vig(0.6, style), false);
+        let contrast = |style| luminance_2020(run(light, style)) / luminance_2020(run(dark, style));
+        for style in [VignetteStyle::HighlightPriority, VignetteStyle::ColorPriority, VignetteStyle::PaintOverlay] {
+            // every style brightens the corners and keeps white white
+            assert!(luminance_2020(run(light, style)) > 0.45, "{style:?}");
+            let w = run([1.0; 3], style);
+            assert!(w.iter().all(|c| (c - 1.0).abs() < 1e-5), "{style:?}: {w:?}");
+        }
+        // Paint washes the corners out towards white: far less contrast left than with Color
+        assert!(contrast(VignetteStyle::PaintOverlay) < contrast(VignetteStyle::ColorPriority) * 0.6);
+        // Color brightens like exposure, keeping the hue and saturation
+        let c = run(red, VignetteStyle::ColorPriority);
+        assert!((c[1] / c[0] - red[1] / red[0]).abs() < 1e-4 && (c[2] / c[0] - red[2] / red[0]).abs() < 1e-4, "{c:?}");
+        // Highlight keeps every channel below white, so bright colours shift towards it
+        let h = run(red, VignetteStyle::HighlightPriority);
+        assert!(h.iter().all(|v| *v < 1.0) && h[1] / h[0] > red[1] / red[0], "{h:?}");
+        assert!(colourfulness(run(red, VignetteStyle::PaintOverlay)) < colourfulness(c) * 0.5);
+    }
+
+    #[test]
+    fn lightening_never_pulls_hdr_highlights_down() {
+        for style in [VignetteStyle::HighlightPriority, VignetteStyle::ColorPriority, VignetteStyle::PaintOverlay] {
+            let px = [2.5, 1.8, 1.2];
+            let out = vignette_px(px, 1.0, &vig(0.8, style), true);
+            assert!(out.iter().zip(px).all(|(o, p)| *o >= p - 1e-5), "{style:?}: {out:?}");
+        }
+    }
+
+    /// `vignette_px` as it was before process V2 (issue #905), verbatim.
+    fn vignette_px_before_v2(mut d: [f32; 3], t: f32, v: &Vig, hdr: bool) -> [f32; 3] {
+        let lum = luminance_2020(d).clamp(0.0, 1.0);
+        if v.amount < 0.0 {
+            let mut f = 1.0 + v.amount * t;
+            if v.style == VignetteStyle::HighlightPriority {
+                f += (1.0 - f) * v.highlights * smooth(0.4, 1.0, lum);
+            }
+            if v.style == VignetteStyle::PaintOverlay {
+                d = d.map(|c| c * (1.0 - (-v.amount) * t) + 0.0);
+            } else {
+                d = d.map(|c| c * f);
+            }
+        } else if hdr {
+            d = d.map(|c| c + (1.0 - c).max(0.0) * v.amount * t * 0.85);
+        } else {
+            d = d.map(|c| c + (1.0 - c) * v.amount * t * 0.85);
+        }
+        d
+    }
+
+    // Process V1 is frozen: its vignette renders bit for bit as before V2 existed.
+    #[test]
+    fn v1_vignette_is_unchanged_and_v2_follows_the_style() {
+        use lightcraft_develop::ProcessVersion;
+        let pixels = [[0.6, 0.25, 0.1], [0.05, 0.05, 0.05], [0.9, 0.85, 0.8], [0.3, 0.5, 0.7], [2.5, 1.8, 1.2]];
+        let styles = [VignetteStyle::HighlightPriority, VignetteStyle::ColorPriority, VignetteStyle::PaintOverlay];
+        let mut differs = 0;
+        for style in styles {
+            for amount in [-80.0, -35.0, 25.0, 90.0] {
+                for highlights in [0.0, 60.0] {
+                    let mut s = DevelopSettings { process: ProcessVersion::V1, ..Default::default() };
+                    (s.vignette.style, s.vignette.amount, s.vignette.highlights) = (style, amount, highlights);
+                    let v1 = vignette(&s).unwrap();
+                    let before = Vig { style, ..v1 };
+                    s.process = ProcessVersion(2);
+                    let v2 = vignette(&s).unwrap();
+                    assert_eq!(v2.style, style);
+                    for px in pixels {
+                        for t in [0.3, 1.0] {
+                            for hdr in [false, true] {
+                                let old = vignette_px_before_v2(px, t, &before, hdr);
+                                assert_eq!(vignette_px(px, t, &v1, hdr).map(f32::to_bits), old.map(f32::to_bits), "{style:?} {amount} {px:?}");
+                                differs += usize::from(vignette_px(px, t, &v2, hdr) != old);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // V2 changes Paint when darkening and every style when lightening
+        assert!(differs > 0);
     }
 
     #[test]
