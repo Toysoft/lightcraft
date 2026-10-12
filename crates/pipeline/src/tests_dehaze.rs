@@ -6,6 +6,7 @@ use std::sync::Arc;
 use lightcraft_develop::{DevelopSettings, LocalAdjustments, Mask, MaskComponent, MaskOp, MaskShape, Process};
 use lightcraft_geom::Point;
 use lightcraft_raster::{Rgb32f, Rgba8};
+use lightcraft_scenes::haze::{black_pct, grey_lch, halo_widths, hue_diff, lumas, median_luma, percentile};
 use lightcraft_scenes::hazy_valley;
 
 use crate::{OutputDepth, PixelWindow, RenderRequest, SourceInfo, StageCache, plan, render, render_cached};
@@ -23,18 +24,23 @@ fn dehazed(process: Process, amount: f64, local: bool) -> DevelopSettings {
     s.effects.dehaze = amount;
     s.light.highlights = -40.0;
     if local {
-        s.masks = vec![Mask {
-            components: vec![MaskComponent {
-                name: None,
-                op: MaskOp::Add,
-                invert: false,
-                shape: MaskShape::Linear { start: Point::new(0.5, 0.0), end: Point::new(0.5, 0.9) },
-            }],
-            adjust: LocalAdjustments { dehaze: 40.0, ..Default::default() },
-            ..Default::default()
-        }];
+        s.masks = vec![gradient_mask(0.0, 0.9, 40.0)];
     }
     s
+}
+
+/// A mask of one linear gradient from `(0.5, start)` to `(0.5, end)` with Dehaze `dehaze`.
+fn gradient_mask(start: f64, end: f64, dehaze: f64) -> Mask {
+    Mask {
+        components: vec![MaskComponent {
+            name: None,
+            op: MaskOp::Add,
+            invert: false,
+            shape: MaskShape::Linear { start: Point::new(0.5, start), end: Point::new(0.5, end) },
+        }],
+        adjust: LocalAdjustments { dehaze, ..Default::default() },
+        ..Default::default()
+    }
 }
 
 /// The scene-linear image doesn't depend on the process, so every process shares it (its keys are
@@ -87,29 +93,6 @@ fn v1_and_v2_keep_their_dehaze_and_v3_has_its_own() {
 
 // ---- V3's Dehaze (issue #1237) -----------------------------------------------------------------
 
-/// A pixel is clipped to black when every channel is at most this (8-bit, display encoded), as in
-/// `examples/dehaze_report.rs`.
-const BLACK: u8 = 2;
-
-fn srgb_lin(v: u8) -> f32 {
-    lightcraft_color::transfer::srgb_to_linear(f32::from(v) / 255.0)
-}
-
-/// Relative luminance (linear sRGB) of an 8-bit pixel.
-fn luminance(p: [u8; 4]) -> f32 {
-    0.2126 * srgb_lin(p[0]) + 0.7152 * srgb_lin(p[1]) + 0.0722 * srgb_lin(p[2])
-}
-
-fn median_luma(img: &Rgba8) -> f32 {
-    let mut v: Vec<f32> = img.data.iter().map(|&p| luminance(p)).collect();
-    v.sort_by(f32::total_cmp);
-    v.get(v.len() / 2).copied().unwrap_or(0.0)
-}
-
-fn black_pct(img: &Rgba8) -> f32 {
-    100.0 * img.data.iter().filter(|p| p[0] <= BLACK && p[1] <= BLACK && p[2] <= BLACK).count() as f32 / img.data.len().max(1) as f32
-}
-
 fn v3(src: &Rgb32f, amount: f64, req: &RenderRequest) -> Rgba8 {
     let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
     s.effects.dehaze = amount;
@@ -160,11 +143,7 @@ fn v3_dehaze_meets_the_acceptance_bands() {
         if name != "hazy valley" {
             continue;
         }
-        let spread = |i: &Rgba8| {
-            let mut v: Vec<f32> = i.data.iter().map(|&p| luminance(p)).collect();
-            v.sort_by(f32::total_cmp);
-            (v[v.len() * 9 / 10] - v[v.len() / 10]) / v[v.len() / 2].max(1e-4)
-        };
+        let spread = |i: &Rgba8| (percentile(lumas(i), 90) - percentile(lumas(i), 10)) / median_luma(i).max(1e-4);
         let (s0, s50, s100) = (spread(&base), spread(&v3(src, 50.0, &req)), spread(&v3(src, 100.0, &req)));
         assert!(s50 > s0 * 1.05 && s100 > s50 * 1.05, "{name}: contrast {s0:.3} → +50 {s50:.3} → +100 {s100:.3}");
     }
@@ -179,11 +158,7 @@ fn v3_negative_dehaze_is_a_gentle_veil() {
     for s in lightcraft_scenes::demo_library().into_iter().filter(|s| s.kind == lightcraft_scenes::Kind::MistyForest) {
         inputs.push((s.name.clone(), s.render_fit(W), 0.4));
     }
-    let pct = |img: &Rgba8, q: usize| {
-        let mut v: Vec<f32> = img.data.iter().map(|&p| luminance(p)).collect();
-        v.sort_by(f32::total_cmp);
-        v.get(v.len() * q / 100).copied().unwrap_or(0.0)
-    };
+    let pct = |img: &Rgba8, q: usize| percentile(lumas(img), q);
     let white = |img: &Rgba8| img.data.iter().filter(|p| p[..3].iter().any(|&c| c >= 254)).count() as f32 / img.data.len().max(1) as f32 * 100.0;
     for (name, src, lo) in &inputs {
         let req = RenderRequest::fit(src.width, src.height);
@@ -203,57 +178,10 @@ fn v3_negative_dehaze_is_a_gentle_veil() {
 fn v3_dehaze_keeps_the_hue_of_neutral_greys() {
     let src = hazy_valley(900, 600);
     let req = RenderRequest::fit(900, 600);
-    let hue = |img: &Rgba8| {
-        let [x0, y0, x1, y1] = lightcraft_scenes::HAZE_LAYOUT.grey;
-        let (w, h) = (img.width as f32, img.height as f32);
-        let (mx, my) = ((x1 - x0) * 0.2, (y1 - y0) * 0.2);
-        let (mut sum, mut n) = ([0.0f32; 3], 0.0f32);
-        for y in ((y0 + my) * h) as usize..((y1 - my) * h) as usize {
-            for x in ((x0 + mx) * w) as usize..((x1 - mx) * w) as usize {
-                let p = img.get(x, y);
-                for i in 0..3 {
-                    sum[i] += srgb_lin(p[i]);
-                }
-                n += 1.0;
-            }
-        }
-        let [r, g, b] = sum.map(|v| v / n.max(1.0));
-        // CIE L*a*b* (D65) of the mean linear sRGB colour
-        let f = |t: f32| if t > 0.008_856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 };
-        let (x, y, z) = (0.4124 * r + 0.3576 * g + 0.1805 * b, 0.2126 * r + 0.7152 * g + 0.0722 * b, 0.0193 * r + 0.1192 * g + 0.9505 * b);
-        let (fx, fy, fz) = (f(x / 0.950_47), f(y), f(z / 1.088_83));
-        (200.0 * (fy - fz)).atan2(500.0 * (fx - fy)).to_degrees()
-    };
+    let hue = |img: &Rgba8| grey_lch(img)[2];
     let (h25, h100) = (hue(&v3(&src, 25.0, &req)), hue(&v3(&src, 100.0, &req)));
-    let drift = (h100 - h25 + 180.0).rem_euclid(360.0) - 180.0;
+    let drift = hue_diff(h100, h25);
     assert!(drift.abs() < 2.0, "grey hue {h25:.1}° → {h100:.1}° ({drift:+.1}°)");
-}
-
-/// Width (px, mean over the middle rows of the valley's blocks) of the band next to the bright /
-/// dark edge that is darker than its block's interior by more than 10 (8-bit luma), on the dark
-/// and the bright side (as `examples/dehaze_report.rs` measures it).
-fn halo_widths(img: &Rgba8) -> (f32, f32) {
-    let l = lightcraft_scenes::HAZE_LAYOUT;
-    let luma8 = |p: [u8; 4]| lightcraft_color::transfer::linear_to_srgb(luminance(p).clamp(0.0, 1.0)) * 255.0;
-    let median = |mut v: Vec<f32>| {
-        v.sort_by(f32::total_cmp);
-        v.get(v.len() / 2).copied().unwrap_or(0.0)
-    };
-    let (w, h) = (img.width as f32, img.height as f32);
-    let px = |u: f32| ((u * w) as usize).min(img.width - 1);
-    let (edge, bright0, dark1) = (px(l.edge_x), px(l.bright_x0), px(l.dark_x1));
-    let span = l.block_y1 - l.block_y0;
-    let (y0, y1) = (((l.block_y0 + span * 0.25) * h) as usize, ((l.block_y1 - span * 0.25) * h) as usize);
-    let (mut dark_sum, mut bright_sum, mut rows) = (0.0f32, 0.0f32, 0.0f32);
-    for y in y0..y1.min(img.height) {
-        let luma = |x: usize| luma8(img.get(x, y));
-        let dark_ref = median((dark1 - (dark1 - edge) / 2..dark1 - 2).map(luma).collect());
-        let bright_ref = median((bright0 + 2..bright0 + (edge - bright0) / 2).map(luma).collect());
-        dark_sum += (edge..dark1).take_while(|&x| luma(x) < dark_ref - 10.0).count() as f32;
-        bright_sum += (bright0..edge).rev().take_while(|&x| luma(x) < bright_ref - 10.0).count() as f32;
-        rows += 1.0;
-    }
-    (dark_sum / rows.max(1.0), bright_sum / rows.max(1.0))
 }
 
 /// No dark halo next to a bright edge, even at +100 (V1 makes one ~20 px wide at this size).
@@ -358,7 +286,7 @@ fn v3_preview_matches_the_export() {
                 for dx in 0..4 {
                     let p = i.get(4 * x + dx, 4 * y + dy);
                     for k in 0..3 {
-                        acc[k] += srgb_lin(p[k]);
+                        acc[k] += lightcraft_color::transfer::decode_srgb8(p[k]);
                     }
                 }
             }
@@ -384,16 +312,7 @@ fn v3_mask_dehaze_adds_to_the_slider() {
     let with = |global: f64, local: f64, start: f64, end: f64| {
         let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
         s.effects.dehaze = global;
-        s.masks = vec![Mask {
-            components: vec![MaskComponent {
-                name: None,
-                op: MaskOp::Add,
-                invert: false,
-                shape: MaskShape::Linear { start: Point::new(0.5, start), end: Point::new(0.5, end) },
-            }],
-            adjust: LocalAdjustments { dehaze: local, ..Default::default() },
-            ..Default::default()
-        }];
+        s.masks = vec![gradient_mask(start, end, local)];
         render(&src, &info, &s, &req).image
     };
     let everywhere = |g, l| with(g, l, 3.0, 4.0);
