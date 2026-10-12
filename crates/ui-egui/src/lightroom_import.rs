@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn unimported_edits_lead_the_import_summary() {
         let mut h = demo();
-        let (task, tx, _, _, _) = fake_import(&h);
+        let (task, tx, ..) = fake_import(&h);
         h.app.lightroom = Some(task);
         h.app.lightroom_last = Some(serde_json::json!({"running": true, "kind": "import", "report": {"imported": 3, "editsNotImported": 2}}));
         tx.send(Message::Finalized(Ok(()))).unwrap();
