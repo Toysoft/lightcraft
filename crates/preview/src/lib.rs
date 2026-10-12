@@ -42,7 +42,16 @@ impl PreviewCache {
 
     /// Memory LRU + disk cache in `dir` (at most `disk_bytes`).
     pub fn with_disk(mem_bytes: usize, dir: &Path, disk_bytes: u64) -> PreviewCache {
-        PreviewCache { generation: RwLock::new(Some(0)), mem: Mutex::new(Lru::new(mem_bytes)), disk: Some(DiskCache::new(dir, disk_bytes)) }
+        Self::with_disk_namespace(mem_bytes, dir, disk_bytes, 0)
+    }
+
+    /// Memory LRU plus a persistent disk namespace. Construction does no filesystem I/O.
+    pub fn with_disk_namespace(mem_bytes: usize, dir: &Path, disk_bytes: u64, namespace: u64) -> PreviewCache {
+        PreviewCache {
+            generation: RwLock::new(Some(0)),
+            mem: Mutex::new(Lru::new(mem_bytes)),
+            disk: Some(DiskCache::with_namespace(dir, disk_bytes, namespace)),
+        }
     }
 
     pub fn disk(&self) -> Option<&DiskCache> {

@@ -230,6 +230,7 @@ struct PrefsFile {
     /// Folder for smart previews (default: `Smart Previews` in the library).
     smart_previews_dir: Option<String>,
     smart_previews_format: crate::smart::Format,
+    smart_previews_cache_generation: u64,
     /// Days after which untouched Local records of unbrowsed folders are forgotten (missing =
     /// the default, 0 = never).
     forget_local_days: Option<u32>,
@@ -462,6 +463,7 @@ impl Session {
         self.cache_mb = prefs.cache_mb;
         self.forget_local_days = prefs.forget_local_days.unwrap_or(lightcraft_catalog::DEFAULT_FORGET_DAYS);
         self.smart_previews_format = prefs.smart_previews_format;
+        self.smart_previews_cache_generation = prefs.smart_previews_cache_generation;
         self.smart_previews_dir = prefs.smart_previews_dir.filter(|_| on_disk).map(PathBuf::from);
         if let Some(d) = &self.smart_previews_dir {
             self.media.smart_dir = Some(d.clone());
@@ -510,7 +512,7 @@ impl Session {
         // photo ids are per library: drop decoded sources of the previous one
         self.media.clear_sources();
         if on_disk {
-            self.media.attach_disk_cache(&dir.join("thumbs"), self.cache_bytes());
+            self.media.attach_disk_cache_namespace(&dir.join("thumbs"), self.cache_bytes(), self.smart_previews_cache_generation);
         }
         let view_written = self.view_json();
         self.library = Some(Library {
@@ -708,6 +710,7 @@ impl Session {
             cache_mb: self.cache_mb,
             smart_previews_dir: self.smart_previews_dir.as_ref().map(|d| d.to_string_lossy().to_string()),
             smart_previews_format: self.smart_previews_format,
+            smart_previews_cache_generation: self.smart_previews_cache_generation,
             forget_local_days: Some(self.forget_local_days),
         })
         .unwrap_or_default();

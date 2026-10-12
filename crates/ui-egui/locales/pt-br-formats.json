@@ -1,9 +1,13 @@
 {
-  "Photos: {count}": "Photos: {count}",
-  "Estimated total size: {size}": "Estimated total size: {size}",
-  "Destination: {path}": "Destination: {path}",
-  "Free space: {size}": "Free space: {size}",
-  ". {kept} existing previews kept unchanged": ". {kept} prévias existentes mantidas sem alterações",
+  "Photos: {count}": {
+    "one": "Foto: {count}",
+    "few": "Fotos: {count}",
+    "many": "Fotos: {count}",
+    "other": "Fotos: {count}"
+  },
+  "Estimated total size: {size}": "Tamanho total estimado: {size}",
+  "Destination: {path}": "Destino: {path}",
+  "Free space: {size}": "Espaço livre: {size}",
   " ({} in Recently Deleted)": " ({} em Excluídos recentemente)",
   " · {skipped} skipped (file exists)": " · {skipped} ignorada(s) (arquivo existente)",
   " · {} duplicate{} skipped": " · {} duplicada{:.0} ignorada",
@@ -100,7 +104,6 @@
   "the {n} selected photos": "as {n} fotos selecionadas",
   "the {} photos in view": "as {} fotos em exibição",
   "these {count} photos": "estas {count} fotos",
-  "{count} smart preview{} · {:.1} MiB": "{count} pré-visualizações{:.0} · {:.1} MiB",
   "{f} folders (and their subfolders)": "{f} pastas (e suas subpastas)",
   "{label} Grading": "Graduação de {label}",
   "{label} {d:+} on every selected photo": "{label} {d:+} em cada foto selecionada",
@@ -253,6 +256,25 @@
   "{name} opened in the other editor": "{name} aberto no outro editor",
   "{n} originals opened in the other editor": "{n} originais abertos no outro editor",
   "· {in_source} identical copies": "· {in_source} cópias idênticas",
-  "Smart preview folder changed. {count} source files could not be removed.": "Pasta de visualizações inteligentes alterada. Não foi possível remover {count} arquivos de origem.",
-  "Smart preview folder change failed: {error}": "Falha ao alterar a pasta de visualizações inteligentes: {error}"
+  "Smart preview folder changed. {count} source files could not be removed.": {
+    "one": "Pasta de visualizações inteligentes alterada. Não foi possível remover {count} arquivo de origem.",
+    "few": "Pasta de visualizações inteligentes alterada. Não foi possível remover {count} arquivos de origem.",
+    "many": "Pasta de visualizações inteligentes alterada. Não foi possível remover {count} arquivos de origem.",
+    "other": "Pasta de visualizações inteligentes alterada. Não foi possível remover {count} arquivos de origem."
+  },
+  "Smart preview folder change failed: {error}": "Falha ao alterar a pasta de visualizações inteligentes: {error}",
+  "{count} smart previews · {size:.1} MiB": {
+    "one": "{count} visualização inteligente · {size:.1} MiB",
+    "few": "{count} visualizações inteligentes · {size:.1} MiB",
+    "many": "{count} visualizações inteligentes · {size:.1} MiB",
+    "other": "{count} visualizações inteligentes · {size:.1} MiB"
+  },
+  ". {count} existing previews kept unchanged": {
+    "one": ". {count} visualização existente mantida sem alterações",
+    "few": ". {count} visualizações existentes mantidas sem alterações",
+    "many": ". {count} visualizações existentes mantidas sem alterações",
+    "other": ". {count} visualizações existentes mantidas sem alterações"
+  },
+  "could not check smart preview storage: {e}": "Não foi possível verificar o armazenamento das visualizações inteligentes: {e}",
+  "free space is unavailable for {path} on this platform": "O espaço livre de {path} não está disponível nesta plataforma."
 }

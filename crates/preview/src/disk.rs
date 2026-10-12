@@ -22,6 +22,8 @@ const QUALITY: u8 = 90;
 
 pub struct DiskCache {
     dir: PathBuf,
+    /// Persisted by the library together with changes to the proxy source folder.
+    namespace: u64,
     /// Bytes the cache may hold (changed in place by [`DiskCache::set_budget`]).
     budget: AtomicU64,
     /// Bytes on disk (`None` until first scanned).
@@ -33,8 +35,15 @@ pub struct DiskCache {
 
 impl DiskCache {
     pub fn new(dir: &Path, budget: u64) -> DiskCache {
+        Self::with_namespace(dir, budget, 0)
+    }
+
+    /// Select a persistent cache namespace without scanning or changing any files. Old
+    /// namespaces share this directory and its budget; normal pruning removes their files.
+    pub fn with_namespace(dir: &Path, budget: u64, namespace: u64) -> DiskCache {
         DiskCache {
             dir: dir.to_path_buf(),
+            namespace,
             budget: AtomicU64::new(budget),
             total: Mutex::new(None),
             hits: AtomicU64::new(0),
@@ -45,6 +54,10 @@ impl DiskCache {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    pub fn namespace(&self) -> u64 {
+        self.namespace
     }
 
     /// Bytes the cache may hold.
@@ -59,6 +72,13 @@ impl DiskCache {
     }
 
     fn path(&self, key: Hash128) -> PathBuf {
+        // Namespace zero preserves existing libraries' cache keys. Every committed folder
+        // switch gets a new value, even when returning to a previously used folder.
+        let key = if self.namespace == 0 {
+            key
+        } else {
+            crate::Hasher128::new().str("thumbnail namespace").u64(self.namespace).update(&key.0.to_le_bytes()).finish()
+        };
         let hex = key.to_string();
         self.dir.join(&hex[..2]).join(format!("{hex}.jpg"))
     }
