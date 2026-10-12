@@ -166,14 +166,20 @@ impl Remote {
 
     /// The client for `account_key` (`user@host[:port]`), built once with the stored app password.
     pub fn client(&self, account_key: &str) -> Result<Client, String> {
-        let (account, store) = {
-            let inner = self.lock();
-            if let Some(c) = inner.clients.get(account_key) {
-                return Ok(c.clone());
-            }
+        // the account is configured and not signed out: checked again after the unlocked password read,
+        // since another request may have been rejected (or the account removed) meanwhile
+        let usable = |inner: &Inner| -> Result<Account, String> {
             let account = inner.account(account_key).cloned().ok_or_else(|| unknown(account_key))?;
             if inner.state(account_key) == AccountState::SignedOut {
                 return Err(sign_in_again(account_key));
+            }
+            Ok(account)
+        };
+        let (account, store) = {
+            let inner = self.lock();
+            let account = usable(&inner)?;
+            if let Some(c) = inner.clients.get(account_key) {
+                return Ok(c.clone());
             }
             (account, inner.config.credentials.clone())
         };
@@ -188,10 +194,8 @@ impl Remote {
         };
         let client = Client::new(account, password, provider()).map_err(|e| e.to_string())?;
         let mut inner = self.lock();
-        // removed meanwhile: hand out this client, but don't keep it
-        if inner.account(account_key).is_some() {
-            inner.clients.insert(account_key.to_string(), client.clone());
-        }
+        usable(&inner)?;
+        inner.clients.insert(account_key.to_string(), client.clone());
         Ok(client)
     }
 

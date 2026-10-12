@@ -179,3 +179,34 @@ fn preferences_never_show_the_password() {
     let file = std::fs::read_to_string(d.join("nextcloud.json")).unwrap();
     assert!(file.contains("bob") && !file.contains("hunter2-secret"), "{file}");
 }
+
+/// Another thread's request is rejected (401) while this one reads the password: the client built
+/// with that password must not be handed out or cached for the now signed-out account.
+#[test]
+fn a_password_rejected_meanwhile_is_not_cached() {
+    struct RejectedWhileReading(std::sync::OnceLock<Arc<crate::remote::Remote>>);
+    impl CredentialStore for RejectedWhileReading {
+        fn get(&self, a: &Account) -> Result<Option<String>, String> {
+            if let Some(remote) = self.0.get() {
+                remote.note_error(&a.key(), &craft_nextcloud::Error::Unauthorized);
+            }
+            Ok(Some("rejected-pw".into()))
+        }
+        fn set(&self, _: &Account, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn delete(&self, _: &Account) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    let d = temp("race");
+    write_settings(&d, &[account("bob")]);
+    let s = Session::new();
+    let store = Arc::new(RejectedWhileReading(std::sync::OnceLock::new()));
+    let _ = store.0.set(s.remote.clone());
+    s.remote.configure(RemoteConfig { settings_file: Some(d.join("nextcloud.json")), cache_dir: None, credentials: Some(store) });
+    let again = "Sign in to Nextcloud (bob@cloud.example) again: Settings ▸ Nextcloud";
+    assert_eq!(s.remote.client("bob@cloud.example").unwrap_err(), again);
+    assert_eq!(s.remote.client("bob@cloud.example").unwrap_err(), again, "nothing was cached");
+    assert_eq!(keys(&s), [("bob@cloud.example".to_string(), AccountState::SignedOut)]);
+}
