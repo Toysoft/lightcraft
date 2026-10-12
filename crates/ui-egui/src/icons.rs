@@ -66,6 +66,9 @@ pub enum Icon {
     Radial,
     Sky,
     Subject,
+    Object,
+    Describe,
+    Background,
     Picker,
     Rotate,
     /// A curved line with an arrow at both ends: drag to rotate, either way (the crop tool's pointer).
@@ -249,7 +252,9 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         Crop => {
             pen.line(&[(6.0, 2.5), (6.0, 14.0), (17.5, 14.0)]);
             pen.line(&[(2.5, 6.0), (14.0, 6.0), (14.0, 17.5)]);
-            pen.line(&[(15.5, 2.0), (17.5, 4.0), (15.5, 6.0)]);
+            let arrow = Pen { s: Stroke::new((1.1 * k).max(0.8), color), ..pen };
+            arrow.arc(13.5, 5.5, 3.0, 230.0, 345.0);
+            arrow.fill(&[(16.9, 6.2), (15.1, 4.9), (17.4, 4.2)], color);
         }
         Eraser => {
             pen.closed(&[(3.0, 12.0), (10.0, 5.0), (16.0, 11.0), (11.0, 16.0), (7.0, 16.0)]);
@@ -268,9 +273,15 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
             }
         }
         Eye => {
-            pen.arc(10.0, 16.0, 9.0, 212.0, 328.0);
-            pen.arc(10.0, 4.0, 9.0, 32.0, 148.0);
-            pen.circle(10.0, 10.0, 2.5);
+            for y in [4.0, 16.0] {
+                pen.p.add(Shape::CubicBezier(egui::epaint::CubicBezierShape::from_points_stroke(
+                    [pen.pt(2.5, 10.0), pen.pt(6.0, y), pen.pt(14.0, y), pen.pt(17.5, 10.0)],
+                    false,
+                    Color32::TRANSPARENT,
+                    pen.s,
+                )));
+            }
+            pen.circle(10.0, 10.0, 2.0);
         }
         GradeAll => {
             pen.circle(10.0, 6.0, 3.2);
@@ -299,9 +310,8 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
             }
         }
         EyeOff => {
-            pen.arc(10.0, 16.0, 9.0, 212.0, 328.0);
-            pen.arc(10.0, 4.0, 9.0, 32.0, 148.0);
-            pen.circle(10.0, 10.0, 2.5);
+            pen.line(&[(2.5, 10.0), (5.0, 13.0), (8.0, 14.2), (12.0, 14.2)]);
+            pen.line(&[(8.0, 5.8), (12.0, 5.8), (15.0, 7.0), (17.5, 10.0), (15.5, 12.4)]);
             pen.line(&[(3.5, 3.5), (16.5, 16.5)]);
         }
         Presets => {
@@ -371,13 +381,13 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
         Circle => pen.circle(10.0, 10.0, 6.0),
         FlagPick => {
             pen.line(&[(5.0, 17.0), (5.0, 3.5)]);
-            pen.closed(&[(5.0, 3.5), (15.0, 3.5), (12.5, 7.0), (15.0, 10.5), (5.0, 10.5)]);
+            pen.closed(&[(5.0, 3.5), (17.0, 3.5), (14.5, 8.0), (17.0, 12.5), (5.0, 12.5)]);
         }
         FlagReject => {
             pen.line(&[(5.0, 17.0), (5.0, 3.5)]);
-            pen.closed(&[(5.0, 3.5), (15.0, 3.5), (12.5, 7.0), (15.0, 10.5), (5.0, 10.5)]);
-            pen.line(&[(8.0, 5.0), (12.0, 9.0)]);
-            pen.line(&[(12.0, 5.0), (8.0, 9.0)]);
+            pen.closed(&[(5.0, 3.5), (17.0, 3.5), (14.5, 8.0), (17.0, 12.5), (5.0, 12.5)]);
+            pen.line(&[(8.0, 6.5), (11.0, 9.5)]);
+            pen.line(&[(11.0, 6.5), (8.0, 9.5)]);
         }
         Gear => {
             pen.circle(10.0, 10.0, 2.5);
@@ -491,6 +501,21 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
             pen.arc(12.0, 9.5, 3.8, 210.0, 360.0);
             pen.line(&[(5.0, 13.5), (15.5, 13.5)]);
             pen.line(&[(2.5, 17.0), (17.5, 17.0)]);
+        }
+        Object => {
+            pen.closed(&[(10.0, 3.0), (16.0, 6.5), (16.0, 13.5), (10.0, 17.0), (4.0, 13.5), (4.0, 6.5)]);
+            pen.line(&[(4.0, 6.5), (10.0, 10.0), (16.0, 6.5)]);
+            pen.line(&[(10.0, 10.0), (10.0, 17.0)]);
+        }
+        Describe => {
+            pen.closed(&[(3.0, 3.5), (17.0, 3.5), (17.0, 13.0), (9.0, 13.0), (5.0, 17.0), (5.0, 13.0), (3.0, 13.0)]);
+            pen.line(&[(6.0, 7.0), (14.0, 7.0)]);
+            pen.line(&[(6.0, 10.0), (11.0, 10.0)]);
+        }
+        Background => {
+            pen.rect(2.5, 2.5, 17.5, 17.5, 1.5);
+            pen.dot(13.5, 6.5, 1.5);
+            pen.line(&[(3.0, 15.0), (7.5, 8.5), (12.0, 14.0), (14.0, 11.0), (17.0, 15.0)]);
         }
         Subject => {
             pen.circle(10.0, 7.0, 3.0);
