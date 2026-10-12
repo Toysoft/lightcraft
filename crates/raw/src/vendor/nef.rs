@@ -20,10 +20,12 @@ const WB_RB_LEVELS: u16 = 0x000c;
 /// ColorBalance (named in the ExifTool Nikon tag-name documentation, which gives the channel order per version but
 /// not where the levels sit): a 4-character version, then, in the versions that aren't enciphered, the as-shot
 /// levels as four `u16` in the maker note's byte order: `0102` (D2H) RGGB from byte 10, `0103` (D70, D70s) RGBG
-/// from byte 20. The offsets were checked on the CC0 raw.pixls.us files 5227 (D2H), 2060 (D70) and 1117 (D70s): they
-/// are the only places in each block where four `u16` hold two greens of 256 in the order's green slots and two
-/// gains between 1 and 4 (563 256 256 373, 555 256 388 256, 589 256 366 256), and the gains they give are within
-/// 2 to 8 % of what the neutral areas of each camera JPEG imply. The D50's `0205` is enciphered.
+/// from byte 20. The two offsets were first taken from ExifTool's source (its ColorBalance0102/0103 tables in
+/// `Nikon.pm`), not from its documentation; no code was taken from it. They were then checked on the CC0
+/// raw.pixls.us files 5227 (D2H), 2060 (D70) and 1117 (D70s): they are the only places in each block where four
+/// `u16` hold two greens of 256 in the order's green slots and two gains between 1 and 4 (563 256 256 373, 555 256
+/// 388 256, 589 256 366 256), and the gains they give are within 2 to 8 % of what the neutral areas of each camera
+/// JPEG imply. The D50's `0205` is enciphered.
 const COLOR_BALANCE: u16 = 0x0097;
 const BLACK_LEVEL: u16 = 0x003d;
 const LINEARIZATION_TABLE: u16 = 0x0096;
