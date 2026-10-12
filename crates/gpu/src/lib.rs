@@ -463,10 +463,6 @@ pub fn try_render(
             return Err(Fallback::NotTried);
         }
         let s = &*lightcraft_pipeline::settings_for(s, req);
-        // process V3's Dehaze (the whole frame's haze map, issue #1237) has no kernel yet: CPU
-        if lightcraft_pipeline::haze::wanted(s) {
-            return Err(Fallback::NotTried);
-        }
         // in flight until this returns; not tried once the process is ending (issue #620)
         let _work = exit::enter().ok_or(Fallback::NotTried)?;
         let gpu = device().ok_or(Fallback::NotTried)?;

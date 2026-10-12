@@ -71,16 +71,6 @@ fn diff(a: &Rgba8, b: &Rgba8) -> (f64, u8, f64) {
 }
 
 fn check(name: &str, src: &Arc<Rgb32f>, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest) -> (f64, u8) {
-    // Process V3's Dehaze (#1237) renders on the CPU until its kernel lands: the GPU declines it,
-    // and the rest of the edit is compared under V2's Dehaze instead.
-    let v2;
-    let s = if lightcraft_pipeline::haze::wanted(&s.effective()) {
-        assert!(lightcraft_gpu::render(src, info, s, req, None).is_none(), "{name}: the GPU must decline V3 Dehaze");
-        v2 = DevelopSettings { process: Process::V2.version(), ..s.clone() };
-        &v2
-    } else {
-        s
-    };
     let cpu = render(src, info, s, req).image;
     let gpu = lightcraft_gpu::render(src, info, s, req, None).expect("gpu render");
     let (mean, max, over) = diff(&cpu, &gpu.image);
@@ -208,6 +198,21 @@ fn cases() -> Vec<(&'static str, Edit)> {
         }),
         ("dehaze -", |s| s.effects.dehaze = -50.0),
         ("dehaze +", |s| s.effects.dehaze = 60.0),
+        ("dehaze -100", |s| s.effects.dehaze = -100.0),
+        ("dehaze +100", |s| s.effects.dehaze = 100.0),
+        ("dehaze in a mask, past +100", |s| {
+            s.effects.dehaze = 50.0;
+            s.masks = vec![Mask {
+                components: vec![MaskComponent {
+                    name: None,
+                    op: MaskOp::Add,
+                    invert: false,
+                    shape: MaskShape::Radial { center: Point::new(0.5, 0.4), rx: 0.35, ry: 0.25, angle: 0.0, feather: 50.0, invert: false },
+                }],
+                adjust: lightcraft_develop::LocalAdjustments { dehaze: 80.0, ..Default::default() },
+                ..Default::default()
+            }];
+        }),
         ("clarity/texture -", |s| {
             s.effects.clarity = -60.0;
             s.effects.texture = -40.0;
@@ -551,8 +556,7 @@ fn cached_renders_match_uncached() {
     let info = SourceInfo { raw: true, ..Default::default() };
     let cache = StageCache::default();
     let req = RenderRequest::fit(640, 640);
-    // (V2: V3's Dehaze renders on the CPU until its kernel lands)
-    let mut s = DevelopSettings { process: Process::V2.version(), ..DevelopSettings::default() };
+    let mut s = DevelopSettings::default();
     typical(&mut s);
     for k in 0..4 {
         s.light.exposure = 0.1 * k as f64;
@@ -768,6 +772,88 @@ fn tint_directions_match_cpu_for_raw_and_rendered_sources() {
             check("tint direction", &src, &info, &s, &RenderRequest::fit(64, 64));
         }
     }
+}
+
+/// Issue #1237: process V3's Dehaze (the whole frame's haze map, sampled by frame-normalised
+/// position) on the hazy valley, at every amount, through masks (added to the slider and clamped to
+/// ±100), exposed, and in windows of a zoomed frame; V1 / V2's Dehaze still matches too.
+#[test]
+fn v3_dehaze_matches() {
+    if !gpu() {
+        return;
+    }
+    use lightcraft_pipeline::PixelWindow;
+    let src = Arc::new(lightcraft_scenes::hazy_valley(1200, 800));
+    let rendered = SourceInfo::default();
+    let raw = SourceInfo { raw: true, ..Default::default() };
+    let whole = RenderRequest::fit(900, 900);
+    let mask = |dehaze: f64, invert: bool| Mask {
+        components: vec![MaskComponent {
+            name: None,
+            op: MaskOp::Add,
+            invert,
+            shape: MaskShape::Linear { start: Point::new(0.5, 0.2), end: Point::new(0.5, 0.7) },
+        }],
+        adjust: lightcraft_develop::LocalAdjustments { dehaze, ..Default::default() },
+        ..Default::default()
+    };
+    let mut worst = (0.0f64, 0u8);
+    let mut run = |name: String, s: &DevelopSettings, info: &SourceInfo, req: &RenderRequest| {
+        let (m, x) = check(&name, &src, info, s, req);
+        worst = (worst.0.max(m), worst.1.max(x));
+    };
+    for amount in [-100.0, -50.0, -25.0, 25.0, 50.0, 100.0] {
+        let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+        s.effects.dehaze = amount;
+        run(format!("V3 dehaze {amount}"), &s, &rendered, &whole);
+        run(format!("V3 dehaze {amount} raw"), &s, &raw, &whole);
+        s.light.exposure = 0.7;
+        run(format!("V3 dehaze {amount} exposed"), &s, &rendered, &whole);
+        typical(&mut s);
+        s.effects.dehaze = amount;
+        run(format!("V3 dehaze {amount} typical"), &s, &raw, &whole);
+    }
+    // masks: alone, added to the slider, and past ±100 (clamped)
+    for (global, local, invert) in [(0.0, 60.0, false), (40.0, 40.0, true), (70.0, 90.0, false), (-60.0, -80.0, false), (50.0, -50.0, true)] {
+        let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+        s.effects.dehaze = global;
+        s.masks = vec![mask(local, invert)];
+        run(format!("V3 dehaze {global} + mask {local}"), &s, &rendered, &whole);
+    }
+    // the Effects section off: only the masks' Dehaze
+    let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+    s.effects.dehaze = 80.0;
+    s.masks = vec![mask(50.0, false)];
+    s.disabled_sections.push("effects".into());
+    run("V3 dehaze, effects off, mask 50".into(), &s, &rendered, &whole);
+    // windows of a zoomed frame sample the whole frame's map
+    let windows = [
+        PixelWindow { x: 0, y: 0, w: 640, h: 480 },
+        PixelWindow { x: 1100, y: 700, w: 640, h: 480 },
+        PixelWindow { x: 2360, y: 1520, w: 640, h: 480 },
+    ];
+    for win in windows {
+        let req = RenderRequest { window: Some(win), ..RenderRequest::fit(3000, 2000) };
+        for amount in [-60.0, 35.0, 100.0] {
+            let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+            s.effects.dehaze = amount;
+            run(format!("V3 dehaze {amount} window {},{}", win.x, win.y), &s, &rendered, &req);
+            s.masks = vec![mask(40.0, false)];
+            run(format!("V3 dehaze {amount} + mask window {},{}", win.x, win.y), &s, &rendered, &req);
+        }
+    }
+    // V1 / V2 keep their own Dehaze on the GPU
+    for p in [Process::V1, Process::V2] {
+        for amount in [-60.0, 60.0] {
+            let mut s = DevelopSettings { process: p.version(), ..DevelopSettings::default() };
+            s.effects.dehaze = amount;
+            run(format!("{p:?} dehaze {amount}"), &s, &rendered, &whole);
+            s.masks = vec![mask(40.0, false)];
+            let req = RenderRequest { window: Some(windows[1]), ..RenderRequest::fit(3000, 2000) };
+            run(format!("{p:?} dehaze {amount} + mask window"), &s, &rendered, &req);
+        }
+    }
+    eprintln!("worst: mean {:.4} LSB, max {} LSB", worst.0, worst.1);
 }
 
 /// Issue #323: windows of a zoomed frame. The GPU renders the window like the CPU does: the

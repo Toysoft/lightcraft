@@ -673,8 +673,12 @@ pub fn render(
         dark: prep.dark.is_some(),
         chroma: masks.is_some() && prep.chroma.is_some(),
     };
-    let (p, aux) = finish_block(&fp, &terms, &present);
+    // process V3's Dehaze: the whole frame's haze map (built on the CPU with the plan, so no
+    // airlight readback), its coefficients bound where V1 / V2 bind the dark plane
+    let haze = plan.haze.as_deref().filter(|_| prep.dark.is_none());
+    let (p, aux) = finish_block(&fp, &terms, &present, haze);
     let aux = gpu.upload(&aux);
+    let haze_buf = haze.map(|m| gpu.upload(&crate::params::haze_coeffs(m)));
     // cleared, so that work which never ran cannot pass for an image (see the check below)
     let out = cx.zeroed(n);
     if fault == Some(crate::Fault::Validation) {
@@ -696,7 +700,7 @@ pub fn render(
                 Some(&prep.base),
                 prep.clarity.as_deref(),
                 prep.texture.as_deref(),
-                prep.dark.as_deref(),
+                prep.dark.as_deref().or(haze_buf.as_ref()),
                 masks.as_ref(),
                 Some(&aux),
                 Some(&out),
