@@ -750,6 +750,28 @@ mod tests {
         assert!(egui::Popup::is_any_open(&h.view.ctx), "its context menu");
     }
 
+    /// #1239: deleting asks first by default, and the context menu's Delete Photo asks too.
+    #[test]
+    fn context_menu_delete_asks_first() {
+        let mut h = demo([1200.0, 760.0]);
+        let t = Duration::from_secs(10);
+        assert!(h.app.ui.settings.confirm_delete, "on by default");
+        h.request("ui.set", json!({"view": "detail"}), t);
+        h.settle(SETTLE);
+        let id = h.app.session.selection.active.expect("an active photo");
+        let cell = format!("film:{}", id.0);
+        h.request("ui.clickWidget", json!({"id": cell, "button": "right"}), t);
+        h.settle(SETTLE);
+        let r = h.request("ui.clickWidget", json!({"id": "button:photoMenu-delete"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        assert_eq!(h.app.ui.dialog, Some(crate::state::Dialog::ConfirmDelete { count: 1 }));
+        assert!(!h.app.session.catalog.photo(id).unwrap().deleted, "not deleted before the answer");
+        h.request("ui.dialog.confirm", json!({}), t);
+        h.settle(SETTLE);
+        assert!(h.app.session.catalog.photo(id).unwrap().deleted, "deleted after OK");
+    }
+
     /// The search field is a shared text field: right-click ▸ Paste puts the clipboard's text in
     /// and filters by it.
     #[test]
@@ -3605,6 +3627,8 @@ mod tests {
             assert_eq!(h.app.ui.dialog, Some(crate::state::Dialog::Settings { tab: tab.into() }));
         }
         // General: confirm before delete, startup view
+        h.request("ui.clickWidget", json!({"id": "check:settings.confirmDelete"}), t);
+        assert!(!h.app.ui.settings.confirm_delete, "on by default; the click turns it off");
         h.request("ui.clickWidget", json!({"id": "check:settings.confirmDelete"}), t);
         assert!(h.app.ui.settings.confirm_delete);
         h.request("ui.clickWidget", json!({"id": "button:settingsStartup-2"}), t);
