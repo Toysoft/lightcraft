@@ -63,7 +63,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add Light",
             [],
             None,
-            "{kind?: point|directional|spot (default point), position?: [x,y] normalized to the uncropped photo (default the centre), intensity?: 0..200, hue?: 0..360, sat?: 0..100, angle?: 0..360 (clockwise from the top), elevation?: 0..90, depth?, falloff?, cone?: 0..100} — switches Relight on; returns {index}",
+            "{kind?: point|directional|spot (default point), position?: [x,y] normalized to the uncropped photo (default the centre), intensity?: 0..200, hue?: 0..360, sat?: 0..100, angle?: 0..360 (clockwise from the top), elevation?: -180..180, depth?, falloff?, cone?: 0..100} — switches Relight on; returns {index}",
             has_active,
             |s, p| {
                 let c = "relight.addLight";
@@ -79,7 +79,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     hue: number("hue", d.hue, 360.0),
                     sat: number("sat", d.sat, 100.0),
                     angle: number("angle", d.angle, 360.0),
-                    elevation: number("elevation", d.elevation, 90.0),
+                    elevation: Some(f64_or(p, "elevation", d.elevation)).filter(|v| v.is_finite()).map_or(d.elevation, |v| v.clamp(-180.0, 180.0)),
                     depth: number("depth", d.depth, 100.0),
                     falloff: number("falloff", d.falloff, 100.0),
                     cone: number("cone", d.cone, 100.0),

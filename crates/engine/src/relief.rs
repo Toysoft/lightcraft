@@ -84,6 +84,7 @@ impl Relief {
     }
 
     pub fn status(&self) -> Status {
+        #[cfg_attr(not(feature = "relief"), allow(unused_mut))]
         let mut status =
             Status { available: Self::AVAILABLE, installed: self.installed(), analyzing: self.analyzing().map(|id| id.0), ..Default::default() };
         #[cfg(feature = "relief")]

@@ -15,7 +15,7 @@ const SETTLE: Duration = Duration::from_secs(120);
 /// The demo library in Detail with the Relight panel open, as its tool-strip button opens it.
 fn relight_tool() -> Headless {
     let app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services { png: None, ..Default::default() });
-    let mut h = Headless::new(app, [1200.0, 1000.0], 1.0);
+    let mut h = Headless::new(app, [1200.0, 1200.0], 1.0);
     let r = h.request("ui.set", json!({"view": "detail"}), T);
     assert_eq!(r["ok"], true, "{r}");
     h.settle(SETTLE);

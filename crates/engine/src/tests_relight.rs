@@ -57,7 +57,13 @@ fn lights_are_edited_by_controls_and_commands() {
     assert_eq!((l.lights[1].kind, l.lights[1].angle, l.lights[1].cone), (RelightKind::Spot, 360.0, 0.0), "numbers are brought into range");
     s.execute("develop.set", &json!({"values": {"relightLight.1.intensity": 150, "relightLight.0.elevation": 400, "relight.ambient": -40}})).unwrap();
     let l = relight(&s);
-    assert_eq!((l.lights[1].intensity, l.lights[0].elevation, l.ambient), (150.0, 90.0, -40.0));
+    assert_eq!((l.lights[1].intensity, l.lights[0].elevation, l.ambient), (150.0, 180.0, -40.0));
+    // a light may be turned all the way round: below the photo's plane too
+    s.execute("relight.addLight", &json!({"kind": "directional", "elevation": -135})).unwrap();
+    assert_eq!(relight(&s).lights[2].elevation, -135.0);
+    s.execute("develop.set", &json!({"control": "relightLight.2.elevation", "value": -999})).unwrap();
+    assert_eq!(relight(&s).lights[2].elevation, -180.0);
+    s.execute("relight.deleteLight", &json!({"index": 2})).unwrap();
     let ctl = s.execute("develop.controls", &json!({"section": "relight"})).unwrap();
     let ids: Vec<&str> = ctl.as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
     assert!(ids.contains(&"relight.softness") && ids.contains(&"relightLight.1.cone"), "{ids:?}");

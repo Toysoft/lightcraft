@@ -24,6 +24,7 @@ pub mod person;
 pub mod presets;
 pub mod profiles;
 pub mod relight;
+pub mod relight_gizmo;
 pub mod right;
 pub mod rules_editor;
 pub mod second;

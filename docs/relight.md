@@ -16,6 +16,13 @@ It is not a Lightroom feature.
 - Each light is a **Point** (a lamp shining every way), a **Directional** (parallel light from far
   away, like the sun: it has a direction, not a place, and its marker sits on a ring around the
   middle of the photo, on the side it shines from) or a **Spot** (a cone from a place).
+- Directional and Spot lights carry a small **figure** on the photo and in the panel, turned in
+  space by their numbers: a disc with rays for a Directional light (a full disc head-on, a thin
+  ellipse with long rays at a grazing angle), a cone for a Spot (wider with Cone, seen down its
+  length when it points straight into the photo). Moving Angle, Elevation or Cone turns it.
+- **Elevation** is a full turn, −180° to 180°: 0 grazes the photo, 90 is head-on, beyond 90 the light
+  comes over from the other side, and below 0 it shines from behind the photo (only on what faces
+  away: a rim light) or, for a Spot, points out of it.
 - Per light: Intensity, colour (Hue, Saturation), Angle and Elevation (Directional, Spot), Depth
   (how far above the photo the light is) and Falloff (Point, Spot), Cone (Spot). Up to 8 lights.
 - For the scene: **Ambient** (the light the photo already had: −100 leaves only the added lights),

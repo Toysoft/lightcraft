@@ -75,6 +75,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         if let Some(kind) = chosen.and_then(|i| RelightKind::ALL.get(i)) {
             let _ = app.run("relight.updateLight", json!({"index": sel, "kind": kind_key(*kind)}));
         }
+        figure(ui, sel, &light);
         let mut fields = vec!["intensity"];
         if light.kind.has_direction() {
             fields.extend(["angle", "elevation"]);
@@ -184,6 +185,25 @@ fn scene(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, d: &DevelopSet
         });
     });
     divider(ui);
+}
+
+/// A Directional or Spot light's figure, turned by its Angle, Elevation and Cone: what the sliders
+/// below it do, seen while they move (`relightFigure:<i>`).
+fn figure(ui: &mut egui::Ui, index: usize, light: &lightcraft_develop::RelightLight) {
+    if !light.kind.has_direction() {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    let (area, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 104.0), egui::Sense::hover());
+    register(ui.ctx(), format!("relightFigure:{index}"), area);
+    let angle = if light.angle.is_finite() { light.angle.to_radians() as f32 } else { 0.0 };
+    // (degrees clockwise from the top: where a Directional light comes from, which way a Spot points)
+    let points = egui::vec2(angle.sin(), -angle.cos());
+    let travels = if light.kind == RelightKind::Directional { -points } else { points };
+    let gizmo = super::relight_gizmo::Gizmo::new(light.kind, travels, light.elevation, light.cone, 40.0);
+    // a Directional light's figure starts where the light comes from, so it is drawn back from the middle
+    let at = if light.kind == RelightKind::Directional { area.center() - travels * 14.0 } else { area.center() - travels * 10.0 };
+    gizmo.paint(ui.painter(), at, t.text_label, 1.5);
 }
 
 /// A light kind as the commands name it.

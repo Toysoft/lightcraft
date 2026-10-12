@@ -2133,7 +2133,8 @@ const LIGHT_GRAB: f32 = 14.0;
 /// Relight tool: every light has a marker on the photo (`relightMarker:<i>`). A click on a marker
 /// selects its light, a drag that starts on it moves the light; nothing else on the photo moves a
 /// light. A Directional light has no place: its marker sits on a ring around the middle of the
-/// photo, on the side its light comes from, and dragging it turns the light.
+/// photo, on the side its light comes from, and dragging it turns the light. Directional and Spot
+/// lights carry a figure ([`super::relight_gizmo::Gizmo`]) that turns with their sliders.
 fn relight_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response, map: &CanvasMap, d: &DevelopSettings) {
     use lightcraft_develop::{RelightKind, RelightLight};
     let lights = &d.relight.lights;
@@ -2169,7 +2170,8 @@ fn relight_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Resp
         p.circle_stroke(c, 10.0, stroke);
         crate::icons::paint(p, Rect::from_center_size(c, vec2(13.0, 13.0)), crate::icons::Icon::Lamp, color);
         register(ui.ctx(), format!("relightMarker:{i}"), Rect::from_center_size(c, vec2(20.0, 20.0)));
-        // which way it shines: a Directional light towards the middle, a Spot along its angle
+        // which way it shines, as a figure turned in space by its angle, elevation and cone: a
+        // Directional light travels towards the middle, a Spot along its angle
         let towards = match l.kind {
             RelightKind::Point => None,
             RelightKind::Directional => Some(map.screen(middle)),
@@ -2178,14 +2180,9 @@ fn relight_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Resp
                 Some(map.screen(Point::new(l.position.x + s.x, l.position.y + s.y)))
             }
         };
-        if let Some(to) = towards
-            && (to - c).length() > 1.0
-        {
-            let dir = (to - c).normalized();
-            let (tip, side) = (c + dir * 30.0, dir.rot90() * 4.0);
-            p.line_segment([c + dir * 12.0, tip], stroke);
-            p.line_segment([tip - dir * 7.0 + side, tip], stroke);
-            p.line_segment([tip - dir * 7.0 - side, tip], stroke);
+        if let Some(to) = towards {
+            let size = if i == selected { 58.0 } else { 44.0 };
+            super::relight_gizmo::Gizmo::new(l.kind, to - c, l.elevation, l.cone, size).paint(p, c, color, stroke.width);
         }
     }
     let hit = |q: Pos2| {

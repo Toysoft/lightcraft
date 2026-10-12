@@ -398,7 +398,7 @@ impl LightK {
         let (x, y) = (place(p.x), place(p.y));
         // a lamp hangs in front of what is under its marker: Depth is how far in front
         let under = surface.relief * bilinear(&surface.height, x * surface.long, y * surface.long);
-        let elevation = finite(l.elevation, d.elevation).clamp(0.0, 90.0).to_radians();
+        let elevation = finite(l.elevation, d.elevation).clamp(-180.0, 180.0).to_radians();
         let [dx, dy] = surface.direction(finite(l.angle, d.angle));
         let dir = match l.kind {
             // towards the light: up out of the photo by its elevation

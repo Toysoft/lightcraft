@@ -1205,8 +1205,10 @@ pub struct RelightLight {
     /// Degrees clockwise from the top of the photo: where a Directional light comes from, or which
     /// way a Spot points.
     pub angle: f64,
-    /// 0..90 degrees. Directional: the light's height above the photo's plane (90 = head-on).
-    /// Spot: how steeply it points down at the photo (90 = straight down).
+    /// −180..180 degrees, a full turn about the axis across the light's angle. Directional: the
+    /// light's height above the photo's plane (0 = grazing, 90 = head-on, beyond 90 it comes down
+    /// from the other side; below 0 it shines from behind the photo, on what faces away). Spot: how
+    /// steeply it points into the photo (90 = straight in; below 0 it points out, at the viewer).
     pub elevation: f64,
     /// 0..100: how far above the photo the light is (Point, Spot).
     pub depth: f64,
