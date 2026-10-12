@@ -2373,7 +2373,8 @@
   "Checking the GPU for faces": "GPU für Gesichter wird geprüft",
   "Show Parent Folder": "Übergeordneten Ordner anzeigen",
   "Hide This Parent": "Diesen übergeordneten Ordner ausblenden",
-  "Takes this row off the list; the folder inside it and every photo stay as they are": "Nimmt diese Zeile aus der Liste; der enthaltene Ordner und alle Fotos bleiben, wie sie sind",
-  "List Deeper Folders": "Tiefere Ordner auflisten",
-  "Folders this deep are not listed here. Click to add this folder to Local, where it opens further": "So tief liegende Ordner werden hier nicht aufgelistet. Klicken, um diesen Ordner zu „Lokal“ hinzuzufügen, wo er sich weiter öffnen lässt"
+  "Hides this row. Nothing on disk or in the library changes": "Blendet diese Zeile aus. Auf dem Datenträger und in der Bibliothek ändert sich nichts",
+  "Go Deeper": "Tiefer gehen",
+  "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further": "So tief liegende Ordner werden hier nicht aufgelistet. Klicken, um diesen Ordner als eigenen Ort zu „Lokal“ hinzuzufügen und ihn dort weiter zu öffnen",
+  "This folder stays listed while the grid shows its photos": "Dieser Ordner bleibt aufgelistet, solange das Raster seine Fotos zeigt"
 }

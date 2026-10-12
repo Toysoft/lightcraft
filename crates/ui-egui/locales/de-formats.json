@@ -315,5 +315,6 @@
   "{n} keywords": "{n} Stichwörter",
   "{n} albums": "{n} Alben",
   "{n} folders": "{n} Ordner",
-  "Lists “{name}”, the folder this one is in": "Listet „{name}“ auf, den Ordner, in dem dieser liegt"
+  "Lists “{name}”, the folder this one is in": "Listet „{name}“ auf, den Ordner, in dem dieser liegt",
+  "“{name}” is now a place in Local: open it there": "„{name}“ ist jetzt ein Ort unter „Lokal“: dort öffnen"
 }

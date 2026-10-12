@@ -1045,6 +1045,9 @@ fn local_says_where_its_listing_stops_and_offers_the_way_on() {
     assert_eq!(r["ok"], true, "{r}");
     h.settle(SETTLE);
     assert!(h.app.ui.local_roots.contains(&eighth), "the folder is a Local place now: {:?}", h.app.ui.local_roots);
+    let said = h.app.ui.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+    assert!(said.contains("“8”") && said.contains("Local"), "the click says what it did: {said:?}");
+    assert!(!on_screen(&h, &more), "a place of its own now, the row has nothing left to offer");
 }
 
 #[test]

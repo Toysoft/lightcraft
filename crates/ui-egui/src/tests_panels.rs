@@ -1736,8 +1736,72 @@ fn show_parent_folder_lists_the_folder_above_and_hide_this_parent_takes_it_away(
     // the parent shown offers the one above it, and going away again
     right_click(&mut h, "source:libfolder:/Users/me");
     assert!(has(&h, "folderShowParent") && has(&h, "folderHideParent"));
+    click(&mut h, "folderShowParent");
+    assert!(has(&h, "source:libfolder:/Users") && has(&h, "source:libfolder:/Users/me"), "two folders up now");
+    // only the topmost can go: hiding one in the middle would draw a folder inside one it is not in
+    right_click(&mut h, "source:libfolder:/Users/me");
+    assert!(!has(&h, "folderHideParent") && !has(&h, "folderShowParent"), "the middle parent offers neither");
+    h.request("ui.key", json!({"key": "escape"}), T);
+    h.step();
+    h.step();
+    right_click(&mut h, "source:libfolder:/Users");
+    click(&mut h, "folderHideParent");
+    assert!(!has(&h, "source:libfolder:/Users") && has(&h, "source:libfolder:/Users/me"), "one level at a time");
+    right_click(&mut h, "source:libfolder:/Users/me");
     click(&mut h, "folderHideParent");
     assert!(!has(&h, "source:libfolder:/Users/me") && has(&h, "source:libfolder:/Users/me/Pictures"));
+    assert!(h.app.ui.folder_parents.is_empty());
+}
+
+/// Below a row that is drawn every folder is a row, so the tree never shows a folder inside one
+/// it is not directly in: a parent asked for two levels up brings the one between with it.
+#[test]
+fn a_shown_parent_brings_the_folders_between_with_it() {
+    let mut h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
+    exec(&mut h, "view.folderParent", json!({"path": "/Users", "show": true}));
+    assert!(has(&h, "source:libfolder:/Users") && has(&h, "source:libfolder:/Users/me") && has(&h, "source:libfolder:/Users/me/Pictures"));
+    let x = |h: &Headless, p: &str| widget(h, &format!("libraryFolderToggle:{p}")).center().x;
+    assert!(x(&h, "/Users/me") > x(&h, "/Users") && x(&h, "/Users/me/Pictures") > x(&h, "/Users/me"), "each inside the one above");
+}
+
+/// Hide This Parent on the folder the grid shows would seem to do nothing (what is shown always
+/// has its row): the item is there, off, and says why.
+#[test]
+fn hide_this_parent_is_off_while_the_grid_shows_that_folder() {
+    let mut h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
+    exec(&mut h, "view.folderParent", json!({"path": "/Users/me", "show": true}));
+    click(&mut h, "source:libfolder:/Users/me");
+    right_click(&mut h, "source:libfolder:/Users/me");
+    click(&mut h, "folderHideParent");
+    assert!(h.app.ui.folder_parents.contains("/Users/me"), "a click on the item that is off changes nothing");
+    assert!(has(&h, "source:libfolder:/Users/me"));
+}
+
+/// A folder asked for can always be taken off again, also once it no longer only leads on (a
+/// photo came into it): before, the command refused it as "always listed" and the entry stayed
+/// for good, counting toward the limit. At the limit, entries like that make room.
+#[test]
+fn a_parent_that_stopped_leading_on_can_still_be_hidden_and_takes_no_room() {
+    use lightcraft_catalog::{Op, Photo, Source};
+    let mut h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
+    exec(&mut h, "view.folderParent", json!({"path": "/Users/me", "show": true}));
+    let id = h.app.session.catalog.alloc_photo_id();
+    let p = Photo::new(id, Source::File { path: "/Users/me/c.jpg".into() }, "c.jpg", "JPEG", 60, 40, "2026-01-01T10:00:00");
+    h.app.session.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    h.step();
+    h.step();
+    right_click(&mut h, "source:libfolder:/Users/me");
+    assert!(!has(&h, "folderHideParent"), "it holds a photo now: listed for that, not because it was asked for");
+    h.request("ui.key", json!({"key": "escape"}), T);
+    h.step();
+    let r = exec(&mut h, "view.folderParent", json!({"path": "/Users/me", "show": false}));
+    assert_eq!(r["show"], false);
+    assert!(h.app.ui.folder_parents.is_empty(), "the entry is gone");
+    // the limit: entries of folders that no longer lead on are dropped before a new one is refused
+    h.app.ui.folder_parents = (0..crate::state::MAX_FOLDER_PARENTS).map(|i| format!("/gone/{i}")).collect();
+    let r = exec(&mut h, "view.folderParent", json!({"path": "/Users", "show": true}));
+    assert_eq!(r["show"], true);
+    assert_eq!(h.app.ui.folder_parents.iter().collect::<Vec<_>>(), ["/Users"]);
 }
 
 /// `view.folderParent` is the command behind both items: it shows, hides or flips a folder that
@@ -1747,7 +1811,7 @@ fn view_folder_parent_shows_and_hides_for_agents_and_refuses_other_folders() {
     let mut h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
     let r = exec(&mut h, "view.folderParent", json!({"path": "/Users/"}));
     assert_eq!(r, json!({"path": "/Users", "show": true}), "spelled another way, it is the same folder");
-    assert!(has(&h, "source:libfolder:/Users") && !has(&h, "source:libfolder:/Users/me"));
+    assert!(has(&h, "source:libfolder:/Users"));
     let r = exec(&mut h, "view.folderParent", json!({"path": "/Users"}));
     assert_eq!(r["show"], false, "with no `show` it flips");
     assert!(!has(&h, "source:libfolder:/Users"));
@@ -1816,6 +1880,8 @@ fn a_count_never_covers_the_name_of_a_deep_row() {
         dir.push_str(name);
         paths.push(format!("{dir}/1.jpg"));
     }
+    // (enough photos at the bottom for counts five digits wide all the way up)
+    paths.extend((0..12_000).map(|i| format!("{dir}/more-{i}.jpg")));
     let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
     let mut h = folders_app_sized(&refs, [1400.0, 1000.0]);
     let left = widget(&h, "panel:left_panel");
@@ -1835,6 +1901,13 @@ fn a_count_never_covers_the_name_of_a_deep_row() {
     // a row with room keeps its count at the panel's visible edge
     let panel = widget(&h, "panel:left_panel");
     assert!(widget(&h, "count:all").right() <= panel.right());
+    // and no count is cut in two by that edge (5 digits wide here): it is whole, inside or past it
+    let mut past = 0;
+    for (id, r) in h.app.widgets.iter().filter(|(w, _)| w.starts_with("count:libfolder:")) {
+        assert!(r.right() <= panel.right() || r.left() >= panel.right(), "{id} straddles the edge: {r:?} / {panel:?}");
+        past += usize::from(r.left() >= panel.right());
+    }
+    assert!(past > 0, "the deepest rows' counts are past the edge");
 }
 
 /// Removing a folder from the library asks first, then moves its photos to Recently Deleted.

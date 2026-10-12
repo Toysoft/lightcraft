@@ -123,9 +123,11 @@ fn row_sensed(
     let label_left = r.left() + 42.0 + indent;
     // a label's dot sits just before the count
     // a count stays at the visible edge while that leaves room for some of the name; a row
-    // indented too far for that keeps its count after its name, reached by scrolling sideways
+    // indented too far for that keeps its count after its name and wholly past the edge (never
+    // cut in two by it), reached by scrolling sideways
     let count_w = count_galley.as_ref().map_or(0.0, |g| g.size().x);
-    let edge = edge.max((label_left + MIN_NAME_ROOM + 8.0 + mark_w + count_w + 18.0).min(r.right()));
+    let after_name = label_left + MIN_NAME_ROOM + 8.0 + mark_w + count_w + 18.0;
+    let edge = if after_name <= edge { edge } else { after_name.max(edge + 4.0 + mark_w + count_w + 18.0).min(r.right()) };
     let count_left = edge - 18.0 - count_w;
     if let Some(c) = mark {
         let dot = Rect::from_center_size(pos2(count_left - MARK_W / 2.0, r.center().y), vec2(8.0, 8.0));
@@ -1131,13 +1133,16 @@ fn folder_tree(
         for (n, p) in subfolders(ui, path) {
             folder_tree(app, ui, place, &n, &p, indent + 16.0, current, reveal, false);
         }
-    } else if open && !subfolders(ui, path).is_empty() {
+    } else if open && !app.ui.local_roots.iter().any(|r| same_folder(r, path)) && !subfolders(ui, path).is_empty() {
         // as deep as one place is listed: say so, and offer the way on, instead of an open
-        // folder that seems to hold nothing
-        let more = row(app, ui, &format!("localDeeper:{path}"), Icon::Plus, crate::i18n::tr("List Deeper Folders"), None, false, indent + 24.0)
-            .on_hover_text(crate::i18n::tr("Folders this deep are not listed here. Click to add this folder to Local, where it opens further"));
-        if more.clicked() {
-            app.act("local.addRoot", json!({"path": path}));
+        // folder that seems to hold nothing (once it is a place of its own, it opens there)
+        let more = row(app, ui, &format!("localDeeper:{path}"), Icon::Plus, crate::i18n::tr("Go Deeper"), None, false, indent + 24.0).on_hover_text(
+            crate::i18n::tr(
+                "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further",
+            ),
+        );
+        if more.clicked() && app.act("local.addRoot", json!({"path": path})).is_some() {
+            app.toast(ui.ctx(), crate::i18n::tr_format!("“{name}” is now a place in Local: open it there", name = name));
         }
     }
 }
@@ -1809,7 +1814,7 @@ fn only_leads_on(n: &FolderNode) -> bool {
 pub(crate) enum FolderPlace {
     /// On the way from its disk to the library's first folder there: passed over unless asked for.
     Leading,
-    /// A disk, or a folder that holds photos, branches, carries a label or lies below one that does.
+    /// A disk, or a folder that holds photos, branches or carries a label, or one below such a folder.
     Listed,
 }
 
@@ -1836,9 +1841,11 @@ pub(crate) fn folder_place<'a>(tree: &'a [FolderNode], key: &str) -> Option<(&'a
 }
 
 /// The rows of the Folders tree. `leading`: these folders are reached from their disk through
-/// folders that only lead on, so one that only leads on itself is passed over — its row is left
-/// out and what it leads to takes its place — unless it was asked for (Show Parent Folder) or is
-/// what the grid shows. `above`: the folder passed over just above these rows, if any.
+/// folders that are passed over, so one that only leads on itself is passed over too — its row
+/// is left out and what it leads to takes its place — unless it was asked for (Show Parent
+/// Folder) or is what the grid shows. Below a row that is drawn, every folder is a row: the tree
+/// never shows a folder inside one it is not directly in. `above`: the folder passed over just
+/// above these rows, if any.
 fn folder_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[FolderNode], indent: f32, leading: bool, above: Option<&FolderNode>) {
     for n in nodes {
         let key = lightcraft_catalog::query::folder_key(&n.path);
@@ -1864,7 +1871,7 @@ fn folder_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[FolderNode],
             folder_row(app, ui, n, &id, &name, indent, open_id, &mut open, sel, FolderParents { above, asked_for });
         }
         if open && !n.children.is_empty() {
-            folder_rows(app, ui, &n.children, indent + 16.0, n.volume || on_the_way, None);
+            folder_rows(app, ui, &n.children, indent + 16.0, n.volume, None);
         }
     }
 }
@@ -1917,7 +1924,8 @@ fn folder_row(
 struct FolderParents<'a> {
     /// The folder passed over just above the row: Show Parent Folder lists it.
     above: Option<&'a FolderNode>,
-    /// The row is itself such a folder, listed because it was asked for: Hide This Parent.
+    /// The row is itself such a folder, the topmost listed because it was asked for: Hide This
+    /// Parent.
     asked_for: bool,
 }
 
@@ -1936,9 +1944,12 @@ fn folder_parent_items(app: &mut LightcraftApp, ui: &mut egui::Ui, n: &FolderNod
         }
     }
     if parents.asked_for {
+        // what the grid shows keeps its row whatever is asked: say so instead of doing nothing
+        let shown = super::side_select::folder_shown(app, &n.path);
         let hide = ui
-            .button(crate::i18n::tr("Hide This Parent"))
-            .on_hover_text(crate::i18n::tr("Takes this row off the list; the folder inside it and every photo stay as they are"));
+            .add_enabled(!shown, egui::Button::new(crate::i18n::tr("Hide This Parent")))
+            .on_hover_text(crate::i18n::tr("Hides this row. Nothing on disk or in the library changes"))
+            .on_disabled_hover_text(crate::i18n::tr("This folder stays listed while the grid shows its photos"));
         register(ui.ctx(), "folderHideParent", hide.rect);
         if hide.clicked() {
             run = Some(json!({"path": n.path, "show": false}));

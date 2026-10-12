@@ -315,5 +315,6 @@
   "{n} keywords": "Ключевые слова: {n}",
   "{n} albums": "Альбомы: {n}",
   "{n} folders": "Папки: {n}",
-  "Lists “{name}”, the folder this one is in": "Показывает «{name}» — папку, в которой лежит эта"
+  "Lists “{name}”, the folder this one is in": "Показывает «{name}» — папку, в которой лежит эта",
+  "“{name}” is now a place in Local: open it there": "«{name}» теперь отдельное место в «Локальном»: откройте её там"
 }

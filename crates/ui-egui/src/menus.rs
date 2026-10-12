@@ -540,7 +540,13 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                 Err(e) => return Some(Err(e)),
             };
             let key = lightcraft_catalog::query::folder_key(path);
+            // a folder asked for earlier can always be taken off again, also once it no longer
+            // only leads on (photos or a second folder came into it, it was labelled or renamed)
+            if show != Some(true) && app.ui.folder_parents.remove(&key) {
+                return Some(Ok(json!({"path": path, "show": false})));
+            }
             let tree = app.caches.folder_tree(&app.session.catalog);
+            let leading = |key: &str| matches!(crate::panels::left::folder_place(&tree, key), Some((_, crate::panels::left::FolderPlace::Leading)));
             let node = match crate::panels::left::folder_place(&tree, &key) {
                 Some((node, crate::panels::left::FolderPlace::Leading)) => node,
                 Some(_) => {
@@ -550,13 +556,16 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                 }
                 None => return Some(Err(format!("{id}: `{path}` holds no photo of the library, so Folders has no place for it"))),
             };
-            let parents = &mut app.ui.folder_parents;
-            let show = show.unwrap_or(!parents.contains(&key));
-            if !show {
-                parents.remove(&key);
-            } else if parents.len() >= crate::state::MAX_FOLDER_PARENTS && !parents.contains(&key) {
-                return Some(Err(format!("{id}: {} parent folders are shown already; hide one first", crate::state::MAX_FOLDER_PARENTS)));
-            } else {
+            let show = show.unwrap_or(true);
+            if show {
+                let parents = &mut app.ui.folder_parents;
+                if parents.len() >= crate::state::MAX_FOLDER_PARENTS {
+                    // folders that stopped leading on take no room from the ones that do
+                    parents.retain(|k| leading(k));
+                }
+                if parents.len() >= crate::state::MAX_FOLDER_PARENTS {
+                    return Some(Err(format!("{id}: {} parent folders are shown already; hide one first", crate::state::MAX_FOLDER_PARENTS)));
+                }
                 parents.insert(key);
             }
             Ok(json!({"path": node.path, "show": show}))

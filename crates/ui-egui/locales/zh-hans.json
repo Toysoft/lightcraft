@@ -2211,7 +2211,8 @@
   "Checking the GPU for faces": "正在检查用于人脸的 GPU",
   "Show Parent Folder": "显示上级文件夹",
   "Hide This Parent": "隐藏此上级文件夹",
-  "Takes this row off the list; the folder inside it and every photo stay as they are": "从列表中移除此行；其中的文件夹和所有照片保持不变",
-  "List Deeper Folders": "列出更深的文件夹",
-  "Folders this deep are not listed here. Click to add this folder to Local, where it opens further": "这么深的文件夹不在此处列出。点按可将此文件夹添加到本地，在那里可继续展开"
+  "Hides this row. Nothing on disk or in the library changes": "隐藏此行。磁盘和资料库中不会有任何更改",
+  "Go Deeper": "继续深入",
+  "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further": "这么深的文件夹不在此处列出。点按可将此文件夹作为单独的位置添加到本地，以便继续展开",
+  "This folder stays listed while the grid shows its photos": "网格显示此文件夹的照片时，它会保留在列表中"
 }

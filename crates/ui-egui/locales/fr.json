@@ -2370,7 +2370,8 @@
   "Checking the GPU for faces": "Vérification du GPU pour les visages",
   "Show Parent Folder": "Afficher le dossier parent",
   "Hide This Parent": "Masquer ce dossier parent",
-  "Takes this row off the list; the folder inside it and every photo stay as they are": "Retire cette ligne de la liste ; le dossier qu’il contient et toutes les photos restent tels quels",
-  "List Deeper Folders": "Afficher les dossiers plus profonds",
-  "Folders this deep are not listed here. Click to add this folder to Local, where it opens further": "Les dossiers aussi profonds ne sont pas affichés ici. Cliquez pour ajouter ce dossier à Local, où il s’ouvre plus loin"
+  "Hides this row. Nothing on disk or in the library changes": "Masque cette ligne. Rien ne change sur le disque ni dans la bibliothèque",
+  "Go Deeper": "Aller plus loin",
+  "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further": "Les dossiers aussi profonds ne sont pas affichés ici. Cliquez pour ajouter ce dossier à Local comme un emplacement à part, et l’ouvrir plus loin",
+  "This folder stays listed while the grid shows its photos": "Ce dossier reste affiché tant que la grille montre ses photos"
 }

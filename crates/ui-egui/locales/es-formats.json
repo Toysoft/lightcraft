@@ -315,5 +315,6 @@
   "{n} keywords": "{n} palabras clave",
   "{n} albums": "{n} álbumes",
   "{n} folders": "{n} carpetas",
-  "Lists “{name}”, the folder this one is in": "Muestra “{name}”, la carpeta que contiene a esta"
+  "Lists “{name}”, the folder this one is in": "Muestra “{name}”, la carpeta que contiene a esta",
+  "“{name}” is now a place in Local: open it there": "“{name}” ya es un lugar en Local: ábrela allí"
 }

@@ -315,5 +315,6 @@
   "{n} keywords": "{n} 个关键字",
   "{n} albums": "{n} 个相册",
   "{n} folders": "{n} 个文件夹",
-  "Lists “{name}”, the folder this one is in": "列出此文件夹所在的“{name}”"
+  "Lists “{name}”, the folder this one is in": "列出此文件夹所在的“{name}”",
+  "“{name}” is now a place in Local: open it there": "“{name}”现在是本地中的一个位置：请在那里打开"
 }

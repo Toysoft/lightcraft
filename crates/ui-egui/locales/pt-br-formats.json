@@ -315,5 +315,6 @@
   "{n} keywords": "{n} palavras-chave",
   "{n} albums": "{n} álbuns",
   "{n} folders": "{n} pastas",
-  "Lists “{name}”, the folder this one is in": "Lista “{name}”, a pasta em que esta está"
+  "Lists “{name}”, the folder this one is in": "Lista “{name}”, a pasta em que esta está",
+  "“{name}” is now a place in Local: open it there": "“{name}” agora é um lugar em Local: abra-a lá"
 }

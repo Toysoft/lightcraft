@@ -315,5 +315,6 @@
   "{n} keywords": "Ключові слова: {n}",
   "{n} albums": "Альбоми: {n}",
   "{n} folders": "Теки: {n}",
-  "Lists “{name}”, the folder this one is in": "Показує «{name}» — теку, в якій лежить ця"
+  "Lists “{name}”, the folder this one is in": "Показує «{name}» — теку, в якій лежить ця",
+  "“{name}” is now a place in Local: open it there": "«{name}» тепер окреме місце в локальних: відкрийте її там"
 }
