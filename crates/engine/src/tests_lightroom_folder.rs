@@ -158,7 +158,18 @@ fn odd_folders_never_fail_the_check() {
         // file systems that only store UTF-8 names (APFS, the macOS default) refuse these, so there
         // is nothing non-UTF-8 to come across and only the symlink checks below apply
         let bad = root.join(std::ffi::OsStr::from_bytes(b"caf\xe9 Previews.lrdata"));
-        if std::fs::create_dir_all(&bad).is_ok() {
+        let made = match std::fs::create_dir_all(&bad) {
+            Ok(()) => true,
+            // (the file system rejects the name: EILSEQ on macOS)
+            Err(e)
+                if (cfg!(target_os = "macos") && e.raw_os_error() == Some(92))
+                    || matches!(e.kind(), std::io::ErrorKind::InvalidFilename | std::io::ErrorKind::InvalidInput) =>
+            {
+                false
+            }
+            Err(e) => panic!("cannot create {bad:?}: {e}"),
+        };
+        if made {
             std::fs::write(root.join("Cat.lrcat"), b"x").unwrap();
             assert_eq!(lightroom_catalog_at(&bad), Some(LightroomPlace { catalog: Some(root.join("Cat.lrcat")) }), "non-UTF-8 name");
             let odd = root.join(std::ffi::OsStr::from_bytes(b"\xff\xfe"));
