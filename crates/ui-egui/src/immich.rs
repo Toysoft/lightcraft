@@ -945,6 +945,19 @@ pub fn settings_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
         t,
         "Import from a self-hosted Immich server (File ▸ Import from Immich…). Add your server and Test it — the menu item unlocks once the test passes.",
     );
+    // iPhone photos are HEIC; this build may not have the optional HEIF decoder (HEVC patents
+    // make it the distributor's call, so it is off by default). Say so here, where the user is
+    // about to import, instead of only when a photo fails to open.
+    if !lightcraft_codecs::Format::Heif.can_decode() {
+        let r = ui.label(
+            egui::RichText::new(crate::i18n::tr(
+                "Photos from an iPhone are HEIC. This build of LightCraft doesn't include HEIF/HEIC decoding — rebuild it with the `heif` feature (cargo build --features heif) to open them.",
+            ))
+            .size(11.0)
+            .color(t.text_dim),
+        );
+        register(ui.ctx(), "label:immichSettingsHeifHint", r.rect);
+    }
 
     let tests = {
         let id = egui::Id::new("immich-settings-tests");

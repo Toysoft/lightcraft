@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::headless::Headless;
 use crate::state::Dialog;
@@ -254,6 +254,31 @@ fn import_from_immich_unlocks_only_after_the_settings_test_passes() {
     assert_eq!(r["ok"], true, "{r}");
     assert!(h.app.session.immich_servers.is_empty(), "the server is gone");
     assert_eq!(menu_enabled(&mut h, "file.importImmich"), Some(false), "locked again with no server");
+    h.settle(SETTLE);
+    let _ = std::fs::remove_dir_all(&lib);
+}
+
+#[test]
+fn the_settings_tab_warns_when_heic_cannot_open_in_this_build() {
+    // iPhone photos are HEIC; when this build has no HEIF decoder the Immich settings tab must
+    // say so (and how to get it) — the user sees it where they configure the import, not only
+    // when a photo fails to open. The hint is gated on the same check the decoder uses.
+    let lib = temp_dir("heichint").unwrap();
+    let mut session = lightcraft_engine::Session::new().with_fs();
+    session.immich_store = Some(lib.join("immich.json"));
+    session.open_library(&lib, false).unwrap();
+    let app = LightcraftApp::new(session, Services { png: None, ..Default::default() });
+    let mut h = Headless::new(app, [1200.0, 800.0], 1.0);
+    h.app.ui.dialog = Some(Dialog::Settings { tab: "integrations".into() });
+    h.settle(SETTLE);
+
+    // how the build behaves decides what the tab says
+    let can_heic = lightcraft_codecs::Format::Heif.can_decode();
+    let widgets = h.request("ui.widgets", json!({}), T);
+    let ids: Vec<&str> =
+        widgets.get("result").and_then(Value::as_array).into_iter().flatten().filter_map(|x| x.get("id").and_then(Value::as_str)).collect();
+    let hint = ids.iter().any(|id| id.contains("label:immichSettingsHeifHint"));
+    assert_eq!(hint, !can_heic, "the hint is shown exactly when this build cannot decode HEIC (can_decode={can_heic})");
     h.settle(SETTLE);
     let _ = std::fs::remove_dir_all(&lib);
 }
