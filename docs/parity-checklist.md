@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (LR-EDIT-EFFECTS-DEHAZE downgraded to 🟡, #1237; rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (LRC-DEV-PROCESS: process V3 for the new Dehaze, #1237; LR-EDIT-EFFECTS-DEHAZE downgraded to 🟡, #1237; rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -719,7 +719,7 @@ From `08-lightroom-classic-extras.md` (Classic-only features) and part 2 of `06-
 | LRC-DEV-CALIB | Calibration panel | P1 | ✅ | `ctl:calibration.*` | |
 | LRC-DEV-TAT | Targeted adjustment tools | P1 | ✅ | `cmd:develop.targeted` (`target`: curve / hue / sat / lum) | |
 | LRC-DEV-DEFAULTS | Per-camera raw defaults | P1 | ✅ | `cmd:library.preferences` (`camera`, `import.perCamera`), `crates/ui-egui/src/panels/settings.rs` | Settings → Import: raw default and per-camera presets |
-| LRC-DEV-PROCESS | Process versions, Update to Current Process | P1 | ✅ | `cmd:develop.updateProcess`, `cmd:develop.reset`, `cmd:develop.get`, `crates/develop/src/settings.rs`, `crates/pipeline/src/finish.rs`, `docs/process-versions.md` | each photo records the rendering process its settings are interpreted by: settings saved before this existed load as V1, new photos and Reset get the latest, virtual copies inherit, copy / paste / sync / presets keep each photo's own; Photo ▸ Update to Current Process (one undo step, enabled while a selected photo is on an older process); a number from a newer LightCraft is kept and renders with the newest known process. Only V1 exists so far: this is what lets a retuned default tone (#146) or stronger Light sliders (#196) ship without changing existing edits |
+| LRC-DEV-PROCESS | Process versions, Update to Current Process | P1 | ✅ | `cmd:develop.updateProcess`, `cmd:develop.reset`, `cmd:develop.get`, `crates/develop/src/settings.rs`, `crates/pipeline/src/finish.rs`, `docs/process-versions.md` | each photo records the rendering process its settings are interpreted by: settings saved before this existed load as V1, new photos and Reset get the latest, virtual copies inherit, copy / paste / sync / presets keep each photo's own; Photo ▸ Update to Current Process (one undo step, enabled while a selected photo is on an older process); a number from a newer LightCraft is kept and renders with the newest known process. V1, V2 (Highlights / Shadows keep detail, #632) and V3 (the new Dehaze, in progress, #1237; renders like V2 until it lands) exist; the stage-cache keys include the process. This is what lets a retuned default tone (#146) or stronger Light sliders (#196) ship without changing existing edits |
 | LRC-DEV-VIEWOPTIONS | Develop view options | P2 | ⬜ | | |
 | LRC-DEV-VIDEO | Video frame capture | P2 | ⬜ | | |
 | LRC-MAP-VIEW | Map view | P2 | ⬜ | | |
@@ -787,6 +787,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | LRC-DEV-PROCESS: process V3 added and made the latest, for the new Dehaze (#1237); the row no longer says only V1 exists |
 | 2026-10-12 | minor | LR-EDIT-EFFECTS-DEHAZE ✅ → 🟡: far stronger than Lightroom's and no guided refinement (#1237); a V3 dehaze is in progress |
 | 2026-10-11 | minor | KEY-SLIDER-TYPE: honor immediate Return/Escape and keep typed keys in the value editor; add regression references |
 | 2026-10-11 | minor | LR-PROF-CAMERACOLOR: raws with a black-and-white camera JPEG take its tone curve (issue #577) |

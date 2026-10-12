@@ -362,7 +362,8 @@ pub struct Plan<'a> {
     pub src_long: usize,
     /// Key of the resampled source (together with the source buffer's identity).
     pub geo: u64,
-    /// Key of the white-balanced, retouched, denoised image (and of the planes computed from it).
+    /// Key of the white-balanced, retouched, denoised image (and of the planes computed from it),
+    /// including the rendering process ([`lightcraft_develop::Process`]).
     pub lin_key: u64,
     /// [`Self::lin_key`] without the noise-reduction settings: draft renders reuse the smooth
     /// planes of an image that differs from this one only in its noise reduction.
@@ -437,6 +438,9 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         // and the local tone mapping
         local_tone::enabled(info, s),
         src_long,
+        // and the planes computed from it are the rendering process's (V3's dehaze haze map), so a
+        // photo moved to another process (Update to Current Process, undo) never reuses them
+        s.process.process(),
     ));
     let lin_key = hash_of((pre_nr_key, [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits)));
     Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
@@ -683,6 +687,8 @@ pub(crate) fn for_rows<T: Send>(data: &mut [T], w: usize, f: impl Fn(usize, &mut
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_dehaze;
 #[cfg(test)]
 mod tests_geometry;
 #[cfg(test)]
