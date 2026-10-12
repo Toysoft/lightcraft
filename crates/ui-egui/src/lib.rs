@@ -139,6 +139,8 @@ mod tests_temp_slider;
 #[cfg(test)]
 mod tests_titlebar;
 #[cfg(test)]
+mod tests_type_contrast;
+#[cfg(test)]
 mod tests_type_scale;
 #[cfg(test)]
 mod tests_unsaved;
