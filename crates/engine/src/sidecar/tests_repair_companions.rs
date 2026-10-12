@@ -16,7 +16,7 @@ impl MoveFs for Faults {
         RealFs.same_file(a, b)
     }
     fn rename_no_replace(&self, a: &Path, b: &Path) -> std::io::Result<()> {
-        if self.0.iter().any(|p| p == a) {
+        if self.0.iter().any(|p| p == a || RealFs.same_file(p, a)) {
             Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected partial move"))
         } else {
             RealFs.rename_no_replace(a, b)
@@ -261,8 +261,10 @@ fn queued_stem_retry_preserves_shared_packet_after_batch_rollback() {
     assert!(!second_packet.exists());
     let pending = queues(&s);
     assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].from, shared);
-    assert_eq!(pending[0].to, second_packet);
+    assert!(pending[0].from == shared || RealFs.same_file(&pending[0].from, &shared), "the queued source is the original shared packet");
+    // The destination keeps the discovered packet extension, including an alias
+    // spelling on a case-insensitive filesystem.
+    assert_eq!(pending[0].to, second_packet.with_extension(pending[0].from.extension().unwrap()));
     let catalog_before = s.catalog.to_snapshot();
     let history_before = (s.undo.len(), s.redo.len(), s.commits());
 
