@@ -37,26 +37,25 @@ fn dehazed(process: Process, amount: f64, local: bool) -> DevelopSettings {
     s
 }
 
+/// The scene-linear image doesn't depend on the process, so every process shares it (its keys are
+/// the same); what does depend on it carries the process in its own key (the tone base) or has its
+/// own cache (V3's haze map). Rendering through warm caches after a process switch is checked by
+/// [`warm_caches_across_processes_match_fresh_renders`].
 #[test]
-fn stage_cache_keys_include_the_process() {
+fn stage_caches_share_the_linear_image_across_processes() {
     let src = scene();
     let info = SourceInfo::default();
     let req = RenderRequest::fit(W, H);
     let keys = |p: Process| {
         let s = dehazed(p, 30.0, false);
         let pl = plan(&src, &info, &s, &req);
-        (pl.lin_key, pl.pre_nr_key, pl.geo)
+        (pl.lin_key, pl.pre_nr_key, pl.geo, crate::local::base_key(&s, 4.0, 0))
     };
     let [k1, k2, k3] = Process::ALL.map(keys);
     for (a, b) in [(k1, k2), (k2, k3), (k1, k3)] {
-        assert_ne!(a.0, b.0, "lin_key");
-        assert_ne!(a.1, b.1, "pre_nr_key");
-        assert_eq!(a.2, b.2, "the resampled source is the same on every process");
+        assert_eq!((a.0, a.1, a.2), (b.0, b.1, b.2), "the linear image and its source are the same on every process");
+        assert_ne!(a.3, b.3, "the tone base is the process's own");
     }
-    // a number from a newer LightCraft keys like the process it renders with
-    let newer =
-        DevelopSettings { process: lightcraft_develop::ProcessVersion(Process::LATEST.version().0 + 5), ..dehazed(Process::LATEST, 30.0, false) };
-    assert_eq!(plan(&src, &info, &newer, &req).lin_key, keys(Process::LATEST).0);
 }
 
 /// V1 and V2 keep the Dehaze they always had (V1 and V2 differ only in the Highlights / Shadows
