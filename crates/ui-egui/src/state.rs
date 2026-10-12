@@ -766,6 +766,10 @@ pub enum Dialog {
     ContactSheet {
         options: lightcraft_engine::contact_sheet::Options,
     },
+    /// Upload the selected photos to Flickr (File ▸ Share ▸ Flickr…).
+    FlickrUpload {
+        opts: crate::flickr::UploadDialog,
+    },
     /// `parent`: the folder to create it in (none: the top level).
     NewAlbum {
         name: String,
@@ -943,7 +947,7 @@ pub enum Dialog {
     Merge {
         opts: crate::merge::MergeDialog,
     },
-    /// Settings (preferences): `tab` = general | import | performance | interface.
+    /// Settings (preferences): `tab` = one of `panels::settings::TABS`.
     Settings {
         tab: String,
     },

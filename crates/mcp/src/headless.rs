@@ -36,7 +36,7 @@ impl Drop for Headless {
 
 impl Default for Headless {
     fn default() -> Self {
-        let session = Session::new().with_fs().with_default_denoise_models().with_system_clock().with_default_face_models();
+        let session = Session::new().with_fs().with_default_denoise_models().with_system_clock().with_default_face_models().with_default_flickr();
         Self::new(session.with_default_sam3_model())
     }
 }

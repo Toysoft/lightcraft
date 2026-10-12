@@ -244,5 +244,12 @@
   "not added to Apple Photos: {e}": "未添加到 Apple 照片：{e}",
   "{n} added to Apple Photos album “{album}”": "已将 {n} 个添加到 Apple 照片相册“{album}”",
   "{n} added to Apple Photos": "已将 {n} 个添加到 Apple 照片",
-  "{n} photos opened for editing; each is stacked with its original": "已打开 {n} 张照片进行编辑；每张都与其原片堆叠在一起"
+  "{n} photos opened for editing; each is stacked with its original": "已打开 {n} 张照片进行编辑；每张都与其原片堆叠在一起",
+  "Signed in as {name}": "已登录：{name}",
+  "Signed in to Flickr as {name}": "已以 {name} 身份登录 Flickr",
+  "Upload {n} photo{} to Flickr as {name}": "以 {name} 身份上传 {n} 张照片到 Flickr{0:.0}",
+  "Uploaded {ok} of {total} photo{} to Flickr": "已上传 {total} 张中的 {ok} 张照片到 Flickr{0:.0}",
+  " · {} not added to the album": " · {} 张未加入相册",
+  " · the album couldn't be made: {}": " · 无法创建相册：{}",
+  " · new album “{}”": " · 新相册“{}”"
 }

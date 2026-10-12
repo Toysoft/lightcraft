@@ -251,6 +251,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         Dialog::PasteSettings { .. } => "Paste Selected Settings",
         Dialog::Export { .. } => "Export",
         Dialog::ContactSheet { .. } => "Contact Sheet PDF",
+        Dialog::FlickrUpload { .. } => "Share to Flickr",
         Dialog::Merge { opts } => opts.title(),
         Dialog::Settings { .. } => "Settings",
         Dialog::ConfirmDelete { .. } => "Delete Photos",
@@ -646,6 +647,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     ui.label("150 dpi · sRGB · current edits · fit without cropping");
                     ui.label("Choose a PDF destination after confirming. Print the PDF from your viewer.");
                 }
+                Dialog::FlickrUpload { opts } => flickr_upload_body(app, ui, &t, opts),
                 Dialog::Export { opts, full_size, resize, preset_name, limit_kb, dir } => {
                     use lightcraft_engine::export::{ExportFormat as F, MetadataPolicy as M, SharpenAmount as A, SharpenFor as S};
                     let n = app.session.selection.ids.len().max(1);
@@ -1203,6 +1205,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         add_label.as_str()
                     }
                     Dialog::ContactSheet { .. } => "Choose PDF…",
+                    Dialog::FlickrUpload { .. } => "Upload",
                     Dialog::Merge { .. } => "Merge",
                     Dialog::DenoiseModel { info, .. } if info["download"].is_string() => "Accept & Download",
                     Dialog::DenoiseModel { .. } => "Install",
@@ -1276,6 +1279,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     Dialog::Import { .. }
                         | Dialog::Export { .. }
                         | Dialog::ContactSheet { .. }
+                        | Dialog::FlickrUpload { .. }
                         | Dialog::NewAlbum { .. }
                         | Dialog::NewSmartAlbum { .. }
                         | Dialog::SmartRules { .. }
@@ -1665,6 +1669,10 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
             }),
         ),
         Dialog::ContactSheet { options } => app.run("app.contactSheet", json!(options)),
+        Dialog::FlickrUpload { opts } => {
+            app.flickr.last_dialog = Some(opts.clone());
+            app.run("flickr.upload", opts.params())
+        }
         Dialog::CopySettings { groups } => app.run("develop.copy", json!({"groups": groups})),
         Dialog::PasteSettings { groups } => app.run("develop.paste", json!({"groups": groups})),
         Dialog::Export { opts, full_size, resize, limit_kb, dir, .. } => {
@@ -1845,6 +1853,115 @@ fn num(ui: &mut egui::Ui, spec: &ControlSpec, v: &mut f64) -> bool {
 }
 
 /// A labelled row (fixed label column).
+/// File → Share → Flickr…: size, quality, who can see the photos, and what goes with them.
+fn flickr_upload_body(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, opts: &mut crate::flickr::UploadDialog) {
+    use crate::flickr::{PRIVACY, SIZES};
+    let n = app.session.targets(&json!({})).len();
+    let status = app.session.execute("flickr.status", &json!({})).unwrap_or_default();
+    let name = status["fullname"].as_str().filter(|s| !s.trim().is_empty()).or(status["username"].as_str()).unwrap_or_default().to_string();
+    ui.label(
+        egui::RichText::new(crate::i18n::tr_format!("Upload {n} photo{} to Flickr as {name}", if n == 1 { "" } else { "s" }, n = n, name = name))
+            .color(t.text_dim),
+    );
+    field(ui, "Size", |ui| {
+        let current = SIZES.iter().find(|(v, _)| *v == opts.long_edge).map_or("2048 px", |(_, l)| l);
+        // (pixel sizes read the same in every language)
+        let label = |v: u32, l: &str| if v == 0 { crate::i18n::tr(l).to_string() } else { l.to_string() };
+        let c = egui::ComboBox::from_id_salt("flickrSize").selected_text(label(opts.long_edge, current)).show_ui(ui, |ui| {
+            for (v, l) in SIZES {
+                ui.selectable_value(&mut opts.long_edge, *v, label(*v, l));
+            }
+        });
+        crate::widgets::register(ui.ctx(), "combo:flickrSize", c.response.rect);
+    });
+    field(ui, "Quality", |ui| {
+        ui.add(egui::DragValue::new(&mut opts.quality).range(1..=100));
+    });
+    field(ui, "Visibility", |ui| {
+        let current = PRIVACY.iter().find(|(v, _)| *v == opts.privacy).map_or("Public", |(_, l)| l);
+        let c = egui::ComboBox::from_id_salt("flickrPrivacy").selected_text(crate::i18n::tr(current)).show_ui(ui, |ui| {
+            for (v, l) in PRIVACY {
+                if ui.selectable_label(opts.privacy == *v, crate::i18n::tr(l)).clicked() {
+                    opts.privacy = v.to_string();
+                }
+            }
+        });
+        crate::widgets::register(ui.ctx(), "combo:flickrPrivacy", c.response.rect);
+    });
+    field(ui, "Album", |ui| {
+        let albums = app.flickr.albums.clone().unwrap_or_default();
+        let current = albums.iter().find(|(id, _, _)| *id == opts.album).map(|(_, title, _)| title.clone());
+        // an album that is gone since it was chosen: none
+        if current.is_none() && !opts.album.is_empty() && app.flickr.albums.is_some() {
+            opts.album.clear();
+        }
+        let none = crate::i18n::tr("None").to_string();
+        let new = crate::i18n::tr("New Album…").to_string();
+        let shown = if opts.new_album { new.clone() } else { current.unwrap_or(none.clone()) };
+        let c = egui::ComboBox::from_id_salt("flickrAlbum").width(220.0).selected_text(shown).show_ui(ui, |ui| {
+            if ui.selectable_label(!opts.new_album && opts.album.is_empty(), none).clicked() {
+                opts.album.clear();
+                opts.new_album = false;
+            }
+            let r = ui.selectable_label(opts.new_album, new);
+            crate::widgets::register(ui.ctx(), "item:flickrNewAlbum", r.rect);
+            if r.clicked() && !opts.new_album {
+                opts.album.clear();
+                opts.new_album = true;
+                // the name field takes the focus
+                ui.memory_mut(|m| m.request_focus(crate::text_field::id("field:flickrNewAlbum")));
+            }
+            if !albums.is_empty() {
+                ui.separator();
+            }
+            for (id, title, photos) in &albums {
+                let title = if title.trim().is_empty() { id.clone() } else { title.clone() };
+                if ui.selectable_label(!opts.new_album && opts.album == *id, title).on_hover_text(photos.to_string()).clicked() {
+                    opts.album = id.clone();
+                    opts.new_album = false;
+                }
+            }
+            if app.flickr.albums_loading && albums.is_empty() {
+                ui.add_enabled(false, egui::Label::new(crate::i18n::tr("Loading albums…")));
+            }
+        });
+        crate::widgets::register(ui.ctx(), "combo:flickrAlbum", c.response.rect);
+        if app.flickr.albums_loading {
+            ui.spinner();
+        }
+    });
+    if opts.new_album {
+        field(ui, "Album name", |ui| {
+            crate::text_field::TextField::singleline("field:flickrNewAlbum", &mut opts.new_album_title)
+                .hint(crate::i18n::tr("Name of the new album"))
+                .width(220.0)
+                .show(ui);
+        });
+        ui.label(
+            egui::RichText::new(crate::i18n::tr("Flickr makes the album with the first photo that goes up as its cover."))
+                .size(11.0)
+                .color(t.text_dim),
+        );
+    }
+    if let Some(e) = &app.flickr.albums_error {
+        ui.label(egui::RichText::new(format!("{} {e}", crate::i18n::tr("Couldn't read your Flickr albums:"))).size(11.0).color(t.caution));
+    }
+    for (value, id, label) in [
+        (&mut opts.tags, "flickrTags", "Keywords as tags"),
+        (&mut opts.description, "flickrDescription", "Caption as description"),
+        (&mut opts.remove_location, "flickrRemoveLocation", "Remove location info"),
+        (&mut opts.hidden, "flickrHidden", "Hide from public searches"),
+    ] {
+        let r = ui.checkbox(value, crate::i18n::tr(label));
+        crate::widgets::register(ui.ctx(), format!("check:{id}"), r.rect);
+    }
+    ui.label(
+        egui::RichText::new(crate::i18n::tr("Each photo goes up with its edits as a JPEG, titled with its title or else its file name."))
+            .size(11.0)
+            .color(t.text_dim),
+    );
+}
+
 fn field<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {

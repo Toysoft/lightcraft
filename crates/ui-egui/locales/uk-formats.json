@@ -244,5 +244,12 @@
   "not added to Apple Photos: {e}": "не додано до Apple Фото: {e}",
   "{n} added to Apple Photos album “{album}”": "Додано до альбому Apple Фото «{album}»: {n}",
   "{n} added to Apple Photos": "Додано до Apple Фото: {n}",
-  "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом"
+  "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом",
+  "Signed in as {name}": "Ви увійшли як {name}",
+  "Signed in to Flickr as {name}": "Ви увійшли у Flickr як {name}",
+  "Upload {n} photo{} to Flickr as {name}": "Завантажити у Flickr фото ({n}) як {name}{:.0}",
+  "Uploaded {ok} of {total} photo{} to Flickr": "Завантажено у Flickr фото: {ok} із {total}{:.0}",
+  " · {} not added to the album": " · не додано до альбому: {}",
+  " · the album couldn't be made: {}": " · не вдалося створити альбом: {}",
+  " · new album “{}”": " · новий альбом «{}»"
 }
