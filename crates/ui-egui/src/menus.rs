@@ -53,6 +53,7 @@ pub fn language_from_command(id: &str) -> Option<crate::i18n::Locale> {
 pub const UI_COMMANDS: &[UiCommand] = &[
     ("ui.dock", "Arrange Panel", None, ""),
     ("ui.dock.reset", "Reset Panel Layout", None, "Window"),
+    ("ui.dock.mobile", "Mobile Layout", None, "Window"),
     ("modelSetup.cancel", "Cancel Pending Photo Action", None, ""),
     ("view.photoGrid", "Photo Grid", None, "View"),
     ("view.squareGrid", "Square Grid", None, "View"),
@@ -339,8 +340,8 @@ fn theme_command(app: &mut LightcraftApp, p: &Value) -> Result<Value, String> {
 
 /// Handle UI commands; `None` means "not a UI command — send it to the engine".
 pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Result<Value, String>> {
-    if matches!(id, "ui.dock" | "ui.dock.reset") {
-        return Some(crate::docking::command(app, id == "ui.dock.reset", p));
+    if matches!(id, "ui.dock" | "ui.dock.reset" | "ui.dock.mobile") {
+        return Some(crate::docking::command(app, crate::docking::Arrangement::of(id), p));
     }
     if matches!(id, "library.inspectLightroom" | "library.importLightroom") {
         // the app's own context: a fresh one's repaints reach no window and its clock starts at zero

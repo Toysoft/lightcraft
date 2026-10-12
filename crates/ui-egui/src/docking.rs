@@ -1,7 +1,7 @@
 //! Application panel identities and persistence around the shared docking renderer.
 //! Document contents remain owned by their existing view implementations.
 
-use craft_ui::docking::{Action, DockArea, DockStyle, Layout, Location, Node, PanelLimits, Permissions, Placement, Zone};
+use craft_ui::docking::{Action, DockArea, DockStyle, Layout, Location, Node, PanelLimits, Permissions, Placement, StackEntry, Zone};
 use craft_ui::layout::{SplitAxis, SplitSize};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -88,7 +88,40 @@ impl Default for Workspace {
     }
 }
 
+/// Height of the mobile arrangement's bottom strip, in points. The canvas takes the rest of the
+/// window.
+const MOBILE_STRIP_HEIGHT: f32 = 260.0;
+
 impl Workspace {
+    /// The opt-in mobile arrangement: the photo fills the window, and the Library, Tools and
+    /// Presets regions are rows of one accordion along the bottom (`Node::Stack`) instead of the
+    /// permanent left and right columns of [`Workspace::default`]. A row's header opens and closes
+    /// it, and the renderer shares the strip's height between the open rows.
+    ///
+    /// Only [`command`] installs it (the `ui.dock.mobile` command), so a user who never invokes
+    /// that command sees no difference; `ui.dock.reset` is the way back to the desktop arrangement.
+    pub fn mobile() -> Self {
+        let row = |panel, open, height| StackEntry { panel, open, height: Some(height) };
+        Self {
+            layout: Layout {
+                root: Some(split(
+                    SplitAxis::Vertical,
+                    SplitSize::FixedSecond(MOBILE_STRIP_HEIGHT),
+                    tabs(Panel::Canvas),
+                    Node::Stack {
+                        entries: vec![
+                            row(Panel::Tools, true, 300.0),
+                            row(Panel::Presets, false, 260.0),
+                            row(Panel::Library, false, 300.0),
+                        ],
+                    },
+                )),
+                floating: Vec::new(),
+            },
+            hidden: Vec::new(),
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         self.layout.validate().map_err(|error| error.to_string())?;
         if !self.layout.contains(&Panel::Canvas) || self.hidden.len() > Panel::ALL.len() {
@@ -371,20 +404,53 @@ pub(crate) fn cancel_replaced_gesture(app: &crate::LightcraftApp, workspace: Opt
     }
 }
 
-pub fn command(app: &mut crate::LightcraftApp, reset: bool, params: &Value) -> Result<Value, String> {
-    command_impl(app, reset, params, false)
+/// Which arrangement a `ui.dock*` command installs beside the user's current workspace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Arrangement {
+    /// Keep the user's workspace and apply the command's own operation to it (`ui.dock`).
+    Current,
+    /// The desktop starting point: [`Workspace::default`] with the Library and Presets columns
+    /// closed, as in `ui.dock.reset`.
+    Reset,
+    /// The opt-in mobile arrangement ([`Workspace::mobile`]), as in `ui.dock.mobile`.
+    Mobile,
 }
 
-fn command_impl(app: &mut crate::LightcraftApp, reset: bool, params: &Value, renderer_action: bool) -> Result<Value, String> {
+impl Arrangement {
+    /// The arrangement a Dock command id selects. Any other id keeps the user's current workspace,
+    /// so an unknown id changes nothing.
+    pub fn of(id: &str) -> Self {
+        match id {
+            "ui.dock.reset" => Self::Reset,
+            "ui.dock.mobile" => Self::Mobile,
+            _ => Self::Current,
+        }
+    }
+}
+
+pub fn command(app: &mut crate::LightcraftApp, arrangement: Arrangement, params: &Value) -> Result<Value, String> {
+    command_impl(app, arrangement, params, false)
+}
+
+fn command_impl(app: &mut crate::LightcraftApp, arrangement: Arrangement, params: &Value, renderer_action: bool) -> Result<Value, String> {
     let mut workspace = app.ui.docking.clone().unwrap_or_else(|| from_ui(app));
-    if reset {
-        workspace = Workspace::default();
-        // The usual LightCraft starting workspace shows its current tool beside the photo.
-        workspace.set_visible(Panel::Library, false)?;
-        workspace.set_visible(Panel::Presets, false)?;
-    } else {
-        sync(&mut workspace, app)?;
-        workspace.command(params)?;
+    match arrangement {
+        Arrangement::Reset => {
+            workspace = Workspace::default();
+            // The usual LightCraft starting workspace shows its current tool beside the photo.
+            workspace.set_visible(Panel::Library, false)?;
+            workspace.set_visible(Panel::Presets, false)?;
+        }
+        // Validate before publishing: a rejected arrangement must leave the user's workspace alone
+        // rather than be installed here and then thrown away by the next render.
+        Arrangement::Mobile => {
+            workspace = Workspace::mobile();
+            workspace.validate()?;
+        }
+        Arrangement::Current => {
+            sync(&mut workspace, app)?;
+            workspace.command(params)?;
+        }
     }
     if !renderer_action {
         cancel_replaced_gesture(app, Some(&workspace));
@@ -483,7 +549,7 @@ pub fn show(app: &mut crate::LightcraftApp, ui: &mut egui::Ui) {
     for action in output.actions {
         if let Err(error) = serde_json::to_value(action)
             .map_err(|error| error.to_string())
-            .and_then(|action| command_impl(app, false, &json!({"action": action}), true))
+            .and_then(|action| command_impl(app, Arrangement::Current, &json!({"action": action}), true))
         {
             app.ui.toast = Some((format!("Panel move was not applied: {error}"), ui.input(|input| input.time) + 8.0, None));
         }
