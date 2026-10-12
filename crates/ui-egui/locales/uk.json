@@ -2156,5 +2156,11 @@
   "Destination library": "Бібліотека призначення",
   "Show in Library": "Показати в бібліотеці",
   "Lightroom catalogs import into the open library; no separate catalog folder is created.": "Каталоги Lightroom імпортуються у відкриту бібліотеку; окрема папка каталогу не створюється.",
-  "These photos are only in memory. Open a library on disk and import the catalog again to save them.": "Ці фотографії є лише в пам’яті. Відкрийте бібліотеку на диску та імпортуйте каталог повторно, щоб зберегти їх."
+  "These photos are only in memory. Open a library on disk and import the catalog again to save them.": "Ці фотографії є лише в пам’яті. Відкрийте бібліотеку на диску та імпортуйте каталог повторно, щоб зберегти їх.",
+  "Changing smart preview folder": "Зміна папки смарт-переглядів",
+  "Refreshing smart previews": "Оновлення смарт-переглядів",
+  "Smart preview folder changed. One source file could not be removed.": "Папку смарт-переглядів змінено. Не вдалося видалити один вихідний файл.",
+  "Smart preview folder changed.": "Папку смарт-переглядів змінено.",
+  "The old folder stays in use until copying finishes. Cancel keeps the old folder. Source cleanup cannot be cancelled after the folder changes.": "Стара папка використовується до завершення копіювання. Скасування зберігає стару папку. Після зміни папки видалення вихідних файлів скасувати неможливо.",
+  "Smart preview folder change cancelled. The old folder is still in use.": "Зміну папки смарт-переглядів скасовано. Стара папка й далі використовується."
 }

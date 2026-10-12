@@ -255,5 +255,7 @@
   "· {in_source} identical copies": "· {in_source} cópias idênticas",
   "{count} more warnings.": "Mais {count} avisos.",
   "{photos} catalog records processed; {collections} collections.": "{photos} registros do catálogo processados; {collections} coleções.",
-  "{missing} originals are missing. Their catalog records are available; use Find Missing Photos to relink them.": "{missing} originais estão ausentes. Seus registros no catálogo estão disponíveis; use Encontrar fotos ausentes para vinculá-los novamente."
+  "{missing} originals are missing. Their catalog records are available; use Find Missing Photos to relink them.": "{missing} originais estão ausentes. Seus registros no catálogo estão disponíveis; use Encontrar fotos ausentes para vinculá-los novamente.",
+  "Smart preview folder changed. {count} source files could not be removed.": "Pasta de visualizações inteligentes alterada. Não foi possível remover {count} arquivos de origem.",
+  "Smart preview folder change failed: {error}": "Falha ao alterar a pasta de visualizações inteligentes: {error}"
 }

@@ -1964,5 +1964,11 @@
   "These photos are only in memory. Open a library on disk and import the catalog again to save them.": "這些相片僅保存在記憶體中。請開啟磁碟上的圖庫並再次匯入目錄以儲存相片。",
   "Show in Library": "在圖庫中顯示",
   "Lightroom catalogs import into the open library; no separate catalog folder is created.": "Lightroom 目錄會匯入目前開啟的圖庫，不會建立獨立的目錄資料夾。",
-  "Destination library": "目標圖庫"
+  "Destination library": "目標圖庫",
+  "Changing smart preview folder": "正在變更智慧預覽資料夾",
+  "Smart preview folder changed. One source file could not be removed.": "已變更智慧預覽資料夾。無法刪除一個來源檔案。",
+  "Smart preview folder changed.": "已變更智慧預覽資料夾。",
+  "The old folder stays in use until copying finishes. Cancel keeps the old folder. Source cleanup cannot be cancelled after the folder changes.": "複製完成前仍使用原資料夾。取消會保留原資料夾。變更資料夾後，無法取消來源檔案清理。",
+  "Refreshing smart previews": "正在更新智慧預覽",
+  "Smart preview folder change cancelled. The old folder is still in use.": "已取消變更智慧預覽資料夾。仍在使用原資料夾。"
 }

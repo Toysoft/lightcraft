@@ -2002,5 +2002,11 @@
   "These photos are only in memory. Open a library on disk and import the catalog again to save them.": "这些照片仅保存在内存中。请打开磁盘上的图库并再次导入目录以保存照片。",
   "Show in Library": "在图库中显示",
   "Lightroom catalogs import into the open library; no separate catalog folder is created.": "Lightroom 目录会导入到当前打开的图库中，不会创建单独的目录文件夹。",
-  "Destination library": "目标图库"
+  "Destination library": "目标图库",
+  "Changing smart preview folder": "正在更改智能预览文件夹",
+  "Smart preview folder changed. One source file could not be removed.": "已更改智能预览文件夹。无法删除一个源文件。",
+  "Smart preview folder changed.": "已更改智能预览文件夹。",
+  "The old folder stays in use until copying finishes. Cancel keeps the old folder. Source cleanup cannot be cancelled after the folder changes.": "复制完成前仍使用原文件夹。取消会保留原文件夹。更改文件夹后，无法取消源文件清理。",
+  "Refreshing smart previews": "正在更新智能预览",
+  "Smart preview folder change cancelled. The old folder is still in use.": "已取消更改智能预览文件夹。仍在使用原文件夹。"
 }

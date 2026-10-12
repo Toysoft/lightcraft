@@ -2003,5 +2003,11 @@
   "These photos are only in memory. Open a library on disk and import the catalog again to save them.": "Estas fotos estão apenas na memória. Abra uma biblioteca no disco e importe o catálogo novamente para salvá-las.",
   "Show in Library": "Mostrar na biblioteca",
   "Lightroom catalogs import into the open library; no separate catalog folder is created.": "Os catálogos do Lightroom são importados para a biblioteca aberta; nenhuma pasta de catálogo separada é criada.",
-  "Destination library": "Biblioteca de destino"
+  "Destination library": "Biblioteca de destino",
+  "Changing smart preview folder": "Alterando a pasta de visualizações inteligentes",
+  "Smart preview folder changed. One source file could not be removed.": "Pasta de visualizações inteligentes alterada. Não foi possível remover um arquivo de origem.",
+  "Smart preview folder changed.": "Pasta de visualizações inteligentes alterada.",
+  "The old folder stays in use until copying finishes. Cancel keeps the old folder. Source cleanup cannot be cancelled after the folder changes.": "A pasta anterior continua em uso até o fim da cópia. Cancelar mantém a pasta anterior. A exclusão dos arquivos de origem não pode ser cancelada após a mudança de pasta.",
+  "Refreshing smart previews": "Atualizando visualizações inteligentes",
+  "Smart preview folder change cancelled. The old folder is still in use.": "Mudança da pasta de visualizações inteligentes cancelada. A pasta anterior continua em uso."
 }

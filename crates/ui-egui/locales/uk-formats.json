@@ -255,5 +255,7 @@
   "· {in_source} identical copies": "· ідентичних копій: {in_source}",
   "{count} more warnings.": "Інших попереджень: {count}.",
   "{photos} catalog records processed; {collections} collections.": "Оброблено записів каталогу: {photos}; колекцій: {collections}.",
-  "{missing} originals are missing. Their catalog records are available; use Find Missing Photos to relink them.": "Не знайдено оригінали: {missing}. Їхні записи каталогу доступні; скористайтеся пошуком відсутніх фотографій, щоб відновити посилання."
+  "{missing} originals are missing. Their catalog records are available; use Find Missing Photos to relink them.": "Не знайдено оригінали: {missing}. Їхні записи каталогу доступні; скористайтеся пошуком відсутніх фотографій, щоб відновити посилання.",
+  "Smart preview folder changed. {count} source files could not be removed.": "Папку смарт-переглядів змінено. Кількість вихідних файлів, які не вдалося видалити: {count}.",
+  "Smart preview folder change failed: {error}": "Не вдалося змінити папку смарт-переглядів: {error}"
 }

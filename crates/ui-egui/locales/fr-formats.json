@@ -255,5 +255,7 @@
   "· {in_source} identical copies": "· {in_source} copies identiques",
   "{count} more warnings.": "{count} avertissements supplémentaires.",
   "{photos} catalog records processed; {collections} collections.": "{photos} entrées du catalogue traitées ; {collections} collections.",
-  "{missing} originals are missing. Their catalog records are available; use Find Missing Photos to relink them.": "{missing} originaux sont manquants. Leurs entrées de catalogue sont disponibles ; utilisez Rechercher les photos manquantes pour rétablir les liens."
+  "{missing} originals are missing. Their catalog records are available; use Find Missing Photos to relink them.": "{missing} originaux sont manquants. Leurs entrées de catalogue sont disponibles ; utilisez Rechercher les photos manquantes pour rétablir les liens.",
+  "Smart preview folder changed. {count} source files could not be removed.": "Dossier des aperçus dynamiques modifié. {count} fichiers sources n'ont pas pu être supprimés.",
+  "Smart preview folder change failed: {error}": "Échec du changement du dossier des aperçus dynamiques : {error}"
 }
