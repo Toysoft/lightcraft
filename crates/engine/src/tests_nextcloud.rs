@@ -233,6 +233,12 @@ fn sign_in_row(s: &Session) -> (&'static str, String, bool) {
 
 const WAITING: &str = "Waiting for Nextcloud approval…";
 
+/// What `nextcloud.preferences` says about sign-in `task`.
+fn sign_in_outcome(s: &mut Session, task: &Value) -> Value {
+    let prefs = s.execute("nextcloud.preferences", &json!({})).unwrap();
+    prefs["signIns"].as_array().unwrap().iter().find(|o| o["task"] == *task).cloned().unwrap_or_else(|| panic!("no sign-in {task}: {prefs}"))
+}
+
 #[test]
 fn plain_sign_in_adds_the_account() {
     let fake = FakeServer::start();
@@ -242,12 +248,15 @@ fn plain_sign_in_adds_the_account() {
     assert_eq!(r["state"], "waiting", "{r}");
     assert!(r["loginUrl"].as_str().unwrap().starts_with(&fake.url()), "{r}");
     assert_eq!(sign_in_row(&s), ("nextcloud", WAITING.to_string(), true));
+    assert_eq!(r["task"], s.activity.list()[0].id, "the reply names the activity row");
+    assert_eq!(sign_in_outcome(&mut s, &r["task"]), json!({"task": r["task"], "state": "waiting"}));
     assert!(s.remote.accounts().is_empty(), "not added before approval");
 
     fake.approve_login();
     wait_until("the sign-in never finished", || s.activity.list().is_empty());
     let key = fake.account().key();
     assert_eq!(keys(&s), [(key.clone(), AccountState::SignedIn)]);
+    assert_eq!(sign_in_outcome(&mut s, &r["task"]), json!({"task": r["task"], "state": "signedIn", "account": key}));
     assert_eq!(creds.get(&fake.account()).unwrap().as_deref(), Some(FakeServer::PASSWORD));
     assert!(!r.to_string().contains(FakeServer::PASSWORD), "{r}");
     let file = std::fs::read_to_string(d.join("nextcloud.json")).unwrap();
@@ -316,13 +325,30 @@ fn cancelling_the_row_stops_sign_in() {
     let fake = FakeServer::start();
     let d = temp("cancel-sign-in");
     let (mut s, creds) = nc_session(&d);
-    s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap();
+    let r = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap();
     let id = s.activity.list()[0].id;
     s.activity.cancel(id).unwrap();
     // the row goes when the sign-in thread ends
     wait_until("the row stayed", || s.activity.list().is_empty());
     assert!(s.remote.accounts().is_empty(), "a cancelled sign-in adds nothing");
     assert_eq!(creds.get(&fake.account()).unwrap(), None);
+    assert_eq!(sign_in_outcome(&mut s, &r["task"])["state"], "cancelled");
+}
+
+/// Nobody approved before craft's deadline: told apart from a cancel.
+#[test]
+fn an_unapproved_sign_in_times_out() {
+    let fake = FakeServer::start();
+    let d = temp("timeout-sign-in");
+    let (mut s, _) = nc_session(&d);
+    s.remote.expire_sign_ins.store(true, std::sync::atomic::Ordering::Relaxed);
+    let r = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap();
+    assert_eq!(r["state"], "waiting", "{r}");
+    wait_until("the row stayed", || s.activity.list().is_empty());
+    let outcome = sign_in_outcome(&mut s, &r["task"]);
+    assert_eq!(outcome["state"], "timedOut", "{outcome}");
+    assert!(outcome["error"].as_str().unwrap().contains("in time"), "{outcome}");
+    assert!(s.remote.accounts().is_empty());
 }
 
 #[test]
@@ -385,14 +411,24 @@ fn no_keyring_is_an_actionable_error() {
     assert!(e.contains("The OS keyring is locked"), "{e}");
     assert!(s.remote.accounts().is_empty() && s.activity.list().is_empty());
 
+    // without waiting, the failure comes back through nextcloud.preferences
+    let r = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap();
+    assert_eq!(r["state"], "waiting", "{r}");
+    wait_until("the row stayed", || s.activity.list().is_empty());
+    let outcome = sign_in_outcome(&mut s, &r["task"]);
+    assert_eq!(outcome["state"], "failed", "{outcome}");
+    assert!(outcome["error"].as_str().unwrap().contains("The OS keyring is locked"), "{outcome}");
+    assert!(!outcome.to_string().contains(FakeServer::PASSWORD), "{outcome}");
+    assert!(s.remote.accounts().is_empty());
+
     s.remote.configure(RemoteConfig { credentials: None, ..config });
     let e = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap_err().to_string();
     assert!(e.contains("This build can't store Nextcloud passwords (no OS keyring support)"), "{e}");
     assert!(s.activity.list().is_empty());
 }
 
-/// R8: a changed certificate signs the account out like a revoked password; signing in again
-/// re-trusts it (it's never re-pinned silently).
+/// R8: a changed certificate signs the account out like a revoked password (see
+/// `sign_in_again_asks_to_trust_a_changed_certificate` for signing it back in).
 #[test]
 fn certificate_change_signs_the_account_out() {
     let d = temp("cert-changed");
@@ -404,4 +440,34 @@ fn certificate_change_signs_the_account_out() {
     s.remote.note_error(key, &craft_nextcloud::Error::CertificateChanged);
     assert_eq!(keys(&s)[0].1, AccountState::SignedOut);
     assert!(s.remote.client(key).unwrap_err().contains("again"));
+}
+
+/// R10: the server's certificate changed since it was pinned: signing in again shows the new
+/// fingerprint (`changed`), and only a `trust` naming it re-pins the account.
+#[test]
+fn sign_in_again_asks_to_trust_a_changed_certificate() {
+    let fake = FakeServer::start_tls(crate::remote::provider());
+    let fp = fake.fingerprint().unwrap();
+    let old = craft_nextcloud::Fingerprint([0xAB; 32]);
+    let d = temp("re-trust");
+    write_settings(&d, &[Account { trust: Some(old), ..fake.account() }]);
+    let (mut s, _) = nc_session(&d);
+    let key = fake.account().key();
+
+    let r = s.execute("nextcloud.signIn", &json!({"account": key})).unwrap();
+    assert_eq!(r, json!({"state": "needsTrust", "fingerprint": fp.to_string(), "changed": true}));
+    assert!(s.activity.list().is_empty());
+    assert_eq!(s.remote.accounts()[0].0.trust, Some(old), "nothing re-pinned yet");
+
+    let e = s.execute("nextcloud.signIn", &json!({"account": key, "trust": old.to_string()})).unwrap_err().to_string();
+    assert!(e.contains("The certificate's fingerprint changed; check it with the server's admin"), "{e}");
+    let e = s.execute("nextcloud.signIn", &json!({"account": key, "trust": "nope"})).unwrap_err().to_string();
+    assert!(e.contains("trust"), "{e}");
+
+    let r = s.execute("nextcloud.signIn", &json!({"account": key, "trust": fp.to_string()})).unwrap();
+    assert_eq!(r["state"], "waiting", "{r}");
+    fake.approve_login();
+    wait_until("the sign-in never finished", || s.activity.list().is_empty());
+    assert_eq!(keys(&s), [(key.clone(), AccountState::SignedIn)]);
+    assert_eq!(s.remote.accounts()[0].0.trust, Some(fp), "pinned to the confirmed certificate");
 }

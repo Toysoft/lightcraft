@@ -7,9 +7,10 @@
 //! means no accounts, never an error.
 //!
 //! Signing in ([`Remote::sign_in`]) is Login Flow v2: the user approves LightCraft in a browser while a
-//! thread asks the server every 2 s, shown as a cancellable `nextcloud` activity row.
+//! thread asks the server every 2 s, shown as a cancellable `nextcloud` activity row. How the last few
+//! sign-ins went is kept for the UI ([`Remote::sign_ins`]).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -32,6 +33,8 @@ const DEFAULT_CACHE_BUDGET_MB: u64 = 20_000;
 const UNREACHABLE_FOR: Duration = Duration::from_secs(30);
 /// How often a waiting sign-in asks the server whether the user approved it.
 const POLL_EVERY: Duration = Duration::from_secs(2);
+/// How many sign-in outcomes are kept ([`Remote::sign_ins`]).
+const MAX_SIGN_INS: usize = 8;
 
 /// Where app passwords are kept (the OS keyring in the apps; memory in tests).
 pub trait CredentialStore: Send + Sync {
@@ -75,6 +78,33 @@ pub enum AccountState {
     /// The last request couldn't reach the server (for [`UNREACHABLE_FOR`]).
     Unreachable,
     SigningIn,
+}
+
+/// Where one sign-in stands ([`SignInOutcome::state`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SignInProgress {
+    /// Waiting for the user to approve it in the browser.
+    Waiting,
+    SignedIn,
+    Failed,
+    /// Cancelled from its activity row.
+    Cancelled,
+    /// Not approved before craft's deadline (20 minutes).
+    TimedOut,
+}
+
+/// How a sign-in went, by its activity row's id (`task` in the `waiting` reply).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SignInOutcome {
+    pub task: u64,
+    pub state: SignInProgress,
+    /// The account signed in, or being signed in again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// Why it didn't sign in, for the user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -141,17 +171,32 @@ fn no_store() -> String {
     "This build can't store Nextcloud passwords (no OS keyring support)".into()
 }
 
+/// A sign-in that ended other than signed in: how, and why in words for the user.
+type SignInEnd = (SignInProgress, String);
+
 /// The session's Nextcloud accounts. Shared (`Arc`) with the threads that load remote photos.
 pub struct Remote {
     /// Sign-ins and downloads show their rows here.
     activity: Activity,
     inner: Mutex<Inner>,
+    /// The last [`MAX_SIGN_INS`] sign-ins, oldest first. Kept across [`Remote::configure`]: they are
+    /// this session's.
+    sign_ins: Mutex<VecDeque<SignInOutcome>>,
+    /// Sign-ins started from now on are past craft's deadline at once (tests of the timeout).
+    #[cfg(test)]
+    pub(crate) expire_sign_ins: AtomicBool,
 }
 
 impl Remote {
     /// No accounts and nowhere to keep any until [`Remote::configure`].
     pub fn new(activity: Activity) -> Remote {
-        Remote { activity, inner: Mutex::default() }
+        Remote {
+            activity,
+            inner: Mutex::default(),
+            sign_ins: Mutex::default(),
+            #[cfg(test)]
+            expire_sign_ins: AtomicBool::new(false),
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -210,8 +255,9 @@ impl Remote {
     }
 
     /// What a failed request says about its account: a rejected password or a changed certificate
-    /// signs it out (requests short-circuit until it signs in again, which re-trusts the certificate;
-    /// it's never re-pinned silently), a connection failure marks it unreachable for 30 s.
+    /// signs it out (requests short-circuit until it signs in again; for a changed certificate that
+    /// answers `needsTrust` with the new fingerprint, re-pinned only once the user confirms it with
+    /// `trust`), a connection failure marks it unreachable for 30 s.
     /// The one place errors change an account's state.
     pub(crate) fn note_error(&self, account_key: &str, e: &Error) {
         let mut inner = self.lock();
@@ -251,20 +297,30 @@ impl Remote {
     /// here. The first request runs here; it answers `{"state": "needsTrust", "fingerprint"}` for an
     /// untrusted certificate unless `trust` is that fingerprint (a different one is an error). Then a
     /// thread waits for the approval, holding a cancellable activity row, and this returns
-    /// `{"state": "waiting", "loginUrl"}`; with `wait` it returns `{"state": "signedIn", "account"}`
-    /// once approved (or the failure).
+    /// `{"state": "waiting", "loginUrl", "task"}` (`task` = the row's id, see [`Remote::sign_ins`]);
+    /// with `wait` it returns `{"state": "signedIn", "account"}` once approved (or the failure).
     pub fn sign_in(self: &Arc<Self>, server: &str, trust: Option<Fingerprint>, wait: bool) -> Result<Value, String> {
-        self.start_sign_in(server, trust, None, wait)
+        self.start_sign_in(server, trust, None, None, wait)
     }
 
-    /// [`Remote::sign_in`] again for account `key`, with its server and trusted certificate. It is
+    /// [`Remote::sign_in`] again for account `key`, with its server and pinned certificate. A
+    /// certificate other than the pinned one answers `{"state": "needsTrust", "fingerprint",
+    /// "changed": true}`; `trust` naming it re-pins the account once approved. The account is
     /// `SigningIn` while the sign-in waits, and signed out if it fails or is cancelled.
-    pub fn sign_in_again(self: &Arc<Self>, key: &str, wait: bool) -> Result<Value, String> {
+    pub fn sign_in_again(self: &Arc<Self>, key: &str, trust: Option<Fingerprint>, wait: bool) -> Result<Value, String> {
         let account = self.lock().account(key).cloned().ok_or_else(|| unknown(key))?;
-        self.start_sign_in(&account.server, account.trust, Some(key), wait)
+        self.start_sign_in(&account.server, trust, account.trust, Some(key), wait)
     }
 
-    fn start_sign_in(self: &Arc<Self>, server: &str, trust: Option<Fingerprint>, again: Option<&str>, wait: bool) -> Result<Value, String> {
+    /// `trust`: the fingerprint the user confirmed for this call; `pinned`: the account's.
+    fn start_sign_in(
+        self: &Arc<Self>,
+        server: &str,
+        trust: Option<Fingerprint>,
+        pinned: Option<Fingerprint>,
+        again: Option<&str>,
+        wait: bool,
+    ) -> Result<Value, String> {
         if self.lock().config.credentials.is_none() {
             return Err(no_store());
         }
@@ -272,13 +328,19 @@ impl Remote {
         // `trust`, and the certificate it then finds must be the one the user saw.
         let mut sign_in = SignIn::start(server, provider());
         if let SignInState::NeedsTrust { fingerprint } = *sign_in.state() {
-            match trust {
-                None => return Ok(json!({"state": "needsTrust", "fingerprint": fingerprint.to_string()})),
-                Some(t) if t != fingerprint => return Err("The certificate's fingerprint changed; check it with the server's admin".into()),
-                Some(_) => {
-                    sign_in.confirm_trust(true);
-                }
+            if trust.or(pinned) == Some(fingerprint) {
+                sign_in.confirm_trust(true);
+            } else if trust.is_some() {
+                return Err("The certificate's fingerprint changed; check it with the server's admin".into());
+            } else if pinned.is_some() {
+                return Ok(json!({"state": "needsTrust", "fingerprint": fingerprint.to_string(), "changed": true}));
+            } else {
+                return Ok(json!({"state": "needsTrust", "fingerprint": fingerprint.to_string()}));
             }
+        }
+        #[cfg(test)]
+        if self.expire_sign_ins.load(Ordering::Relaxed) {
+            sign_in.set_deadline_for_test(Instant::now());
         }
         let login_url = match sign_in.state() {
             SignInState::Waiting { login_url } => login_url.clone(),
@@ -288,12 +350,14 @@ impl Remote {
         };
         let cancel = Arc::new(AtomicBool::new(false));
         let task = self.activity.start("nextcloud", "Waiting for Nextcloud approval…", Cancel::Flag(cancel.clone()));
+        let id = task.id();
         let again = again.map(str::to_string);
         if let Some(key) = &again {
             self.set_state_of(key, |_| true, AccountState::SigningIn);
         }
+        self.note_sign_in(SignInOutcome { task: id, state: SignInProgress::Waiting, account: again.clone(), error: None });
         if wait {
-            let key = self.wait_for_approval(sign_in, &cancel, again.as_deref())?;
+            let key = self.wait_for_approval(id, sign_in, &cancel, again.as_deref())?;
             return Ok(json!({"state": "signedIn", "account": key}));
         }
         let remote = self.clone();
@@ -303,45 +367,83 @@ impl Remote {
             .spawn(move || {
                 // the row goes when the thread ends, however it ends
                 let _task = task;
-                if let Err(e) = remote.wait_for_approval(sign_in, &cancel, thread_again.as_deref()) {
+                if let Err(e) = remote.wait_for_approval(id, sign_in, &cancel, thread_again.as_deref()) {
                     log::warn!("Nextcloud sign-in: {e}");
                 }
             })
             .map_err(|e| {
-                if let Some(key) = &again {
-                    self.set_state_of(key, |s| s == AccountState::SigningIn, AccountState::SignedOut);
-                }
-                format!("could not start the sign-in: {e}")
+                let e = format!("could not start the sign-in: {e}");
+                let _ = self.end_sign_in(id, again.as_deref(), Err((SignInProgress::Failed, e.clone())));
+                e
             })?;
-        Ok(json!({"state": "waiting", "loginUrl": login_url}))
+        Ok(json!({"state": "waiting", "loginUrl": login_url, "task": id}))
     }
 
     /// Ask every 2 s until the user approves (then keep the account), the sign-in fails or times
-    /// out, or `cancel` is set. An `again` account still signing in at the end is signed out.
+    /// out, or `cancel` is set; then [`Remote::end_sign_in`].
     ///
     /// Everything it changes goes through `Remote` as configured *then*: after a
     /// [`Remote::configure`] meanwhile, an approved account joins the new settings and a forgotten
     /// `SigningIn` state is left alone.
-    fn wait_for_approval(&self, mut sign_in: SignIn, cancel: &AtomicBool, again: Option<&str>) -> Result<String, String> {
-        let result = loop {
+    fn wait_for_approval(&self, task: u64, mut sign_in: SignIn, cancel: &AtomicBool, again: Option<&str>) -> Result<String, String> {
+        let cancelled = || (SignInProgress::Cancelled, Error::Cancelled.to_string());
+        let ended = loop {
             let asked = Instant::now();
             while asked.elapsed() < POLL_EVERY && !cancel.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(50));
             }
             if cancel.load(Ordering::Relaxed) {
-                break Err(Error::Cancelled.to_string());
+                break Err(cancelled());
             }
             match sign_in.poll() {
                 SignInState::Waiting { .. } => {}
-                SignInState::Done { account, app_password } => break self.add_signed_in(account.clone(), app_password),
-                SignInState::Failed(e) => break Err(e.to_string()),
-                SignInState::NeedsTrust { .. } => break Err(Error::Malformed("unexpected sign-in state".into()).to_string()),
+                SignInState::Done { account, app_password } => {
+                    break self.add_signed_in(account.clone(), app_password).map_err(|e| (SignInProgress::Failed, e));
+                }
+                // craft gives up with `Cancelled` at its deadline; only the row's flag is a user's cancel
+                SignInState::Failed(Error::Cancelled) if cancel.load(Ordering::Relaxed) => break Err(cancelled()),
+                SignInState::Failed(Error::Cancelled) => {
+                    break Err((SignInProgress::TimedOut, "The sign-in wasn't approved in time; start it again".into()));
+                }
+                SignInState::Failed(e) => break Err((SignInProgress::Failed, e.to_string())),
+                SignInState::NeedsTrust { .. } => {
+                    break Err((SignInProgress::Failed, Error::Malformed("unexpected sign-in state".into()).to_string()));
+                }
             }
         };
+        self.end_sign_in(task, again, ended)
+    }
+
+    /// Note how sign-in `task` ended, and sign an `again` account still signing in out.
+    fn end_sign_in(&self, task: u64, again: Option<&str>, ended: Result<String, SignInEnd>) -> Result<String, String> {
         if let Some(key) = again {
             self.set_state_of(key, |s| s == AccountState::SigningIn, AccountState::SignedOut);
         }
-        result
+        let outcome = match &ended {
+            Ok(key) => SignInOutcome { task, state: SignInProgress::SignedIn, account: Some(key.clone()), error: None },
+            Err((state, e)) => SignInOutcome { task, state: *state, account: again.map(str::to_string), error: Some(e.clone()) },
+        };
+        self.note_sign_in(outcome);
+        ended.map_err(|(_, e)| e)
+    }
+
+    /// Keep `outcome`, replacing the one for its task; the oldest goes past [`MAX_SIGN_INS`].
+    fn note_sign_in(&self, outcome: SignInOutcome) {
+        let mut kept = self.sign_ins.lock().unwrap_or_else(PoisonError::into_inner);
+        match kept.iter_mut().find(|o| o.task == outcome.task) {
+            Some(o) => *o = outcome,
+            None => {
+                kept.push_back(outcome);
+                if kept.len() > MAX_SIGN_INS {
+                    kept.pop_front();
+                }
+            }
+        }
+    }
+
+    /// How the last 8 sign-ins went (or stand), oldest first.
+    pub fn sign_ins(&self) -> Vec<SignInOutcome> {
+        self.sign_ins.lock().unwrap_or_else(PoisonError::into_inner).iter().cloned().collect()
     }
 
     /// An approved sign-in: the password goes to the store, the account (with its trusted
@@ -396,6 +498,18 @@ pub(crate) fn provider() -> Arc<CryptoProvider> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keeps_the_last_eight_sign_ins() {
+        let r = Remote::new(Activity::default());
+        for task in 1..=10 {
+            r.note_sign_in(SignInOutcome { task, state: SignInProgress::Waiting, account: None, error: None });
+        }
+        r.note_sign_in(SignInOutcome { task: 9, state: SignInProgress::SignedIn, account: Some("a@b".into()), error: None });
+        let kept = r.sign_ins();
+        assert_eq!(kept.iter().map(|o| o.task).collect::<Vec<_>>(), [3, 4, 5, 6, 7, 8, 9, 10]);
+        assert_eq!(kept[6].state, SignInProgress::SignedIn, "updated in place");
+    }
 
     #[test]
     fn unreachable_lasts_thirty_seconds() {
