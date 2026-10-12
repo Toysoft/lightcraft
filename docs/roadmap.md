@@ -1,6 +1,6 @@
 # Roadmap: milestones, current focus and what's next
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; milestones moved here from ROADMAP.md, focus re-ranked after the 2026-10-10 re-measure) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Look parity risk: the default raw response is measured — tone and colour — and its tone model ships as process V2) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 Forward-looking plan. The summary with the headline numbers is [ROADMAP.md](../ROADMAP.md); the
 ranked shortfalls are [gaps.md](gaps.md); the numbers come from [target-app-parity.md](target-app-parity.md).
@@ -90,9 +90,12 @@ calibration: M0–M13 took ≈ 25 active hours against an estimate of ≈ 110–
 - **Raw-format sources:** decoders are written from prose format descriptions (even ones published
   alongside GPL code); decoder source is never read (decided 2026-10-05). Still open:
   freedom-to-operate review for local Laplacian filters, PatchMatch and HEVC (HEIC).
-- **Look parity** with Adobe's default rendering is tuned by eye until the fidelity suite exists.
-  Retuning changes existing edits, so it ships as a new process version
-  ([process-versions.md](process-versions.md)).
+- **Look parity** with Adobe's default rendering is measured for the default raw response — tone
+  *and* colour, against Lightroom reference renders kept only locally (LR-BEHAV-RENDER-FIDELITY).
+  The measured tone model ships as process **V2** ([process-versions.md](process-versions.md)), so
+  retuning it changes only new photos: existing edits stay on V1 and keep their look until they are
+  updated. Every other slider's response, and the presets, are still tuned by eye until the fidelity
+  suite covers them.
 
 ## Design notes kept from the old ROADMAP
 
@@ -108,6 +111,7 @@ calibration: M0–M13 took ≈ 25 active hours against an estimate of ≈ 110–
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Look parity risk updated: the default raw response is measured (tone + colour) and its tone model ships as process V2; other sliders and presets still by eye |
 | 2026-10-10 | minor | Beta hours 340–600; full ready ~59% in the gate note |
 | 2026-10-10 | minor | Added the Alpha gate table (core-workflow gate from the revised standard): passes, stays alpha |
 | 2026-10-10 | major | Created: milestones moved from ROADMAP.md (statuses refreshed: M3 ✅, M11 / M12 / M15 detail), current focus re-ranked toward beta, risks and design notes kept |

@@ -207,6 +207,9 @@ pub(crate) struct Prepared {
     pub chroma_blur: Option<Arc<Rgb32f>>,
     /// Airlight of `dark` (before exposure).
     pub air: f32,
+    /// Per-photo scale on positive Whites ([`tone::whites_scale`]); 1.0 unless the frame's
+    /// highlight level is known (a raw, with a positive Whites set — see [`Plan::whites_scale`]).
+    pub whites_scale: f32,
     pub masks: Vec<masks::Evaluated>,
     /// Output pixels per unit of the source long edge.
     pub px_per_long: f64,
@@ -371,6 +374,9 @@ pub struct Plan<'a> {
     pub eyes: Vec<redeye::EyeK>,
     /// The whole frame's dehaze airlight, for a windowed render (which can't see the whole frame).
     pub fixed_air: Option<f32>,
+    /// The per-photo scale on positive Whites, from the whole frame's highlight level
+    /// ([`tone::whites_scale`]) — 1.0 unless this is a raw with a positive Whites set.
+    pub whites_scale: f32,
     /// A windowed render works on a larger window when spots reach into it (see
     /// [`spots::window_for_reads`]); this is the requested window inside the rendered one, which
     /// the result is cut to.
@@ -403,6 +409,26 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
     let (full_w, full_h) = frame.fit(req.max_w, req.max_h);
     // sizes and scale are those of the whole output; a window only narrows what is drawn
     let px_per_long = frame.px_per_long(full_w);
+    // Positive Whites is per-photo from V2 on (see [`tone::whites_scale`]), so the frame's
+    // highlight level is measured from a small render of the *whole* frame -- which a window
+    // cannot see, and which must not depend on the Whites value it scales. Whites at 0 or below
+    // has no per-photo term at all, so there is nothing to measure and nothing to pay for; V1's
+    // Whites is a fixed curve, so it has nothing to measure either.
+    let whites_scale = if s.process.process().is_measured_tone() && info.raw && s.light.whites > 0.0 {
+        let k = (AIRLIGHT_PROXY_EDGE as f64 / full_w.max(full_h) as f64).min(1.0);
+        let (pw, ph) = (((full_w as f64 * k).round() as usize).max(1), ((full_h as f64 * k).round() as usize).max(1));
+        let p99 = local::frame_highlight(src, info, s, &frame, pw, ph);
+        let scale = tone::whites_scale(p99);
+        // The coefficient table is fitted against this statistic, so being able to read what the
+        // pipeline actually measured is the difference between a calibrated model and one applied
+        // at the wrong amplitude -- which is how the first attempt at this failed.
+        if whites_debug() {
+            eprintln!("[whites] highlight p99 {p99:.4} -> scale {scale:.4} (whites {}, proxy {pw}x{ph})", s.light.whites);
+        }
+        scale
+    } else {
+        1.0
+    };
     let mut fixed_air = None;
     let mut keep = None;
     let (frame, w, h) = match req.window {
@@ -439,7 +465,7 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         src_long,
     ));
     let lin_key = hash_of((pre_nr_key, [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits)));
-    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
+    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, whites_scale, keep, mattes: info.mattes.clone() }
 }
 
 /// Whether the scene-linear stage needs work only the CPU does (defringe, spot removal).
@@ -572,6 +598,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
     if let Some(a) = plan.fixed_air {
         prep.air = a;
     }
+    prep.whites_scale = plan.whites_scale;
     lap("prepare", &mut t);
     if let Some((a, c)) = shared {
         c.put(CacheEntry { src: a.clone(), geo, sampled, lin: Some((lin_key, lin)), planes });
@@ -664,6 +691,12 @@ pub(crate) fn is_bw(s: &DevelopSettings) -> bool {
 pub fn profiling() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LIGHTCRAFT_PROFILE").is_some())
+}
+
+/// Whether `LIGHTCRAFT_WHITES` is set: print the measured Whites statistic to stderr.
+fn whites_debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LIGHTCRAFT_WHITES").is_some())
 }
 
 /// Run `f`, printing its duration under `LIGHTCRAFT_PROFILE`.

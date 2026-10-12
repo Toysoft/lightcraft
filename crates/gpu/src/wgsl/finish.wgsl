@@ -31,6 +31,23 @@ fn chroma_scale(o: f32) -> f32 {
     return a + (b - a) * t;
 }
 
+// The finish stage's Blacks curve (`lightcraft_pipeline::tone::Blacks`): `t` is a black point that
+// only exists below the shadows (a positive Blacks is anchored at 0), `p` its curvature.
+fn blacks_apply(x: f32, t: f32, p: f32) -> f32 {
+    if (!(x > 0.0)) {
+        return 0.0;
+    }
+    let u = clamp((x - t) / (1.0 - t), 0.0, 1.0);
+    if (p == 1.0) {
+        return u;
+    }
+    return pow(u, p);
+}
+
+fn blacks_apply_rgb(v: vec3<f32>, t: f32, p: f32) -> vec3<f32> {
+    return vec3<f32>(blacks_apply(v.x, t, p), blacks_apply(v.y, t, p), blacks_apply(v.z, t, p));
+}
+
 fn encode_srgb(v: f32) -> f32 {
     let o = pu(F_SRGB_OFF);
     let f = clamp(v, 0.0, 1.0) * f32(SRGB_N);
@@ -406,11 +423,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         c = calibrate(c);
     }
 
-    // --- tone map on luminance, highlight desaturation
+    // --- tone map, highlight desaturation
+    // The default raw curve acts on the channels like the reference's does; a camera look, fitted
+    // as a whole-image curve, stays on luminance (see `ToneMap::per_channel`).
     let yl = lum2020(c);
     let o = tone_apply(yl);
     var d = vec3<f32>(0.0);
-    if (yl > 1e-9) {
+    if (pu(F_PER_CHANNEL) != 0u) {
+        d = vec3<f32>(tone_apply(c.x), tone_apply(c.y), tone_apply(c.z));
+    } else if (yl > 1e-9) {
         d = c * o / yl;
     }
     let k = chroma_scale(o);
@@ -421,6 +442,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (mx > 1.0) {
         let t = clamp((mx - 1.0) / max(mx - o, 1e-6), 0.0, 1.0);
         d = d + (o - d) * t;
+    }
+
+    // --- blacks (per channel, over the tone map; `d` is in 0..1 by now)
+    if (pu(F_BLACKS) != 0u) {
+        let bt = pf(F_BLACKS_T);
+        let bp = pf(F_BLACKS_P);
+        let ba = pf(F_BLACKS_A);
+        let pch = blacks_apply_rgb(d, bt, bp);
+        if (ba < 1.0) {
+            let y = lum2020(d);
+            let g = select(0.0, blacks_apply(y, bt, bp) / y, y > 1e-9);
+            let lum = d * g;
+            d = lum + (pch - lum) * ba;
+        } else {
+            d = pch;
+        }
     }
 
     // --- colour

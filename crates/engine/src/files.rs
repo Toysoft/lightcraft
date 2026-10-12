@@ -595,6 +595,14 @@ fn matte_kind(name: &str) -> Option<lightcraft_pipeline::masks::MatteKind> {
 /// A DNG `ProfileToneCurve` (linear in, linear out, 1.0 = white after exposure compensation) as the
 /// finish stage's camera tone curve: 32 knots, log-spaced over 12 stops below white; above white
 /// the camera tone's shoulder continues it.
+///
+/// The curve carries **no chroma curve**. It is the file's own and acts on the reference's
+/// *channels*, so mapping luminance here does lose colourfulness the reference keeps — but both
+/// ways of putting it back overshoot on measured files. On `ProfileToneCurve` DNGs at neutral
+/// neutral (Adobe Standard, 1200 px) the bare luminance map reads ΔE 5.5 and 4.9; compositing the
+/// default curve's chroma curve over it reads 7.8 and 7.9, and applying the curve per channel
+/// instead reads 7.9 and 8.4. The reference sits *under* a luminance map on these files, so the
+/// residual is not in the tone stage and no constant fitted to the default curve can repair it.
 pub(crate) fn dng_tone_curve(curve: &lightcraft_raw::profile::ToneCurve) -> Option<lightcraft_pipeline::tone::CameraTone> {
     let knots: [[f32; 2]; 32] = std::array::from_fn(|i| {
         let x = 2f32.powf(-12.0 + 12.0 * i as f32 / 31.0);
@@ -1285,6 +1293,12 @@ mod tests {
         assert!((0.8..1.1).contains(&(mean(&after) / mean(&before))), "{} vs {}", mean(&after), mean(&before));
         let tone = info.camera_tone.expect("the DNG tone curve becomes the camera tone");
         assert!((tone.apply(0.18) - 0.3).abs() < 0.01, "{}", tone.apply(0.18));
+        // The profile curve is the reference's own and acts on its channels, but this path maps
+        // luminance, and every chroma curve we can put back over it overshoots the reference on
+        // measured files (see `dng_tone_curve`) — so the file's tone carries none, and it must not
+        // silently grow one again. A chroma curve here cost two measured files 1.9 and
+        // 2.9 ΔE at neutral against Lightroom.
+        assert!(tone.chroma().iter().all(|k| *k == 1.0), "camera tone has a chroma curve: {:?}", tone.chroma());
         // a look table alone changes the render too (applied after exposure)
         raw.color.profile = ProfileLook {
             look_table: Some(HsvTable { hue_divisions: 1, sat_divisions: 2, val_divisions: 1, data: vec![[0.0, 1.0, 0.5]; 2], srgb_value: false }),
