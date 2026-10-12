@@ -316,5 +316,8 @@
   "{n} albums": "{n} álbuns",
   "{n} folders": "{n} pastas",
   "Lists “{name}”, the folder this one is in": "Lista “{name}”, a pasta em que esta está",
-  "“{name}” is now a place in Local: open it there": "“{name}” agora é um lugar em Local: abra-a lá"
+  "“{name}” is now a place in Local: open it there": "“{name}” agora é um lugar em Local: abra-a lá",
+  "Showing {what}": "Mostrando {what}",
+  "{title}, showing {what}": "{title}, mostrando {what}",
+  "{first} and {n} more": "{first} e mais {n}"
 }

@@ -316,5 +316,8 @@
   "{n} albums": "{n} 個相簿",
   "{n} folders": "{n} 個資料夾",
   "Lists “{name}”, the folder this one is in": "列出此資料夾所在的「{name}」",
-  "“{name}” is now a place in Local: open it there": "「{name}」現在是本機中的一個位置：請在那裡打開"
+  "“{name}” is now a place in Local: open it there": "「{name}」現在是本機中的一個位置：請在那裡打開",
+  "Showing {what}": "正在顯示 {what}",
+  "{title}, showing {what}": "{title}，正在顯示 {what}",
+  "{first} and {n} more": "{first} 及另外 {n} 項"
 }

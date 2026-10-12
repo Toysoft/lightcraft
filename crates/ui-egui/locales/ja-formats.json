@@ -316,5 +316,8 @@
   "{n} albums": "{n}個のアルバム",
   "{n} folders": "{n}個のフォルダ",
   "Lists “{name}”, the folder this one is in": "このフォルダが入っている「{name}」を表示します",
-  "“{name}” is now a place in Local: open it there": "「{name}」をローカルの場所に追加しました。そこで開いてください"
+  "“{name}” is now a place in Local: open it there": "「{name}」をローカルの場所に追加しました。そこで開いてください",
+  "Showing {what}": "{what} を表示中",
+  "{title}, showing {what}": "{title}、{what} を表示中",
+  "{first} and {n} more": "{first} ほか {n} 件"
 }

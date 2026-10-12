@@ -316,5 +316,8 @@
   "{n} albums": "Альбоми: {n}",
   "{n} folders": "Теки: {n}",
   "Lists “{name}”, the folder this one is in": "Показує «{name}» — теку, в якій лежить ця",
-  "“{name}” is now a place in Local: open it there": "«{name}» тепер окреме місце в локальних: відкрийте її там"
+  "“{name}” is now a place in Local: open it there": "«{name}» тепер окреме місце в локальних: відкрийте її там",
+  "Showing {what}": "Показано: {what}",
+  "{title}, showing {what}": "{title}, показано: {what}",
+  "{first} and {n} more": "{first} і ще {n}"
 }
