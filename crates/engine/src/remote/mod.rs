@@ -9,8 +9,14 @@
 //! Signing in ([`Remote::sign_in`]) is Login Flow v2: the user approves LightCraft in a browser while a
 //! thread asks the server every 2 s, shown as a cancellable `nextcloud` activity row. How the last few
 //! sign-ins went is kept for the UI ([`Remote::sign_ins`]).
+//!
+//! Photos load through the engine's file hooks ([`hooks`]): from the originals downloaded to this
+//! computer ([`Remote::local_original`]), the server's previews and a Range read of the file's start.
 
-use std::collections::{HashMap, VecDeque};
+pub(crate) mod hooks;
+mod originals;
+
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -19,6 +25,8 @@ use std::time::{Duration, Instant};
 use craft_nextcloud::rustls::crypto::CryptoProvider;
 pub use craft_nextcloud::{Account, Fingerprint, RemotePath};
 use craft_nextcloud::{Client, Error, SignIn, SignInState};
+pub use originals::NOT_DOWNLOADED;
+pub(crate) use originals::budget_bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -31,6 +39,8 @@ const MAX_SETTINGS: usize = 1 << 20;
 const DEFAULT_CACHE_BUDGET_MB: u64 = 20_000;
 /// How long one failed connection marks an account unreachable.
 const UNREACHABLE_FOR: Duration = Duration::from_secs(30);
+/// How long an answer from an account's server counts as "it is reachable" ([`Remote::exists`]).
+const REACHABLE_FOR: Duration = Duration::from_secs(30);
 /// How often a waiting sign-in asks the server whether the user approved it.
 const POLL_EVERY: Duration = Duration::from_secs(2);
 /// How many sign-in outcomes are kept ([`Remote::sign_ins`]).
@@ -127,6 +137,14 @@ struct Inner {
     clients: HashMap<String, Client>,
     /// What the last request said about an account, and when; none = signed in.
     states: HashMap<String, (AccountState, Instant)>,
+    /// Etag and size of remote files, from listings and `stat`s (this session).
+    known: HashMap<RemotePath, (String, u64)>,
+    /// Files the server said it no longer has, until a listing has them again.
+    gone: HashSet<RemotePath>,
+    /// The names in each folder listed this session.
+    listed: HashMap<RemotePath, HashSet<String>>,
+    /// Clients built from now on give up on a server silent for this long (craft's default if `None`).
+    stall_limit: Option<Duration>,
 }
 
 impl Inner {
@@ -179,6 +197,8 @@ pub struct Remote {
     /// Sign-ins and downloads show their rows here.
     activity: Activity,
     inner: Mutex<Inner>,
+    /// Held while an original downloads: one at a time.
+    downloads: Mutex<()>,
     /// The last [`MAX_SIGN_INS`] sign-ins, oldest first. Kept across [`Remote::configure`]: they are
     /// this session's.
     sign_ins: Mutex<VecDeque<SignInOutcome>>,
@@ -193,6 +213,7 @@ impl Remote {
         Remote {
             activity,
             inner: Mutex::default(),
+            downloads: Mutex::default(),
             sign_ins: Mutex::default(),
             #[cfg(test)]
             expire_sign_ins: AtomicBool::new(false),
@@ -203,15 +224,26 @@ impl Remote {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Use `config` from now on: reads its settings file and forgets clients and account states.
+    /// Use `config` from now on: reads its settings file and forgets clients, account states and what
+    /// it knew about remote files.
     pub fn configure(&self, config: RemoteConfig) {
-        let settings = config
+        let mut settings: Settings = config
             .settings_file
             .as_deref()
             .and_then(|p| read_capped(p, MAX_SETTINGS))
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
+        // (a hand-edited file may hold 0)
+        settings.cache_budget_mb = settings.cache_budget_mb.max(originals::MIN_CACHE_BUDGET_MB);
         *self.lock() = Inner { config, settings, ..Inner::default() };
+    }
+
+    /// Clients built from now on give up on a server that sends nothing for `limit` (tests).
+    #[cfg(test)]
+    pub(crate) fn set_stall_limit(&self, limit: Duration) {
+        let mut inner = self.lock();
+        inner.stall_limit = Some(limit);
+        inner.clients.clear();
     }
 
     pub fn accounts(&self) -> Vec<(Account, AccountState)> {
@@ -230,13 +262,13 @@ impl Remote {
             }
             Ok(account)
         };
-        let (account, store) = {
+        let (account, store, stall_limit) = {
             let inner = self.lock();
             let account = usable(&inner)?;
             if let Some(c) = inner.clients.get(account_key) {
                 return Ok(c.clone());
             }
-            (account, inner.config.credentials.clone())
+            (account, inner.config.credentials.clone(), inner.stall_limit)
         };
         // the store may be the OS keyring (slow, may prompt): not under the lock
         let password = match store {
@@ -247,7 +279,10 @@ impl Remote {
             self.note_error(account_key, &Error::Unauthorized);
             return Err(sign_in_again(account_key));
         };
-        let client = Client::new(account, password, provider()).map_err(|e| e.to_string())?;
+        let mut client = Client::new(account, password, provider()).map_err(|e| e.to_string())?;
+        if let Some(limit) = stall_limit {
+            client = client.with_stall_limit(limit).map_err(|e| e.to_string())?;
+        }
         let mut inner = self.lock();
         usable(&inner)?;
         inner.clients.insert(account_key.to_string(), client.clone());
@@ -483,10 +518,19 @@ impl Remote {
         self.lock().settings.cache_budget_mb
     }
 
+    /// Set the disk budget for downloaded originals (at least 1000 MB), evicting down to it.
     pub fn set_cache_budget_mb(&self, mb: u64) -> Result<(), String> {
-        let mut inner = self.lock();
-        let settings = Settings { cache_budget_mb: mb, ..inner.settings.clone() };
-        inner.save(settings)
+        let mb = mb.max(originals::MIN_CACHE_BUDGET_MB);
+        {
+            let mut inner = self.lock();
+            let settings = Settings { cache_budget_mb: mb, ..inner.settings.clone() };
+            inner.save(settings)?;
+        }
+        // (a cache that can't be opened now takes the budget when it is)
+        if let Ok(cache) = self.cache() {
+            cache.set_budget(budget_bytes(mb));
+        }
+        Ok(())
     }
 }
 

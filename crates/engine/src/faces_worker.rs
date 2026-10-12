@@ -316,7 +316,8 @@ fn scan_pool(pace: Pace) -> Option<&'static rayon::ThreadPool> {
 /// instead limited by how many photos run at once ([`memory_workers`]); its decodes count as interactive ones at the gate,
 /// which never wait.
 fn process_in_background(prepared: Prepared, embedder: &Embedder, pace: Pace) -> Done {
-    let work = || process(prepared, embedder);
+    // (a batch job: it never downloads a Nextcloud original)
+    let work = || crate::memory::without_downloads(|| process(prepared, embedder));
     match scan_pool(pace) {
         Some(pool) => pool.install(work),
         None => work(),

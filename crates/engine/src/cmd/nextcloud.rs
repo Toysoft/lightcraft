@@ -19,8 +19,12 @@ fn preferences(s: &mut Session, p: &Value) -> Result<Value> {
         .into_iter()
         .map(|(a, state)| json!({"account": a.key(), "server": a.server, "user": a.user, "root": a.root().to_string(), "state": state}))
         .collect();
-    // ponytail: no originals cache yet (NC5 opens it and reports its usage)
-    Ok(json!({"accounts": accounts, "cacheBudgetMb": s.remote.cache_budget_mb(), "cachedBytes": 0, "pinnedBytes": 0, "signIns": s.remote.sign_ins()}))
+    // (no cache folder configured: nothing cached)
+    let usage = s.remote.cache().ok().map(|c| c.usage());
+    let (cached, pinned) = usage.map_or((0, 0), |u| (u.total, u.pinned));
+    Ok(
+        json!({"accounts": accounts, "cacheBudgetMb": s.remote.cache_budget_mb(), "cachedBytes": cached, "pinnedBytes": pinned, "signIns": s.remote.sign_ins()}),
+    )
 }
 
 fn remove_account(s: &mut Session, p: &Value) -> Result<Value> {

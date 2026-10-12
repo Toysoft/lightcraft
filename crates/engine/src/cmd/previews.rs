@@ -115,7 +115,8 @@ fn run_all(jobs: Vec<Vec<RenderJob>>, state: &PreviewBuild, task: &TaskGuard, la
             }
             let next = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).next();
             let Some(photo_jobs) = next else { break };
-            let ok = crate::guard::catch("building previews", || run_photo(photo_jobs)).unwrap_or(false);
+            // background work: it waits for interactive renders' memory and never downloads a Nextcloud original
+            let ok = crate::guard::catch("building previews", || crate::memory::in_background(|| run_photo(photo_jobs))).unwrap_or(false);
             if !ok {
                 state.failed.fetch_add(1, Ordering::Relaxed);
             }
@@ -267,7 +268,8 @@ fn smart_run(
                 // is offline, when it is the only copy — the sync is small next to the decode
                 let r = source
                     .ok_or_else(|| "nothing to build from".to_string())
-                    .and_then(|s| s.load_source())
+                    // (background work: it never downloads a Nextcloud original)
+                    .and_then(|s| crate::memory::in_background(|| s.load_source()))
                     .and_then(|src| crate::smart::encode(&src.image, src.info_or(Default::default()).camera_tone.as_ref()))
                     .and_then(|b| {
                         let parent = path.parent().ok_or_else(|| format!("{}: no parent folder", path.display()))?;

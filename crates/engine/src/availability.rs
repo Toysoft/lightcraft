@@ -20,7 +20,7 @@ pub type Waker = Arc<dyn Fn() + Send + Sync>;
 /// How long a cached answer is used before it is checked again (it is still returned meanwhile).
 pub const RECHECK: Duration = Duration::from_secs(15);
 
-fn fs_exists(path: &str) -> bool {
+pub(crate) fn fs_exists(path: &str) -> bool {
     // the browser build has no file system: its originals are always "there"
     cfg!(target_arch = "wasm32") || std::path::Path::new(path).exists()
 }

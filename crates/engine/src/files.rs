@@ -809,13 +809,26 @@ fn raf_preview_extent(prefix: &[u8]) -> Option<u64> {
 /// [`embedded_preview_srgb`] for [`preview_window`], which does not re-read the container.
 /// `None` when the bytes are not a decodable image.
 fn quick_image_srgb(header: &[u8], window: &[u8], max_edge: usize) -> Option<lightcraft_raster::Rgba8> {
-    let mut d = lightcraft_codecs::decode(window, fit_box(max_edge)).ok()?;
+    let d = decode_fitted(window, max_edge)?;
+    // The JPEG's own EXIF orientation, else the raw's (from its header), as the whole-file path does
+    Some(d.to_srgb8().oriented(preview_orientation(header, d.orientation)))
+}
+
+/// An image file's bytes decoded and fitted into a `max_edge` square, not turned.
+fn decode_fitted(bytes: &[u8], max_edge: usize) -> Option<lightcraft_codecs::Decoded> {
+    let mut d = lightcraft_codecs::decode(bytes, fit_box(max_edge)).ok()?;
     if d.image.width.max(d.image.height) > max_edge {
         d.image = fit(&d.image, max_edge, max_edge, Filter::Box);
         d.alpha = None;
     }
-    // The JPEG's own EXIF orientation, else the raw's (from its header), as the whole-file path does
-    Some(d.to_srgb8().oriented(preview_orientation(header, d.orientation)))
+    Some(d)
+}
+
+/// A server's preview image (a Nextcloud thumbnail) as display sRGB no larger than `max_edge`: like
+/// [`quick_image_srgb`], but never turned, since server previews are upright already.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn decode_upright_srgb(bytes: &[u8], max_edge: usize) -> Option<lightcraft_raster::Rgba8> {
+    Some(decode_fitted(bytes, max_edge)?.to_srgb8())
 }
 
 /// The filesystem-backed [`PairLoader`]: the file is read and decoded once, and developed as usual and from the photo's
@@ -862,14 +875,18 @@ pub fn fs_hooks() -> (FileLoader, FileProbe) {
 }
 
 impl crate::Session {
-    /// Install the filesystem file hooks (desktop, CLI, MCP headless), and on macOS the Apple Photos
-    /// runner ([`crate::apple_photos::osascript`]; installed, not run).
+    /// Install the filesystem file hooks (desktop, CLI, MCP headless) with `nextcloud://` paths routed
+    /// to the session's Nextcloud accounts ([`crate::remote`]), and on macOS the Apple Photos runner
+    /// ([`crate::apple_photos::osascript`]; installed, not run).
     pub fn with_fs(mut self) -> Self {
         let (l, p) = fs_hooks();
         self.media.file_loader = Some(l);
         self.media.file_probe = Some(p);
         self.media.preview_loader = Some(fs_preview_loader());
         self.media.denoise.loader = Some(fs_pair_loader());
+        // Nextcloud photos (`nextcloud://`) go to the session's `remote`, and file bytes and existence too
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::remote::hooks::route(&mut self);
         #[cfg(target_os = "macos")]
         {
             self.apple_photos = Some(crate::apple_photos::osascript());

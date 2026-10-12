@@ -971,6 +971,9 @@ pub struct QuickJob {
     pub cached: Vec<(Arc<PreviewCache>, Hash128)>,
     /// Embedded preview of an unedited raw: (path, loader, max edge).
     pub embedded: Option<(String, PreviewLoader, usize)>,
+    /// Keep the embedded preview in the first `cached` entry: a Nextcloud photo's comes from the server,
+    /// and is its thumbnail from then on (the grid doesn't ask the server again).
+    pub keep_embedded: bool,
     /// Last resort: run this thumbnail job.
     pub small: Option<Box<RenderJob>>,
 }
@@ -1003,6 +1006,11 @@ impl QuickJob {
         if let Some((path, loader, edge)) = &self.embedded
             && let Some(image) = loader(path, *edge)
         {
+            if self.keep_embedded
+                && let Some((cache, k)) = self.cached.first()
+            {
+                cache.put(*k, Arc::new(image.clone()));
+            }
             return done(rendered(image), Some(QuickSource::Embedded));
         }
         if let Some(job) = self.small {
@@ -1350,7 +1358,7 @@ impl crate::Session {
         let h = Hasher128::new().str(&content_key(&p)).str("quick").u64(p.develop.hash64()).u64(apply_crop as u64).finish();
         let key = h.0 as u64;
         let embedded = self.embedded_of(&p).map(|(path, l)| (path, l, max_edge.clamp(1, SourceLevel::Preview.max_edge())));
-        Some(QuickJob { request_id: 0, photo: id, key, cached, embedded, small: apply_crop.then(|| Box::new(small)) })
+        Some(QuickJob { request_id: 0, photo: id, key, cached, embedded, keep_embedded: false, small: apply_crop.then(|| Box::new(small)) })
     }
 
     /// A first grid thumbnail for an unedited raw: the cached render for `job` (the real
@@ -1366,6 +1374,7 @@ impl crate::Session {
             photo: job.photo,
             key: job.key,
             cached: job.cache.clone().into_iter().collect(),
+            keep_embedded: lightcraft_catalog::is_remote(&path),
             embedded: Some((path, l, edge)),
             small: None,
         })

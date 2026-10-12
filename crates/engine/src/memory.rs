@@ -156,6 +156,7 @@ impl Drop for Permit<'_> {
 
 thread_local! {
     static BACKGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static NO_DOWNLOADS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Run `f` as background work (grid thumbnails, neighbour prefetch): its decodes wait at the
@@ -170,6 +171,22 @@ pub fn in_background<R>(f: impl FnOnce() -> R) -> R {
 /// Is this thread running background work ([`in_background`])?
 pub fn is_background() -> bool {
     BACKGROUND.with(|b| b.get())
+}
+
+/// Run `f` without downloading originals (a Nextcloud photo's), like background work, while its decodes
+/// still count as interactive at the [`work_gate`]: for the face scan, whose pool threads must never
+/// wait there.
+pub fn without_downloads<R>(f: impl FnOnce() -> R) -> R {
+    let was = NO_DOWNLOADS.with(|b| b.replace(true));
+    let r = f();
+    NO_DOWNLOADS.with(|b| b.set(was));
+    r
+}
+
+/// May work on this thread download an original? Not background work ([`in_background`]) nor
+/// [`without_downloads`].
+pub fn may_download() -> bool {
+    !is_background() && !NO_DOWNLOADS.with(|b| b.get())
 }
 
 /// The process-wide gate for decodes and import probes (limit: a quarter of the budget).
