@@ -126,6 +126,7 @@ language_table! {
     Ru, "ru", "Русский", "Cyrl", include_str!("../locales/ru.json");
     Fr, "fr", "Français", "Latn", include_str!("../locales/fr.json");
     Uk, "uk", "Українська", "Cyrl", include_str!("../locales/uk.json");
+    Ar, "ar", "العربية", "Arab", include_str!("../locales/ar.json");
 }
 
 // The settings file stores the BCP-47 code (`"zh-hans"`), never the Rust variant name, so a
@@ -522,6 +523,9 @@ mod tests {
         for tag in ["es", "es-ES", "es_MX.UTF-8", "es-419"] {
             assert_eq!(Locale::parse_tag(tag), Some(Locale::Es), "{tag}");
         }
+        for tag in ["ar", "ar-SA", "ar_EG.UTF-8", "ar-AE", "ar-Arab-EG"] {
+            assert_eq!(Locale::parse_tag(tag), Some(Locale::Ar), "{tag}");
+        }
         assert_eq!(Locale::parse_tag("xx"), None);
     }
 
@@ -539,6 +543,10 @@ mod tests {
         set_language(Locale::PtBr);
         assert_eq!(tr("Exposure"), "Exposição");
         assert_eq!(tr("Settings"), "Configurações");
+        set_language(Locale::Ar);
+        assert_eq!(tr("Exposure"), "تعريض");
+        assert_eq!(tr("My Photos"), "صوري");
+        assert_eq!(tr("White Balance"), "موازنة اللون الأبيض");
         set_language(Locale::En);
         assert_eq!(tr("Exposure"), "Exposure");
     }
@@ -667,6 +675,7 @@ mod tests {
             ("app.language.german", Locale::De),
             ("app.language.russian", Locale::Ru),
             ("app.language.ukrainian", Locale::Uk),
+            ("app.language.arabic", Locale::Ar),
         ];
         // One command per language, and every command reachable from the menu table.
         assert_eq!(commands.len(), Locale::ALL.len());
