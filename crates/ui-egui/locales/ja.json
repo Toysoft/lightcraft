@@ -2046,5 +2046,6 @@
   "Base · finer detail": "ベース · より細部まで",
   "Large · best search results": "大 · 最良の検索結果",
   "English only": "英語のみ",
-  "any language": "全言語"
+  "any language": "全言語",
+  "The graphics card stopped running the model: the processor took over.": "グラフィックカードがモデルの実行を停止したため、プロセッサが引き継ぎました。"
 }

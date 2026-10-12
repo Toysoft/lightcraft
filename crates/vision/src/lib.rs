@@ -7,8 +7,9 @@
 //! ViT-B/32 ([`clip`]) is a second family behind the same trait, with its own tokenizer and scoring.
 //!
 //! The weights are not part of LightCraft: they are read from a folder the user downloads them
-//! to ([`load`]). Everything here runs locally. On macOS the towers run on the GPU through Metal,
-//! elsewhere on the CPU; the web build has no towers ([`load`] reports that it's unsupported).
+//! to ([`load`]). Everything here runs locally. The towers run on candle (on macOS on the GPU through Metal,
+//! elsewhere on the CPU), or on a runner another crate provides ([`load_with`], [`accel`]: LightCraft's wgpu GPU
+//! runner), with candle as the fallback; the web build has no towers ([`load`] reports that it's unsupported).
 //!
 //! The SigLIP and CLIP towers are ported from the Hugging Face `transformers` implementation
 //! (Apache-2.0); see `NOTICE`. This crate is therefore licensed under the Apache License 2.0 only (not the MIT
@@ -16,6 +17,8 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod accel;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod clip;
 pub mod config;
@@ -82,6 +85,14 @@ pub trait ContentModel: Send + Sync {
         None
     }
     fn manifest(&self) -> &Manifest;
+    /// What runs the model: "CPU", or "GPU: <adapter>" (both towers loaded must run there to say so).
+    fn runs_on(&self) -> String {
+        "CPU".into()
+    }
+    /// Why the GPU stopped running this model (a failure: the CPU took over), if it did.
+    fn gpu_fallback(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A score as `scale · cosine + bias`, through a sigmoid for a sigmoid model ([`ContentModel::scoring`]).
@@ -138,11 +149,24 @@ pub fn is_model_dir(dir: &Path, manifest: &Manifest) -> bool {
 /// Load the model `manifest` describes from `dir`, on [`best_device`].
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load(dir: &Path, manifest: &Manifest, towers: Towers) -> Result<Box<dyn ContentModel>> {
+    load_with(dir, manifest, towers, None)
+}
+
+/// [`load`], running each tower on a runner `accel` makes when it can ([`accel::Accelerator`]: the GPU), with candle
+/// on [`best_device`] as the fallback (when no runner can be made, or one fails).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_with(dir: &Path, manifest: &Manifest, towers: Towers, accel: Option<&accel::Accelerator>) -> Result<Box<dyn ContentModel>> {
     manifest::validate(manifest)?;
     match manifest.family {
-        manifest::Family::Siglip => Ok(Box::new(siglip::Siglip::load_on(dir, manifest.clone(), towers, best_device())?)),
-        manifest::Family::Clip => Ok(Box::new(clip::Clip::load_on(dir, manifest.clone(), towers, best_device())?)),
+        manifest::Family::Siglip => Ok(Box::new(siglip::Siglip::load_with(dir, manifest.clone(), towers, best_device(), accel)?)),
+        manifest::Family::Clip => Ok(Box::new(clip::Clip::load_with(dir, manifest.clone(), towers, best_device(), accel)?)),
     }
+}
+
+/// How [`ContentModel::runs_on`] names a candle device.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn device_name(d: &candle_core::Device) -> String {
+    if d.is_cpu() { "CPU".into() } else { "GPU (Metal)".into() }
 }
 
 /// The web build has no towers.

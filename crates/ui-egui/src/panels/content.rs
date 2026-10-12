@@ -242,6 +242,23 @@ fn index_section(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, on: boo
     if let Some(e) = st["index"]["saveError"].as_str() {
         ui.add(egui::Label::new(RichText::new(sentence(e)).font(t.font(11.5)).color(t.caution)).wrap());
     }
+    // what runs the model ("GPU: <card>" or "CPU"), once it is loaded, and how long a photo takes
+    if let Some(device) = st["device"].as_str().or(st["textDevice"].as_str()) {
+        let line = match st["msPerPhoto"].as_f64() {
+            Some(ms) if st["device"].is_string() => tr_format!("Runs on {device} · {ms} ms per photo", device = device, ms = ms.round() as u64),
+            _ => tr_format!("Runs on {device}", device = device),
+        };
+        let r = ui.label(RichText::new(line).font(t.font(11.5)).color(t.text_dim));
+        register(ui.ctx(), "content:device", r.rect);
+    }
+    if st["gpuFallback"].is_string() {
+        ui.add(
+            egui::Label::new(
+                RichText::new(tr("The graphics card stopped running the model: the processor took over.")).font(t.font(11.5)).color(t.caution),
+            )
+            .wrap(),
+        );
+    }
     ui.horizontal(|ui| {
         ui.label(RichText::new(tr("Pace")).color(t.text_label));
         let mut pace = match st["pace"].as_str() {

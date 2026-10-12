@@ -2,6 +2,18 @@
 
 ## 2026-10-12
 
+### Search by content on the graphics card
+- The content models now run on the **graphics card** (Vulkan, DirectX 12 or Metal; NVIDIA, AMD, Intel, Apple),
+  with the processor as the fallback. On an RTX 4090 indexing goes from ~390 to ~1,750 photos a minute with SigLIP 2
+  Base and from ~50 to ~1,000 with the large So400m model, whose better searches are no longer a day's wait for a big
+  library; a search's text is ready in a few milliseconds. Results are the same as on the processor.
+- Settings ▸ Search says what runs the model and how long a photo takes (*Runs on GPU: NVIDIA GeForce RTX 4090 · 19 ms
+  per photo*). If the graphics card fails, the processor takes over at once without losing a photo, and Settings ▸
+  Search says so. *Use the GPU for rendering* (Settings ▸ Performance) switches it off too.
+- Indexing reads more photos at once at Normal and Fast pace (it was waiting for them), also on the processor; the
+  photos it renders itself (no usable preview) are rendered on the processor.
+- Agents: `content.status` gives `device`, `textDevice` and `gpuFallback`.
+
 ### Search by content: a second model, and models tuned one by one
 - **CLIP ViT-B/32** (OpenAI, MIT licence, 605 MB) joins the SigLIP 2 models in Settings ▸ Search: the small, quick one,
   about twice as fast at indexing as SigLIP 2 Base and a third of its download, for English searches and tags. It finds

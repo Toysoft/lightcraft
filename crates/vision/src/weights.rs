@@ -135,6 +135,20 @@ impl Weights {
     }
 }
 
+impl crate::accel::TensorSource for Weights {
+    /// A whole tensor as f32 (F16 / BF16 converted), with its shape.
+    fn read(&self, name: &str) -> std::result::Result<(Vec<usize>, Vec<f32>), String> {
+        let e = self.entry(name).map_err(|e| e.to_string())?;
+        if e.dtype == DType::I64 {
+            return Err(format!("{name}: not a float tensor"));
+        }
+        let shape = e.shape.clone();
+        let t = Weights::read(self, name).map_err(|e| e.to_string())?;
+        let v = t.to_dtype(DType::F32).and_then(|t| t.flatten_all()).and_then(|t| t.to_vec1::<f32>()).map_err(|e| format!("{name}: {e}"))?;
+        Ok((shape, v))
+    }
+}
+
 /// [`Weights`] as a candle `VarBuilder` backend.
 pub struct Backend(pub Arc<Weights>);
 

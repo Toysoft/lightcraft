@@ -2044,5 +2044,6 @@
   "Base · finer detail": "Base · más detalle",
   "Large · best search results": "Grande · los mejores resultados de búsqueda",
   "English only": "solo inglés",
-  "any language": "cualquier idioma"
+  "any language": "cualquier idioma",
+  "The graphics card stopped running the model: the processor took over.": "La tarjeta gráfica dejó de ejecutar el modelo: el procesador tomó el relevo."
 }

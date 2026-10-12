@@ -2081,5 +2081,6 @@
   "Base · finer detail": "基础 · 细节更丰富",
   "Large · best search results": "大 · 搜索结果最佳",
   "English only": "仅英语",
-  "any language": "任意语言"
+  "any language": "任意语言",
+  "The graphics card stopped running the model: the processor took over.": "显卡已停止运行该模型：已改由处理器运行。"
 }

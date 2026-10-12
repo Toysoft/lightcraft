@@ -221,6 +221,68 @@ fn a_scan_fills_the_index_shows_in_the_activity_stack_and_a_reopened_library_doe
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// The stand-in on a "GPU" until it has embedded `fail_after` images; then, as the real models do when the GPU fails
+/// mid-batch (`lightcraft_vision::accel`), it carries on on the CPU and says why.
+struct FlakyGpu {
+    inner: Fake,
+    fail_after: usize,
+}
+
+impl FlakyGpu {
+    fn failed(&self) -> bool {
+        self.inner.mine.load(Ordering::SeqCst) >= self.fail_after
+    }
+}
+
+impl ContentModel for FlakyGpu {
+    fn embed_images(&self, batch: &[Rgb8]) -> lightcraft_vision::Result<Vec<Vec<f32>>> {
+        self.inner.embed_images(batch)
+    }
+    fn embed_texts(&self, texts: &[&str]) -> lightcraft_vision::Result<Vec<Vec<f32>>> {
+        self.inner.embed_texts(texts)
+    }
+    fn score_cosine(&self, cosine: f32) -> f32 {
+        self.inner.score_cosine(cosine)
+    }
+    fn manifest(&self) -> &Manifest {
+        self.inner.manifest()
+    }
+    fn runs_on(&self) -> String {
+        if self.failed() { "CPU".into() } else { "GPU: Fake card".into() }
+    }
+    fn gpu_fallback(&self) -> Option<String> {
+        self.failed().then(|| "Fake card: device lost (simulated)".into())
+    }
+}
+
+#[test]
+fn the_status_says_what_runs_the_model_and_a_gpu_failure_mid_scan_loses_nothing() {
+    for (fail_after, name) in [(usize::MAX, "gpu-ok"), (3, "gpu-lost")] {
+        let d = temp(name);
+        let calls = Arc::new(Calls::default());
+        let mut s = session(&d, &calls, 0, true);
+        let c = calls.clone();
+        s.content.loader = Some(Arc::new(move |_: &Path, m: &Manifest, _: Towers| {
+            let inner = Fake { manifest: m.clone(), calls: c.clone(), mine: Arc::new(AtomicUsize::new(0)), slow: 0 };
+            Ok(Box::new(FlakyGpu { inner, fail_after }) as Box<dyn ContentModel>)
+        }));
+        let total = s.catalog.photos().filter(|p| p.in_library()).count();
+        assert!(status(&mut s)["device"].is_null(), "nothing loaded yet");
+        let last = pump_until(&mut s, done);
+        assert_eq!(last["indexed"].as_u64(), Some(total as u64), "every photo is indexed either way: {last}");
+        let st = status(&mut s);
+        if fail_after == usize::MAX {
+            assert_eq!((st["device"].as_str(), &st["gpuFallback"]), (Some("GPU: Fake card"), &Value::Null), "{st}");
+        } else {
+            assert_eq!(st["device"].as_str(), Some("CPU"), "{st}");
+            assert!(st["gpuFallback"].as_str().unwrap().contains("device lost"), "{st}");
+        }
+        assert!(st["textDevice"].is_string() || st["textDevice"].is_null());
+        drop(s);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
 #[test]
 fn a_replaced_original_is_queued_again_and_deleted_photos_are_compacted_away() {
     let d = temp("stale");
@@ -560,7 +622,8 @@ fn the_real_model_finds_the_beach() {
     let t = Instant::now();
     s.execute("content.pump", &json!({"wait": true})).unwrap();
     let st = status(&mut s);
-    eprintln!("indexed {} photos in {:.1} s ({} ms per photo)", st["indexed"], t.elapsed().as_secs_f64(), st["msPerPhoto"]);
+    eprintln!("indexed {} photos in {:.1} s ({} ms per photo on {})", st["indexed"], t.elapsed().as_secs_f64(), st["msPerPhoto"], st["device"]);
+    assert!(st["device"].is_string(), "{st}");
     assert_eq!(st["indexed"], st["total"], "{st}");
     let r = s.execute("content.search", &json!({"text": "a beach", "limit": 3})).unwrap();
     let top = r["results"][0]["id"].as_u64().unwrap();

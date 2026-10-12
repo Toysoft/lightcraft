@@ -28,11 +28,14 @@ use crate::media::{PreviewLoader, RenderJob};
 pub(crate) const EDGE: usize = 512;
 /// A raw's embedded preview is used when its long edge is at least this.
 pub(crate) const MIN_PREVIEW_EDGE: usize = 256;
-/// Embedded previews read at once: each reads its raw file (a 50 MP raw is ~60 MB) and decodes the preview.
-pub(crate) const MAX_PREVIEW_READS: usize = 4;
-/// Photos rendered from their file at once (no usable preview: a JPEG, a TIFF, a raw without one). A render can hold
-/// the whole file and a full-size decode, so one at a time: a few big files at once were the 2–5 GB peaks of a scan.
-pub(crate) const MAX_RENDERS: usize = 1;
+/// Embedded previews read at once, by pace (Low, Normal, Fast): each reads its raw file (a 50 MP raw is ~60 MB) and
+/// decodes the preview.
+pub(crate) const PREVIEW_READS: [usize; 3] = [2, 4, 8];
+/// Photos rendered from their file at once, by pace (no usable preview: a JPEG, a TIFF, a raw without one). A render
+/// holds its file and a decode: a few big files at once were the 2–5 GB peaks of a scan before big TIFFs were decoded
+/// reduced. One at a time left a model on the GPU waiting for them (352 mixed photos: 26 s with one, 10 s with four,
+/// the same peak memory).
+pub(crate) const RENDERS: [usize; 3] = [1, 3, 6];
 
 /// A counting gate: at most `max` holders at once (the others wait), and the most there ever were.
 pub(crate) struct Gate {
@@ -82,7 +85,9 @@ pub(crate) struct Gates {
     pub renders: Gate,
 }
 
-pub(crate) static GATES: Gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
+static LOW_GATES: Gates = Gates { previews: Gate::new(PREVIEW_READS[0]), renders: Gate::new(RENDERS[0]) };
+static NORMAL_GATES: Gates = Gates { previews: Gate::new(PREVIEW_READS[1]), renders: Gate::new(RENDERS[1]) };
+static FAST_GATES: Gates = Gates { previews: Gate::new(PREVIEW_READS[2]), renders: Gate::new(RENDERS[2]) };
 
 /// How hard indexing may work: the user's choice (Settings ▸ Search, `content.pace`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -124,6 +129,23 @@ impl Pace {
         }
     }
 
+    fn index(self) -> usize {
+        match self {
+            Pace::Low => 0,
+            Pace::Normal => 1,
+            Pace::Fast => 2,
+        }
+    }
+
+    /// How many pictures a scan at this pace reads at once (shared by every scan of the process).
+    pub(crate) fn gates(self) -> &'static Gates {
+        match self {
+            Pace::Low => &LOW_GATES,
+            Pace::Normal => &NORMAL_GATES,
+            Pace::Fast => &FAST_GATES,
+        }
+    }
+
     /// Photos per forward pass: larger batches are a little faster per photo, smaller ones stop sooner when cancelled.
     pub fn batch(self) -> usize {
         match self {
@@ -142,11 +164,7 @@ fn cores() -> usize {
 /// the decodes run inside it (rayon's global pool serves the interactive work, which must not wait behind a scan).
 pub(crate) fn pool(pace: Pace) -> Option<&'static rayon::ThreadPool> {
     static POOLS: [OnceLock<Option<rayon::ThreadPool>>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
-    let i = match pace {
-        Pace::Low => 0,
-        Pace::Normal => 1,
-        Pace::Fast => 2,
-    };
+    let i = pace.index();
     POOLS
         .get(i)?
         .get_or_init(|| {
@@ -162,9 +180,23 @@ pub(crate) fn pool(pace: Pace) -> Option<&'static rayon::ThreadPool> {
 /// Loads a content model from its folder (the real one: [`lightcraft_vision::load`]; tests use a stand-in).
 pub(crate) type Loader = Arc<dyn Fn(&Path, &Manifest, Towers) -> Result<Box<dyn ContentModel>, String> + Send + Sync>;
 
-/// The real loader.
+/// The real loader: each tower on the GPU when one can run it (wgpu compute: `lightcraft_gpu::transformer`), else on
+/// the CPU; a GPU failure later moves the model to the CPU for good ([`ContentModel::gpu_fallback`]).
 pub(crate) fn default_loader() -> Loader {
-    Arc::new(|dir: &Path, m: &Manifest, towers: Towers| lightcraft_vision::load(dir, m, towers).map_err(|e| e.to_string()))
+    Arc::new(|dir: &Path, m: &Manifest, towers: Towers| load_accelerated(dir, m, towers))
+}
+
+/// [`lightcraft_vision::load`] with the GPU runner offered.
+pub(crate) fn load_accelerated(dir: &Path, m: &Manifest, towers: Towers) -> Result<Box<dyn ContentModel>, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let accel = lightcraft_gpu::transformer::accelerator();
+        lightcraft_vision::load_with(dir, m, towers, Some(&*accel)).map_err(|e| e.to_string())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        lightcraft_vision::load(dir, m, towers).map_err(|e| e.to_string())
+    }
 }
 
 /// One photo to embed.
@@ -216,13 +248,16 @@ pub(crate) struct Done {
     pub embedded: usize,
     /// The model could not be loaded: nothing will work until it changes.
     pub model_error: Option<String>,
+    /// What ran the model ([`ContentModel::runs_on`]), and why the GPU stopped running it, if it did.
+    pub device: Option<String>,
+    pub gpu_fallback: Option<String>,
 }
 
 fn to_rgb(img: &lightcraft_raster::Rgba8) -> Rgb8 {
     Rgb8 { width: img.width, height: img.height, data: img.data.iter().map(|p| [p[0], p[1], p[2]]).collect() }
 }
 
-/// The picture of one photo, or why there is none. At most [`MAX_PREVIEW_READS`] previews and [`MAX_RENDERS`] renders
+/// The picture of one photo, or why there is none. At most [`PREVIEW_READS`] previews and [`RENDERS`] renders
 /// run at once (`gates`), whatever the size of the pool. Once `gone` is set (the session let go of the worker: the
 /// model or the library changed, indexing stopped) nothing more is read: the photo comes back skipped.
 /// The reads and renders run in `pool` (the gate is taken before, on the calling thread: see [`pictures`]).
@@ -400,7 +435,14 @@ impl Worker {
                     let started = Instant::now();
                     let skip = |items: Vec<Item>| items.into_iter().map(|i| (i.id, i.hash, Outcome::Skipped)).collect::<Vec<_>>();
                     if cancel.load(Ordering::SeqCst) {
-                        let _ = done_tx.send(Done { results: skip(batch.items), ms: 0.0, embedded: 0, model_error: None });
+                        let _ = done_tx.send(Done {
+                            results: skip(batch.items),
+                            ms: 0.0,
+                            embedded: 0,
+                            model_error: None,
+                            device: None,
+                            gpu_fallback: None,
+                        });
                         continue;
                     }
                     if model.is_none() && model_error.is_none() {
@@ -412,14 +454,22 @@ impl Worker {
                         }
                     }
                     let Some(m) = model.as_deref() else {
-                        let _ = done_tx.send(Done { results: skip(batch.items), ms: 0.0, embedded: 0, model_error: model_error.clone() });
+                        let _ = done_tx.send(Done {
+                            results: skip(batch.items),
+                            ms: 0.0,
+                            embedded: 0,
+                            model_error: model_error.clone(),
+                            device: None,
+                            gpu_fallback: None,
+                        });
                         continue;
                     };
                     // (on this thread: the reads wait for their gates outside the pool, see `pictures`)
-                    let results = embed(m, batch.items, &GATES, &gone, pool(batch.pace));
+                    let results = embed(m, batch.items, batch.pace.gates(), &gone, pool(batch.pace));
                     let embedded = results.iter().filter(|r| matches!(r.2, Outcome::Embedded(_))).count();
                     let ms = started.elapsed().as_secs_f64() * 1e3;
-                    if done_tx.send(Done { results, ms, embedded, model_error: None }).is_err() {
+                    let (device, gpu_fallback) = (Some(m.runs_on()), m.gpu_fallback());
+                    if done_tx.send(Done { results, ms, embedded, model_error: None, device, gpu_fallback }).is_err() {
                         break;
                     }
                 }
@@ -711,6 +761,9 @@ pub(crate) struct State {
     /// Embedded this session, and the measured cost of one photo (moving average, milliseconds).
     pub embedded: u64,
     pub ms_per_photo: Option<f64>,
+    /// What runs the image tower ("GPU: …" or "CPU"), once loaded, and why the GPU stopped running it, if it did.
+    pub device: Option<String>,
+    pub gpu_fallback: Option<String>,
     pub counts: Counts,
     /// The catalog revision and index size the counts were made at (a status with nothing changed does not count again).
     pub counts_stamp: Option<(u64, usize)>,
@@ -816,23 +869,26 @@ mod tests {
     fn previews_and_renders_run_a_few_at_a_time_whatever_the_pool() {
         use std::sync::atomic::AtomicUsize;
         let pool = rayon::ThreadPoolBuilder::new().num_threads(16).build().unwrap();
-        // previews only: at most MAX_PREVIEW_READS at once
-        let gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
+        let (reads, renders) = (PREVIEW_READS[1], RENDERS[1]);
+        // previews only: at most `reads` at once
+        let gates = Gates { previews: Gate::new(reads), renders: Gate::new(renders) };
         let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
         let out = pictures(items(32, true, &live, &most), &gates, &AtomicBool::new(false), Some(&pool));
         assert_eq!(out.len(), 32);
         assert!(out.iter().all(|(_, _, r)| r.as_ref().is_ok_and(|img| img.width == 300)));
-        assert_eq!(gates.previews.peak(), MAX_PREVIEW_READS);
-        assert!(most.load(Ordering::SeqCst) <= MAX_PREVIEW_READS);
+        assert_eq!(gates.previews.peak(), reads);
+        assert!(most.load(Ordering::SeqCst) <= reads);
         assert_eq!(gates.renders.peak(), 0);
-        // no usable preview: every photo is rendered, one at a time
-        let gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
+        // no usable preview: every photo is rendered, a few at a time
+        let gates = Gates { previews: Gate::new(reads), renders: Gate::new(renders) };
         let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
         let out = pictures(items(12, false, &live, &most), &gates, &AtomicBool::new(false), Some(&pool));
         assert!(out.iter().all(|(_, _, r)| r.as_ref().is_ok_and(|img| img.width == 320)));
-        assert_eq!(gates.renders.peak(), MAX_RENDERS);
+        assert_eq!(gates.renders.peak(), renders);
         // (a preview read and a render may overlap, never more than the two caps together)
-        assert!(most.load(Ordering::SeqCst) <= MAX_PREVIEW_READS + MAX_RENDERS);
+        assert!(most.load(Ordering::SeqCst) <= reads + renders);
+        // Low reads less at once than Normal, Fast more
+        assert!(PREVIEW_READS.is_sorted() && RENDERS.is_sorted() && RENDERS[0] == 1);
     }
 
     #[test]
@@ -889,12 +945,12 @@ mod tests {
         let model = Counting(calls.clone(), lightcraft_vision::manifest::builtin_siglip2_b16_256());
         // let go of before the batch: no picture is read, the model never runs, every photo comes back skipped
         let gone = AtomicBool::new(true);
-        let out = embed(&model, items(6, false, &live, &most), &GATES, &gone, None);
+        let out = embed(&model, items(6, false, &live, &most), Pace::Low.gates(), &gone, None);
         assert_eq!(out.len(), 6);
         assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Skipped)));
         assert_eq!((most.load(Ordering::SeqCst), calls.load(Ordering::SeqCst)), (0, 0));
         // still wanted: read and embedded
-        let out = embed(&model, items(3, true, &live, &most), &GATES, &AtomicBool::new(false), None);
+        let out = embed(&model, items(3, true, &live, &most), Pace::Low.gates(), &AtomicBool::new(false), None);
         assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Embedded(_))));
         assert_eq!(calls.load(Ordering::SeqCst), 3);
         // let go of while its pictures were being read (waiting for the shared render gate): the model is not run
@@ -905,7 +961,7 @@ mod tests {
             flag.store(true, Ordering::SeqCst);
             Ok(lightcraft_raster::Rgba8::new(320, 240))
         }));
-        let out = embed(&model, batch, &GATES, &gone, None);
+        let out = embed(&model, batch, Pace::Low.gates(), &gone, None);
         assert_eq!(out.len(), 4);
         assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Skipped)), "nothing embedded");
         assert_eq!(calls.load(Ordering::SeqCst), 3, "the model did not run again");

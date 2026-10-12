@@ -2044,5 +2044,6 @@
   "Base · finer detail": "基本 · 細節更豐富",
   "Large · best search results": "大 · 搜尋結果最佳",
   "English only": "僅英文",
-  "any language": "任何語言"
+  "any language": "任何語言",
+  "The graphics card stopped running the model: the processor took over.": "顯示卡已停止執行該模型：已改由處理器執行。"
 }

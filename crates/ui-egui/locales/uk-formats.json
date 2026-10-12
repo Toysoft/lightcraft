@@ -270,5 +270,7 @@
   ", ~{n}× faster": ", у ~{n} раза швидше",
   "Its index of this library: {n} photos": "Її індекс цієї бібліотеки: {n} фото",
   "Using {name}: its own index of this library is back (the other model's is kept)": "Використовується {name}: її власний індекс цієї бібліотеки знову доступний (індекс іншої моделі збережено)",
-  "Using {name}: it indexes the library once (the other model's index is kept)": "Використовується {name}: вона один раз проіндексує бібліотеку (індекс іншої моделі збережено)"
+  "Using {name}: it indexes the library once (the other model's index is kept)": "Використовується {name}: вона один раз проіндексує бібліотеку (індекс іншої моделі збережено)",
+  "Runs on {device} · {ms} ms per photo": "Працює на {device} · {ms} мс на фото",
+  "Runs on {device}": "Працює на {device}"
 }

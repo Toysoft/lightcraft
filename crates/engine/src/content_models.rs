@@ -560,7 +560,7 @@ const SELF_TEST: &[(lightcraft_scenes::Kind, &str)] =
 pub fn self_test(home: &Path, m: &Manifest) -> Result<Value, String> {
     use lightcraft_vision::{Rgb8, Towers};
     let started = std::time::Instant::now();
-    let model = lightcraft_vision::load(home, m, Towers::BOTH).map_err(|e| format!("the model does not load: {e}"))?;
+    let model = crate::content_worker::load_accelerated(home, m, Towers::BOTH).map_err(|e| format!("the model does not load: {e}"))?;
     let load_ms = started.elapsed().as_secs_f64() * 1e3;
     let scenes = lightcraft_scenes::demo_library();
     let mut images = Vec::new();
@@ -585,11 +585,13 @@ pub fn self_test(home: &Path, m: &Manifest) -> Result<Value, String> {
         ok &= right;
         checks.push(json!({"text": texts.get(i), "best": texts.get(best.0), "score": scores.get(i), "ok": right}));
     }
-    let cpu = lightcraft_vision::best_device().is_cpu();
+    let runs_on = model.runs_on();
+    let cpu = runs_on == "CPU";
     let round = |v: f64| (v * 10.0).round() / 10.0;
     let result = json!({
         "ok": ok,
         "device": if cpu { "cpu" } else { "gpu" },
+        "runsOn": runs_on,
         "loadMs": round(load_ms),
         "msPerImage": round(ms_per_image),
         "cpuMsPerImage": cpu.then(|| round(ms_per_image)),

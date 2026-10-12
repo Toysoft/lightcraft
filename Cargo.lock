@@ -3306,8 +3306,10 @@ dependencies = [
  "lightcraft-raster",
  "lightcraft-raw",
  "lightcraft-scenes",
+ "lightcraft-vision",
  "log",
  "pollster 1.0.1",
+ "serde_json",
  "wgpu",
 ]
 
@@ -3513,7 +3515,9 @@ dependencies = [
  "candle-nn",
  "lightcraft-raster",
  "lightcraft-scenes",
+ "log",
  "png",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

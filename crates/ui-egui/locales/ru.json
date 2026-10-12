@@ -2235,5 +2235,6 @@
   "Base · finer detail": "Базовая · больше деталей",
   "Large · best search results": "Большая · лучшие результаты поиска",
   "English only": "только английский",
-  "any language": "любой язык"
+  "any language": "любой язык",
+  "The graphics card stopped running the model: the processor took over.": "Видеокарта перестала выполнять модель: её работу взял на себя процессор."
 }

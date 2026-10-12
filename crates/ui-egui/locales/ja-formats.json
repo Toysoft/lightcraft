@@ -270,5 +270,7 @@
   ", ~{n}× faster": ", 約{n}倍速い",
   "Its index of this library: {n} photos": "このライブラリのインデックス: {n} 枚",
   "Using {name}: its own index of this library is back (the other model's is kept)": "{name} を使用: このライブラリ用のインデックスが戻りました(他のモデルのものも保持されます)",
-  "Using {name}: it indexes the library once (the other model's index is kept)": "{name} を使用: ライブラリを一度インデックスします(他のモデルのインデックスは保持されます)"
+  "Using {name}: it indexes the library once (the other model's index is kept)": "{name} を使用: ライブラリを一度インデックスします(他のモデルのインデックスは保持されます)",
+  "Runs on {device} · {ms} ms per photo": "{device} で実行 · 写真 1 枚あたり {ms} ms",
+  "Runs on {device}": "{device} で実行"
 }

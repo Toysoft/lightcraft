@@ -176,6 +176,15 @@ pub fn pixels(img: &Rgb8, spec: &ImageSpec) -> Result<Vec<f32>> {
     Ok(out)
 }
 
+/// [`pixels`] of every image, one after the other (`[n, 3, size, size]`), resized in parallel (on the current rayon
+/// pool: an indexing pace's threads).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn batch(images: &[Rgb8], spec: &ImageSpec) -> Result<Vec<f32>> {
+    use rayon::prelude::*;
+    let each: Vec<Vec<f32>> = images.par_iter().map(|img| pixels(img, spec)).collect::<Result<_>>()?;
+    Ok(each.concat())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

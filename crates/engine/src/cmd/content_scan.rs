@@ -104,6 +104,8 @@ pub(crate) fn refresh(s: &mut Session, fresh: bool) {
         st.counts = Counts::default();
         st.counts_stamp = None;
         st.ms_per_photo = None;
+        st.device = None;
+        st.gpu_fallback = None;
         if st.text.as_ref().is_some_and(|t| Some(&t.tag) != new.as_ref()) {
             st.text = None;
         }
@@ -203,6 +205,17 @@ fn collect(s: &mut Session) -> usize {
         if let Some(e) = done.model_error {
             log::warn!("content index: the model could not be loaded: {e}");
             s.content.error = Some((tag.clone(), format!("the content model could not be loaded: {e}")));
+        }
+        if let Some(d) = done.device {
+            s.content.device = Some(d);
+        }
+        if let Some(why) = done.gpu_fallback
+            && s.content.gpu_fallback.is_none()
+        {
+            log::warn!("content index: the GPU stopped running the model ({why}); the CPU indexes from now on");
+            s.content.gpu_fallback = Some(why);
+            // the batch was embedded on the CPU: the GPU's speed is no guide to what is left
+            s.content.ms_per_photo = None;
         }
         if done.embedded > 0 {
             let per = done.ms / done.results.len().max(1) as f64;
@@ -435,6 +448,9 @@ pub(crate) fn report(s: &mut Session) -> Value {
         "stopped": st.held,
         "pace": st.pace.name(),
         "msPerPhoto": st.ms_per_photo.map(|v| v.round()),
+        "device": st.device,
+        "textDevice": st.text.as_ref().and_then(|t| t.model.as_ref()).map(|m| m.runs_on()),
+        "gpuFallback": st.gpu_fallback.clone().or_else(|| st.text.as_ref().and_then(|t| t.model.as_ref()).and_then(|m| m.gpu_fallback())),
         "etaSeconds": eta,
         "embeddedThisSession": st.embedded,
         "error": st.error.as_ref().filter(|(t, _)| st.current.as_ref().is_some_and(|c| &c.tag == t)).map(|(_, e)| e.clone()),

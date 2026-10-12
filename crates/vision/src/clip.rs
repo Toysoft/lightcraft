@@ -22,9 +22,12 @@ use std::sync::Arc;
 use candle_core::{DType, Device, IndexOp, Module, Tensor};
 use candle_nn::{LayerNorm, Linear, VarBuilder};
 
+use crate::accel::{Accel, Accelerator, Input, Pool, TowerPlan};
 use crate::config::{ClipConfig, TextConfig, VisionConfig};
 use crate::manifest::{Family, Manifest, ScoreKind, TokenizerKind};
-use crate::nn::{Block, blocks, causal_mask, linear_no_bias, read_bounded, rows, scalar};
+use crate::nn::{
+    Block, Lazy, block_plans, blocks, causal_mask, flat_rows, linear_no_bias, linear_plan, make_runner, norm_plan, read_bounded, rows, scalar,
+};
 use crate::tokenizer::clip_bpe::{self, ClipBpe};
 use crate::tokenizer::{MAX_TEXT_BYTES, clip_text};
 use crate::weights::{Backend, Weights};
@@ -135,14 +138,67 @@ impl TextTower {
     }
 }
 
+/// The image tower as plain data, for a [`crate::accel::TowerRunner`]. The final layer norm is `post_layernorm`
+/// (on every position: the class token's is the one picked).
+fn image_plan(c: &VisionConfig, projection: usize) -> TowerPlan {
+    let d = c.hidden;
+    let n = c.grid() * c.grid();
+    TowerPlan {
+        name: "image",
+        hidden: d,
+        heads: c.heads,
+        intermediate: c.intermediate,
+        eps: c.eps as f32,
+        act: c.act,
+        causal: false,
+        input: Input::Patches { patches: n, proj: linear_plan("vision_model.embeddings.patch_embedding", c.channels * c.patch * c.patch, d, false) },
+        class: Some("vision_model.embeddings.class_embedding".into()),
+        positions: "vision_model.embeddings.position_embedding.weight".into(),
+        max_len: n + 1,
+        pre_ln: Some(norm_plan("vision_model.pre_layrnorm")),
+        blocks: block_plans("vision_model", c.layers, d, c.intermediate),
+        final_ln: norm_plan("vision_model.post_layernorm"),
+        pool: Pool::Pick,
+        proj: Some(linear_plan("visual_projection", d, projection, false)),
+        out: projection,
+    }
+}
+
+/// The text tower as plain data, for a [`crate::accel::TowerRunner`].
+fn text_plan(c: &TextConfig) -> TowerPlan {
+    TowerPlan {
+        name: "text",
+        hidden: c.hidden,
+        heads: c.heads,
+        intermediate: c.intermediate,
+        eps: c.eps as f32,
+        act: c.act,
+        causal: true,
+        input: Input::Tokens,
+        class: None,
+        positions: "text_model.embeddings.position_embedding.weight".into(),
+        max_len: c.context,
+        pre_ln: None,
+        blocks: block_plans("text_model", c.layers, c.hidden, c.intermediate),
+        final_ln: norm_plan("text_model.final_layer_norm"),
+        pool: Pool::Pick,
+        proj: Some(linear_plan("text_projection", c.hidden, c.projection, false)),
+        out: c.projection,
+    }
+}
+
 /// A loaded CLIP model.
 pub struct Clip {
     manifest: Manifest,
     config: ClipConfig,
     device: Device,
     weights: Arc<Weights>,
-    vision: Option<VisionTower>,
-    text: Option<TextTower>,
+    towers: Towers,
+    /// The candle towers: loaded with the model, or (when a runner runs the tower) only if the CPU has to take over.
+    vision: Lazy<VisionTower>,
+    text: Lazy<TextTower>,
+    gpu_image: Option<Accel>,
+    gpu_text: Option<Accel>,
     tokenizer: Option<ClipBpe>,
     /// `exp(logit_scale)`.
     scale: f32,
@@ -151,6 +207,11 @@ pub struct Clip {
 impl Clip {
     /// Load from `dir` (`model.safetensors`, `config.json`, and for the text tower `vocab.json` + `merges.txt`).
     pub fn load_on(dir: &Path, manifest: Manifest, towers: Towers, device: Device) -> Result<Self> {
+        Self::load_with(dir, manifest, towers, device, None)
+    }
+
+    /// [`Clip::load_on`], running each tower on a runner `accel` makes when it can (the CPU, on `device`, otherwise).
+    pub fn load_with(dir: &Path, manifest: Manifest, towers: Towers, device: Device, accel: Option<&Accelerator>) -> Result<Self> {
         if manifest.family != Family::Clip || manifest.text.tokenizer != TokenizerKind::ClipBpe || manifest.score.kind != ScoreKind::Softmax {
             return Err(Error::Model(format!("{}: not a CLIP manifest", manifest.id)));
         }
@@ -177,19 +238,55 @@ impl Clip {
             return Err(Error::Model(format!("the manifest's context {} is longer than the model's {}", manifest.text.context, config.text.context)));
         }
         let weights = Weights::open(&dir.join(WEIGHTS_FILE))?;
-        let vb = VarBuilder::from_backend(Box::new(Backend(weights.clone())), DType::F32, device.clone());
-        let vision = if towers.image { Some(VisionTower::new(&config.vision, config.projection, vb.clone())?) } else { None };
-        let (text, tokenizer) = if towers.text {
-            let tok = ClipBpe::load(dir)?;
-            if tok.vocab_size() > config.text.vocab {
-                return Err(Error::Model(format!("the tokenizer has {} tokens, the model {}", tok.vocab_size(), config.text.vocab)));
-            }
-            (Some(TextTower::new(&config.text, &weights, vb)?), Some(tok))
-        } else {
-            (None, None)
-        };
         let scale = scalar(&weights, "logit_scale")?.clamp(-20.0, 20.0).exp();
-        Ok(Self { manifest, config, device, weights, vision, text, tokenizer, scale })
+        let mut m = Self {
+            manifest,
+            config,
+            device,
+            weights,
+            towers,
+            vision: Lazy::empty(),
+            text: Lazy::empty(),
+            gpu_image: None,
+            gpu_text: None,
+            tokenizer: None,
+            scale,
+        };
+        if towers.image {
+            m.gpu_image = make_runner(accel, || image_plan(&m.config.vision, m.config.projection), &m.weights);
+            if m.gpu_image.is_none() {
+                m.vision = Lazy::loaded(m.load_vision()?);
+            }
+        }
+        if towers.text {
+            let tok = ClipBpe::load(dir)?;
+            if tok.vocab_size() > m.config.text.vocab {
+                return Err(Error::Model(format!("the tokenizer has {} tokens, the model {}", tok.vocab_size(), m.config.text.vocab)));
+            }
+            m.tokenizer = Some(tok);
+            let c = &m.config.text;
+            // the token table is read a row at a time; check it now so a damaged file fails at load
+            if m.weights.shape(TOKEN_TABLE) != Some(&[c.vocab, c.hidden][..]) {
+                return Err(Error::Model(format!("{TOKEN_TABLE}: missing or not {} × {}", c.vocab, c.hidden)));
+            }
+            m.gpu_text = make_runner(accel, || text_plan(&m.config.text), &m.weights);
+            if m.gpu_text.is_none() {
+                m.text = Lazy::loaded(m.load_text()?);
+            }
+        }
+        Ok(m)
+    }
+
+    fn var_builder(&self) -> VarBuilder<'static> {
+        VarBuilder::from_backend(Box::new(Backend(self.weights.clone())), DType::F32, self.device.clone())
+    }
+
+    fn load_vision(&self) -> Result<VisionTower> {
+        VisionTower::new(&self.config.vision, self.config.projection, self.var_builder())
+    }
+
+    fn load_text(&self) -> Result<TextTower> {
+        TextTower::new(&self.config.text, &self.weights, self.var_builder())
     }
 
     pub fn config(&self) -> &ClipConfig {
@@ -216,14 +313,36 @@ impl Clip {
 
     /// Image embeddings from preprocessed pixels `[B, 3, S, S]`.
     pub fn embed_pixels(&self, pixels: &Tensor) -> Result<Vec<Vec<f32>>> {
-        let vision = self.vision.as_ref().ok_or_else(|| Error::Model("the image tower is not loaded".into()))?;
-        rows(&vision.forward(&pixels.to_device(&self.device)?)?)
+        let (b, ..) = pixels.dims4()?;
+        self.embed_pixel_values(pixels.flatten_all()?.to_dtype(DType::F32)?.to_vec1::<f32>()?, b)
+    }
+
+    /// Image embeddings from preprocessed pixels (`n` images `[3, S, S]`, one after the other): on the runner when there
+    /// is one, else (or when it fails) on candle.
+    fn embed_pixel_values(&self, px: Vec<f32>, n: usize) -> Result<Vec<Vec<f32>>> {
+        if !self.towers.image {
+            return Err(Error::Model("the image tower is not loaded".into()));
+        }
+        let (c, out) = (&self.config.vision, self.config.projection);
+        if n == 0 || px.len() != n * c.channels * c.image * c.image {
+            return Err(Error::Input(format!("{} pixel values for {n} images of {}×{}×{}", px.len(), c.channels, c.image, c.image)));
+        }
+        if let Some(g) = &self.gpu_image
+            && let Some(v) = g.run(|| crate::accel::patches(&px, n, c.image, c.patch), n, out, &vec![0; n])
+        {
+            return Ok(flat_rows(v, out));
+        }
+        let vision = self.vision.get(|| self.load_vision())?;
+        let t = Tensor::from_vec(px, (n, c.channels, c.image, c.image), &self.device)?;
+        rows(&vision.forward(&t)?)
     }
 
     /// Text embeddings from token ids as [`Clip::tokens`] gives them (each padded to the same length, with its count
     /// of real tokens).
     pub fn embed_tokens(&self, texts: &[(Vec<u32>, usize)]) -> Result<Vec<Vec<f32>>> {
-        let text = self.text.as_ref().ok_or_else(|| Error::Model("the text tower is not loaded".into()))?;
+        if !self.towers.text {
+            return Err(Error::Model("the text tower is not loaded".into()));
+        }
         // only as long as the longest text: the causal mask keeps what follows a text's end out of it
         let l = texts.iter().map(|(_, n)| *n).max().unwrap_or(0);
         let mut ids = Vec::with_capacity(texts.len() * l);
@@ -233,11 +352,31 @@ impl Clip {
             ids.extend_from_slice(row);
             ends.push(n.saturating_sub(1));
         }
+        let (b, c) = (ends.len(), &self.config.text);
+        if l == 0 || l > c.context || ids.len() != b * l {
+            return Err(Error::Input(format!("{} tokens for {b} texts of {l} (context {})", ids.len(), c.context)));
+        }
+        if let Some(g) = &self.gpu_text {
+            let input =
+                || -> Result<Vec<f32>> { Ok(self.weights.read_rows(TOKEN_TABLE, &ids)?.to_dtype(DType::F32)?.flatten_all()?.to_vec1::<f32>()?) };
+            let pick: Vec<u32> = ends.iter().map(|e| *e as u32).collect();
+            if let Some(v) = g.run(input, b, c.projection, &pick) {
+                return Ok(flat_rows(v, c.projection));
+            }
+        }
+        let text = self.text.get(|| self.load_text())?;
         rows(&text.forward(&ids, &ends, l, &self.weights, &self.device)?)
     }
 
     fn score_map(&self) -> Scoring {
         Scoring { scale: self.scale, bias: self.manifest.score.softmax_offset(), sigmoid: true }
+    }
+
+    fn runs_on_gpu(&self) -> Option<String> {
+        let towers = [(self.towers.image, &self.gpu_image), (self.towers.text, &self.gpu_text)];
+        let mut names = towers.iter().filter(|(on, _)| *on).map(|(_, g)| g.as_ref().and_then(|g| g.device()));
+        let first = names.next()??;
+        names.all(|n| n.as_deref() == Some(first.as_str())).then_some(first)
     }
 }
 
@@ -249,16 +388,10 @@ impl ContentModel for Clip {
         if batch.len() > MAX_BATCH {
             return Err(Error::Input(format!("{} images in one batch (at most {MAX_BATCH})", batch.len())));
         }
-        if self.vision.is_none() {
+        if !self.towers.image {
             return Err(Error::Model("the image tower is not loaded".into()));
         }
-        let s = self.manifest.image.size as usize;
-        let mut px = Vec::with_capacity(batch.len() * 3 * s * s);
-        for img in batch {
-            px.extend(preprocess::pixels(img, &self.manifest.image)?);
-        }
-        let px = Tensor::from_vec(px, (batch.len(), 3, s, s), &self.device)?;
-        self.embed_pixels(&px)
+        self.embed_pixel_values(preprocess::batch(batch, &self.manifest.image)?, batch.len())
     }
 
     fn embed_texts(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
@@ -282,6 +415,14 @@ impl ContentModel for Clip {
 
     fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    fn runs_on(&self) -> String {
+        self.runs_on_gpu().map_or_else(|| crate::device_name(&self.device), |d| format!("GPU: {d}"))
+    }
+
+    fn gpu_fallback(&self) -> Option<String> {
+        self.gpu_image.as_ref().and_then(Accel::failed).or_else(|| self.gpu_text.as_ref().and_then(Accel::failed))
     }
 }
 

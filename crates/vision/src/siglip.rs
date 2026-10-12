@@ -24,9 +24,12 @@ use std::sync::Arc;
 use candle_core::{DType, Device, IndexOp, Module, Tensor};
 use candle_nn::{LayerNorm, Linear, VarBuilder};
 
+use crate::accel::{Accel, Accelerator, Input, Pool, ProbeHead, TowerPlan};
 use crate::config::{SiglipConfig, TextConfig, VisionConfig};
 use crate::manifest::{Family, Manifest, ScoreKind, TokenizerKind};
-use crate::nn::{Block, Mlp, attend, blocks, linear, read_bounded, rows, scalar, split_heads};
+use crate::nn::{
+    Block, Lazy, Mlp, attend, block_plans, blocks, flat_rows, linear, linear_plan, make_runner, norm_plan, read_bounded, rows, scalar, split_heads,
+};
 use crate::tokenizer::{MAX_TEXT_BYTES, SentencePiece};
 use crate::weights::{Backend, Weights};
 use crate::{ContentModel, Error, MAX_BATCH, Result, Rgb8, Scoring, Towers, preprocess};
@@ -175,14 +178,84 @@ impl TextTower {
     }
 }
 
+/// The image tower as plain data, for a [`crate::accel::TowerRunner`].
+fn image_plan(c: &VisionConfig) -> TowerPlan {
+    let d = c.hidden;
+    let n = c.grid() * c.grid();
+    let head = "vision_model.head";
+    let packed = |i: usize| crate::accel::Linear {
+        weight: format!("{head}.attention.in_proj_weight"),
+        bias: Some(format!("{head}.attention.in_proj_bias")),
+        rows: Some((i * d, d)),
+        inp: d,
+        out: d,
+    };
+    TowerPlan {
+        name: "image",
+        hidden: d,
+        heads: c.heads,
+        intermediate: c.intermediate,
+        eps: c.eps as f32,
+        act: c.act,
+        causal: false,
+        input: Input::Patches { patches: n, proj: linear_plan("vision_model.embeddings.patch_embedding", c.channels * c.patch * c.patch, d, true) },
+        class: None,
+        positions: "vision_model.embeddings.position_embedding.weight".into(),
+        max_len: n,
+        pre_ln: None,
+        blocks: block_plans("vision_model", c.layers, d, c.intermediate),
+        final_ln: norm_plan("vision_model.post_layernorm"),
+        pool: Pool::Probe(Box::new(ProbeHead {
+            probe: format!("{head}.probe"),
+            q: packed(0),
+            k: packed(1),
+            v: packed(2),
+            o: linear_plan(&format!("{head}.attention.out_proj"), d, d, true),
+            ln: norm_plan(&format!("{head}.layernorm")),
+            fc1: linear_plan(&format!("{head}.mlp.fc1"), d, c.intermediate, true),
+            fc2: linear_plan(&format!("{head}.mlp.fc2"), c.intermediate, d, true),
+        })),
+        proj: None,
+        out: d,
+    }
+}
+
+/// The text tower as plain data, for a [`crate::accel::TowerRunner`].
+fn text_plan(c: &TextConfig) -> TowerPlan {
+    TowerPlan {
+        name: "text",
+        hidden: c.hidden,
+        heads: c.heads,
+        intermediate: c.intermediate,
+        eps: c.eps as f32,
+        act: c.act,
+        causal: false,
+        input: Input::Tokens,
+        class: None,
+        positions: "text_model.embeddings.position_embedding.weight".into(),
+        max_len: c.context,
+        pre_ln: None,
+        blocks: block_plans("text_model", c.layers, c.hidden, c.intermediate),
+        final_ln: norm_plan("text_model.final_layer_norm"),
+        pool: Pool::Pick,
+        proj: Some(linear_plan("text_model.head", c.hidden, c.projection, true)),
+        out: c.projection,
+    }
+}
+
 /// A loaded SigLIP model.
 pub struct Siglip {
     manifest: Manifest,
     config: SiglipConfig,
     device: Device,
     weights: Arc<Weights>,
-    vision: Option<VisionTower>,
-    text: Option<TextTower>,
+    /// Which towers were asked for.
+    towers: Towers,
+    /// The candle towers: loaded with the model, or (when a runner runs the tower) only if the CPU has to take over.
+    vision: Lazy<VisionTower>,
+    text: Lazy<TextTower>,
+    gpu_image: Option<Accel>,
+    gpu_text: Option<Accel>,
     tokenizer: Option<SentencePiece>,
     /// `exp(logit_scale)`.
     scale: f32,
@@ -192,6 +265,11 @@ pub struct Siglip {
 impl Siglip {
     /// Load from `dir` (`model.safetensors`, `config.json`, and for the text tower `tokenizer.json`).
     pub fn load_on(dir: &Path, manifest: Manifest, towers: Towers, device: Device) -> Result<Self> {
+        Self::load_with(dir, manifest, towers, device, None)
+    }
+
+    /// [`Siglip::load_on`], running each tower on a runner `accel` makes when it can (the CPU, on `device`, otherwise).
+    pub fn load_with(dir: &Path, manifest: Manifest, towers: Towers, device: Device, accel: Option<&Accelerator>) -> Result<Self> {
         if manifest.family != Family::Siglip || manifest.text.tokenizer != TokenizerKind::Sentencepiece || manifest.score.kind != ScoreKind::Sigmoid {
             return Err(Error::Model(format!("{}: not a SigLIP manifest", manifest.id)));
         }
@@ -218,21 +296,63 @@ impl Siglip {
             return Err(Error::Model(format!("the manifest's context {} is longer than the model's {}", manifest.text.context, config.text.context)));
         }
         let weights = Weights::open(&dir.join(WEIGHTS_FILE))?;
-        let vb = VarBuilder::from_backend(Box::new(Backend(weights.clone())), DType::F32, device.clone());
-        let vision = if towers.image { Some(VisionTower::new(&config.vision, vb.pp("vision_model"))?) } else { None };
-        let (text, tokenizer) = if towers.text {
-            let tok = SentencePiece::load(dir)?;
-            if tok.vocab_size() > config.text.vocab {
-                return Err(Error::Model(format!("the tokenizer has {} tokens, the model {}", tok.vocab_size(), config.text.vocab)));
-            }
-            (Some(TextTower::new(&config.text, &weights, vb.pp("text_model"))?), Some(tok))
-        } else {
-            (None, None)
-        };
         let logit_scale = scalar(&weights, "logit_scale")?;
         let bias = scalar(&weights, "logit_bias")?;
         let scale = logit_scale.clamp(-20.0, 20.0).exp();
-        Ok(Self { manifest, config, device, weights, vision, text, tokenizer, scale, bias })
+        let mut m = Self {
+            manifest,
+            config,
+            device,
+            weights,
+            towers,
+            vision: Lazy::empty(),
+            text: Lazy::empty(),
+            gpu_image: None,
+            gpu_text: None,
+            tokenizer: None,
+            scale,
+            bias,
+        };
+        if towers.image {
+            m.gpu_image = make_runner(accel, || image_plan(&m.config.vision), &m.weights);
+            if m.gpu_image.is_none() {
+                m.vision = Lazy::loaded(m.load_vision()?);
+            }
+        }
+        if towers.text {
+            let tok = SentencePiece::load(dir)?;
+            if tok.vocab_size() > m.config.text.vocab {
+                return Err(Error::Model(format!("the tokenizer has {} tokens, the model {}", tok.vocab_size(), m.config.text.vocab)));
+            }
+            m.tokenizer = Some(tok);
+            m.check_token_table()?;
+            m.gpu_text = make_runner(accel, || text_plan(&m.config.text), &m.weights);
+            if m.gpu_text.is_none() {
+                m.text = Lazy::loaded(m.load_text()?);
+            }
+        }
+        Ok(m)
+    }
+
+    fn var_builder(&self) -> VarBuilder<'static> {
+        VarBuilder::from_backend(Box::new(Backend(self.weights.clone())), DType::F32, self.device.clone())
+    }
+
+    fn load_vision(&self) -> Result<VisionTower> {
+        VisionTower::new(&self.config.vision, self.var_builder().pp("vision_model"))
+    }
+
+    fn load_text(&self) -> Result<TextTower> {
+        TextTower::new(&self.config.text, &self.weights, self.var_builder().pp("text_model"))
+    }
+
+    /// The token table stays on disk: check it at load so a damaged file fails then.
+    fn check_token_table(&self) -> Result<()> {
+        let c = &self.config.text;
+        if self.weights.shape(TOKEN_TABLE) != Some(&[c.vocab, c.hidden][..]) {
+            return Err(Error::Model(format!("{TOKEN_TABLE}: missing or not {} × {}", c.vocab, c.hidden)));
+        }
+        Ok(())
     }
 
     pub fn device(&self) -> &Device {
@@ -269,15 +389,57 @@ impl Siglip {
 
     /// Image embeddings from preprocessed pixels `[B, 3, S, S]`.
     pub fn embed_pixels(&self, pixels: &Tensor) -> Result<Vec<Vec<f32>>> {
-        let vision = self.vision.as_ref().ok_or_else(|| Error::Model("the image tower is not loaded".into()))?;
-        rows(&vision.forward(&pixels.to_device(&self.device)?)?)
+        let (b, ..) = pixels.dims4()?;
+        self.embed_pixel_values(pixels.flatten_all()?.to_dtype(DType::F32)?.to_vec1::<f32>()?, b)
+    }
+
+    /// Image embeddings from preprocessed pixels (`n` images `[3, S, S]`, one after the other): on the runner when there
+    /// is one, else (or when it fails) on candle.
+    fn embed_pixel_values(&self, px: Vec<f32>, n: usize) -> Result<Vec<Vec<f32>>> {
+        if !self.towers.image {
+            return Err(Error::Model("the image tower is not loaded".into()));
+        }
+        let c = &self.config.vision;
+        if n == 0 || px.len() != n * c.channels * c.image * c.image {
+            return Err(Error::Input(format!("{} pixel values for {n} images of {}×{}×{}", px.len(), c.channels, c.image, c.image)));
+        }
+        if let Some(g) = &self.gpu_image
+            && let Some(v) = g.run(|| crate::accel::patches(&px, n, c.image, c.patch), n, c.hidden, &[])
+        {
+            return Ok(flat_rows(v, c.hidden));
+        }
+        let vision = self.vision.get(|| self.load_vision())?;
+        let t = Tensor::from_vec(px, (n, c.channels, c.image, c.image), &self.device)?;
+        rows(&vision.forward(&t)?)
     }
 
     /// Text embeddings from padded token ids (`n × context`, row-major).
     pub fn embed_tokens(&self, ids: &[u32], n: usize) -> Result<Vec<Vec<f32>>> {
-        let text = self.text.as_ref().ok_or_else(|| Error::Model("the text tower is not loaded".into()))?;
+        if !self.towers.text {
+            return Err(Error::Model("the text tower is not loaded".into()));
+        }
         let l = ids.len().checked_div(n).unwrap_or(0);
+        let c = &self.config.text;
+        if l == 0 || l > c.context || ids.len() != n * l {
+            return Err(Error::Input(format!("{} tokens for {n} texts of {l} (context {})", ids.len(), c.context)));
+        }
+        if let Some(g) = &self.gpu_text {
+            let input =
+                || -> Result<Vec<f32>> { Ok(self.weights.read_rows(TOKEN_TABLE, ids)?.to_dtype(DType::F32)?.flatten_all()?.to_vec1::<f32>()?) };
+            // the last position of the padded context, as the CPU path
+            if let Some(v) = g.run(input, n, c.projection, &vec![(l - 1) as u32; n]) {
+                return Ok(flat_rows(v, c.projection));
+            }
+        }
+        let text = self.text.get(|| self.load_text())?;
         rows(&text.forward(ids, n, l, &self.weights, &self.device)?)
+    }
+
+    fn runs_on_gpu(&self) -> Option<String> {
+        let towers = [(self.towers.image, &self.gpu_image), (self.towers.text, &self.gpu_text)];
+        let mut names = towers.iter().filter(|(on, _)| *on).map(|(_, g)| g.as_ref().and_then(|g| g.device()));
+        let first = names.next()??;
+        names.all(|n| n.as_deref() == Some(first.as_str())).then_some(first)
     }
 }
 
@@ -289,16 +451,10 @@ impl ContentModel for Siglip {
         if batch.len() > MAX_BATCH {
             return Err(Error::Input(format!("{} images in one batch (at most {MAX_BATCH})", batch.len())));
         }
-        if self.vision.is_none() {
+        if !self.towers.image {
             return Err(Error::Model("the image tower is not loaded".into()));
         }
-        let s = self.manifest.image.size as usize;
-        let mut px = Vec::with_capacity(batch.len() * 3 * s * s);
-        for img in batch {
-            px.extend(preprocess::pixels(img, &self.manifest.image)?);
-        }
-        let px = Tensor::from_vec(px, (batch.len(), 3, s, s), &self.device)?;
-        self.embed_pixels(&px)
+        self.embed_pixel_values(preprocess::batch(batch, &self.manifest.image)?, batch.len())
     }
 
     fn embed_texts(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
@@ -325,6 +481,14 @@ impl ContentModel for Siglip {
 
     fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+
+    fn runs_on(&self) -> String {
+        self.runs_on_gpu().map_or_else(|| crate::device_name(&self.device), |d| format!("GPU: {d}"))
+    }
+
+    fn gpu_fallback(&self) -> Option<String> {
+        self.gpu_image.as_ref().and_then(Accel::failed).or_else(|| self.gpu_text.as_ref().and_then(Accel::failed))
     }
 }
 
@@ -498,6 +662,68 @@ mod tests {
         assert!(Siglip::load_on(&t.dir, manifest(), Towers { image: false, text: false }, Device::Cpu).is_err());
         // missing folder
         assert!(Siglip::load_on(Path::new("/nonexistent/lc-vision"), manifest(), Towers::BOTH, Device::Cpu).is_err());
+    }
+
+    /// A runner that answers with zeros until it is told to fail, counting its calls.
+    struct Flaky {
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+        fail_from: usize,
+        out: usize,
+    }
+
+    impl crate::accel::TowerRunner for Flaky {
+        fn run(&self, _: &[f32], n: usize, _: &[u32]) -> std::result::Result<Vec<f32>, String> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call >= self.fail_from { Err("device lost".into()) } else { Ok(vec![0.5; n * self.out]) }
+        }
+        fn device(&self) -> String {
+            "Test GPU".into()
+        }
+    }
+
+    #[test]
+    fn a_runner_that_fails_hands_the_batch_to_the_cpu_for_good() {
+        let _alone = crate::accel::tests::ALONE.lock().unwrap_or_else(|e| e.into_inner());
+        crate::accel::reset_disabled();
+        let t = tiny("flaky", CONFIG, &tensors(8), 0);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen_plans = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (c, plans) = (calls.clone(), seen_plans.clone());
+        let accel =
+            move |plan: &TowerPlan, src: &dyn crate::accel::TensorSource| -> std::result::Result<Box<dyn crate::accel::TowerRunner>, String> {
+                // the plan names tensors the file has
+                assert!(src.read(&plan.positions).is_ok());
+                plans.lock().unwrap().push(plan.name);
+                Ok(Box::new(Flaky { calls: c.clone(), fail_from: 2, out: plan.out }))
+            };
+        let m = Siglip::load_with(&t.dir, manifest(), Towers::BOTH, Device::Cpu, Some(&accel)).unwrap();
+        assert_eq!(*seen_plans.lock().unwrap(), vec!["image", "text"]);
+        assert_eq!(m.runs_on(), "GPU: Test GPU");
+        let cpu = load(&t).unwrap();
+        let img = Rgb8::from_fn(40, 30, |x, y| [x as u8 * 6, y as u8 * 8, 100]);
+        // on the runner: its (normalised) answer
+        let e = m.embed_images(std::slice::from_ref(&img)).unwrap();
+        assert!((e[0][0] - (1.0f32 / 8.0).sqrt()).abs() < 1e-6);
+        assert_eq!(m.embed_texts(&["ab"]).unwrap()[0].len(), 8);
+        // the third call fails: the CPU embeds that batch, and every one after it
+        let want = cpu.embed_images(std::slice::from_ref(&img)).unwrap();
+        assert_eq!(m.embed_images(std::slice::from_ref(&img)).unwrap(), want);
+        assert!(m.gpu_fallback().unwrap().contains("device lost"));
+        assert_eq!(m.runs_on(), "CPU");
+        assert_eq!(m.embed_images(std::slice::from_ref(&img)).unwrap(), want);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3, "the failed runner is not called again");
+        // and models loaded from now on do not ask for a runner
+        assert!(crate::accel::disabled().is_some());
+        let again = Siglip::load_with(&t.dir, manifest(), Towers::BOTH, Device::Cpu, Some(&accel)).unwrap();
+        assert_eq!((again.runs_on().as_str(), seen_plans.lock().unwrap().len()), ("CPU", 2));
+        crate::accel::reset_disabled();
+        // a runner that cannot be made: the CPU, at once
+        let refuse = |_: &TowerPlan, _: &dyn crate::accel::TensorSource| -> std::result::Result<Box<dyn crate::accel::TowerRunner>, String> {
+            Err("no GPU".into())
+        };
+        let m = Siglip::load_with(&t.dir, manifest(), Towers::BOTH, Device::Cpu, Some(&refuse)).unwrap();
+        assert_eq!((m.runs_on().as_str(), m.gpu_fallback()), ("CPU", None));
+        assert_eq!(m.embed_images(std::slice::from_ref(&img)).unwrap(), want);
     }
 
     #[test]

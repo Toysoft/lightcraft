@@ -15,7 +15,7 @@ lightcraft-raster = { workspace = true }
 lightcraft-develop = { workspace = true }
 lightcraft-scenes = { workspace = true }
 lightcraft-pipeline = { workspace = true }
-lightcraft-gpu = { workspace = true }
+lightcraft-gpu = { workspace = true, features = ["vision"] }
 lightcraft-catalog = { workspace = true }
 web-time = { workspace = true }
 lightcraft-preview = { workspace = true }

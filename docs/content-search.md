@@ -9,7 +9,9 @@ and LightCraft embeds every photo of the library in the background. Then **searc
 (its Contents mode, or `contents:` words in any search), mixed with every other filter and sorted by Relevance; **find
 photos with similar contents** from any photo; and use **auto-tags** from a vocabulary of about 1,500 things a photo can
 show: the Library Filter's Contents column, suggestions in the Keywording panel, and a Smart Collection criterion.
-Two model families work behind the same interface: Google's SigLIP 2 (the default) and OpenAI's CLIP.
+Two model families work behind the same interface: Google's SigLIP 2 (the default) and OpenAI's CLIP. The models run on
+the graphics card when there is one (Vulkan, DirectX 12 or Metal through wgpu: NVIDIA, AMD, Intel, Apple), with the
+processor as the fallback (see *On the graphics card*).
 
 ## Models
 
@@ -17,16 +19,18 @@ A content model is a folder of files described by a manifest (`content-model.jso
 what it is, its licence, every file pinned by size and SHA-256, and how it wants its input. Models are interchangeable
 behind it. LightCraft knows four, in two families:
 
-| Id | Model | Licence | Size | Settings ▸ Search says | Indexing (per photo, vs Base) |
-|---|---|---|---|---|---|
-| `siglip2-b16-256` | [SigLIP 2 Base, patch 16, 256 px](https://huggingface.co/google/siglip2-base-patch16-256) (Google) | Apache-2.0 | 1.5 GB | Base · fast · any language (recommended) | 141–167 ms (1×) |
-| `siglip2-b16-384` | [SigLIP 2 Base, patch 16, 384 px](https://huggingface.co/google/siglip2-base-patch16-384) (Google) | Apache-2.0 | 1.5 GB | Base · finer detail, ~2.4× slower · any language | not measured (~2.4× the work) |
-| `siglip2-so400m-16-384` | [SigLIP 2 So400m, patch 16, 384 px](https://huggingface.co/google/siglip2-so400m-patch16-384) (Google) | Apache-2.0 | 4.6 GB | Large · best search results, ~8× slower · any language | 1,175–1,179 ms (8×) |
-| `clip-vit-b32-openai` | [CLIP ViT-B/32](https://huggingface.co/openai/clip-vit-base-patch32) (OpenAI) | MIT | 0.6 GB | Small · fastest, ~2× faster · English only | 33–101 ms (~0.5×) |
+| Id | Model | Licence | Size | Settings ▸ Search says | Indexing per photo, CPU (vs Base) | GPU |
+|---|---|---|---|---|---|---|
+| `siglip2-b16-256` | [SigLIP 2 Base, patch 16, 256 px](https://huggingface.co/google/siglip2-base-patch16-256) (Google) | Apache-2.0 | 1.5 GB | Base · fast · any language (recommended) | 141–167 ms (1×) | 13–19 ms |
+| `siglip2-b16-384` | [SigLIP 2 Base, patch 16, 384 px](https://huggingface.co/google/siglip2-base-patch16-384) (Google) | Apache-2.0 | 1.5 GB | Base · finer detail, ~2.4× slower · any language | not measured (~2.4× the work) | not measured |
+| `siglip2-so400m-16-384` | [SigLIP 2 So400m, patch 16, 384 px](https://huggingface.co/google/siglip2-so400m-patch16-384) (Google) | Apache-2.0 | 4.6 GB | Large · best search results, ~8× slower · any language | 1,175–1,179 ms (8×) | 36–41 ms |
+| `clip-vit-b32-openai` | [CLIP ViT-B/32](https://huggingface.co/openai/clip-vit-base-patch32) (OpenAI) | MIT | 0.6 GB | Small · fastest, ~2× faster · English only | 33–101 ms (~0.5×) | 11–16 ms |
 
-Indexing times are end to end (reading the picture included) at Normal pace on a Ryzen 9 9950X (16 cores, CPU only,
-load average 11–20 from other work), on the same two scratch libraries (352 mixed JPEG/raw photos, 235 Sony raws with
-embedded previews).
+Indexing times are end to end (reading the picture included) at Normal pace on the same two scratch libraries (352
+mixed JPEG/raw photos, 235 Sony raws with embedded previews): CPU on a Ryzen 9 9950X (16 cores, load average 11–20
+from other work, before the scan read more photos at once); GPU on an NVIDIA GeForce RTX 4090 (Vulkan). On the GPU the
+model is no longer what takes the time: reading the photos is (see *On the graphics card*). The hints in Settings ▸
+Search ("~8× slower") describe the work, which is what a processor feels.
 
 - **SigLIP 2** (`crates/vision/src/siglip.rs`): a ViT image tower with an attention-pooling head, a text tower with
   Gemma's SentencePiece tokenizer (256k tokens, 64-token context). Trained with a sigmoid loss, so its score is a match
@@ -101,9 +105,11 @@ one, or switches indexing off.
 
 **Test** (`content.models.test`) loads the model and embeds three procedurally generated scenes (a beach, a misty
 forest, a flower close-up from `lightcraft-scenes`) and three descriptions; each scene must match its own description
-best. It records the load time and the time per photo and per text in `installed.json`. On a Ryzen 9 9950X (CPU):
-SigLIP 2 Base 256 px loads in ~0.6 s, ~200–220 ms per photo, ~50–75 ms per text; CLIP ViT-B/32 loads in 0.1 s, 44 ms
-per photo, 5 ms per text; So400m loads in 2.4 s, ~3.8 s per photo and ~290 ms per text (measured under load).
+best. It records the load time, the time per photo and per text, and what ran it (`runsOn`: "GPU: <card>" or "CPU")
+in `installed.json`. On a Ryzen 9 9950X (CPU): SigLIP 2 Base 256 px loads in ~0.6 s, ~200–220 ms per photo, ~50–75 ms
+per text; CLIP ViT-B/32 loads in 0.1 s, 44 ms per photo, 5 ms per text; So400m loads in 2.4 s, ~3.8 s per photo and
+~290 ms per text (measured under load). On an RTX 4090 a model loads in 0.6 s (CLIP), 1.3 s (Base) or 3.4 s (So400m:
+its weights are rearranged and sent to the card).
 
 ## Indexing
 
@@ -114,15 +120,19 @@ index. It runs in the background:
 - **What is embedded:** the unedited photo, upright and uncropped, so edits never make a photo be indexed again. A raw's
   embedded JPEG is used when its long edge is at least 256 px (no raw decode); anything else is rendered with default
   settings at 512 px. Videos are not indexed.
-- **One model, one thread:** the image tower (about 400 MB) is loaded once, on its own thread; photos go through it in
-  batches of 8, 16 or 32 (by pace). The pictures of a batch are read in parallel, on the same threads, but at most 4
-  embedded previews and 1 rendered photo at a time, whatever the pace: a render can hold a whole file and a full-size
-  decode. Raws with a full-size JPEG and a small one (a Sony α1: 8640 × 5760 and 1616 × 1080) are read from the
-  smallest that covers 512 px, and big TIFFs (a layered Photoshop TIFF can be gigabytes) are reduced strip by strip as
-  they are read. Indexing 502 Sony α1 raws (and one 2.3 GB TIFF) peaks at about 1.4 GB of memory.
+- **One model, one thread:** the image tower (about 400 MB) is loaded once, on its own thread (on the graphics card
+  when there is one); photos go through it in batches of 8, 16 or 32 (by pace). The pictures of a batch are read in
+  parallel, a few at a time by pace: 2, 4 or 8 embedded previews and 1, 3 or 6 rendered photos at once (Low, Normal,
+  Fast). A render can hold a whole file and its decode; the renders run on the processor (they are small, and leave the
+  graphics card to the views and the model). Raws with a full-size JPEG and a small one (a Sony α1: 8640 × 5760 and
+  1616 × 1080) are read from the smallest that covers 512 px, and big TIFFs (a layered Photoshop TIFF can be gigabytes)
+  are reduced strip by strip as they are read. Indexing 502 Sony α1 raws (and one 2.3 GB TIFF) peaks at about 1.4 GB
+  of memory; 352 mixed photos at Fast pace about 1.9 GB.
 - **Pace** (Settings ▸ Search, `content.pace`): **Low** uses a quarter of the processor's threads (at most 4),
   **Normal** half of them, **Fast** four fifths. The work runs on a thread pool of that size, separate from the one the
-  window renders with; while you drag, type or scroll no new batch starts.
+  window renders with; while you drag, type or scroll no new batch starts. The pictures are read by threads of their
+  own that wait for their turn (a pool thread never waits: a render that hands work to another pool would otherwise
+  take on another photo's read and wait for itself).
 - **Progress:** a row in the activity stack, *Indexing photo contents*, counts indexed photos of all; Settings ▸ Search
   shows the same with the time left (from the measured speed). The row's ✕ (or `activity.cancel`) stops the scan once
   the batch it is on is done; everything embedded so far is kept. Turning the switch on again (or **Resume**) carries
@@ -141,7 +151,71 @@ index. It runs in the background:
 
 Measured on a Ryzen 9 9950X (16 cores, CPU only): SigLIP 2 Base 256 px roughly 140–300 ms per photo end to end, so a
 library of 10,000 photos takes about half an hour to an hour, once; CLIP about half that; So400m 8 times as
-long (see *Models*).
+long (see *Models*). With an RTX 4090: 1,000–2,300 photos a minute whatever the model (10,000 photos in 5–10 minutes).
+
+## On the graphics card
+
+The towers run on the graphics card through wgpu compute kernels (`crates/gpu/src/transformer.rs`,
+`crates/gpu/src/wgsl/tf_*.wgsl`), the same way AI Denoise runs its network there:
+
+- **A device of its own**, separate from the one the views render with (and from denoise's), so the model and the
+  interactive renders are separate contexts the driver time-slices and a failure of one never takes down the other.
+  The work is handed to the driver a few dozen kernels at a time, so the views get their turns. It follows the same
+  switches as GPU rendering: `LIGHTCRAFT_GPU=0`, `LIGHTCRAFT_GPU_BACKEND`, `LIGHTCRAFT_GPU_ADAPTER` and Settings ▸
+  Performance ▸ *Use the GPU for rendering* (unchecked, the processor runs the model until it is checked again), and
+  the same crash sentinel around creating the device and building its kernels.
+- **What runs there:** every transformer layer (the patch and token embeddings with the class token and positions,
+  layer norms, the q/k/v, output and MLP products with their GELU, multi-head attention with CLIP's causal mask, the
+  residual adds), SigLIP's attention-pooling head, CLIP's class-token and end-of-text pooling and both projections.
+  The processor resizes the photos and cuts them into patches, tokenizes texts and reads their token rows from the
+  weights file (SigLIP's 256k-row table stays on disk), and normalises the embeddings that come back.
+- **Kernels:** a tiled matrix product (128 × 128 or 64 × 64 blocks, 8 × 8 or 4 × 4 values per thread, bias, GELU and
+  the residual add fused in; about 22 TFLOP/s on an RTX 4090), a strided batched product for attention (heads read
+  straight out of the packed q/k/v rows and written back merged), row kernels for layer norm and softmax, and two small
+  ones that assemble the embeddings and pick the pooled positions.
+- **Precision:** f32 throughout, weights included (as on the processor). Against the processor's results with the real
+  models: embeddings cosine ≥ 0.999998 for every test image and text, scores within 5e-6; the phase 1 references
+  (Hugging Face `transformers`) still match through the GPU (SigLIP 2 Base scores within 1.1e-6, CLIP cosines within
+  3e-7; `crates/gpu/tests/vision_towers.rs`). Each kernel is tested against plain loops on sizes that are not multiples
+  of its blocks (`crates/gpu/src/transformer/tests.rs`).
+- **Memory:** the weights stay on the card for as long as the model is loaded (Base 370 MB per tower, So400m about
+  1.7 GB); the activations of up to 64 photos at a time are allocated once, within 1 GB, and attention's scores a few
+  photos at a time (256 MB). A model whose layers do not fit the card's buffer limits, or a card that runs out of
+  memory, is refused and the processor runs it. Indexing with So400m used 4.5 GB of the card (both towers), Base 1.9 GB,
+  CLIP 1.1 GB.
+- **When the card fails** (a device error, a lost device, a wrong-sized or non-finite answer, a batch that does not
+  finish in 60 s) the batch is embedded again on the processor, nothing is lost or mixed in the index, and the
+  processor runs the model for the rest of the session; the log says why and so does Settings ▸ Search ("The graphics
+  card stopped running the model: the processor took over.", `gpuFallback` in `content.status`).
+- **Settings ▸ Search** says what runs the model and how long a photo takes once indexing has started ("Runs on GPU:
+  NVIDIA GeForce RTX 4090 · 19 ms per photo", or "Runs on CPU · …"); `content.status` has `device` and `textDevice`.
+
+Measured on an RTX 4090 against the Ryzen 9 9950X (32 threads), the towers alone (a 1024 × 683 photo, resize
+included; `cargo test -p lightcraft-gpu --features vision --test vision_towers timings -- --ignored`):
+
+| Model | GPU, ms per photo at batch 1 / 8 / 32 | CPU, batch 1 / 8 | GPU, ms per text (alone / 8 at once) | CPU |
+|---|---|---|---|---|
+| CLIP ViT-B/32 | 19.5 / 6.5 / 1.9 | 88 / 47 | 4.0 / 0.5 | 22 / 7.7 |
+| SigLIP 2 Base 256 | 14.0 / 4.2 / 3.0 | 234 / 176 | 6.0 / 0.9 | 100 / 39 |
+| SigLIP 2 So400m 384 | 42.9 / 26.2 / 24.7 | 1,619 / 1,639 | 18.7 / 3.5 | 329 / 176 |
+
+End to end, indexing a scratch library from nothing (`lightcraft-cli run … content.pump wait=true`, wall time including
+start-up and loading the model):
+
+| Library | Pace | CLIP | Base | So400m |
+|---|---|---|---|---|
+| 352 mixed JPEG / raw photos | Normal | 1,812 photos/min (16 ms) | 1,752 /min (19 ms) | 996 /min (41 ms) |
+| | Fast | 2,029 /min (23 ms) | 2,293 /min (20 ms) | 1,154 /min (42 ms) |
+| 235 Sony raws (embedded previews) | Normal | 4,192 /min (11 ms) | 3,749 /min (13 ms) | 1,357 /min (36 ms) |
+| 352 mixed, on the CPU (`LIGHTCRAFT_GPU=0`) | Normal | 1,154 /min (36 ms) | 389 /min (139 ms) | 52 /min (1,223 ms) |
+
+(ms: the measured time per photo `content.status` reports.) Indexing used 1.0–2.1 processor threads on average with
+So400m and up to 3.9 with Base at Fast pace: decoding the photos.
+
+The window while So400m indexes on the same card (desktop app, scrolling the grid and changing exposure in the loupe;
+provisional, a short check): UI update median 0.8 ms (max 3.8) at Normal against 0.7 (max 6) idle; loupe renders
+median 4–6.6 ms (max ~24) against 3.6–3.9 (max 4.3). While a model's weights are being sent to the card (once per
+model and session, about 2 s for So400m) a single UI update took up to 0.2–0.7 s; not investigated further.
 
 ## The index file
 
@@ -213,7 +287,7 @@ the cosine does, and its cut-offs were chosen on the same photos.
 
 Latency (Ryzen 9 9950X, CPU): the text tower loads in about half a second, once; then a new search embeds the text in
 30–70 ms and scores the index in a few ms. Under heavy load from other work (load average ~75) a new search took
-0.6–1.2 s and More / Fewer 20–30 ms.
+0.6–1.2 s and More / Fewer 20–30 ms. On an RTX 4090 a text takes 4 ms (CLIP), 6 ms (Base) or 19 ms (So400m).
 
 ### For agents and scripts
 
@@ -364,7 +438,7 @@ Reachable from the control channel, `lightcraft-cli run` and MCP (`cmd_content_m
 | `content.models.remove` | `{id}` | delete a model's folder |
 | `content.models.test` | `{id, wait?}` | the self-test (in the background, or `wait: true` to get the result) |
 | `content.enable` | `{on}` | the Index photo contents setting (needs a model in use); on again resumes a stopped scan |
-| `content.status` | | the model in use, whether indexing is on, `indexed` of `total`, `stale`, `failed`, `offline`, `pending`, `indexing`, `stopped`, `pace`, `msPerPhoto`, `etaSeconds`, `error`, `index {file, bytes, photos, records, deadRecords, saveError}` |
+| `content.status` | | the model in use, whether indexing is on, `indexed` of `total`, `stale`, `failed`, `offline`, `pending`, `indexing`, `stopped`, `pace`, `msPerPhoto`, `device` / `textDevice` (what runs the image / text tower once loaded: `"GPU: <card>"` or `"CPU"`), `gpuFallback` (why the graphics card stopped running the model), `etaSeconds`, `error`, `index {file, bytes, photos, records, deadRecords, saveError}` |
 | `content.pace` | `{pace: low \| normal \| fast}` | how much of the computer indexing uses |
 | `content.pump` | `{pause?, wait?, timeoutMs?}` | one step of the background scan (the app calls it a few times a second); `wait: true` runs it to the end |
 | `content.search` | `{text, limit?: 100, min?}` | `{results: [{id, score}], indexed, total, complete, ms}`, best first |
@@ -399,7 +473,11 @@ lightcraft-cli run --demo content.models.install path=~/.config/lightcraft/model
 
 - The web build has no content search (the towers run natively only, on candle).
 - The vocabulary is English only (other languages can be added as user vocabularies; with SigLIP 2 they work).
-- No GPU on Linux and Windows (candle's CPU kernels; Metal on macOS): the large model is slow there.
+- The GPU kernels were measured on an NVIDIA card (Vulkan) only; DirectX 12, Metal and AMD / Intel cards run the same
+  kernels but are untested. Weights are kept in f32 on the card (f16 would halve So400m's 1.7 GB per tower; not needed
+  on a 24 GB card, it may matter on small ones).
+- Reading the photos, not the model, bounds indexing on a fast card: the next batch is read only after the current one
+  went through the model.
 - The cut-offs were measured on one person's 343 photos; people and vehicles were few. SigLIP 2 Base 384 px is not
   calibrated.
 - CLIP's tokenizer skips Unicode NFC (accents typed decomposed tokenize differently).
