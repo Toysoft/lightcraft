@@ -9,7 +9,7 @@
 //! window to the image. NaNs are skipped like [`f32::min`] does: a window yields NaN only when every
 //! value in it is NaN.
 
-use crate::{Plane, par_rows};
+use crate::Plane;
 
 /// Square min filter (erosion) of radius `r`: each output pixel is the minimum over the
 /// `(2r+1)²` window around it, clipped to the image. `r == 0` returns a copy.
@@ -27,15 +27,29 @@ fn filter(p: &Plane, r: usize, pick: fn(f32, f32) -> f32) -> Plane {
     if r == 0 || p.data.is_empty() || p.data.len() != w.saturating_mul(h) {
         return p.clone();
     }
-    let rows = |src: &Plane| {
-        let mut out = src.clone();
-        par_rows(&mut out.data, src.width, |_, row| {
-            let mut scratch = Scratch::default();
-            line(row, r, pick, &mut scratch);
-        });
-        out
-    };
-    transpose(&rows(&transpose(&rows(p))))
+    let mut out = p.clone();
+    rows(&mut out, r, pick);
+    let mut t = out.transpose();
+    rows(&mut t, r, pick);
+    t.transpose()
+}
+
+/// [`line`] over every row of `p`, in place (row-parallel, one scratch per worker).
+fn rows(p: &mut Plane, r: usize, pick: fn(f32, f32) -> f32) {
+    let w = p.width;
+    if w == 0 {
+        return;
+    }
+    #[cfg(feature = "parallel")]
+    {
+        use rayon::prelude::*;
+        p.data.par_chunks_mut(w).for_each_init(Scratch::default, |s, row| line(row, r, pick, s));
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        let mut s = Scratch::default();
+        p.data.chunks_mut(w).for_each(|row| line(row, r, pick, &mut s));
+    }
 }
 
 #[derive(Default)]
@@ -78,17 +92,6 @@ fn line(row: &mut [f32], r: usize, pick: fn(f32, f32) -> f32, s: &mut Scratch) {
     for (x, o) in row.iter_mut().enumerate() {
         *o = pick(s.suf[x], s.pre[x + 2 * r]);
     }
-}
-
-fn transpose(p: &Plane) -> Plane {
-    let (w, h) = (p.width, p.height);
-    let mut t = Plane::new(h, w);
-    par_rows(&mut t.data, h, |x, row| {
-        for (y, v) in row.iter_mut().enumerate() {
-            *v = p.data.get(y * w + x).copied().unwrap_or(0.0);
-        }
-    });
-    t
 }
 
 #[cfg(test)]

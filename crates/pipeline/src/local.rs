@@ -217,7 +217,7 @@ pub fn median_hv(p: &Plane, r: usize) -> Plane {
         for_rows(&mut out.data, src.width, |y, row| median_row(src.row(y), row, r));
         out
     };
-    transpose(&rows(&transpose(&rows(p))))
+    rows(&rows(p).transpose()).transpose()
 }
 
 /// Running median of `src` over `2r+1` taps (clamped edges) into `out`: a sorted window that
@@ -241,17 +241,6 @@ fn median_row(src: &[f32], out: &mut [f32], r: usize) {
             win.insert(j, new);
         }
     }
-}
-
-fn transpose(p: &Plane) -> Plane {
-    let (w, h) = (p.width, p.height);
-    let mut t = Plane::new(h, w);
-    for_rows(&mut t.data, h, |x, row| {
-        for (y, v) in row.iter_mut().enumerate() {
-            *v = p.data[y * w + x];
-        }
-    });
-    t
 }
 
 /// Detail scale of the highlights/shadows base from process V2, as a fraction of the long edge:
@@ -474,11 +463,7 @@ pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneS
         || s.masks.iter().any(|m| m.adjust.defringe > 0.0))
     .then(|| (0.0018 * ppl).max(0.6));
     // (from V3 Dehaze samples the whole frame's haze map instead: `crate::haze`)
-    let v3_haze = match s.process.process() {
-        Process::V1 | Process::V2 => false,
-        Process::V3 => true,
-    };
-    let dark = (!v3_haze && (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze))).then(|| (0.02 * ppl).max(1.0));
+    let dark = (!crate::haze::is_v3(s) && (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze))).then(|| (0.02 * ppl).max(1.0));
     let chroma = (local_any(|a| a.moire) || s.masks.iter().any(|m| m.adjust.noise > 0.0)).then(|| (CHROMA_SIGMA * ppl).max(1.0));
     let base_detail = if base.is_some() { tone_base_detail(s, px_per_long) } else { 0 };
     PlaneSigmas { base, base_detail, clarity, texture, dark, chroma }

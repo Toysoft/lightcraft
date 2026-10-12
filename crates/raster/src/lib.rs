@@ -100,6 +100,21 @@ impl<T: Copy + Default> Image<T> {
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
+    /// The image mirrored about its main diagonal (`width` and `height` swap; row-parallel). A
+    /// buffer shorter than its size reads as `T::default()` where it runs out.
+    pub fn transpose(&self) -> Self
+    where
+        T: Send + Sync,
+    {
+        let (w, h) = (self.width, self.height);
+        let mut t = Image::<T>::new(h, w);
+        par_rows(&mut t.data, h, |x, row| {
+            for (y, v) in row.iter_mut().enumerate() {
+                *v = self.data.get(y * w + x).copied().unwrap_or_default();
+            }
+        });
+        t
+    }
     /// [`Self::map`] into the same buffer (no second image in memory).
     pub fn map_in_place(&mut self, f: impl Fn(T) -> T + Sync + Send)
     where
