@@ -435,3 +435,101 @@ fn an_agents_update_folder_location_never_looks_on_the_apps_thread() {
     let r = h.request("engine.execute", json!({"command": "folder.updateLocation", "params": {"path": dir.path("archive")}}), T);
     assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.contains("missing `folder`")), "{r}");
 }
+
+// ── Second review: a person and an agent at once ─────────────────────────────────────────────
+
+fn inspect_relocate(h: &mut Headless) -> serde_json::Value {
+    h.request("ui.inspect", json!({}), T)["result"]["relocate"].clone()
+}
+
+#[test]
+fn locate_anyway_from_the_dialog_of_a_folder_that_isnt_there_scans_it_at_its_new_place() {
+    let dir = Scratch::new("anyway-sync");
+    let mut h = moved_folder(&dir, "archive/journey");
+    std::fs::remove_file(dir.path("archive/journey/b.png")).unwrap();
+    open_offline(&mut h, &dir.path("trip"));
+
+    // Locate Missing Folder…: only some are there, so the question takes the dialog's place
+    press_ok(&mut h, |h| matches!(&h.app.ui.dialog, Some(Dialog::LocateFolder { found: 1, total: 2, synchronize: true, .. })));
+    // Locate Anyway: the folder is scanned where it is now
+    let now = dir.path("archive/journey");
+    press_ok(
+        &mut h,
+        |h| matches!(&h.app.ui.dialog, Some(Dialog::SynchronizeFolder { path, counts: Some(c), .. }) if path.replace('\\', "/") == now && !c.offline),
+    );
+    assert_eq!(files(&h), [dir.path("archive/journey/a.png"), dir.path("archive/journey/b.png")]);
+}
+
+#[test]
+fn a_question_that_waits_is_not_overtaken_and_its_end_is_said() {
+    let dir = Scratch::new("question-waits");
+    let mut h = moved_folder(&dir, "archive/journey");
+    std::fs::remove_file(dir.path("archive/journey/b.png")).unwrap();
+    let before = files(&h);
+    row_menu(&mut h, &dir.path("trip"), "folderLocate");
+    assert!(h.step_until(T, |h| matches!(&h.app.ui.dialog, Some(Dialog::LocateFolder { .. }))), "{:?}", h.app.ui.dialog);
+    assert_eq!(inspect_relocate(&mut h)["last"], json!(null), "it waits for the answer");
+
+    // an agent's step meanwhile would make the answer be about a library that is no longer
+    let params = json!({"folder": dir.path("trip"), "path": dir.path("archive/journey"), "incomplete": true});
+    let r = h.request("engine.execute", json!({"command": "folder.updateLocation", "params": params}), T);
+    assert!(r["ok"] == false && h.app.relocate.is_none(), "{r}");
+    assert_eq!(files(&h), before);
+
+    // Cancel: that is how it ended, and for which folder
+    let r = h.request("ui.dialog.cancel", json!({}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    h.step();
+    h.step();
+    let last = inspect_relocate(&mut h)["last"].clone();
+    assert_eq!(last["cancelled"], json!(true), "{last}");
+    assert_eq!(last["folder"].as_str().map(|f| f.replace('\\', "/")), Some(dir.path("trip")), "{last}");
+    assert!(h.app.relocate_asked.is_none());
+}
+
+#[test]
+fn every_end_names_its_folder() {
+    let dir = Scratch::new("names");
+    let mut h = moved_folder(&dir, "archive/journey");
+    let last = update_location(&mut h, json!({"folder": dir.path("trip"), "path": dir.path("archive")}));
+    assert!(last["error"].is_string(), "{last}");
+    assert_eq!(
+        (last["folder"].as_str().map(|f| f.replace('\\', "/")), last["path"].as_str().map(|f| f.replace('\\', "/"))),
+        (Some(dir.path("trip")), Some(dir.path("archive"))),
+        "{last}"
+    );
+}
+
+#[test]
+fn an_agents_step_brings_the_open_dialog_of_that_folder_up_to_date() {
+    let dir = Scratch::new("agent-stale");
+    let mut h = moved_folder(&dir, "archive/journey");
+    open_offline(&mut h, &dir.path("trip"));
+
+    let last = update_location(&mut h, json!({"folder": dir.path("trip"), "path": dir.path("archive/journey")}));
+    assert_eq!(last["relinked"], json!(2), "{last}");
+
+    // the dialog was about a folder the library no longer has: it is about the folder where it is now
+    let now = dir.path("archive/journey");
+    let scanned = h.step_until(
+        T,
+        |h| matches!(&h.app.ui.dialog, Some(Dialog::SynchronizeFolder { path, counts: Some(c), .. }) if path.replace('\\', "/") == now && !c.offline),
+    );
+    assert!(scanned, "{:?}", h.app.ui.dialog);
+}
+
+#[test]
+fn an_agents_confirm_that_is_refused_leaves_the_dialog_to_choose_again() {
+    let dir = Scratch::new("agent-refused");
+    let mut h = moved_folder(&dir, "archive/journey");
+    open_offline(&mut h, &dir.path("trip"));
+    h.app.services.pick_folder = None;
+
+    let r = h.request("ui.dialog.confirm", json!({}), T);
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(
+        matches!(&h.app.ui.dialog, Some(Dialog::SynchronizeFolder { counts: Some(c), .. }) if c.offline),
+        "as after its button: {:?}",
+        h.app.ui.dialog
+    );
+}

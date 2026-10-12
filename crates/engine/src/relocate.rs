@@ -24,7 +24,10 @@
 //! * a place that is, as the library has it, the file of another photo of the folder (the new
 //!   place is inside the folder, or the folder inside it) is taken only when the file's content
 //!   is the photo's. Otherwise the step is refused, whatever was asked: the photo would show
-//!   the other photo's picture under its own edits;
+//!   the other photo's picture under its own edits. The same place can be written in many ways
+//!   (other letter case on a disk that doesn't tell case apart, a link, a second mount), so
+//!   where one folder is inside the other on disk, files are told by what they are on disk
+//!   ([`FileId`]), not by how their paths are spelled; a place written with `..` is refused;
 //! * a file of another size than the library recorded is not the file it knew: it is not counted
 //!   as found;
 //! * a folder with none of the files is not the folder, and one with only some of them (or with
@@ -74,6 +77,8 @@ pub struct Sought {
     /// The contents the library recorded for the photos that would be here (a virtual copy
     /// shares its photo's file); empty when it recorded none.
     hashes: Vec<String>,
+    /// Where the photos that would be here are now, as the library has them.
+    now: Vec<String>,
     /// The place is, as the library has it, the file of another photo of the folder: only its
     /// content tells whose the file there is.
     claimed: bool,
@@ -97,17 +102,81 @@ enum Seen {
     Claimed,
 }
 
+/// What a file is on disk, however its path is spelled.
+#[cfg(unix)]
+type FileId = (u64, u64);
+#[cfg(not(unix))]
+type FileId = PathBuf;
+
+/// What the file or folder at `path` is on disk (links followed), if it is there.
+fn file_id(path: &Path, meta: Option<&std::fs::Metadata>) -> Option<FileId> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let read;
+        let meta = match meta {
+            Some(m) => m,
+            None => {
+                read = std::fs::metadata(path).ok()?;
+                &read
+            }
+        };
+        Some((meta.dev(), meta.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        // (no file id in std here: the path as the system spells it, links and letter case resolved)
+        let _ = meta;
+        std::fs::canonicalize(path).ok()
+    }
+}
+
+/// `inner` is, on disk, `outer` or a place inside it (however the two are written).
+fn inside(inner: &str, outer: &str) -> bool {
+    let Some(outer) = file_id(Path::new(outer), None) else { return false };
+    let Ok(real) = std::fs::canonicalize(inner) else { return false };
+    real.ancestors().take(512).any(|a| file_id(a, None).as_ref() == Some(&outer))
+}
+
+/// The files of the folder's photos where the library has them now, by what they are on disk —
+/// when one of `from` and `to` is inside the other on disk, which is when a file at the new
+/// place can be one of them. Empty otherwise (the usual case: nothing of `from` is looked at).
+fn files_now(photos: &[RelocatedPhoto], from: &str, to: &str, progress: &ScanProgress) -> HashMap<FileId, String> {
+    let mut out = HashMap::new();
+    if !inside(to, from) && !inside(from, to) {
+        return out;
+    }
+    for r in photos {
+        if progress.cancel.load(Relaxed) {
+            break;
+        }
+        if let Some(id) = file_id(Path::new(&r.from), None) {
+            out.entry(id).or_insert_with(|| r.from.clone());
+        }
+    }
+    out
+}
+
 impl Sought {
-    fn seen(&self) -> Seen {
+    /// What is at the place. `theirs`: the files of the folder's photos as they are on disk now
+    /// ([`files_now`]).
+    fn seen(&self, theirs: &HashMap<FileId, String>) -> Seen {
         let Ok(meta) = std::fs::metadata(&self.path) else { return Seen::Missing };
         if !meta.is_file() {
             return Seen::Missing;
         }
-        if self.claimed {
-            // (read only here: a folder located inside itself is rare, and reading every file of
-            // a folder on a network share takes hours)
-            let content = crate::cmd::missing::file_hash(&self.path);
-            let proven = !self.hashes.is_empty() && content.is_some_and(|c| self.hashes.iter().all(|h| *h == c));
+        // another photo's file under another spelling of its path (a photo's own file, where
+        // the new place is another name for the folder itself, is its own)
+        let theirs = || {
+            !theirs.is_empty() && file_id(Path::new(&self.path), Some(&meta)).and_then(|id| theirs.get(&id)).is_some_and(|at| !self.now.contains(at))
+        };
+        if self.claimed || theirs() {
+            // the photo's file has the photo's size and content (read only here, and in pieces:
+            // a folder located inside itself is rare, and reading every file of a folder on a
+            // network share takes hours)
+            let proven = !self.hashes.is_empty()
+                && (self.size == 0 || self.size == meta.len())
+                && crate::cmd::missing::file_hash(&self.path).is_some_and(|c| self.hashes.iter().all(|h| *h == c));
             return if proven { Seen::Same } else { Seen::Claimed };
         }
         match self.size {
@@ -193,6 +262,10 @@ impl Relocation {
             return Err(invalid(format!("{path} is a whole disk or holds disks: pass `disk: true` to locate it")));
         }
         let abs = std::path::absolute(to).map_err(|e| invalid(format!("{to}: {e}")))?;
+        // (one place has one spelling to compare by: `a/b/../b` is not told from `a/b` as written)
+        if abs.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(invalid(format!("{to}: write the folder's path without `..`")));
+        }
         // (rebuilt from its parts: no trailing separator, so the photos' paths are joined cleanly)
         let abs: PathBuf = abs.components().collect();
         let to = abs.to_string_lossy().to_string();
@@ -215,19 +288,28 @@ impl Relocation {
     /// folder and not known to be the photo's that would point at it ([`Sought`]).
     ///
     /// `progress` counts the places looked at; with its `cancel` set the looking stops early
-    /// (and is then of no use: the caller drops the result).
+    /// and is refused: what was seen until then says nothing.
     pub fn look(self, progress: &ScanProgress) -> std::result::Result<Located, String> {
         let Relocation { from, to, photos, files, library } = self;
         if !Path::new(&to).is_dir() {
             return Err(format!("{to} is not a folder"));
         }
         let total = files.iter().filter(|f| f.counted).count();
-        let Tally { found, unverified, different, claimed, claimed_example } = look_at(&files, progress);
+        let theirs = files_now(&photos, &from, &to, progress);
+        // (a place only a photo in Recently Deleted or a kept Local record would point at is
+        // looked at where a file there can be another photo's)
+        let files: Vec<Sought> = files.into_iter().filter(|f| f.counted || f.claimed || !theirs.is_empty()).collect();
+        let Tally { found, unverified, different, claimed, claimed_example } = look_at(&files, &theirs, progress);
+        if progress.cancel.load(Relaxed) {
+            // (places not looked at may be other photos' files: what was seen says nothing)
+            return Err("locating the folder was stopped: nothing was changed".to_string());
+        }
         if let Some(first) = claimed_example {
             let n = claimed;
-            let (is, s) = if n == 1 { ("is", "") } else { ("are", "s") };
+            let (s, verb) = if n == 1 { ("", "belongs") } else { ("s", "belong") };
             return Err(format!(
-                "{n} file{s} in {to} {is} the file{s} of other photos of this folder, as far as the library can tell (such as {first}): the folder can't be located there"
+                "{n} file{s} in {to} {verb} to other photos of this folder, as far as the library can tell (such as {first}): choose the folder its files are in now. \
+                 (One of the two folders is inside the other; a file there is taken for a photo only when the library recorded the photo's content and the file has it.)"
             ));
         }
         Ok(Located { from, to, photos, found, total, unverified, different, library })
@@ -243,8 +325,7 @@ impl Relocation {
 /// Where the photos of a folder would be, and the places to look at.
 struct Destinations {
     photos: Vec<RelocatedPhoto>,
-    /// Each place once (a virtual copy shares its photo's file): those of the library's photos,
-    /// and every claimed one ([`Sought::claimed`]), whoever would point at it.
+    /// Each place once (a virtual copy shares its photo's file).
     files: Vec<Sought>,
 }
 
@@ -253,17 +334,35 @@ fn destinations(catalog: &Catalog, from: &str, to: &str) -> Destinations {
     let mut photos: Vec<RelocatedPhoto> = Vec::new();
     let mut files: Vec<Sought> = Vec::new();
     let mut at: HashMap<String, usize> = HashMap::new();
+    // A record of only having looked at a file in Local is no photo of the folder: it stays (the
+    // place on disk did not move), and gives way where a photo of the library comes to its file
+    // ([`giving_way`]) — also when that file is in a folder inside this one.
+    let browsed: HashSet<String> = catalog
+        .photos()
+        .filter(|p| p.local && !p.deleted)
+        .filter_map(|p| match &p.source {
+            Source::File { path } if folder_rest(path, from).is_some() => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    let looked: HashSet<PhotoId> = catalog.local_records_of(&browsed).untouched.into_iter().collect();
     for p in catalog.photos() {
         let Source::File { path } = &p.source else { continue };
+        if looked.contains(&p.id) {
+            continue;
+        }
         let Some(rest) = folder_rest(path, from).filter(|r| !r.is_empty()) else { continue };
         // joined by the platform, so the result is spelled like a path read from this disk
         let dest = rest.iter().fold(base.clone(), |d, name| d.join(name)).to_string_lossy().to_string();
         let i = *at.entry(dest.clone()).or_insert_with(|| {
-            files.push(Sought { path: dest.clone(), size: 0, hashes: Vec::new(), claimed: false, counted: false });
+            files.push(Sought { path: dest.clone(), size: 0, hashes: Vec::new(), now: Vec::new(), claimed: false, counted: false });
             files.len() - 1
         });
         if let Some(f) = files.get_mut(i) {
             f.counted |= p.in_library();
+            if !f.now.contains(path) {
+                f.now.push(path.clone());
+            }
             if f.size == 0 {
                 f.size = p.file_size;
             }
@@ -278,7 +377,6 @@ fn destinations(catalog: &Catalog, from: &str, to: &str) -> Destinations {
     for f in &mut files {
         f.claimed = now.contains(f.path.as_str());
     }
-    files.retain(|f| f.counted || f.claimed);
     Destinations { photos, files }
 }
 
@@ -326,7 +424,7 @@ fn plural(n: usize) -> &'static str {
 /// What is at each of `files`, looked at on several threads (a network share answers each
 /// slowly). `progress.total` / `done` follow; stops early when `progress.cancel` is set, with
 /// what was seen so far.
-pub fn look_at(files: &[Sought], progress: &ScanProgress) -> Tally {
+pub fn look_at(files: &[Sought], theirs: &HashMap<FileId, String>, progress: &ScanProgress) -> Tally {
     use std::sync::atomic::AtomicUsize;
     progress.total.store(files.len(), Relaxed);
     progress.done.store(0, Relaxed);
@@ -340,7 +438,7 @@ pub fn look_at(files: &[Sought], progress: &ScanProgress) -> Tally {
     let work = || {
         while !cancel.load(Relaxed) {
             let Some(f) = files.get(next.fetch_add(1, Relaxed)) else { break };
-            match f.seen() {
+            match f.seen(theirs) {
                 Seen::Claimed => {
                     claimed.fetch_add(1, Relaxed);
                     example.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(|| f.path.clone());
@@ -368,8 +466,10 @@ pub fn look_at(files: &[Sought], progress: &ScanProgress) -> Tally {
         let n = crate::import::workers(files.len());
         if n > 1 {
             std::thread::scope(|sc| {
-                for _ in 0..n {
-                    sc.spawn(work);
+                // (a thread the system won't start: the others, or this one, do its share)
+                let started = (0..n).filter(|_| std::thread::Builder::new().spawn_scoped(sc, work).is_ok()).count();
+                if started == 0 {
+                    work();
                 }
             });
         } else {

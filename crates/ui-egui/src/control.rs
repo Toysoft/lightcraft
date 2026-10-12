@@ -388,7 +388,8 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context, req: &ControlRequest
                 // action may ask whether it is (`folder.locate` scans the folder afterwards only
                 // for the Synchronize dialog that is waiting for it)
                 let r = crate::panels::dialogs::confirm_dialog(app, &d);
-                // the import review and the rule editor stay open on an error, as with their buttons
+                // the import review, the rule editor and Synchronize Folder stay open on an
+                // error, as with their buttons (other dialogs the button keeps open close here)
                 let stays = (r.is_err()
                     && matches!(
                         d,
@@ -396,6 +397,7 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context, req: &ControlRequest
                             | crate::state::Dialog::SamModel { .. }
                             | crate::state::Dialog::SmartRules { .. }
                             | crate::state::Dialog::SaveEffect { .. }
+                            | crate::state::Dialog::SynchronizeFolder { .. }
                     ))
                     || (r.is_ok() && crate::panels::dialogs::keeps_open(app, &d));
                 // (a dialog the action opened or changed takes its place)

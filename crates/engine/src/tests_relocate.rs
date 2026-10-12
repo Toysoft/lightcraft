@@ -330,13 +330,13 @@ fn the_plan_names_each_file_once_and_the_count_can_be_stopped() {
     let plan = Relocation::new(&s, &dir.path("trip"), &now, false).unwrap();
     assert_eq!(plan.files().len(), 2, "{:?}", plan.files());
     let progress = crate::import::ScanProgress::default();
-    assert_eq!(look_at(plan.files(), &progress).found, 2);
+    assert_eq!(look_at(plan.files(), &Default::default(), &progress).found, 2);
     assert_eq!((progress.done.load(Ordering::Relaxed), progress.total.load(Ordering::Relaxed)), (2, 2));
 
     // ✕ on its row in the activity stack
     let stopped = crate::import::ScanProgress::default();
     stopped.cancel.store(true, Ordering::Relaxed);
-    assert_eq!(look_at(plan.files(), &stopped).found, 0, "nothing more is looked for");
+    assert_eq!(look_at(plan.files(), &Default::default(), &stopped).found, 0, "nothing more is looked for");
 
     let r = relocate(&mut s, &dir.path("trip"), &now);
     assert_eq!((r["relinked"].as_u64(), r["found"].as_u64()), (Some(3), Some(2)), "the copy follows its photo: {r}");
@@ -586,6 +586,8 @@ fn forget_sizes_and_contents(s: &mut Session) {
     let ops: Vec<Op> = s
         .catalog
         .photos()
+        // (a record of having looked in Local stays as browsing left it: untouched)
+        .filter(|p| !p.local)
         .map(|p| Op::SetContent {
             id: p.id,
             width: p.width,
@@ -720,4 +722,138 @@ fn a_file_whose_size_the_library_never_recorded_is_taken_and_said() {
     let r = relocate(&mut s, &dir.path("trip"), &now);
 
     assert_eq!((r["found"].as_u64(), r["unverified"].as_u64(), r["different"].as_u64()), (Some(2), Some(2), Some(0)), "{r}");
+}
+
+// ── The same place under another spelling (second review) ────────────────────────────────────
+//
+// * A place inside the folder is the same place however it is written: with `..`, in other
+//   letter case on a disk that doesn't tell case apart, or through a link.
+// * The folder inside the chosen one is the same mistake the other way round.
+// * A file only browsed in Local at the new place is not "another photo": its record gives way.
+// * Looking that was stopped found nothing out.
+
+fn at(s: &Session, path: &str) -> PhotoId {
+    s.catalog.photos().find(|p| matches!(&p.source, Source::File { path: q } if q == path)).map(|p| p.id).unwrap()
+}
+
+#[test]
+fn a_place_written_with_dot_dot_is_refused() {
+    let dir = Scratch::new("dotdot");
+    let mut s = same_name_one_level_apart(&dir);
+    let to = format!("{}{sep}b{sep}..{sep}b", dir.path("a"), sep = std::path::MAIN_SEPARATOR);
+    let e = refused(&mut s, json!({"folder": dir.path("a"), "path": to, "incomplete": true}));
+    assert!(e.contains("`..`"), "{e}");
+}
+
+#[test]
+fn a_place_inside_the_folder_in_other_letter_case_is_the_same_place() {
+    let dir = Scratch::new("case");
+    write_png(&dir.path("a/x.png"), 1);
+    write_png(&dir.path("a/B/x.png"), 2);
+    if !Path::new(&dir.path("a/b/x.png")).is_file() {
+        return; // this disk tells `B` from `b`: `a/b` is no folder here
+    }
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [dir.path("a")]})).unwrap();
+    for blind in [false, true] {
+        if blind {
+            forget_sizes_and_contents(&mut s);
+        }
+        let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("a/b"), "incomplete": true}));
+        assert!(e.contains("other photos of this folder"), "blind {blind}: {e}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_to_a_place_inside_the_folder_is_the_same_place() {
+    let dir = Scratch::new("link");
+    let mut s = same_name_one_level_apart(&dir);
+    std::os::unix::fs::symlink(dir.path("a/b"), dir.path("link")).unwrap();
+    for blind in [false, true] {
+        if blind {
+            forget_sizes_and_contents(&mut s);
+        }
+        let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("link"), "incomplete": true}));
+        assert!(e.contains("other photos of this folder"), "blind {blind}: {e}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_to_the_folder_itself_gives_no_photo_another_photos_file() {
+    let dir = Scratch::new("link-self");
+    let mut s = library(&dir);
+    forget_sizes_and_contents(&mut s);
+    std::os::unix::fs::symlink(dir.path("trip"), dir.path("link")).unwrap();
+    // every file there is the photo's own, under another name
+    let r = relocate(&mut s, &dir.path("trip"), &dir.path("link"));
+    assert_eq!((r["relinked"].as_u64(), r["found"].as_u64()), (Some(2), Some(2)), "{r}");
+}
+
+#[test]
+fn the_folder_inside_the_chosen_one_is_the_same_mistake() {
+    let dir = Scratch::new("too-high");
+    write_png(&dir.path("a/b/x.png"), 1);
+    write_png(&dir.path("a/b/b/x.png"), 2);
+    write_png(&dir.path("a/b/k.png"), 3);
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [dir.path("a/b")]})).unwrap();
+    std::fs::copy(dir.path("a/b/k.png"), dir.path("a/k.png")).unwrap();
+    forget_sizes_and_contents(&mut s);
+    // one level too high: `a/b/x.png` would be taken for the photo of `a/b/b/x.png`
+    let e = refused(&mut s, json!({"folder": dir.path("a/b"), "path": dir.path("a"), "incomplete": true}));
+    assert!(e.contains("other photos of this folder"), "{e}");
+}
+
+#[test]
+fn a_file_only_browsed_in_local_at_a_place_inside_the_folder_gives_way() {
+    let dir = Scratch::new("nested-local");
+    write_png(&dir.path("a/x.png"), 1);
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [dir.path("a")]})).unwrap();
+    let photo = at(&s, &dir.path("a/x.png"));
+    // the file went one level down, and the folder it is in now was looked at in Local
+    std::fs::create_dir_all(dir.0.join("a/b")).unwrap();
+    std::fs::rename(dir.0.join("a/x.png"), dir.0.join("a/b/x.png")).unwrap();
+    s.execute("library.browse", &json!({"path": dir.path("a/b")})).unwrap();
+    assert_eq!(s.catalog.len(), 2, "the library's photo and the record of having looked");
+
+    for blind in [false, true] {
+        if blind {
+            s.undo_step().unwrap();
+            forget_sizes_and_contents(&mut s);
+        }
+        let r = relocate(&mut s, &dir.path("a"), &dir.path("a/b"));
+        assert_eq!((r["relinked"].as_u64(), r["found"].as_u64(), r["replacedLocal"].as_u64()), (Some(1), Some(1), Some(1)), "blind {blind}: {r}");
+        assert_eq!(files(&s), [dir.path("a/b/x.png")], "one record for the one file");
+        assert!(s.catalog.photo(photo).is_some_and(|p| p.in_library()));
+    }
+}
+
+#[test]
+fn a_claimed_file_of_another_size_than_the_photos_is_not_read_to_be_refused() {
+    let dir = Scratch::new("claimed-size");
+    let mut s = same_name_one_level_apart(&dir);
+    write_other(&dir.path("a/b/x.png"));
+    let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("a/b"), "incomplete": true}));
+    assert!(e.contains("other photos of this folder"), "{e}");
+}
+
+#[test]
+fn looking_that_was_stopped_found_nothing_out() {
+    let dir = Scratch::new("stopped");
+    let s = library(&dir);
+    let now = moved_away(&dir);
+    let stopped = crate::import::ScanProgress::default();
+    stopped.cancel.store(true, Ordering::Relaxed);
+    let e = Relocation::new(&s, &dir.path("trip"), &now, false).unwrap().look(&stopped).unwrap_err();
+    assert!(e.contains("stopped"), "{e}");
+}
+
+#[test]
+fn a_files_content_read_in_pieces_is_the_content_import_recorded() {
+    let bytes: Vec<u8> = (0..300_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+    let pieces = crate::cmd::missing::hash_reader(&bytes[..]).unwrap();
+    assert_eq!(pieces, lightcraft_preview::hash_bytes(&bytes).to_string());
 }

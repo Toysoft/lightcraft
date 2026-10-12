@@ -65,7 +65,9 @@ impl Drop for RelocateTask {
 /// located, and while an import or a Synchronize Folder runs (both add and relink photos of
 /// folders: the answer could be about a library that is no longer).
 pub fn start(app: &mut LightcraftApp, request: Request) -> Result<Value, String> {
-    if app.relocate.is_some() {
+    // (a question that waits is about the library as it is: another step meanwhile, an agent's
+    // say, would have its answer relink photos that are no longer where they were found)
+    if app.relocate.is_some() || app.relocate_asked.is_some() {
         return Err(crate::i18n::tr("A folder is already being located").to_string());
     }
     if app.import.is_some() {
@@ -104,8 +106,8 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
     // Synchronize Folder afterwards is for its dialog, which waits for the answer: closed (or
     // another dialog opened) while the files are looked for, it is not opened again unasked.
     // (Once the question is shown it stands in for that dialog, and carries the wish itself.)
-    let waiting = app.relocate.as_ref().map(|t| &t.request).or(app.relocate_asked.as_ref().filter(|a| !a.2 && !a.0.incomplete).map(|a| &a.0));
-    if waiting.is_some_and(|r| r.synchronize && !synchronizing(app, &r.path)) {
+    let gone = |r: &Request| r.synchronize && !synchronizing(app, &r.path);
+    if app.relocate.as_ref().is_some_and(|t| gone(&t.request)) || app.relocate_asked.as_ref().is_some_and(|a| !a.2 && !a.0.incomplete && gone(&a.0)) {
         if let Some(t) = &mut app.relocate {
             t.request.synchronize = false;
         }
@@ -142,14 +144,16 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
                 });
             }
         } else if !asking {
+            // Cancel: that is how it ended
+            app.relocate_last = Some(ended(request, json!({"cancelled": true})));
             app.relocate_asked = None;
         }
     }
     let Some(task) = app.relocate.as_ref() else { return };
     if task.guard.is_cancelled() {
         // ✕ on its row: a count stopped part-way says nothing
+        app.relocate_last = Some(ended(&task.request, json!({"cancelled": true})));
         app.relocate = None;
-        app.relocate_last = Some(json!({"cancelled": true}));
         return;
     }
     let (done, total) = (task.progress.done.load(Ordering::Relaxed), task.progress.total.load(Ordering::Relaxed));
@@ -167,7 +171,7 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
     let located = match located {
         Ok(l) => l,
         Err(e) => {
-            app.relocate_last = Some(json!({"error": e}));
+            app.relocate_last = Some(ended(&request, json!({"error": e})));
             return app.toast_error(ctx, e);
         }
     };
@@ -178,13 +182,21 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
         ctx.request_repaint();
         return;
     }
-    app.relocate_last = Some(json!({"error": why}));
+    // (the reason in the words the command has for it is the agent's; the person reads the toast)
+    app.relocate_last = Some(ended(&request, json!({"error": why})));
+    let name = lightcraft_catalog::folders::folder_label(&located.to);
     if located.found == 0 {
-        let name = lightcraft_catalog::folders::folder_label(&located.to);
         app.toast_error(ctx, crate::i18n::tr_format!("None of this folder's photos are in “{name}”: choose the folder it is now", name = name));
     } else {
-        // (an agent's step: its reason, in the words the command has for it)
-        app.toast_error(ctx, why);
+        app.toast_error(
+            ctx,
+            crate::i18n::tr_format!(
+                "Only {found} of this folder's {total} photos are in “{name}”: the folder was not located",
+                found = located.found,
+                total = located.total,
+                name = name
+            ),
+        );
     }
 }
 
@@ -194,14 +206,17 @@ fn synchronizing(app: &LightcraftApp, folder: &str) -> bool {
 }
 
 /// Relink the photos (one undo step) and say so; then Synchronize Folder at the new place when
-/// it was asked from that dialog and nothing else was opened meanwhile.
+/// it was asked from that dialog and nothing else was opened meanwhile, or when that dialog is
+/// open on the folder.
 fn finish(app: &mut LightcraftApp, ctx: &egui::Context, request: Request, located: Located) {
     let to = located.to.clone();
     match app.session.execute_fn("folder.updateLocation", |s| located.commit(s, request.incomplete)) {
         Ok(r) => {
             app.toast(ctx, crate::i18n::tr_format!("Folder located. Photos relinked: {n}", n = r["relinked"].as_u64().unwrap_or(0)));
             app.relocate_last = Some(r);
-            if request.synchronize && (app.ui.dialog.is_none() || synchronizing(app, &request.path)) {
+            // (a Synchronize dialog open on the folder as it was is about a folder the library
+            // no longer has, whoever located it: an agent's step too brings it up to date)
+            if (request.synchronize && app.ui.dialog.is_none()) || synchronizing(app, &request.path) {
                 let name = lightcraft_catalog::folders::folder_label(&to);
                 // the folder was chosen by the person, whatever it is: a disk too
                 let opened = crate::sync::open(app, &to, &name, request.disk).or_else(|_| crate::sync::open(app, &to, &name, true));
@@ -213,15 +228,24 @@ fn finish(app: &mut LightcraftApp, ctx: &egui::Context, request: Request, locate
             }
         }
         Err(e) => {
-            app.relocate_last = Some(json!({"error": e.to_string()}));
+            app.relocate_last = Some(ended(&request, json!({"error": e.to_string()})));
             app.toast_error(ctx, e.to_string());
         }
     }
 }
 
+/// How locating `request`'s folder ended without the command's result: `how` with the `folder`
+/// and `path` asked for, so whoever reads it can tell whose end it is.
+fn ended(request: &Request, mut how: Value) -> Value {
+    how["folder"] = json!(request.path);
+    how["path"] = json!(request.to);
+    how
+}
+
 /// `ui.inspect` → `relocate`: `{running: {done, total} | null, last}`. `last` is how the latest
-/// one went: `folder.updateLocation`'s result, `{error}` or `{cancelled: true}`; `null` while one
-/// runs or waits for the person's answer, and before the first.
+/// one went: `folder.updateLocation`'s result, `{error, folder, path}` or `{cancelled: true,
+/// folder, path}` (✕ on its row, or Cancel in the question); `null` while one runs or waits for
+/// the person's answer, and before the first.
 pub fn status(app: &LightcraftApp) -> Value {
     let running =
         app.relocate.as_ref().map(|t| json!({"done": t.progress.done.load(Ordering::Relaxed), "total": t.progress.total.load(Ordering::Relaxed)}));

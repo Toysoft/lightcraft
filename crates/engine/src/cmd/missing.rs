@@ -90,9 +90,26 @@ pub(crate) fn stored_hash(p: &Photo) -> Option<&str> {
     p.content_hash.as_deref().map(|h| h.split(':').next().unwrap_or(h)).filter(|h| !h.is_empty())
 }
 
-/// The content hash of the file at `path` (as import computes it), if it can be read.
+/// The content hash of the file at `path` (as import computes it), if it can be read. Read in
+/// pieces: the file is whatever is on the disk, of any size.
 pub(crate) fn file_hash(path: &str) -> Option<String> {
-    std::fs::read(path).ok().map(|b| lightcraft_preview::hash_bytes(&b).to_string())
+    hash_reader(std::fs::File::open(path).ok()?)
+}
+
+/// The content hash of what `r` gives, read in pieces (the hash import computes of the whole).
+pub(crate) fn hash_reader(mut r: impl std::io::Read) -> Option<String> {
+    let mut hasher = lightcraft_preview::Hasher128::new();
+    let mut piece = vec![0u8; 1 << 16];
+    loop {
+        match r.read(&mut piece) {
+            Ok(0) => return Some(hasher.finish().to_string()),
+            Ok(n) => {
+                hasher.update(piece.get(..n)?);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return None,
+        }
+    }
 }
 
 /// An in-scope photo ([`checked_path`]) as Find Missing Photos sees it: its file, the size and

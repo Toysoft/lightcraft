@@ -267,6 +267,7 @@
   "{n} preset{}": "{n} preset{}",
   "None of this folder's photos are in “{name}”: choose the folder it is now": "Žádná z fotografií této složky není ve složce „{name}“: vyberte složku, kterou je nyní",
   "Only {found} of this folder's {total} photos are in:": "Jen {found} z {total} fotografií této složky je ve složce:",
+  "Only {found} of this folder's {total} photos are in “{name}”: the folder was not located": "Jen {found} z {total} fotografií této složky je ve složce „{name}“: složka nebyla nalezena",
   "Files there that are not the size the library recorded: {n}": "Soubory tam, které nemají velikost zaznamenanou knihovnou: {n}",
   "Folder located. Photos relinked: {n}": "Složka nalezena. Znovu propojené fotografie: {n}",
   "{count} more warnings.": "{count} more warnings.",
