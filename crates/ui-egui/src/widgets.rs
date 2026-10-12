@@ -177,6 +177,12 @@ pub(crate) fn shown_value(spec: &ControlSpec, v: f64) -> String {
     if shown == "+0" || shown == "-0" { "0".to_string() } else { crate::readout::signed(&shown) }
 }
 
+/// A slider's value as the text its field opens with: no plus, and the hyphen of a keyboard
+/// for the minus it is shown with, so that what is copied from the field pastes anywhere.
+pub(crate) fn draft_value(spec: &ControlSpec, v: f64) -> String {
+    shown_value(spec, v).trim_start_matches('+').replace(crate::readout::MINUS, "-")
+}
+
 /// A Lightroom slider row (label + value above a track with a hollow ring thumb).
 /// Double-click the label or thumb to reset. Shift-drag = fine adjustment. Click the value to
 /// type one: Return or clicking away applies it, Esc keeps the old one.
@@ -229,7 +235,7 @@ pub fn slider(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool, label_
     let value_pressed = value_resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary));
     // Focus on the owned primary press before fast typing; retain the readout's click activation.
     if enabled && typing.is_none() && (value_resp.clicked() || value_pressed) {
-        typing = Some((shown_value(spec, value).trim_start_matches('+').to_string(), 0, value_pressed));
+        typing = Some((draft_value(spec, value), 0, value_pressed));
     }
     let value_released = ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary));
     // The opening press must complete the readout's original click before the edit continues.
