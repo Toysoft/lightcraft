@@ -252,5 +252,7 @@
   "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом",
   "{name} opened in the other editor": "{name} відкрито в іншому редакторі",
   "{n} originals opened in the other editor": "Відкрито оригіналів в іншому редакторі: {n}",
-  "· {in_source} identical copies": "· ідентичних копій: {in_source}"
+  "· {in_source} identical copies": "· ідентичних копій: {in_source}",
+  "Smart preview folder changed. {count} source files could not be removed.": "Папку смарт-переглядів змінено. Кількість вихідних файлів, які не вдалося видалити: {count}.",
+  "Smart preview folder change failed: {error}": "Не вдалося змінити папку смарт-переглядів: {error}"
 }

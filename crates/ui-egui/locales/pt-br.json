@@ -1998,5 +1998,11 @@
   "Recognition models": "Modelos de reconhecimento",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Nenhum processador gráfico encontrado: o LightCraft renderiza na CPU, o que é muito mais lento. Detalhes em Ajuda → Informações do sistema.",
   "On NixOS, start it from `nix develop`.": "No NixOS, inicie-o a partir de `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado."
+  "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado.",
+  "Changing smart preview folder": "Alterando a pasta de visualizações inteligentes",
+  "Refreshing smart previews": "Atualizando visualizações inteligentes",
+  "The old folder stays in use until copying finishes. Cancel keeps the old folder. Source cleanup cannot be cancelled after the folder changes.": "A pasta anterior continua em uso até o fim da cópia. Cancelar mantém a pasta anterior. A exclusão dos arquivos de origem não pode ser cancelada após a mudança de pasta.",
+  "Smart preview folder change cancelled. The old folder is still in use.": "Mudança da pasta de visualizações inteligentes cancelada. A pasta anterior continua em uso.",
+  "Smart preview folder changed.": "Pasta de visualizações inteligentes alterada.",
+  "Smart preview folder changed. One source file could not be removed.": "Pasta de visualizações inteligentes alterada. Não foi possível remover um arquivo de origem."
 }

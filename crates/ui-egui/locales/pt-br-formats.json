@@ -252,5 +252,7 @@
   "{n} photos opened for editing; each is stacked with its original": "{n} fotos abertas para edição; cada uma está empilhada com a original",
   "{name} opened in the other editor": "{name} aberto no outro editor",
   "{n} originals opened in the other editor": "{n} originais abertos no outro editor",
-  "· {in_source} identical copies": "· {in_source} cópias idênticas"
+  "· {in_source} identical copies": "· {in_source} cópias idênticas",
+  "Smart preview folder changed. {count} source files could not be removed.": "Pasta de visualizações inteligentes alterada. Não foi possível remover {count} arquivos de origem.",
+  "Smart preview folder change failed: {error}": "Falha ao alterar a pasta de visualizações inteligentes: {error}"
 }

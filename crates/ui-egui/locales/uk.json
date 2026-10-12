@@ -2151,5 +2151,11 @@
   "Adding to Apple Photos": "Додавання до Apple Фото",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Графічний процесор не знайдено: LightCraft виконує рендеринг на ЦП, а це набагато повільніше. Докладніше: Довідка → Інформація про систему.",
   "On NixOS, start it from `nix develop`.": "У NixOS запускайте його з `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Файли з тим самим вмістом, що й інший файл цього імпорту: імпортується лише перший."
+  "Files with the same content as another file in this import: only the first is imported.": "Файли з тим самим вмістом, що й інший файл цього імпорту: імпортується лише перший.",
+  "Changing smart preview folder": "Зміна папки смарт-переглядів",
+  "Refreshing smart previews": "Оновлення смарт-переглядів",
+  "The old folder stays in use until copying finishes. Cancel keeps the old folder. Source cleanup cannot be cancelled after the folder changes.": "Стара папка використовується до завершення копіювання. Скасування зберігає стару папку. Після зміни папки видалення вихідних файлів скасувати неможливо.",
+  "Smart preview folder change cancelled. The old folder is still in use.": "Зміну папки смарт-переглядів скасовано. Стара папка й далі використовується.",
+  "Smart preview folder changed.": "Папку смарт-переглядів змінено.",
+  "Smart preview folder changed. One source file could not be removed.": "Папку смарт-переглядів змінено. Не вдалося видалити один вихідний файл."
 }

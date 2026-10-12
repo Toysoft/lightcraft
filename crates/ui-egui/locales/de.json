@@ -2118,5 +2118,11 @@
   "Adding to Apple Photos": "Wird zu Apple Fotos hinzugefügt",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Kein Grafikprozessor gefunden: LightCraft rendert auf der CPU, was viel langsamer ist. Details unter Hilfe → Systeminformationen.",
   "On NixOS, start it from `nix develop`.": "Unter NixOS starten Sie es aus `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Dateien mit demselben Inhalt wie eine andere Datei dieses Imports: Nur die erste wird importiert."
+  "Files with the same content as another file in this import: only the first is imported.": "Dateien mit demselben Inhalt wie eine andere Datei dieses Imports: Nur die erste wird importiert.",
+  "Changing smart preview folder": "Ordner für Smart-Vorschauen wird geändert",
+  "Refreshing smart previews": "Smart-Vorschauen werden aktualisiert",
+  "The old folder stays in use until copying finishes. Cancel keeps the old folder. Source cleanup cannot be cancelled after the folder changes.": "Der bisherige Ordner bleibt bis zum Ende des Kopierens in Gebrauch. Abbrechen behält den bisherigen Ordner bei. Nach dem Ordnerwechsel kann das Löschen der Quelldateien nicht abgebrochen werden.",
+  "Smart preview folder change cancelled. The old folder is still in use.": "Ordnerwechsel für Smart-Vorschauen abgebrochen. Der bisherige Ordner bleibt in Gebrauch.",
+  "Smart preview folder changed.": "Ordner für Smart-Vorschauen geändert.",
+  "Smart preview folder changed. One source file could not be removed.": "Ordner für Smart-Vorschauen geändert. Eine Quelldatei konnte nicht entfernt werden."
 }

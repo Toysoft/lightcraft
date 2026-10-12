@@ -252,5 +252,7 @@
   "{n} photos opened for editing; each is stacked with its original": "{n}枚の写真を編集用に開きました。それぞれ元の写真とスタックされています",
   "{name} opened in the other editor": "{name}を別のエディタで開きました",
   "{n} originals opened in the other editor": "{n}個の元ファイルを別のエディタで開きました",
-  "· {in_source} identical copies": "・同一のコピー {in_source} 件"
+  "· {in_source} identical copies": "・同一のコピー {in_source} 件",
+  "Smart preview folder changed. {count} source files could not be removed.": "スマートプレビューのフォルダーを変更しました。コピー元ファイルを{count}個削除できませんでした。",
+  "Smart preview folder change failed: {error}": "スマートプレビューのフォルダーを変更できませんでした: {error}"
 }

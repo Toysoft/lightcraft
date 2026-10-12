@@ -252,5 +252,7 @@
   "{n} photos opened for editing; each is stacked with its original": "{n} Fotos zur Bearbeitung geöffnet; jedes ist mit seinem Original gestapelt",
   "{name} opened in the other editor": "{name} im anderen Editor geöffnet",
   "{n} originals opened in the other editor": "{n} Originale im anderen Editor geöffnet",
-  "· {in_source} identical copies": "· {in_source} identische Kopien"
+  "· {in_source} identical copies": "· {in_source} identische Kopien",
+  "Smart preview folder changed. {count} source files could not be removed.": "Ordner für Smart-Vorschauen geändert. {count} Quelldateien konnten nicht entfernt werden.",
+  "Smart preview folder change failed: {error}": "Ordnerwechsel für Smart-Vorschauen fehlgeschlagen: {error}"
 }

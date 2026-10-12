@@ -1957,5 +1957,11 @@
   "Adding to Apple Photos": "Ajout à Apple Photos",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Aucun processeur graphique trouvé : LightCraft effectue le rendu sur le processeur, ce qui est beaucoup plus lent. Détails dans Aide → Informations système.",
   "On NixOS, start it from `nix develop`.": "Sous NixOS, lancez-le depuis `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Fichiers au contenu identique à un autre fichier de cette importation : seul le premier est importé."
+  "Files with the same content as another file in this import: only the first is imported.": "Fichiers au contenu identique à un autre fichier de cette importation : seul le premier est importé.",
+  "Changing smart preview folder": "Changement du dossier des aperçus dynamiques",
+  "Refreshing smart previews": "Actualisation des aperçus dynamiques",
+  "The old folder stays in use until copying finishes. Cancel keeps the old folder. Source cleanup cannot be cancelled after the folder changes.": "L'ancien dossier reste utilisé jusqu'à la fin de la copie. Annuler conserve l'ancien dossier. La suppression des fichiers sources ne peut plus être annulée après le changement de dossier.",
+  "Smart preview folder change cancelled. The old folder is still in use.": "Changement du dossier des aperçus dynamiques annulé. L'ancien dossier reste utilisé.",
+  "Smart preview folder changed.": "Dossier des aperçus dynamiques modifié.",
+  "Smart preview folder changed. One source file could not be removed.": "Dossier des aperçus dynamiques modifié. Un fichier source n'a pas pu être supprimé."
 }
