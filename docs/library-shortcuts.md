@@ -46,6 +46,16 @@ commit `4e012a59a6d2442ba749f109ea27aadb5c0b11a5` by Gardy, and addresses the ca
 [issue #283](https://github.com/storytold/lightcraft/issues/283). That PR was open when checked
 on 2026-10-08; this work extends its fix with library culling bindings and tests.
 
+## RAW+JPEG pairs
+
+`library.pairPreferences` turns on two independent switches, both off until asked. `syncPairMetadata` makes
+ratings and pick/reject flags (`0`–`5`, `[` `]`, `P`, `X`, `U`) land on the other file of a joined pair as one
+Undo step. `syncPairLabels` does the same for colour labels, and only while metadata sync is on. Delete,
+Restore and Delete Permanently stay on the selected file. The **Both / JPEG** switch on the bottom bar turns
+`pairedCulling` and `syncPairMetadata` on together, joins detected pairs, and shows the JPEG. The
+RAW+JPEG badge switches to the raw with `photo.pairFocus`. Clicking the button again shows both files.
+Splitting the pair (`photo.splitPair`) keeps both photos and both files.
+
 Public behaviour references, checked 2026-10-08:
 
 - [Lightroom Classic keyboard shortcuts](https://helpx.adobe.com/lightroom-classic/help/keyboard-shortcuts.html)

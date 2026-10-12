@@ -29,6 +29,7 @@ mod merge;
 pub mod metadata;
 pub mod missing;
 mod organize;
+mod pairs;
 mod prefs;
 mod preset_files;
 pub mod previews;
@@ -146,6 +147,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(previews::specs());
         v.extend(lut_profiles::specs());
         v.extend(cull::specs());
+        v.extend(pairs::specs());
         v.extend(convert::specs());
         v.extend(convert::edit_specs());
         v.extend(merge::specs());

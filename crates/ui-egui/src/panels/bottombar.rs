@@ -45,6 +45,10 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                         ui.add_space(10.0);
                         let sort = icon_button(ui, "sort", Icon::Sort, vec2(30.0, 30.0), false, true, "Sort");
                         egui::Popup::menu(&sort).show(|ui| sort_menu(app, ui));
+                        if left_rect.width() >= 420.0 {
+                            ui.add_space(8.0);
+                            pair_switch(app, ui);
+                        }
                     } else {
                         let current_icon = VIEW_MODES.iter().find(|(_, _, mode, _)| *mode == app.ui.view).map_or(Icon::More, |(_, icon, _, _)| *icon);
                         let more = icon_button(ui, "viewOptions", current_icon, vec2(40.0, 32.0), true, true, "View");
@@ -62,6 +66,18 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                                 }
                             }
                             ui.separator();
+                            if ui.selectable_label(!app.session.paired_culling, crate::i18n::tr("Both files")).clicked() {
+                                if app.session.paired_culling {
+                                    toggle_paired_culling(app);
+                                }
+                                ui.close();
+                            }
+                            if ui.selectable_label(app.session.paired_culling, crate::i18n::tr("JPEG only")).clicked() {
+                                if !app.session.paired_culling {
+                                    toggle_paired_culling(app);
+                                }
+                                ui.close();
+                            }
                             ui.menu_button(crate::i18n::tr("Sort"), |ui| sort_menu(app, ui));
                             if compact_zoom && matches!(app.ui.view, ViewMode::Detail | ViewMode::Compare) {
                                 ui.menu_button(crate::i18n::tr_format!("Click {}:1", app.ui.click_zoom / 100), |ui| click_zoom_menu(app, ui));
@@ -74,6 +90,62 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 .right();
             centre(app, ui, full, left_end + 12.0, right_start - 12.0);
         });
+}
+
+/// Bottom-bar switch: Both shows every file, JPEG shows one JPEG per RAW+JPEG pair.
+fn pair_switch(app: &mut LightcraftApp, ui: &mut egui::Ui) {
+    let on = app.session.paired_culling;
+    let t = Tokens::get(ui.ctx());
+    let font = t.semibold(12.0);
+    let both = crate::i18n::tr("Both");
+    let jpeg = crate::i18n::tr("JPEG");
+    let both_w = (ui.painter().layout_no_wrap(both.to_string(), font.clone(), t.text).size().x + 22.0).max(56.0);
+    let jpeg_w = (ui.painter().layout_no_wrap(jpeg.to_string(), font.clone(), t.text).size().x + 22.0).max(56.0);
+    let h = 30.0;
+    let (r, _) = ui.allocate_exact_size(vec2(both_w + 2.0 + jpeg_w, h), Sense::hover());
+    register(ui.ctx(), "button:pairedCulling", r);
+    let left = Rect::from_min_size(r.min, vec2(both_w, h));
+    let right = Rect::from_min_size(pos2(r.left() + both_w + 2.0, r.top()), vec2(jpeg_w, h));
+    let both_resp = ui.interact(left, egui::Id::new("pair-both"), Sense::click());
+    let jpeg_resp = ui.interact(right, egui::Id::new("pair-jpeg"), Sense::click());
+    register(ui.ctx(), "button:pairedCulling-both", left);
+    register(ui.ctx(), "button:pairedCulling-jpeg", right);
+    let tip = crate::i18n::tr("Both shows the raw and the JPEG. JPEG shows one JPEG per pair and copies stars and flags to the raw.");
+    both_resp.clone().on_hover_text(tip);
+    jpeg_resp.clone().on_hover_text(tip);
+    let p = ui.painter();
+    segment(p, &t, left, both, &font, !on, both_resp.hovered());
+    segment(p, &t, right, jpeg, &font, on, jpeg_resp.hovered());
+    if both_resp.clicked() && on {
+        toggle_paired_culling(app);
+    }
+    if jpeg_resp.clicked() && !on {
+        toggle_paired_culling(app);
+    }
+}
+
+fn segment(p: &egui::Painter, t: &Tokens, r: Rect, label: &str, font: &egui::FontId, active: bool, hovered: bool) {
+    let fill = if active {
+        t.accent
+    } else if hovered {
+        t.hover
+    } else {
+        t.canvas
+    };
+    let text = if active { egui::Color32::WHITE } else { t.text_dim };
+    p.rect_filled(r, 15.0, fill);
+    if !active {
+        p.rect_stroke(r, 15.0, egui::Stroke::new(1.0, t.button_border), egui::StrokeKind::Inside);
+    }
+    p.text(r.center(), Align2::CENTER_CENTER, label, font.clone(), text);
+}
+
+fn toggle_paired_culling(app: &mut LightcraftApp) {
+    let on = !app.session.paired_culling;
+    if on {
+        let _ = app.run("photo.joinPairs", json!({}));
+    }
+    let _ = app.run("library.pairPreferences", json!({"pairedCulling": on, "syncPairMetadata": on}));
 }
 
 /// Five 19-point stars, three 22-point flags, seven 3-point gaps, a 6-point group gap

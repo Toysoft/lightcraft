@@ -184,6 +184,15 @@ struct PrefsFile {
     /// Days after which untouched Local records of unbrowsed folders are forgotten (missing =
     /// the default, 0 = never).
     forget_local_days: Option<u32>,
+    /// One grid cell per RAW+JPEG pair.
+    #[serde(default)]
+    paired_culling: bool,
+    /// Ratings and flags follow the other file of a pair.
+    #[serde(default)]
+    sync_pair_metadata: bool,
+    /// Colour labels follow too, when metadata sync is on.
+    #[serde(default)]
+    sync_pair_labels: bool,
 }
 
 fn presets_json(s: &Session) -> String {
@@ -405,6 +414,9 @@ impl Session {
         self.import_defaults = prefs.import;
         self.cache_mb = prefs.cache_mb;
         self.forget_local_days = prefs.forget_local_days.unwrap_or(lightcraft_catalog::DEFAULT_FORGET_DAYS);
+        self.paired_culling = prefs.paired_culling;
+        self.sync_pair_metadata = prefs.sync_pair_metadata;
+        self.sync_pair_labels = prefs.sync_pair_labels;
         self.smart_previews_dir = prefs.smart_previews_dir.filter(|_| on_disk).map(PathBuf::from);
         if let Some(d) = &self.smart_previews_dir {
             self.media.smart_dir = Some(d.clone());
@@ -640,6 +652,9 @@ impl Session {
             cache_mb: self.cache_mb,
             smart_previews_dir: self.smart_previews_dir.as_ref().map(|d| d.to_string_lossy().to_string()),
             forget_local_days: Some(self.forget_local_days),
+            paired_culling: self.paired_culling,
+            sync_pair_metadata: self.sync_pair_metadata,
+            sync_pair_labels: self.sync_pair_labels,
         })
         .unwrap_or_default();
         let Some(lib) = self.library.as_mut() else { return Ok(()) };

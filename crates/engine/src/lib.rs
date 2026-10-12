@@ -178,7 +178,7 @@ pub struct Session {
     /// The grid order for the current source/filter/sort (cached by catalog revision).
     /// Shared, so frontends can hold it across frames without copying ([`Session::visible_shared`]).
     visible: Arc<[PhotoId]>,
-    visible_key: Option<(u64, String)>,
+    visible_key: Option<(u64, bool, u64, String)>,
     /// Identifies the current `visible` list: a new value (unique in the process) every time it
     /// is recomputed, so frontends can key their per-view caches on it instead of hashing the ids.
     visible_gen: u64,
@@ -295,6 +295,16 @@ pub struct Session {
     /// Untouched Local records of folders not browsed for this many days are forgotten when the
     /// library opens (0 = never; persisted in prefs.json). See `cmd/browse.rs`.
     pub forget_local_days: u32,
+    /// Show one grid cell per RAW+JPEG pair (prefs.json). Off by default.
+    pub paired_culling: bool,
+    /// Copy ratings and pick/reject flags onto the other file of a pair (prefs.json).
+    pub sync_pair_metadata: bool,
+    /// Also copy colour labels when [`Self::sync_pair_metadata`] is on (prefs.json).
+    pub sync_pair_labels: bool,
+    /// Pairs whose visible cell is the raw. Session-only; the JPEG is the default.
+    pub(crate) pair_show_raw: std::collections::HashSet<lightcraft_catalog::PairId>,
+    /// Bumped when [`Self::pair_show_raw`] changes so the grid cache rebuilds.
+    pub pair_focus_gen: u64,
     /// Adds exported files to Apple Photos ([`apple_photos`]): `/usr/bin/osascript`, installed by
     /// [`Session::with_fs`] on macOS; `None` elsewhere and in sessions without a file system. Tests
     /// put a fake here.
@@ -390,6 +400,11 @@ impl Session {
             cache_mb: 0,
             smart_previews_dir: None,
             forget_local_days: lightcraft_catalog::DEFAULT_FORGET_DAYS,
+            paired_culling: false,
+            sync_pair_metadata: false,
+            sync_pair_labels: false,
+            pair_show_raw: std::collections::HashSet::new(),
+            pair_focus_gen: 0,
             #[cfg(not(target_arch = "wasm32"))]
             apple_photos: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -837,13 +852,45 @@ impl Session {
 
     // ---------------------------------------------------------------- library view
 
+    /// Drop one file of a pair when both are in the same list and neither photo is stacked.
+    /// The JPEG stays unless `show_raw` names that pair.
+    fn hide_paired_jpegs(
+        cat: &lightcraft_catalog::Catalog,
+        ids: &[PhotoId],
+        show_raw: &std::collections::HashSet<lightcraft_catalog::PairId>,
+    ) -> Vec<PhotoId> {
+        if cat.pairs().next().is_none() {
+            return ids.to_vec();
+        }
+        let present: std::collections::HashSet<PhotoId> = ids.iter().copied().collect();
+        let index = cat.pair_index();
+        ids.iter()
+            .copied()
+            .filter(|id| {
+                let Some(pid) = index.get(id) else { return true };
+                let Some(pair) = cat.pair(*pid) else { return true };
+                if cat.stack_of(pair.raw).is_some() || cat.stack_of(pair.jpeg).is_some() {
+                    return true;
+                }
+                let prefer_jpeg = !show_raw.contains(&pair.id);
+                let keep = if prefer_jpeg { pair.jpeg } else { pair.raw };
+                let other = if prefer_jpeg { pair.raw } else { pair.jpeg };
+                if *id == keep { true } else { *id == other && !present.contains(&keep) }
+            })
+            .collect()
+    }
+
     /// Photos shown in the grid/filmstrip for the current source, filter and sort.
     pub fn visible(&mut self) -> &[PhotoId] {
-        let mut key =
-            (self.catalog.revision, format!("{:?}|{:?}|{:?}|{:?}|{:?}", self.source, self.filter, self.sort, self.browse, self.library_folder));
+        let mut key = (
+            self.catalog.revision,
+            self.paired_culling,
+            self.pair_focus_gen,
+            format!("{:?}|{:?}|{:?}|{:?}|{:?}", self.source, self.filter, self.sort, self.browse, self.library_folder),
+        );
         if self.source == LibrarySource::Missing && self.media.availability.is_background() {
             // the view fills in as the background checks find files gone
-            key.1.push_str(&format!("|{}", self.media.availability.generation()));
+            key.3.push_str(&format!("|{}", self.media.availability.generation()));
         }
         if self.visible_key.as_ref() != Some(&key) {
             // "in the last N days" rules count back from the session's clock
@@ -895,6 +942,9 @@ impl Session {
             }
             if self.source != LibrarySource::RecentlyDeleted {
                 visible = self.catalog.arrange_stacks(&visible);
+            }
+            if self.paired_culling {
+                visible = Self::hide_paired_jpegs(&self.catalog, &visible, &self.pair_show_raw);
             }
             self.visible = visible.into();
             self.visible_gen = VISIBLE_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1014,6 +1064,8 @@ mod tests_lightroom_folder;
 mod tests_merge;
 #[cfg(test)]
 mod tests_organize;
+#[cfg(test)]
+mod tests_pairs;
 #[cfg(test)]
 mod tests_persist;
 #[cfg(test)]

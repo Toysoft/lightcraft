@@ -169,7 +169,22 @@ fn album_targets_or_err(s: &Session, command: &str, targets: Vec<PhotoId>) -> Re
 
 /// Apply one op per target as a single undo step.
 fn for_targets(s: &mut Session, p: &Value, label: &str, f: impl Fn(PhotoId) -> Option<Op>) -> Result<Value> {
-    let targets = s.targets(p);
+    commit_ops(s, label, s.targets(p), f)
+}
+
+/// Ratings, flags and (when asked) labels also land on a RAW+JPEG partner. Delete does not use this.
+fn for_cull(s: &mut Session, p: &Value, label: &str, labels: bool, f: impl Fn(PhotoId) -> Option<Op>) -> Result<Value> {
+    let (targets, skipped) = expand_pair_targets(s, s.targets(p), labels);
+    let mut v = commit_ops(s, label, targets, f)?;
+    if skipped > 0
+        && let Some(obj) = v.as_object_mut()
+    {
+        obj.insert("skipped".into(), json!(skipped));
+    }
+    Ok(v)
+}
+
+fn commit_ops(s: &mut Session, label: &str, targets: Vec<PhotoId>, f: impl Fn(PhotoId) -> Option<Op>) -> Result<Value> {
     let ops: Vec<Op> = targets.iter().filter_map(|id| f(*id)).collect();
     let n = ops.len();
     if n > 0 {
@@ -178,10 +193,30 @@ fn for_targets(s: &mut Session, p: &Value, label: &str, f: impl Fn(PhotoId) -> O
     Ok(json!({"changed": n}))
 }
 
+/// Partner ids when metadata sync is on. `labels` also requires label sync. Missing partners are counted and skipped.
+fn expand_pair_targets(s: &Session, mut ids: Vec<PhotoId>, labels: bool) -> (Vec<PhotoId>, usize) {
+    if !s.sync_pair_metadata || (labels && !s.sync_pair_labels) {
+        return (ids, 0);
+    }
+    let mut skipped = 0usize;
+    let extra: Vec<Option<PhotoId>> = ids.iter().map(|id| s.catalog.pair_partner(*id)).collect();
+    for partner in extra.into_iter().flatten() {
+        if s.catalog.photo(partner).is_none() {
+            skipped += 1;
+            continue;
+        }
+        if !ids.contains(&partner) {
+            ids.push(partner);
+        }
+    }
+    (ids, skipped)
+}
+
 /// Adjust each target's own rating; unchanged bounds do not create an undo step.
 fn change_rating(s: &mut Session, p: &Value, delta: i8, label: &str) -> Result<Value> {
     let mut ops = Vec::new();
-    for id in s.targets(p) {
+    let (targets, skipped) = expand_pair_targets(s, s.targets(p), false);
+    for id in targets {
         let old = s.catalog.photo(id).ok_or(lightcraft_catalog::CatalogError::NoPhoto(id))?.rating;
         let rating = (i16::from(old) + i16::from(delta)).clamp(0, 5) as u8;
         if rating != old {
@@ -193,7 +228,13 @@ fn change_rating(s: &mut Session, p: &Value, delta: i8, label: &str) -> Result<V
         s.commit(label, Op::Batch { ops })?;
     }
     advance_if(s, p);
-    Ok(json!({"changed": n}))
+    let mut v = json!({"changed": n});
+    if skipped > 0
+        && let Some(obj) = v.as_object_mut()
+    {
+        obj.insert("skipped".into(), json!(skipped));
+    }
+    Ok(v)
 }
 
 fn advance_if(s: &mut Session, p: &Value) {
@@ -647,7 +688,7 @@ pub fn specs() -> Vec<CommandSpec> {
             if !(0..=5).contains(&r) {
                 return Err(bad("photo.rate", "rating must be 0..5"));
             }
-            let v = for_targets(s, p, "Set Rating", |id| Some(Op::SetRating { id, rating: r as u8 }))?;
+            let v = for_cull(s, p, "Set Rating", false, |id| Some(Op::SetRating { id, rating: r as u8 }))?;
             advance_if(s, p);
             Ok(v)
         }),
@@ -659,18 +700,18 @@ pub fn specs() -> Vec<CommandSpec> {
         }),
         cmd!("photo.flag", "Set Flag", ["Photo", "Set Flag"], None, "{flag: pick|reject|none, ids?, advance?: bool}", has_selection, |s, p| {
             let f = str_param(p, "flag").and_then(Flag::parse).ok_or_else(|| bad("photo.flag", "flag must be pick|reject|none"))?;
-            let v = for_targets(s, p, "Set Flag", |id| Some(Op::SetFlag { id, flag: f }))?;
+            let v = for_cull(s, p, "Set Flag", false, |id| Some(Op::SetFlag { id, flag: f }))?;
             advance_if(s, p);
             Ok(v)
         }),
         cmd!("photo.pick", "Flag as Pick", ["Photo", "Set Flag"], Some("P"), "{ids?}", has_selection, |s, p| {
-            for_targets(s, p, "Flag as Pick", |id| Some(Op::SetFlag { id, flag: Flag::Pick }))
+            for_cull(s, p, "Flag as Pick", false, |id| Some(Op::SetFlag { id, flag: Flag::Pick }))
         }),
         cmd!("photo.reject", "Flag as Reject", ["Photo", "Set Flag"], Some("X"), "{ids?}", has_selection, |s, p| {
-            for_targets(s, p, "Flag as Reject", |id| Some(Op::SetFlag { id, flag: Flag::Reject }))
+            for_cull(s, p, "Flag as Reject", false, |id| Some(Op::SetFlag { id, flag: Flag::Reject }))
         }),
         cmd!("photo.unflag", "Unflag", ["Photo", "Set Flag"], Some("U"), "{ids?}", has_selection, |s, p| {
-            for_targets(s, p, "Unflag", |id| Some(Op::SetFlag { id, flag: Flag::None }))
+            for_cull(s, p, "Unflag", false, |id| Some(Op::SetFlag { id, flag: Flag::None }))
         }),
         cmd!(
             "photo.label",
@@ -684,7 +725,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     None | Some("none") => None,
                     Some(x) => Some(ColorLabel::parse(x).ok_or_else(|| bad("photo.label", "unknown label"))?),
                 };
-                for_targets(s, p, "Set Color Label", |id| Some(Op::SetLabel { id, label: l }))
+                for_cull(s, p, "Set Color Label", true, |id| Some(Op::SetLabel { id, label: l }))
             }
         ),
         // ---- orientation
