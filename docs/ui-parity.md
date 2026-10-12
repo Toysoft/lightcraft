@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (accessibility audit: test over the AccessKit tree; fields, sliders and dialogs named) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (accessibility audit: test over the AccessKit tree; fields, sliders and dialogs named; magnifying-glass tool and anchored horizontal scrub zoom; original-pixel detail gaps unchanged) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 How LightCraft's interaction compares with Lightroom's: views, panels, tools and handles, modifier
 keys, shortcuts, zoom, context menus and feel. Rows for individual menu items and shortcuts live in
@@ -101,10 +101,54 @@ handles, placing a spot or a brush stroke, and moving a mask pin on the canvas. 
 with a real screen reader on each platform, and focus order (egui follows drawing order: top bar,
 left panel, canvas, right panel, which is sensible but not tuned).
 
+## Magnifying-glass tool and scrub zoom
+
+The magnifying-glass button beside the zoom selector selects `tool.zoom`. With it selected,
+hold the primary mouse button and drag right to zoom in or left to zoom out. Vertical travel
+does not change the scale; the image point where the drag began stays under that press position,
+subject to the existing pan edge limits. Moving back reverses the zoom without accumulating drift.
+The scale doubles per 200 logical pixels of horizontal travel and is bounded from Fit to 800%.
+
+Shift-drag temporarily uses the same gesture without selecting the tool, following Lightroom
+Classic's scrubby-zoom direction. Ordinary dragging still pans when the tool is off. Holding
+Space with the magnifier selected temporarily pans instead of invoking the Space zoom toggle;
+Space retains its existing toggle binding outside this tool and its pause behavior in slideshow.
+Clicking without dragging still toggles Fit / the chosen click-zoom ratio. A completed scrub
+does not trigger that click toggle on release.
+
+Crop, Masking, Remove, Red Eye, pickers and targeted adjustments retain their editing gestures;
+Shift does not turn those tools into scrub zoom. Selecting the zoom tool leaves an editing tool
+panel and clears the previous gesture, but preserves Compare and Reference views. Wheel, pinch,
+trackpad pan, Before/After clipping and native-window rendering are unchanged.
+
+This is a navigation-only change: it does not fix RAW cold decoding, alter cache policy or close
+gap 4's mask-overlay / soft-proofing detail work. No Adobe assets are used; the button reuses
+LightCraft's existing original magnifying-glass icon.
+
+### Standalone zoom verification (2026-10-11)
+
+The zoom-only Windows x64 release build was exercised on an isolated Sony RAW library with the
+RTX 5080 / DX12: button selection, horizontal right/left zoom, vertical-travel independence,
+Fit / 100% click toggle, Shift scrub, ordinary pan and Compare/Reference scrubbing. The button
+also toggled at 800 × 600; native captures at that size and 1600 × 1000 did not fall back to
+headless rendering. Cropped toolbar review confirmed the visibly highlighted magnifier beside
+the percentage selector. No personal photos or screenshots are included in the contribution.
+
+Held-Space pan is covered using held egui key events in the regression harness, not OS-level
+synthetic input: the running app's `ui.key` control request emits both press and release, so
+it cannot hold Space across a separate drag request. The regressions also cover Space's normal
+zoom toggle and slideshow pause/resume outside the pan override.
+
+`cargo xtask ci` passes formatting and stops at unchanged upstream `pipeline/src/spots.rs:250`
+(`chunks_exact_to_as_chunks`) with Rust 1.99.0 on Windows. Full workspace tests, the HEIF CI gate
+and WASM were not reached. This is not a claim of full-CI or cross-platform verification.
+
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-12 | minor | Accessibility: an AccessKit tree audit test over every view, Develop tool and 13 dialogs; unnamed fields, slider ranges and the Auto Stack slider fixed; 30% → 55%; UI remaining 40–70 h → 34–58 h |
+| 2026-10-11 | minor | Magnifier tool and press-anchored horizontal scrub; Shift scrub, ordinary pan and temporary Space pan preserve editing input and comparison views |
 | 2026-10-11 | minor | Zoom row: Compare and Reference get zoom windows; what remains of LR-VIEW-ZOOM is overlays and soft proofing |
 | 2026-10-10 | major | Created: measured command and shortcut counts, assessment by area, estimates; moved the shortcut conflicts section here from the checklist |

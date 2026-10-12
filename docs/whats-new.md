@@ -218,6 +218,14 @@
 - Compare and Reference View panes say "Rendering…" (or that the photo can't be opened) the same way, so a
   magnified preview isn't taken for the photo when checking focus at 1:1.
 
+### Magnifying-glass tool and scrub zoom
+- The magnifying-glass button beside the zoom selector selects the Zoom Tool. Hold the mouse button
+  and slide right to zoom in, left to zoom out, anchored at the point where you pressed. Shift-drag
+  uses the same gesture without selecting the tool; ordinary dragging still pans with the tool off.
+- Hold Space to pan temporarily with the zoom tool selected. Click without dragging still toggles
+  Fit / your chosen zoom ratio; releasing a scrub does not toggle. Editing tools keep their gestures.
+- Compare and Reference stay open when selecting the tool. Wheel and pinch zoom are unchanged.
+
 ### JPEG XL export
 - Export as JPEG XL (issue #247): Format ▸ JPEG XL in the Export dialog, `format: "jxl"` for agents and the CLI
   (`render in.raw -o out.jxl`). Quality as for JPEG, or Lossless; Effort (Fast / Normal) trades time for a
