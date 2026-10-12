@@ -183,9 +183,9 @@ pub(crate) struct Item {
 /// Renders one photo's picture (display sRGB).
 pub(crate) type Render = Box<dyn FnOnce() -> Result<lightcraft_raster::Rgba8, String> + Send>;
 
-/// A render job as a [`Render`].
+/// A render job as a [`Render`], run on the CPU ([`RenderJob::run_on_cpu`]: the scan leaves the GPU to the views).
 pub(crate) fn render(job: RenderJob) -> Render {
-    Box::new(move || match job.run().rendered {
+    Box::new(move || match job.run_on_cpu().rendered {
         Ok(r) if r.image.width > 0 && r.image.height > 0 => Ok(r.image),
         Ok(_) => Err("it rendered empty".into()),
         Err(e) => Err(e),
@@ -225,16 +225,21 @@ fn to_rgb(img: &lightcraft_raster::Rgba8) -> Rgb8 {
 /// The picture of one photo, or why there is none. At most [`MAX_PREVIEW_READS`] previews and [`MAX_RENDERS`] renders
 /// run at once (`gates`), whatever the size of the pool. Once `gone` is set (the session let go of the worker: the
 /// model or the library changed, indexing stopped) nothing more is read: the photo comes back skipped.
-fn picture(item: Item, gates: &Gates, gone: &AtomicBool) -> (PhotoId, Hash, Result<Rgb8, Outcome>) {
+/// The reads and renders run in `pool` (the gate is taken before, on the calling thread: see [`pictures`]).
+fn picture(item: Item, gates: &Gates, gone: &AtomicBool, pool: Option<&rayon::ThreadPool>) -> (PhotoId, Hash, Result<Rgb8, Outcome>) {
     let Item { id, hash, preview, job, path } = item;
     let unwanted = || gone.load(Ordering::SeqCst);
+    let inside = |f: &mut (dyn FnMut() -> Option<lightcraft_raster::Rgba8> + Send)| match pool {
+        Some(p) => p.install(f),
+        None => f(),
+    };
     let run = catch_unwind(AssertUnwindSafe(|| {
         if unwanted() {
             return Ok(None);
         }
         let preview = preview.and_then(|(p, load)| {
             let _pass = gates.previews.enter();
-            if unwanted() { None } else { load(&p, EDGE) }
+            if unwanted() { None } else { inside(&mut || load(&p, EDGE)) }
         });
         if let Some(img) = preview.filter(|img| img.width.max(img.height) >= MIN_PREVIEW_EDGE) {
             return Ok(Some(to_rgb(&img)));
@@ -245,7 +250,13 @@ fn picture(item: Item, gates: &Gates, gone: &AtomicBool) -> (PhotoId, Hash, Resu
         if unwanted() {
             return Ok(None);
         }
-        job().map(|img| Some(to_rgb(&img)))
+        let mut job = Some(job);
+        let mut rendered = None;
+        inside(&mut || {
+            rendered = job.take().map(|j| j());
+            None
+        });
+        rendered.unwrap_or_else(|| Err("it was not rendered".into())).map(|img| Some(to_rgb(&img)))
     }));
     let r = match run {
         Ok(Ok(Some(img))) => Ok(img),
@@ -263,17 +274,57 @@ fn picture(item: Item, gates: &Gates, gone: &AtomicBool) -> (PhotoId, Hash, Resu
     )
 }
 
-/// The pictures of a batch, read in parallel (within the gates).
-fn pictures(items: Vec<Item>, gates: &Gates, gone: &AtomicBool) -> Vec<(PhotoId, Hash, Result<Rgb8, Outcome>)> {
-    use rayon::prelude::*;
-    items.into_par_iter().map(|i| picture(i, gates, gone)).collect()
+/// The pictures of a batch, read a few at a time (the gates' sizes) by threads of their own, which wait for the gates;
+/// the reads and renders themselves run in `pool`. A rayon worker must never wait for a gate: a render's parallel
+/// loops let the worker running it take on another photo's task meanwhile, which would then wait for the gate that
+/// very worker holds (the scan hung once its renders ran on the CPU).
+fn pictures(items: Vec<Item>, gates: &Gates, gone: &AtomicBool, pool: Option<&rayon::ThreadPool>) -> Vec<(PhotoId, Hash, Result<Rgb8, Outcome>)> {
+    let n = items.len();
+    let queue = Mutex::new(items.into_iter().enumerate().collect::<std::collections::VecDeque<_>>());
+    let done = Mutex::new(Vec::with_capacity(n));
+    let work = || {
+        loop {
+            let next = queue.lock().unwrap_or_else(PoisonError::into_inner).pop_front();
+            let Some((i, item)) = next else { break };
+            let r = picture(item, gates, gone, pool);
+            done.lock().unwrap_or_else(PoisonError::into_inner).push((i, r));
+        }
+    };
+    let threads = (gates.previews.max + gates.renders.max).clamp(1, n.max(1));
+    std::thread::scope(|sc| {
+        for t in 0..threads {
+            // (a thread that cannot be started leaves its share to the others, or to this one below)
+            let _ = std::thread::Builder::new().name(format!("lightcraft-content-read-{t}")).spawn_scoped(sc, work);
+        }
+    });
+    work();
+    let mut done = done.into_inner().unwrap_or_else(PoisonError::into_inner);
+    done.sort_by_key(|(i, _)| *i);
+    done.into_iter().map(|(_, r)| r).collect()
 }
 
-/// Embed one batch with `model` (already on the pace's pool). Once `gone` is set the rest of the batch is skipped:
-/// a worker the session dropped (another model, another library) stops after the photo it is reading, and never runs
-/// the model again.
-fn embed(model: &dyn ContentModel, items: Vec<Item>, gone: &AtomicBool) -> Vec<(PhotoId, Hash, Outcome)> {
-    let pictures = pictures(items, &GATES, gone);
+/// Embed one batch with `model`: the pictures read ([`pictures`]), then the model run in `pool` (the pace's). Once
+/// `gone` is set the rest of the batch is skipped: a worker the session dropped (another model, another library) stops
+/// after the photo it is reading, and never runs the model again.
+fn embed(
+    model: &dyn ContentModel,
+    items: Vec<Item>,
+    gates: &Gates,
+    gone: &AtomicBool,
+    pool: Option<&rayon::ThreadPool>,
+) -> Vec<(PhotoId, Hash, Outcome)> {
+    let pictures = pictures(items, gates, gone, pool);
+    match pool {
+        Some(p) => p.install(|| embed_pictures(model, pictures, gone)),
+        None => embed_pictures(model, pictures, gone),
+    }
+}
+
+fn embed_pictures(
+    model: &dyn ContentModel,
+    pictures: Vec<(PhotoId, Hash, Result<Rgb8, Outcome>)>,
+    gone: &AtomicBool,
+) -> Vec<(PhotoId, Hash, Outcome)> {
     let (mut keys, mut images, mut out) = (Vec::new(), Vec::new(), Vec::new());
     for (id, hash, r) in pictures {
         match r {
@@ -364,11 +415,8 @@ impl Worker {
                         let _ = done_tx.send(Done { results: skip(batch.items), ms: 0.0, embedded: 0, model_error: model_error.clone() });
                         continue;
                     };
-                    let work = || embed(m, batch.items, &gone);
-                    let results = match pool(batch.pace) {
-                        Some(p) => p.install(work),
-                        None => work(),
-                    };
+                    // (on this thread: the reads wait for their gates outside the pool, see `pictures`)
+                    let results = embed(m, batch.items, &GATES, &gone, pool(batch.pace));
                     let embedded = results.iter().filter(|r| matches!(r.2, Outcome::Embedded(_))).count();
                     let ms = started.elapsed().as_secs_f64() * 1e3;
                     if done_tx.send(Done { results, ms, embedded, model_error: None }).is_err() {
@@ -771,7 +819,7 @@ mod tests {
         // previews only: at most MAX_PREVIEW_READS at once
         let gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
         let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-        let out = pool.install(|| pictures(items(32, true, &live, &most), &gates, &AtomicBool::new(false)));
+        let out = pictures(items(32, true, &live, &most), &gates, &AtomicBool::new(false), Some(&pool));
         assert_eq!(out.len(), 32);
         assert!(out.iter().all(|(_, _, r)| r.as_ref().is_ok_and(|img| img.width == 300)));
         assert_eq!(gates.previews.peak(), MAX_PREVIEW_READS);
@@ -780,11 +828,38 @@ mod tests {
         // no usable preview: every photo is rendered, one at a time
         let gates = Gates { previews: Gate::new(MAX_PREVIEW_READS), renders: Gate::new(MAX_RENDERS) };
         let (live, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-        let out = pool.install(|| pictures(items(12, false, &live, &most), &gates, &AtomicBool::new(false)));
+        let out = pictures(items(12, false, &live, &most), &gates, &AtomicBool::new(false), Some(&pool));
         assert!(out.iter().all(|(_, _, r)| r.as_ref().is_ok_and(|img| img.width == 320)));
         assert_eq!(gates.renders.peak(), MAX_RENDERS);
         // (a preview read and a render may overlap, never more than the two caps together)
         assert!(most.load(Ordering::SeqCst) <= MAX_PREVIEW_READS + MAX_RENDERS);
+    }
+
+    #[test]
+    fn renders_that_run_on_another_pool_never_deadlock_on_the_gates() {
+        // A render that hands work to another rayon pool (the demo scenes render on a pool of their own) keeps its
+        // thread busy meanwhile: a pool thread then takes on other tasks of its own pool. With the gate waits on pool
+        // threads, one of those was another photo waiting for the render gate that very thread held: the scan hung (once
+        // its renders ran on the CPU).
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+        let other = Arc::new(rayon::ThreadPoolBuilder::new().num_threads(2).build().unwrap());
+        let gates = Gates { previews: Gate::new(2), renders: Gate::new(1) };
+        let items: Vec<Item> = (0..16)
+            .map(|i| {
+                let other = other.clone();
+                let job: Render = Box::new(move || {
+                    other.install(|| std::thread::sleep(std::time::Duration::from_millis(5)));
+                    Ok(lightcraft_raster::Rgba8::new(64, 48))
+                });
+                Item { id: PhotoId(i), hash: [0; 16], preview: None, job: Some(job), path: None }
+            })
+            .collect();
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let out = pictures(items, &gates, &AtomicBool::new(false), Some(&pool));
+            let _ = tx.send((out.len(), out.iter().all(|(_, _, r)| r.is_ok()), gates.renders.peak()));
+        });
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(30)), Ok((16, true, 1)), "the reads deadlocked");
     }
 
     /// Counts the images it is asked to embed.
@@ -814,12 +889,12 @@ mod tests {
         let model = Counting(calls.clone(), lightcraft_vision::manifest::builtin_siglip2_b16_256());
         // let go of before the batch: no picture is read, the model never runs, every photo comes back skipped
         let gone = AtomicBool::new(true);
-        let out = embed(&model, items(6, false, &live, &most), &gone);
+        let out = embed(&model, items(6, false, &live, &most), &GATES, &gone, None);
         assert_eq!(out.len(), 6);
         assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Skipped)));
         assert_eq!((most.load(Ordering::SeqCst), calls.load(Ordering::SeqCst)), (0, 0));
         // still wanted: read and embedded
-        let out = embed(&model, items(3, true, &live, &most), &AtomicBool::new(false));
+        let out = embed(&model, items(3, true, &live, &most), &GATES, &AtomicBool::new(false), None);
         assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Embedded(_))));
         assert_eq!(calls.load(Ordering::SeqCst), 3);
         // let go of while its pictures were being read (waiting for the shared render gate): the model is not run
@@ -830,7 +905,7 @@ mod tests {
             flag.store(true, Ordering::SeqCst);
             Ok(lightcraft_raster::Rgba8::new(320, 240))
         }));
-        let out = embed(&model, batch, &gone);
+        let out = embed(&model, batch, &GATES, &gone, None);
         assert_eq!(out.len(), 4);
         assert!(out.iter().all(|(_, _, o)| matches!(o, Outcome::Skipped)), "nothing embedded");
         assert_eq!(calls.load(Ordering::SeqCst), 3, "the model did not run again");

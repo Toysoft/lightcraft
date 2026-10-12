@@ -804,6 +804,19 @@ impl RenderJob {
     }
 
     pub fn run(self) -> RenderResult {
+        self.run_with(true)
+    }
+
+    /// [`RenderJob::run`] on the CPU whatever the job is: background work that is not shown (the content scan's renders
+    /// of photos without a usable preview) leaves the GPU to the views. Two `lightcraft-cli run` processes crashed in
+    /// the NVIDIA Vulkan driver (`libnvidia-glcore` 615.71.09, inside `queue_submit`) while a content scan rendered
+    /// such photos on the GPU from its worker threads; it did not happen again in later runs, so the cause is not
+    /// known, and these small renders gain little from the GPU.
+    pub fn run_on_cpu(self) -> RenderResult {
+        self.run_with(false)
+    }
+
+    fn run_with(self, gpu_allowed: bool) -> RenderResult {
         if let Some((cache, key)) = &self.cache
             && let Some(img) = cache.get_at(self.cache_generation, *key)
         {
@@ -837,7 +850,7 @@ impl RenderJob {
                 let info = source.info_or(self.info);
                 // Thumbnails (many small jobs side by side) stay on the CPU; views and exports use
                 // the GPU when there is one.
-                let gpu = self.cache.is_none();
+                let gpu = gpu_allowed && self.cache.is_none();
                 let (mut rendered, gpu_fallback) = develop_reporting(src, &info, &self.settings, &self.request, self.stages.as_deref(), gpu);
                 // for a display profile: the image goes to the display's values, the histogram
                 // and the cached view preview stay sRGB
@@ -1943,6 +1956,29 @@ mod tests {
         assert!(s.media.has_source(id, SourceLevel::Full));
         assert!(!s.media.has_source(id, SourceLevel::Preview));
         assert!(!s.media.has_source(PhotoId(id.0 + 1), SourceLevel::Full));
+    }
+
+    #[test]
+    fn the_content_scans_renders_stay_on_the_cpu() {
+        let mut s = crate::Session::with_demo();
+        let id = s.active().unwrap();
+        let job = |s: &mut crate::Session| {
+            let mut j = s.variant_job(id, &DevelopSettings::default(), 256).unwrap();
+            // (the scan keeps them out of the thumbnail cache, which also kept thumbnails on the CPU)
+            j.cache = None;
+            j
+        };
+        let gpu_here = lightcraft_gpu::available();
+        // a GPU failure armed for the next GPU render on this thread: the scan's render must not be the one to meet it
+        lightcraft_gpu::inject_fault(lightcraft_gpu::Fault::Validation);
+        let scanned = crate::content_worker::render(job(&mut s))();
+        assert!(scanned.is_ok());
+        let shown = job(&mut s).run();
+        if gpu_here {
+            assert!(shown.gpu_fallback.is_some(), "the scan's render took the GPU");
+        }
+        lightcraft_gpu::reset_failures();
+        assert!(job(&mut s).run_on_cpu().gpu_fallback.is_none());
     }
 
     #[test]
