@@ -478,7 +478,8 @@
   it is the size the library recorded; files of another size are said in the question. A file that is another
   photo's of the same folder (the chosen folder is inside the old one, or the reverse) is never taken for it, unless
   its content is the photo's.
-- Agents and the CLI: `folder.updateLocation {folder, path}`.
+- Agents and the CLI: `folder.updateLocation {folder, path}`. In the running app it looks for the files in the
+  background too and answers at once; `ui.inspect` → `relocate` says how it went.
 
 ### HDR and panorama merges of CR2 keep their colour
 - Photo Merge of Canon CR2 (and other raws whose colour LightCraft fits from the camera's own JPEG, such as NEF and

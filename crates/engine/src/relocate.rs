@@ -171,6 +171,10 @@ impl Relocation {
     /// this folder; two photos would share one file). No file-system access.
     pub fn new(s: &Session, path: &str, to: &str, disk: bool) -> Result<Relocation> {
         let (path, to) = (path.trim(), to.trim());
+        if cfg!(target_arch = "wasm32") {
+            // (no disk to look at: every folder would be "not a folder")
+            return Err(invalid("locating a folder is not supported in the web version: it has no disk to look for the photos' files on"));
+        }
         if path.is_empty() {
             return Err(invalid("missing `folder`"));
         }
@@ -493,8 +497,9 @@ pub(crate) fn follow_located(s: &mut Session, from: &str, to: &str) {
     }
 }
 
-/// `folder.updateLocation` in one go, on the calling thread (agents, the CLI; the app does the
-/// looking on a worker thread, see `lightcraft_ui_egui::relocate`).
+/// `folder.updateLocation` in one go, on the calling thread: the CLI and headless MCP, where
+/// that thread is the caller's own. The app never runs this: it does the looking on a worker
+/// thread, for an agent's call too (see `lightcraft_ui_egui::relocate`).
 pub fn relocate(s: &mut Session, path: &str, to: &str, disk: bool, incomplete: bool) -> Result<Value> {
     let plan = Relocation::new(s, path, to, disk)?;
     let task = s.activity.start("relocate", "Locating folder", crate::activity::Cancel::No);

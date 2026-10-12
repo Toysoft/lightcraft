@@ -250,7 +250,7 @@ fn the_files_are_looked_for_under_a_row_whose_cross_stops_it() {
     let dir = Scratch::new("activity");
     let mut h = moved_folder(&dir, "archive/journey");
     let before = files(&h);
-    let request = Request { path: dir.path("trip"), to: dir.path("archive/journey"), disk: false, incomplete: false, synchronize: false };
+    let request = Request { path: dir.path("trip"), to: dir.path("archive/journey"), disk: false, incomplete: false, synchronize: false, asks: true };
 
     // started between frames: nothing is collected until the next one
     let r = crate::relocate::start(&mut h.app, request.clone());
@@ -294,7 +294,7 @@ fn the_question_waits_for_another_dialog_to_be_done_with() {
     let dir = Scratch::new("waits");
     let mut h = moved_folder(&dir, "archive/journey");
     std::fs::remove_file(dir.path("archive/journey/b.png")).unwrap();
-    let request = Request { path: dir.path("trip"), to: dir.path("archive/journey"), disk: false, incomplete: false, synchronize: false };
+    let request = Request { path: dir.path("trip"), to: dir.path("archive/journey"), disk: false, incomplete: false, synchronize: false, asks: true };
     assert!(crate::relocate::start(&mut h.app, request).is_ok());
     // something else was opened while the files were looked for
     h.app.ui.dialog = Some(Dialog::About);
@@ -325,7 +325,45 @@ fn synchronize_is_not_opened_again_once_its_dialog_was_closed() {
 
 // ── Review of #1122 ──────────────────────────────────────────────────────────────────────────
 //
+// * An agent that confirms the dialog of a folder that isn't there (`ui.dialog.confirm`) gets
+//   what the person's click gets: the folder is located and scanned at its new place.
+// * A Synchronize dialog closed while the files were looked for is not opened again.
 // * A file at the new place that is not the size the library recorded is said in the question.
+// * `folder.updateLocation` from an agent, in the app, looks for the files on a worker thread
+//   too; `ui.inspect` → `relocate` says how it went.
+
+#[test]
+fn an_agent_confirming_the_dialog_of_a_folder_that_isnt_there_gets_the_scan_too() {
+    let dir = Scratch::new("agent");
+    let mut h = moved_folder(&dir, "archive/journey");
+    open_offline(&mut h, &dir.path("trip"));
+
+    let r = h.request("ui.dialog.confirm", json!({}), T);
+    assert_eq!(r["ok"], true, "{r}");
+
+    let now = dir.path("archive/journey");
+    let scanned = h.step_until(
+        T,
+        |h| matches!(&h.app.ui.dialog, Some(Dialog::SynchronizeFolder { path, counts: Some(c), .. }) if path.replace('\\', "/") == now && !c.offline),
+    );
+    assert!(scanned, "the dialog scans the folder at its new place: {:?} · {:?}", h.app.ui.dialog, toast(&h));
+    assert_eq!(files(&h), [dir.path("archive/journey/a.png"), dir.path("archive/journey/b.png")]);
+}
+
+#[test]
+fn a_dialog_closed_while_the_files_were_looked_for_is_not_opened_again() {
+    let dir = Scratch::new("closed-looking");
+    let mut h = moved_folder(&dir, "archive/journey");
+    open_offline(&mut h, &dir.path("trip"));
+    let request = Request { path: dir.path("trip"), to: dir.path("archive/journey"), disk: false, incomplete: false, synchronize: true, asks: true };
+    assert!(crate::relocate::start(&mut h.app, request).is_ok());
+    // Cancel, before the files were all looked for
+    h.app.ui.dialog = None;
+
+    assert!(h.step_until(T, |h| h.app.relocate.is_none() && toast(h).contains("Folder located")), "{:?}", toast(&h));
+    h.step();
+    assert!(h.app.ui.dialog.is_none(), "{:?}", h.app.ui.dialog);
+}
 
 #[test]
 fn a_file_that_is_not_the_size_the_library_recorded_is_said_in_the_question() {
@@ -344,4 +382,56 @@ fn a_file_that_is_not_the_size_the_library_recorded_is_said_in_the_question() {
     let asked = |h: &Headless| matches!(&h.app.ui.dialog, Some(Dialog::LocateFolder { found: 1, total: 2, different: 1, .. }));
     assert!(h.step_until(T, asked), "{:?} · {:?}", h.app.ui.dialog, toast(&h));
     shot(&mut h, "locate-different.png");
+}
+
+/// `folder.updateLocation` as an agent calls it in the app, and what `ui.inspect` says of it.
+fn update_location(h: &mut Headless, params: serde_json::Value) -> serde_json::Value {
+    let r = h.request("engine.execute", json!({"command": "folder.updateLocation", "params": params}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    // (the way of the person's: a worker thread under a row that can be stopped, see
+    // `the_files_are_looked_for_under_a_row_whose_cross_stops_it`)
+    assert_eq!(r["result"], json!({"background": true}), "the reply does not wait for the disk: {r}");
+    assert!(h.step_until(T, |h| h.app.relocate.is_none()), "it ends");
+    h.step();
+    let r = h.request("ui.inspect", json!({}), T);
+    assert_eq!(r["result"]["relocate"]["running"], json!(null), "{}", r["result"]["relocate"]);
+    r["result"]["relocate"]["last"].clone()
+}
+
+#[test]
+fn an_agents_update_folder_location_never_looks_on_the_apps_thread() {
+    let dir = Scratch::new("agent-update");
+    let mut h = moved_folder(&dir, "archive/journey");
+    std::fs::remove_file(dir.path("archive/journey/b.png")).unwrap();
+    let before = files(&h);
+    let params = json!({"folder": dir.path("trip"), "path": dir.path("archive/journey")});
+
+    // only some of the files: an agent is told why not, as by the command anywhere else, and
+    // the person is not asked about a step that isn't theirs
+    let last = update_location(&mut h, params.clone());
+    assert!(last["error"].as_str().is_some_and(|e| e.contains("only 1 of the 2 files") && e.contains("incomplete: true")), "{last}");
+    assert!(h.app.ui.dialog.is_none() && h.app.relocate_asked.is_none(), "{:?}", h.app.ui.dialog);
+    assert_eq!(files(&h), before);
+
+    // none of them
+    let last = update_location(&mut h, json!({"folder": dir.path("trip"), "path": dir.path("archive")}));
+    assert!(last["error"].as_str().is_some_and(|e| e.contains("none of the 2 files")), "{last}");
+    assert_eq!(files(&h), before);
+
+    // with `incomplete`: the command's result
+    let mut anyway = params;
+    anyway["incomplete"] = json!(true);
+    let last = update_location(&mut h, anyway);
+    assert_eq!((last["relinked"].as_u64(), last["found"].as_u64(), last["notFound"].as_u64()), (Some(2), Some(1), Some(1)), "{last}");
+    assert_eq!(files(&h), [dir.path("archive/journey/a.png"), dir.path("archive/journey/b.png")]);
+
+    // what needs no disk to refuse is refused in the reply
+    let r = h.request(
+        "engine.execute",
+        json!({"command": "folder.updateLocation", "params": {"folder": dir.path("nothing"), "path": dir.path("archive")}}),
+        T,
+    );
+    assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.contains("no photo in the library")), "{r}");
+    let r = h.request("engine.execute", json!({"command": "folder.updateLocation", "params": {"path": dir.path("archive")}}), T);
+    assert!(r["ok"] == false && r["error"].as_str().is_some_and(|e| e.contains("missing `folder`")), "{r}");
 }

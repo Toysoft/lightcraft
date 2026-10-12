@@ -445,6 +445,9 @@ pub struct LightcraftApp {
     /// What was found when only some of them are there, for the dialog that asks about it (and
     /// whether that dialog was shown yet: it waits for another dialog to be done with).
     pub relocate_asked: Option<(relocate::Request, lightcraft_engine::relocate::Located, bool)>,
+    /// How the latest locating of a folder went (`ui.inspect` → `relocate.last`, see
+    /// [`relocate::status`]).
+    pub relocate_last: Option<Value>,
     /// A Lightroom catalog inspect/import in progress.
     pub lightroom: Option<lightroom_import::LightroomTask>,
     /// Last terminal Lightroom result, exposed by the command's status/wait response.
@@ -547,6 +550,7 @@ impl LightcraftApp {
             sync_run: None,
             relocate: None,
             relocate_asked: None,
+            relocate_last: None,
             lightroom: None,
             lightroom_last: None,
             lightroom_result: None,

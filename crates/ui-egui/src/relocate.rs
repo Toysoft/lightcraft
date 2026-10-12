@@ -1,5 +1,6 @@
-//! Locating a library folder that is somewhere else now, in the app (`folder.locate`; see
-//! `lightcraft_engine::relocate`, issue #1112).
+//! Locating a library folder that is somewhere else now, in the app (`folder.locate`, and
+//! `folder.updateLocation` when an agent calls it here; see `lightcraft_engine::relocate`, issue
+//! #1112).
 //!
 //! The person says where the folder is (Synchronize Folder's button when the folder isn't
 //! there, or Update Folder Location… on a Folders row). Whether that is the folder is told by
@@ -36,9 +37,12 @@ pub struct Request {
     pub disk: bool,
     /// Locate it there even when only some of its files are (the person agreed).
     pub incomplete: bool,
-    /// Open Synchronize Folder on it afterwards (it was asked from that dialog, which is still
-    /// open or gave way to the question).
+    /// Open Synchronize Folder on it afterwards: it was asked from that dialog. Dropped by
+    /// [`poll`] when the dialog is closed before the files were all looked for.
     pub synchronize: bool,
+    /// A person asked, and is asked in turn when only some of the files are there. Not an agent
+    /// (`folder.updateLocation`): it is told why not, as by the command anywhere else.
+    pub asks: bool,
 }
 
 /// The files of a folder being looked for at its new place.
@@ -91,11 +95,24 @@ pub fn start(app: &mut LightcraftApp, request: Request) -> Result<Value, String>
     let guard = app.session.activity.start("relocate", "Locating folder", Cancel::Flag(progress.cancel.clone()));
     guard.detail(&name);
     app.relocate = Some(RelocateTask { request, progress, rx, guard });
+    app.relocate_last = None;
     Ok(json!({"started": true}))
 }
 
 /// Each frame: when the looking is done, relink the photos, say why not, or ask.
 pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
+    // Synchronize Folder afterwards is for its dialog, which waits for the answer: closed (or
+    // another dialog opened) while the files are looked for, it is not opened again unasked.
+    // (Once the question is shown it stands in for that dialog, and carries the wish itself.)
+    let waiting = app.relocate.as_ref().map(|t| &t.request).or(app.relocate_asked.as_ref().filter(|a| !a.2 && !a.0.incomplete).map(|a| &a.0));
+    if waiting.is_some_and(|r| r.synchronize && !synchronizing(app, &r.path)) {
+        if let Some(t) = &mut app.relocate {
+            t.request.synchronize = false;
+        }
+        if let Some((r, ..)) = &mut app.relocate_asked {
+            r.synchronize = false;
+        }
+    }
     // what the question is about: relinked once agreed to, let go of when the dialog was closed
     if let Some((request, located, shown)) = &mut app.relocate_asked {
         let asking = matches!(app.ui.dialog, Some(Dialog::LocateFolder { .. }));
@@ -132,6 +149,7 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
     if task.guard.is_cancelled() {
         // ✕ on its row: a count stopped part-way says nothing
         app.relocate = None;
+        app.relocate_last = Some(json!({"cancelled": true}));
         return;
     }
     let (done, total) = (task.progress.done.load(Ordering::Relaxed), task.progress.total.load(Ordering::Relaxed));
@@ -148,20 +166,26 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
     drop(task);
     let located = match located {
         Ok(l) => l,
-        Err(e) => return app.toast_error(ctx, e),
+        Err(e) => {
+            app.relocate_last = Some(json!({"error": e}));
+            return app.toast_error(ctx, e);
+        }
     };
-    if located.found == 0 {
-        let name = lightcraft_catalog::folders::folder_label(&located.to);
-        app.toast_error(ctx, crate::i18n::tr_format!("None of this folder's photos are in “{name}”: choose the folder it is now", name = name));
-        return;
-    }
-    if located.found < located.total && !request.incomplete {
+    let Some(why) = located.refusal(request.incomplete) else { return finish(app, ctx, request, located) };
+    if located.found > 0 && request.asks {
         // (asked on the next frame, see above)
         app.relocate_asked = Some((request, located, false));
         ctx.request_repaint();
         return;
     }
-    finish(app, ctx, request, located);
+    app.relocate_last = Some(json!({"error": why}));
+    if located.found == 0 {
+        let name = lightcraft_catalog::folders::folder_label(&located.to);
+        app.toast_error(ctx, crate::i18n::tr_format!("None of this folder's photos are in “{name}”: choose the folder it is now", name = name));
+    } else {
+        // (an agent's step: its reason, in the words the command has for it)
+        app.toast_error(ctx, why);
+    }
 }
 
 /// The dialog open now is Synchronize Folder for `folder`.
@@ -176,6 +200,7 @@ fn finish(app: &mut LightcraftApp, ctx: &egui::Context, request: Request, locate
     match app.session.execute_fn("folder.updateLocation", |s| located.commit(s, request.incomplete)) {
         Ok(r) => {
             app.toast(ctx, crate::i18n::tr_format!("Folder located. Photos relinked: {n}", n = r["relinked"].as_u64().unwrap_or(0)));
+            app.relocate_last = Some(r);
             if request.synchronize && (app.ui.dialog.is_none() || synchronizing(app, &request.path)) {
                 let name = lightcraft_catalog::folders::folder_label(&to);
                 // the folder was chosen by the person, whatever it is: a disk too
@@ -187,8 +212,20 @@ fn finish(app: &mut LightcraftApp, ctx: &egui::Context, request: Request, locate
                 }
             }
         }
-        Err(e) => app.toast_error(ctx, e.to_string()),
+        Err(e) => {
+            app.relocate_last = Some(json!({"error": e.to_string()}));
+            app.toast_error(ctx, e.to_string());
+        }
     }
+}
+
+/// `ui.inspect` → `relocate`: `{running: {done, total} | null, last}`. `last` is how the latest
+/// one went: `folder.updateLocation`'s result, `{error}` or `{cancelled: true}`; `null` while one
+/// runs or waits for the person's answer, and before the first.
+pub fn status(app: &LightcraftApp) -> Value {
+    let running =
+        app.relocate.as_ref().map(|t| json!({"done": t.progress.done.load(Ordering::Relaxed), "total": t.progress.total.load(Ordering::Relaxed)}));
+    json!({"running": running, "last": app.relocate_last})
 }
 
 /// The question when only some of the folder's files are at the new place.
@@ -221,6 +258,6 @@ pub fn confirm(app: &mut LightcraftApp, dlg: &Dialog) -> Result<Value, String> {
             request.incomplete = true;
             Ok(json!({"started": true}))
         }
-        _ => start(app, Request { path: path.clone(), to: to.clone(), disk: *disk, incomplete: true, synchronize: *synchronize }),
+        _ => start(app, Request { path: path.clone(), to: to.clone(), disk: *disk, incomplete: true, synchronize: *synchronize, asks: true }),
     }
 }

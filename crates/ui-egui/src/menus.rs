@@ -1765,10 +1765,38 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             match to {
                 Some(to) => crate::relocate::start(
                     app,
-                    crate::relocate::Request { path: folder.to_string(), to, disk: flag("disk"), incomplete: flag("incomplete"), synchronize },
+                    crate::relocate::Request {
+                        path: folder.to_string(),
+                        to,
+                        disk: flag("disk"),
+                        incomplete: flag("incomplete"),
+                        synchronize,
+                        asks: true,
+                    },
                 ),
                 None => Ok(Value::Null),
             }
+        }
+        "folder.updateLocation" => {
+            // the engine's command looks for the files on the calling thread, which here is the
+            // app's: an agent's call (control channel, `mcp --connect`) goes the way of the
+            // person's instead — a worker thread under a row in the activity stack — and is
+            // answered at once; `ui.inspect` → `relocate` says how it went
+            let text = |key: &str| p.get(key).and_then(Value::as_str).filter(|x| !x.trim().is_empty());
+            let (Some(folder), Some(to)) = (text("folder"), text("path")) else {
+                let key = if text("folder").is_none() { "folder" } else { "path" };
+                return Some(Err(format!("folder.updateLocation: missing `{key}`")));
+            };
+            let flag = |key: &str| p.get(key).and_then(Value::as_bool).unwrap_or(false);
+            let request = crate::relocate::Request {
+                path: folder.to_string(),
+                to: to.to_string(),
+                disk: flag("disk"),
+                incomplete: flag("incomplete"),
+                synchronize: false,
+                asks: false,
+            };
+            crate::relocate::start(app, request).map(|_| json!({"background": true}))
         }
         "file.addFromDevice" => {
             // a camera / card: review its DCIM folder, copying into the library by default
