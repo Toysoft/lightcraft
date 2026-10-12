@@ -16,7 +16,7 @@ impl MoveFs for Faults {
         RealFs.same_file(a, b)
     }
     fn rename_no_replace(&self, a: &Path, b: &Path) -> std::io::Result<()> {
-        if self.0.iter().any(|p| p == a) {
+        if self.0.iter().any(|p| p == a || RealFs.same_file(p, a)) {
             Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected provenance partial move"))
         } else {
             RealFs.rename_no_replace(a, b)
