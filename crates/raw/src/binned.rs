@@ -64,8 +64,7 @@ impl RawImage {
         // Opcode lists 1/2 need the normalised copy; plain files are normalised row by row.
         let norm: Option<Normalized> = if self.opcodes.list1.is_empty() && self.opcodes.list2.is_empty() { None } else { Some(self.normalized()?) };
         let cfa = cfa.shifted(a.x, a.y);
-        let range = self.white_at(0) - self.black.mean();
-        let scale = if range > 0.0 { 1.0 / range } else { 1.0 };
+        let scale = self.normalization_scales().first().copied().unwrap_or(1.0);
         let uniform_black =
             self.black.delta_h.is_empty() && self.black.delta_v.is_empty() && self.black.values.iter().all(|&v| v == self.black.values[0]);
         let black0 = self.black.at(0, 0, 0, 1);

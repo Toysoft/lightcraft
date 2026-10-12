@@ -94,8 +94,9 @@ fn export_dialog_is_unchanged_in_a_tall_window() {
     assert_fits(&h, "Export at 1600×1000");
     let dialog = rect(&h, "dialog:window");
     // (846 tall as before #781: the whole dialog, nothing scrolled away; 615 wide since the
-    // format row gained JPEG XL, #780)
-    assert!((dialog.height() - 846.0).abs() <= 1.0, "{dialog:?}");
+    // format row gained JPEG XL, #780). The macOS-only Apple Photos checkbox adds one row.
+    let expected_height = 846.0 + if cfg!(target_os = "macos") { 30.0 } else { 0.0 };
+    assert!((dialog.height() - expected_height).abs() <= 1.0, "{dialog:?}");
     assert!((dialog.width() - 615.2).abs() <= 1.0, "{dialog:?}");
 }
 
