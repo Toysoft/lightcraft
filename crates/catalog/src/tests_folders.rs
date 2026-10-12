@@ -11,6 +11,8 @@
 //! * Choosing a folder shows what was imported from it and from the folders inside it — exactly
 //!   as many photos as the row says.
 
+use crate::folders::{is_disk_root, volume_of};
+use crate::query::folder_key;
 use crate::*;
 
 fn add(c: &mut Catalog, path: &str) -> PhotoId {
@@ -401,4 +403,62 @@ fn the_quick_check_agrees_with_the_careful_one() {
             assert_eq!(photo_in_root(photo, &root), slow, "{p:?} in {r:?}");
         }
     }
+}
+
+#[test]
+fn a_nextcloud_account_is_a_volume_of_its_own() {
+    let c =
+        library(&["nextcloud://root@cloud.dev-null.me/Sony A7R VI/2026/a.ARW", "nextcloud://root@cloud.dev-null.me/Canon R8/b.CR3", "/home/u/c.jpg"]);
+    let tree = c.folder_tree();
+    let account = tree.iter().find(|n| n.name == "root@cloud.dev-null.me").expect("account node");
+    assert!(account.volume);
+    let kids: Vec<&str> = account.children.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(kids, ["Canon R8", "Sony A7R VI"]);
+    assert!(tree.iter().any(|n| n.path == "/"), "the local disk node");
+    let vols: Vec<Option<String>> = c.photos().map(|p| volume_of(p)).collect();
+    let remote: Vec<_> = vols.iter().filter(|v| v.as_deref().is_some_and(is_remote)).collect();
+    assert_eq!(remote.len(), 2);
+    assert_eq!(remote[0], remote[1]);
+    assert!(vols.iter().any(|v| v.as_deref() == Some("/")));
+}
+
+#[test]
+fn remote_paths_keep_their_case_and_stay_inside_the_account() {
+    assert_eq!(folder_key("nextcloud://u@h/A/b/../C"), "nextcloud://u@h/A/C");
+    assert_eq!(folder_key("nextcloud://u@h/../../x"), "nextcloud://u@h/x");
+    assert_eq!(folder_key("nextcloud://u@h/a\\b"), "nextcloud://u@h/a\\b");
+    assert_ne!(folder_key("nextcloud://u@h/Dir"), folder_key("nextcloud://u@h/dir"));
+}
+
+#[test]
+fn nextcloud_roots_are_disk_roots() {
+    assert!(is_disk_root("nextcloud://u@h/"));
+    assert!(is_disk_root("nextcloud://u@h"));
+    assert!(!is_disk_root("nextcloud://u@h/Dir"));
+    assert!(!is_disk_root("nextcloud:///Dir"));
+}
+
+#[test]
+fn the_tree_and_the_filter_agree_on_remote_folders() {
+    let c = library(&[
+        "nextcloud://u@h/Sony/2026/a.ARW",
+        "nextcloud://u@h/Sony/b.ARW",
+        "nextcloud://u@h/Sony/../Canon/c.CR3",
+        "nextcloud://u@h/d.jpg",
+        "nextcloud://v@h/e.jpg",
+        "/home/u/f.jpg",
+    ]);
+    fn check(c: &Catalog, nodes: &[FolderNode], seen: &mut usize) {
+        for n in nodes {
+            if n.selectable {
+                let f = Filter { library_folder: Some(n.path.clone()), ..Default::default() };
+                assert_eq!(c.query(&f, &Sort::default()).len(), n.count, "{} ({})", n.name, n.path);
+                *seen += 1;
+            }
+            check(c, &n.children, seen);
+        }
+    }
+    let mut seen = 0;
+    check(&c, &c.folder_tree(), &mut seen);
+    assert!(seen >= 7, "{seen} rows checked");
 }

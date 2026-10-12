@@ -497,6 +497,9 @@ pub(crate) struct SplitPath {
 /// trailing separator dropped, `..` resolved lexically, a Windows verbatim prefix removed;
 /// `lower_drive` lower-cases a drive letter (the identity does, a display name wants it as is).
 pub(crate) fn split_path(path: &str, lower_drive: bool) -> SplitPath {
+    if is_remote(path) {
+        return split_remote(path);
+    }
     let mut s = path.replace('\\', "/");
     if let Some(rest) = s.strip_prefix("//?/").or_else(|| s.strip_prefix("//./")) {
         s = match rest.strip_prefix("UNC/") {
@@ -528,6 +531,32 @@ pub(crate) fn split_path(path: &str, lower_drive: bool) -> SplitPath {
     SplitPath { prefix, parts, absolute }
 }
 
+/// Where remote (Nextcloud) photos are addressed: `nextcloud://user@host/dir/x.ARW`.
+pub const REMOTE_SCHEME: &str = "nextcloud://";
+
+/// Whether `path` lies on a remote account rather than a local disk.
+pub fn is_remote(path: &str) -> bool {
+    path.starts_with(REMOTE_SCHEME)
+}
+
+/// A remote path: the account (`nextcloud://user@host`) is the prefix `..` can't climb above;
+/// server paths are case-sensitive and `\\` is an ordinary character in them.
+fn split_remote(path: &str) -> SplitPath {
+    let rest = path.get(REMOTE_SCHEME.len()..).unwrap_or("");
+    let (authority, tail) = rest.split_once('/').unwrap_or((rest, ""));
+    let parts = tail.split('/').fold(Vec::new(), |mut parts: Vec<String>, c| {
+        match c {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            c => parts.push(c.to_string()),
+        }
+        parts
+    });
+    SplitPath { prefix: format!("{REMOTE_SCHEME}{authority}"), parts, absolute: true }
+}
+
 /// A folder path's identity, for telling whether two spellings name the same folder: `/` and
 /// `\\` are both separators, repeated separators, `.` and a trailing separator are dropped,
 /// `..` is resolved lexically, a Windows verbatim prefix (`\\?\`) is removed and the drive
@@ -538,7 +567,7 @@ pub(crate) fn split_path(path: &str, lower_drive: bool) -> SplitPath {
 pub fn folder_key(path: &str) -> String {
     let SplitPath { prefix, parts, absolute } = split_path(path, true);
     let key = if absolute { format!("{prefix}/{}", parts.join("/")) } else { parts.join("/") };
-    if cfg!(windows) { key.to_lowercase() } else { key }
+    if cfg!(windows) && !is_remote(path) { key.to_lowercase() } else { key }
 }
 
 /// Whether `path` is folder `root` or lies somewhere inside it, however either is spelled

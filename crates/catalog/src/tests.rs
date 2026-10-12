@@ -694,3 +694,11 @@ fn undated_photos_group_under_unknown_date_and_sort_together() {
     let filter_year = Filter { date: Some("2026".into()), ..Default::default() };
     assert_eq!(c.query(&filter_year, &Sort { key: SortKey::CaptureDate, ascending: false, ..Default::default() }), vec![p_dated2, p_dated1]);
 }
+
+#[test]
+fn is_remote_is_a_prefix_check() {
+    assert!(is_remote("nextcloud://a@b/x"));
+    for p in ["/home/x", "C:\\x", "//h/s", "nextcloud:/a", ""] {
+        assert!(!is_remote(p), "{p}");
+    }
+}

@@ -36,7 +36,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::query::{folder_key, folder_rest, folder_within, key_within, split_path};
+use crate::query::{folder_key, folder_rest, folder_within, is_remote, key_within, split_path};
 use crate::{Catalog, ColorLabel, Op, Source};
 
 /// Folder levels kept per photo. No real path comes near it; a deeper one is counted at its
@@ -129,7 +129,11 @@ fn place(dir: &str) -> Option<Placed> {
     let sp = split_path(dir, false);
     let names: Vec<&str> = sp.parts.iter().map(String::as_str).collect();
     let named = |mount: String, volume: &str, used: usize| (mount, volume.to_string(), used);
-    let (mount, volume, used) = if sp.prefix.starts_with("//") {
+    let (mount, volume, used) = if is_remote(&sp.prefix) {
+        // one volume per account, named `user@host`; an empty authority is no account
+        let authority = sp.prefix.get(crate::query::REMOTE_SCHEME.len()..).filter(|a| !a.is_empty())?;
+        named(sp.prefix.clone(), authority, 0)
+    } else if sp.prefix.starts_with("//") {
         // `//server/share`: a server alone (no share) is no place to keep photos
         if sp.prefix.ends_with('/') {
             return None;
