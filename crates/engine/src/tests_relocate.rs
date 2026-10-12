@@ -857,3 +857,68 @@ fn a_files_content_read_in_pieces_is_the_content_import_recorded() {
     let pieces = crate::cmd::missing::hash_reader(&bytes[..]).unwrap();
     assert_eq!(pieces, lightcraft_preview::hash_bytes(&bytes).to_string());
 }
+
+// ── Third review: files shared below the two folders, and a browsed file that is another picture ─
+
+#[cfg(unix)]
+#[test]
+fn a_link_inside_the_folder_to_the_chosen_place_is_seen() {
+    let dir = Scratch::new("link-below-from");
+    write_png(&dir.path("big/2023/x.png"), 2);
+    write_png(&dir.path("pics/x.png"), 1);
+    std::os::unix::fs::symlink(dir.path("big/2023"), dir.path("pics/2023")).unwrap();
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [dir.path("pics/x.png"), dir.path("pics/2023/x.png")]})).unwrap();
+    assert_eq!(s.catalog.len(), 2);
+    for blind in [false, true] {
+        if blind {
+            forget_sizes_and_contents(&mut s);
+        }
+        // `big/2023/x.png` is the file of the photo at `pics/2023/x.png`
+        let e = refused(&mut s, json!({"folder": dir.path("pics"), "path": dir.path("big/2023"), "incomplete": true}));
+        assert!(e.contains("other photos of this folder"), "blind {blind}: {e}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_inside_the_chosen_place_back_to_the_folder_is_seen() {
+    let dir = Scratch::new("link-below-to");
+    let mut s = Session::new().with_fs();
+    write_png(&dir.path("a/x.png"), 1);
+    write_png(&dir.path("a/sub/x.png"), 2);
+    s.execute("library.import", &json!({"paths": [dir.path("a")]})).unwrap();
+    std::fs::create_dir_all(dir.0.join("new")).unwrap();
+    std::fs::copy(dir.path("a/x.png"), dir.path("new/x.png")).unwrap();
+    std::os::unix::fs::symlink(dir.path("a"), dir.path("new/sub")).unwrap();
+    for blind in [false, true] {
+        if blind {
+            forget_sizes_and_contents(&mut s);
+        }
+        // `new/sub/x.png` is `a/x.png`: the other photo's file
+        let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("new"), "incomplete": true}));
+        assert!(e.contains("other photos of this folder"), "blind {blind}: {e}");
+    }
+}
+
+#[test]
+fn a_browsed_file_inside_the_folder_that_is_another_picture_is_not_taken_for_the_photo() {
+    let dir = Scratch::new("nested-local-other");
+    write_png(&dir.path("a/x.png"), 1);
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [dir.path("a")]})).unwrap();
+    // nothing moved: one level down lies another picture of the same name (and size), looked at in Local
+    write_png(&dir.path("a/b/x.png"), 2);
+    s.execute("library.browse", &json!({"path": dir.path("a/b")})).unwrap();
+
+    let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("a/b"), "incomplete": true}));
+    assert!(e.contains("another picture than the library recorded"), "{e}");
+}
+
+#[test]
+fn a_relative_place_with_dot_dot_is_told_to_be_written_in_full() {
+    let dir = Scratch::new("dotdot-relative");
+    let mut s = library(&dir);
+    let e = refused(&mut s, json!({"folder": dir.path("trip"), "path": ".."}));
+    assert!(e.contains("full path"), "{e}");
+}

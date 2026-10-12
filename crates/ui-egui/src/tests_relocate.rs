@@ -268,6 +268,8 @@ fn the_files_are_looked_for_under_a_row_whose_cross_stops_it() {
     assert!(h.step_until(T, |h| h.app.relocate.is_none()), "it ends");
     h.step();
     assert_eq!(files(&h), before, "stopped: nothing changed");
+    let last = h.app.relocate_last.clone().unwrap_or_default();
+    assert_eq!((last["cancelled"].as_bool(), last["folder"].as_str().map(|f| f.replace('\\', "/"))), (Some(true), Some(dir.path("trip"))), "{last}");
     assert!(h.app.session.activity.list().is_empty(), "the row goes with it");
 
     // an import running: its photos could be the folder's
@@ -474,6 +476,13 @@ fn a_question_that_waits_is_not_overtaken_and_its_end_is_said() {
     let params = json!({"folder": dir.path("trip"), "path": dir.path("archive/journey"), "incomplete": true});
     let r = h.request("engine.execute", json!({"command": "folder.updateLocation", "params": params}), T);
     assert!(r["ok"] == false && h.app.relocate.is_none(), "{r}");
+    assert!(r["error"].as_str().is_some_and(|e| e.contains("question")), "why: {r}");
+    let asking = inspect_relocate(&mut h)["asking"].clone();
+    assert_eq!(
+        (asking["folder"].as_str().map(|f| f.replace('\\', "/")), asking["shown"].as_bool()),
+        (Some(dir.path("trip")), Some(true)),
+        "{asking}"
+    );
     assert_eq!(files(&h), before);
 
     // Cancel: that is how it ended, and for which folder
@@ -506,7 +515,8 @@ fn an_agents_step_brings_the_open_dialog_of_that_folder_up_to_date() {
     let mut h = moved_folder(&dir, "archive/journey");
     open_offline(&mut h, &dir.path("trip"));
 
-    let last = update_location(&mut h, json!({"folder": dir.path("trip"), "path": dir.path("archive/journey")}));
+    // (the folder written another way than the dialog has it)
+    let last = update_location(&mut h, json!({"folder": format!("{}/", dir.path("trip")), "path": dir.path("archive/journey")}));
     assert_eq!(last["relinked"], json!(2), "{last}");
 
     // the dialog was about a folder the library no longer has: it is about the folder where it is now

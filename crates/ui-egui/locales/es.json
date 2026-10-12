@@ -2206,6 +2206,7 @@
   "If it is somewhere else now, locate it: its photos then point at the folder you choose. No file is touched.": "Si ahora está en otro lugar, localízala: sus fotos apuntarán a la carpeta que elijas. No se toca ningún archivo.",
   "Locating folder": "Localizando carpeta",
   "A folder is already being located": "Ya se está localizando una carpeta",
+  "A question about locating a folder is waiting for its answer": "Una pregunta sobre la localización de una carpeta espera respuesta",
   "Locating the folder failed": "No se pudo localizar la carpeta",
   "Locate Anyway": "Localizar de todos modos",
   "Locate the folder there anyway?": "¿Localizar la carpeta ahí de todos modos?",

@@ -24,10 +24,13 @@
 //! * a place that is, as the library has it, the file of another photo of the folder (the new
 //!   place is inside the folder, or the folder inside it) is taken only when the file's content
 //!   is the photo's. Otherwise the step is refused, whatever was asked: the photo would show
-//!   the other photo's picture under its own edits. The same place can be written in many ways
-//!   (other letter case on a disk that doesn't tell case apart, a link, a second mount), so
-//!   where one folder is inside the other on disk, files are told by what they are on disk
-//!   ([`FileId`]), not by how their paths are spelled; a place written with `..` is refused;
+//!   the other photo's picture under its own edits. The same file can be reached by many paths
+//!   (other letter case on a disk that doesn't tell case apart, a link at or below either
+//!   folder), so while the folder is still on disk where the library has it, the photos' files
+//!   are told by what they are on disk ([`FileId`]), not by how their paths are spelled; a
+//!   place written with `..` is refused. (One share mounted twice is two disks to this.)
+//! * a file inside the folder that was only looked at in Local is taken for the library's photo
+//!   coming to its place when its content is the photo's, where the library recorded that;
 //! * a file of another size than the library recorded is not the file it knew: it is not counted
 //!   as found;
 //! * a folder with none of the files is not the folder, and one with only some of them (or with
@@ -82,6 +85,9 @@ pub struct Sought {
     /// The place is, as the library has it, the file of another photo of the folder: only its
     /// content tells whose the file there is.
     claimed: bool,
+    /// The place is a file of the folder that was only looked at in Local: nothing says it is
+    /// the photo's, so its content is asked where the library recorded the photo's.
+    browsed: bool,
     /// A library photo's (not only one's in Recently Deleted or browsed in Local, which nobody
     /// is looking for): counted in [`Located::total`].
     counted: bool,
@@ -131,19 +137,13 @@ fn file_id(path: &Path, meta: Option<&std::fs::Metadata>) -> Option<FileId> {
     }
 }
 
-/// `inner` is, on disk, `outer` or a place inside it (however the two are written).
-fn inside(inner: &str, outer: &str) -> bool {
-    let Some(outer) = file_id(Path::new(outer), None) else { return false };
-    let Ok(real) = std::fs::canonicalize(inner) else { return false };
-    real.ancestors().take(512).any(|a| file_id(a, None).as_ref() == Some(&outer))
-}
-
-/// The files of the folder's photos where the library has them now, by what they are on disk —
-/// when one of `from` and `to` is inside the other on disk, which is when a file at the new
-/// place can be one of them. Empty otherwise (the usual case: nothing of `from` is looked at).
-fn files_now(photos: &[RelocatedPhoto], from: &str, to: &str, progress: &ScanProgress) -> HashMap<FileId, String> {
+/// The files of the folder's photos where the library has them now, by what they are on disk:
+/// a file at the new place can be one of them under another path (a place inside the folder, a
+/// link at or below either folder). Empty when the folder is not on disk where the library has
+/// it (the usual case: nothing of `from` is looked at then).
+fn files_now(photos: &[RelocatedPhoto], from: &str, progress: &ScanProgress) -> HashMap<FileId, String> {
     let mut out = HashMap::new();
-    if !inside(to, from) && !inside(from, to) {
+    if file_id(Path::new(from), None).is_none() {
         return out;
     }
     for r in photos {
@@ -170,9 +170,9 @@ impl Sought {
         let theirs = || {
             !theirs.is_empty() && file_id(Path::new(&self.path), Some(&meta)).and_then(|id| theirs.get(&id)).is_some_and(|at| !self.now.contains(at))
         };
-        if self.claimed || theirs() {
+        if self.claimed || theirs() || (self.browsed && !self.hashes.is_empty()) {
             // the photo's file has the photo's size and content (read only here, and in pieces:
-            // a folder located inside itself is rare, and reading every file of a folder on a
+            // files shared by the two folders are rare, and reading every file of a folder on a
             // network share takes hours)
             let proven = !self.hashes.is_empty()
                 && (self.size == 0 || self.size == meta.len())
@@ -264,7 +264,7 @@ impl Relocation {
         let abs = std::path::absolute(to).map_err(|e| invalid(format!("{to}: {e}")))?;
         // (one place has one spelling to compare by: `a/b/../b` is not told from `a/b` as written)
         if abs.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            return Err(invalid(format!("{to}: write the folder's path without `..`")));
+            return Err(invalid(format!("{to}: give the folder's full path, without `..`")));
         }
         // (rebuilt from its parts: no trailing separator, so the photos' paths are joined cleanly)
         let abs: PathBuf = abs.components().collect();
@@ -295,7 +295,7 @@ impl Relocation {
             return Err(format!("{to} is not a folder"));
         }
         let total = files.iter().filter(|f| f.counted).count();
-        let theirs = files_now(&photos, &from, &to, progress);
+        let theirs = files_now(&photos, &from, progress);
         // (a place only a photo in Recently Deleted or a kept Local record would point at is
         // looked at where a file there can be another photo's)
         let files: Vec<Sought> = files.into_iter().filter(|f| f.counted || f.claimed || !theirs.is_empty()).collect();
@@ -306,10 +306,10 @@ impl Relocation {
         }
         if let Some(first) = claimed_example {
             let n = claimed;
-            let (s, verb) = if n == 1 { ("", "belongs") } else { ("s", "belong") };
+            let (s, verb, is) = if n == 1 { ("", "belongs", "is") } else { ("s", "belong", "are") };
             return Err(format!(
-                "{n} file{s} in {to} {verb} to other photos of this folder, as far as the library can tell (such as {first}): choose the folder its files are in now. \
-                 (One of the two folders is inside the other; a file there is taken for a photo only when the library recorded the photo's content and the file has it.)"
+                "{n} file{s} in {to} {verb} to other photos of this folder, or {is} another picture than the library recorded for the photo, as far as the library can tell (such as {first}): choose the folder its files are in now. \
+                 (The folder as the library has it and the chosen one share files; a file there is taken for a photo only when the library recorded the photo's content and the file has it.)"
             ));
         }
         Ok(Located { from, to, photos, found, total, unverified, different, library })
@@ -346,16 +346,18 @@ fn destinations(catalog: &Catalog, from: &str, to: &str) -> Destinations {
         })
         .collect();
     let looked: HashSet<PhotoId> = catalog.local_records_of(&browsed).untouched.into_iter().collect();
+    let mut looked_at: HashSet<&str> = HashSet::new();
     for p in catalog.photos() {
         let Source::File { path } = &p.source else { continue };
         if looked.contains(&p.id) {
+            looked_at.insert(path.as_str());
             continue;
         }
         let Some(rest) = folder_rest(path, from).filter(|r| !r.is_empty()) else { continue };
         // joined by the platform, so the result is spelled like a path read from this disk
         let dest = rest.iter().fold(base.clone(), |d, name| d.join(name)).to_string_lossy().to_string();
         let i = *at.entry(dest.clone()).or_insert_with(|| {
-            files.push(Sought { path: dest.clone(), size: 0, hashes: Vec::new(), now: Vec::new(), claimed: false, counted: false });
+            files.push(Sought { path: dest.clone(), size: 0, hashes: Vec::new(), now: Vec::new(), claimed: false, browsed: false, counted: false });
             files.len() - 1
         });
         if let Some(f) = files.get_mut(i) {
@@ -376,6 +378,7 @@ fn destinations(catalog: &Catalog, from: &str, to: &str) -> Destinations {
     let now: HashSet<&str> = photos.iter().map(|r| r.from.as_str()).collect();
     for f in &mut files {
         f.claimed = now.contains(f.path.as_str());
+        f.browsed = looked_at.contains(f.path.as_str());
     }
     Destinations { photos, files }
 }

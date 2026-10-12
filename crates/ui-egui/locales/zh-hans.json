@@ -2045,6 +2045,7 @@
   "If it is somewhere else now, locate it: its photos then point at the folder you choose. No file is touched.": "如果它现在在别处，请定位它：其中的照片将指向你选择的文件夹。不会改动任何文件。",
   "Locating folder": "正在定位文件夹",
   "A folder is already being located": "已在定位一个文件夹",
+  "A question about locating a folder is waiting for its answer": "有一个关于定位文件夹的问题正在等待回答",
   "Locating the folder failed": "定位文件夹失败",
   "Locate Anyway": "仍然定位",
   "Locate the folder there anyway?": "仍然将文件夹定位到那里吗？",

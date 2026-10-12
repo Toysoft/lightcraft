@@ -1998,6 +1998,7 @@
   "If it is somewhere else now, locate it: its photos then point at the folder you choose. No file is touched.": "Se ora si trova altrove, localizzala: le sue foto punteranno alla cartella che scegli. Nessun file viene toccato.",
   "Locating folder": "Localizzazione della cartella",
   "A folder is already being located": "È già in corso la localizzazione di una cartella",
+  "A question about locating a folder is waiting for its answer": "Una domanda sulla localizzazione di una cartella attende risposta",
   "Locating the folder failed": "La localizzazione della cartella non è riuscita",
   "Locate Anyway": "Localizza comunque",
   "Locate the folder there anyway?": "Localizzare comunque la cartella lì?",

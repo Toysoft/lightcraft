@@ -67,8 +67,12 @@ impl Drop for RelocateTask {
 pub fn start(app: &mut LightcraftApp, request: Request) -> Result<Value, String> {
     // (a question that waits is about the library as it is: another step meanwhile, an agent's
     // say, would have its answer relink photos that are no longer where they were found)
-    if app.relocate.is_some() || app.relocate_asked.is_some() {
+    if app.relocate.is_some() {
         return Err(crate::i18n::tr("A folder is already being located").to_string());
+    }
+    if app.relocate_asked.is_some() {
+        // (it may wait behind another dialog: `ui.inspect` → `relocate.asking` says for which folder)
+        return Err(crate::i18n::tr("A question about locating a folder is waiting for its answer").to_string());
     }
     if app.import.is_some() {
         return Err(crate::i18n::tr("Wait for the import to finish").to_string());
@@ -200,9 +204,11 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
     }
 }
 
-/// The dialog open now is Synchronize Folder for `folder`.
+/// The dialog open now is Synchronize Folder for `folder` (however the folder is written: with
+/// a trailing separator, say).
 fn synchronizing(app: &LightcraftApp, folder: &str) -> bool {
-    matches!(&app.ui.dialog, Some(Dialog::SynchronizeFolder { path, .. }) if path == folder)
+    use lightcraft_catalog::query::folder_key;
+    matches!(&app.ui.dialog, Some(Dialog::SynchronizeFolder { path, .. }) if folder_key(path) == folder_key(folder))
 }
 
 /// Relink the photos (one undo step) and say so; then Synchronize Folder at the new place when
@@ -245,11 +251,14 @@ fn ended(request: &Request, mut how: Value) -> Value {
 /// `ui.inspect` → `relocate`: `{running: {done, total} | null, last}`. `last` is how the latest
 /// one went: `folder.updateLocation`'s result, `{error, folder, path}` or `{cancelled: true,
 /// folder, path}` (✕ on its row, or Cancel in the question); `null` while one runs or waits for
-/// the person's answer, and before the first.
+/// the person's answer, and before the first. `asking`: the folder a question waits about
+/// (`{folder, path, shown}`; not `shown` while another dialog is open), during which no other
+/// folder is located.
 pub fn status(app: &LightcraftApp) -> Value {
+    let asking = app.relocate_asked.as_ref().map(|(r, _, shown)| json!({"folder": r.path, "path": r.to, "shown": shown}));
     let running =
         app.relocate.as_ref().map(|t| json!({"done": t.progress.done.load(Ordering::Relaxed), "total": t.progress.total.load(Ordering::Relaxed)}));
-    json!({"running": running, "last": app.relocate_last})
+    json!({"running": running, "asking": asking, "last": app.relocate_last})
 }
 
 /// The question when only some of the folder's files are at the new place.

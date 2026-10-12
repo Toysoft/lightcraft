@@ -2007,6 +2007,7 @@
   "If it is somewhere else now, locate it: its photos then point at the folder you choose. No file is touched.": "如果它現在在別處，請指定其位置：其中的照片將指向你選擇的資料夾。不會更動任何檔案。",
   "Locating folder": "正在尋找資料夾",
   "A folder is already being located": "已在尋找一個資料夾",
+  "A question about locating a folder is waiting for its answer": "有一個關於定位檔案夾的問題正在等待回答",
   "Locating the folder failed": "尋找資料夾失敗",
   "Locate Anyway": "仍然指定",
   "Locate the folder there anyway?": "仍然將資料夾指定到那裡嗎？",
