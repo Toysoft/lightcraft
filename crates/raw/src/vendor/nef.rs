@@ -2,7 +2,7 @@
 //!
 //! Sources: TIFF 6.0 (the raw image is a standard CFA SubIFD), Laurent Clévy's NEF structure notes (prose: IFD
 //! layout, SubIFDs, maker note header) and the ExifTool Nikon tag-name documentation (`0x000c` WB_RBLevels,
-//! `0x0097` ColorBalance, `0x003d` BlackLevel, `0x0096` NEFLinearizationTable). The Huffman-compressed data (compression 34713) is decoded
+//! `0x003d` BlackLevel, `0x0096` NEFLinearizationTable). The Huffman-compressed data (compression 34713) is decoded
 //! by [`super::nefc`], which documents its clean-room sources; "lossy after split" files are decoded when their strip follows the
 //! rule documented there; files it can't decode are reported as [`RawError::Unsupported`] and their embedded previews still work. So are High Efficiency NEFs
 //! (HE / HE★, Z 8, Z 9, Z 6III, Z f): they keep compression 34713 but carry a wavelet codestream that starts with
@@ -17,8 +17,13 @@ use lightcraft_tiff::tags::{self as t, photometric};
 use lightcraft_tiff::{ByteOrder, Ifd, Tiff, makernote};
 
 const WB_RB_LEVELS: u16 = 0x000c;
-/// ColorBalance: a 4-character version, then (in the versions that aren't enciphered) the as-shot levels as four `u16`
-/// in the maker note's byte order: `0102` (D2H) RGGB from byte 10, `0103` (D70, D70s) RGBG from byte 20.
+/// ColorBalance (named in the ExifTool Nikon tag-name documentation, which gives the channel order per version but
+/// not where the levels sit): a 4-character version, then, in the versions that aren't enciphered, the as-shot
+/// levels as four `u16` in the maker note's byte order: `0102` (D2H) RGGB from byte 10, `0103` (D70, D70s) RGBG
+/// from byte 20. The offsets were checked on the CC0 raw.pixls.us files 5227 (D2H), 2060 (D70) and 1117 (D70s): they
+/// are the only places in each block where four `u16` hold two greens of 256 in the order's green slots and two
+/// gains between 1 and 4 (563 256 256 373, 555 256 388 256, 589 256 366 256), and the gains they give are within
+/// 2 to 8 % of what the neutral areas of each camera JPEG imply. The D50's `0205` is enciphered.
 const COLOR_BALANCE: u16 = 0x0097;
 const BLACK_LEVEL: u16 = 0x003d;
 const LINEARIZATION_TABLE: u16 = 0x0096;
@@ -860,6 +865,23 @@ mod tests {
         assert_eq!(wb(ByteOrder::Big, Some(b"0102\0\0\0\0\0\0\x02\x33".to_vec()), None), None);
         // WB_RBLevels wins when present
         assert_eq!(wb(ByteOrder::Big, Some(block(ByteOrder::Big, b"0102", 10, d2h)), Some([3, 2, 5, 4])), Some([1.5, 1.0, 1.25]));
+    }
+
+    /// The header probe (the import path) reports the same as-shot white balance as the full decode.
+    #[test]
+    fn color_balance_white_balance_survives_the_header_probe() {
+        let (w, h) = (16usize, 4usize);
+        let words: Vec<u8> = (0..w * h).flat_map(|i| (100 + i as u16).to_be_bytes()).collect();
+        let mut block = b"0103".to_vec();
+        block.resize(20, 0);
+        block.extend([555u16, 256, 388, 256].iter().flat_map(|v| v.to_be_bytes()));
+        block.resize(140, 0);
+        let mut mn = IfdBuilder::new();
+        mn.set(COLOR_BALANCE, Value::Undefined(block));
+        let bytes = nef_with_note(1, 14, vec![words], w as u32, h as u32, h as u32, Some(mn));
+        let full = crate::decode(&bytes).unwrap();
+        assert_eq!(full.wb_multipliers, Some([555.0 / 256.0, 1.0, 388.0 / 256.0]));
+        assert_eq!(crate::probe_info(&bytes).unwrap().wb_multipliers, full.wb_multipliers);
     }
 
     #[test]
