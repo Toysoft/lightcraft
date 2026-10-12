@@ -171,6 +171,65 @@ fn v3_dehaze_meets_the_acceptance_bands() {
     }
 }
 
+/// Negative Dehaze is a gentle, near-neutral veil: at −100 the misty demo scenes' median rises
+/// +0.4..+1.2 EV (V1 / V2: up to +1.5), −50 rises less, the shadows lift and no more pixels clip
+/// to white.
+#[test]
+fn v3_negative_dehaze_is_a_gentle_veil() {
+    let mut inputs = vec![("hazy valley".to_string(), scene(), 0.0f32)];
+    for s in lightcraft_scenes::demo_library().into_iter().filter(|s| s.kind == lightcraft_scenes::Kind::MistyForest) {
+        inputs.push((s.name.clone(), s.render_fit(W), 0.4));
+    }
+    let pct = |img: &Rgba8, q: usize| {
+        let mut v: Vec<f32> = img.data.iter().map(|&p| luminance(p)).collect();
+        v.sort_by(f32::total_cmp);
+        v.get(v.len() * q / 100).copied().unwrap_or(0.0)
+    };
+    let white = |img: &Rgba8| img.data.iter().filter(|p| p[..3].iter().any(|&c| c >= 254)).count() as f32 / img.data.len().max(1) as f32 * 100.0;
+    for (name, src, lo) in &inputs {
+        let req = RenderRequest::fit(src.width, src.height);
+        let base = v3(src, 0.0, &req);
+        let m0 = median_luma(&base).max(1e-4);
+        let (half, full) = (v3(src, -50.0, &req), v3(src, -100.0, &req));
+        let (ev50, ev100) = ((median_luma(&half) / m0).log2(), (median_luma(&full) / m0).log2());
+        assert!((*lo..=1.2).contains(&ev100), "{name} −100: median {ev100:+.2} EV, want {lo}..1.2");
+        assert!(ev50 > 0.0 && ev50 < ev100, "{name}: −50 {ev50:+.2} EV, −100 {ev100:+.2} EV");
+        assert!(pct(&full, 5) > pct(&base, 5), "{name}: the shadows lift");
+        assert!(white(&full) <= white(&base) + 0.5, "{name}: {:.1} % → {:.1} % clipped white", white(&base), white(&full));
+    }
+}
+
+/// The hue of the valley's neutral grey patch drifts less than 2° between +25 and +100.
+#[test]
+fn v3_dehaze_keeps_the_hue_of_neutral_greys() {
+    let src = hazy_valley(900, 600);
+    let req = RenderRequest::fit(900, 600);
+    let hue = |img: &Rgba8| {
+        let [x0, y0, x1, y1] = lightcraft_scenes::HAZE_LAYOUT.grey;
+        let (w, h) = (img.width as f32, img.height as f32);
+        let (mx, my) = ((x1 - x0) * 0.2, (y1 - y0) * 0.2);
+        let (mut sum, mut n) = ([0.0f32; 3], 0.0f32);
+        for y in ((y0 + my) * h) as usize..((y1 - my) * h) as usize {
+            for x in ((x0 + mx) * w) as usize..((x1 - mx) * w) as usize {
+                let p = img.get(x, y);
+                for i in 0..3 {
+                    sum[i] += srgb_lin(p[i]);
+                }
+                n += 1.0;
+            }
+        }
+        let [r, g, b] = sum.map(|v| v / n.max(1.0));
+        // CIE L*a*b* (D65) of the mean linear sRGB colour
+        let f = |t: f32| if t > 0.008_856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 };
+        let (x, y, z) = (0.4124 * r + 0.3576 * g + 0.1805 * b, 0.2126 * r + 0.7152 * g + 0.0722 * b, 0.0193 * r + 0.1192 * g + 0.9505 * b);
+        let (fx, fy, fz) = (f(x / 0.950_47), f(y), f(z / 1.088_83));
+        (200.0 * (fy - fz)).atan2(500.0 * (fx - fy)).to_degrees()
+    };
+    let (h25, h100) = (hue(&v3(&src, 25.0, &req)), hue(&v3(&src, 100.0, &req)));
+    let drift = (h100 - h25 + 180.0).rem_euclid(360.0) - 180.0;
+    assert!(drift.abs() < 2.0, "grey hue {h25:.1}° → {h100:.1}° ({drift:+.1}°)");
+}
+
 /// Width (px, mean over the middle rows of the valley's blocks) of the band next to the bright /
 /// dark edge that is darker than its block's interior by more than 10 (8-bit luma), on the dark
 /// and the bright side (as `examples/dehaze_report.rs` measures it).
@@ -412,7 +471,7 @@ fn v3_haze_map_is_built_once() {
     let (Some(a), Some(b)) = (a, b) else { panic!("no haze map") };
     // (by value: other tests share the process-wide cache and may evict it in between)
     assert!(*a == *b, "the second plan gets the same map");
-    assert_eq!(a.size(), (1024, 683));
+    assert_eq!(a.size(), (768, 512));
 }
 
 /// The cached map follows everything it depends on: the white balance, the crop, the orientation,

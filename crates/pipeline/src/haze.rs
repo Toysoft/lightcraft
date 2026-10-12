@@ -6,8 +6,8 @@
 //! mid-render airlight readback.
 //!
 //! Built on a proxy of the whole output frame, long edge `P = min(`[`PROXY_EDGE`]`, native)`, after
-//! white balance (before exposure), in the gamma encoding `e = lin^(1/2.2)` (scale-invariant: the
-//! map doesn't change with Exposure):
+//! white balance (before exposure), in the gamma encoding `e = √lin` (scale-invariant: the map
+//! doesn't change with Exposure):
 //! 1. airlight `A`: the brightest (luminance) pixel among the top [`AIR_TOP`] of the patch dark
 //!    channel, pulled [`AIR_NEUTRAL`] of the way toward neutral and floored at [`AIR_FLOOR`]
 //!    (`A'`);
@@ -31,13 +31,14 @@ use crate::SourceInfo;
 use crate::geometry::Frame;
 
 /// Long edge (px) of the proxy the map is built on (smaller frames use their own size).
-pub const PROXY_EDGE: usize = 1024;
-/// Gamma of the encoding the map works in (`e = lin^(1/GAMMA)`).
-pub const GAMMA: f32 = 2.2;
+pub const PROXY_EDGE: usize = 768;
+/// Gamma of the encoding the map works in (`e = lin^(1/GAMMA)`): 2, so [`encode`] is a square
+/// root and [`decode`] a square (cheap per pixel on the CPU and the GPU).
+pub const GAMMA: f32 = 2.0;
 /// Share of the patch dark channel (its brightest end) the airlight is picked from.
 pub const AIR_TOP: f32 = 0.001;
 /// How far the airlight is pulled toward a neutral of its own luminance (0 = as picked).
-pub const AIR_NEUTRAL: f32 = 0.5;
+pub const AIR_NEUTRAL: f32 = 0.7;
 /// Lowest airlight channel (encoded): no division by zero, no runaway gain on dark photos.
 pub const AIR_FLOOR: f32 = 0.05;
 /// Upper clamp of the normalised dark `g`.
@@ -46,7 +47,7 @@ pub const G_MAX: f32 = 1.5;
 pub const PATCH: f32 = 0.012;
 /// Guided refinement radius as a fraction of the proxy's long edge (Gaussian windows with the
 /// spread of a box of this radius: `σ = r/√3`).
-pub const GUIDE_RADIUS: f32 = 0.035;
+pub const GUIDE_RADIUS: f32 = 0.05;
 /// Guided refinement epsilon (in units of `g²`).
 pub const GUIDE_EPS: f32 = 1e-3;
 /// Entries of the exposure-compensation LUT: amounts `0.05, 0.10, …, 1.0`.
@@ -62,15 +63,18 @@ pub const COMP_STEP: usize = 7;
 pub const OMEGA: f32 = 0.95;
 pub const OMEGA_POWER: f32 = 0.6;
 /// Lowest transmission at +100 (`t ≥ lerp(1, T_FLOOR, k)`): bounds the gain at `1/T_FLOOR`.
-pub const T_FLOOR: f32 = 0.25;
+pub const T_FLOOR: f32 = 0.35;
 /// Sky tolerance: pixels within this of the airlight (encoded, per channel, relative to its brightest
 /// channel) are recovered less.
-pub const SKY_K: f32 = 0.15;
+pub const SKY_K: f32 = 0.3;
 /// Share of the input's chromaticity blended back after recovery (keeps colours from swinging).
-pub const CHROMA_KEEP: f32 = 0.3;
+pub const CHROMA_KEEP: f32 = 0.5;
 /// Negative Dehaze: veil strength at −100 and the share of it that doesn't depend on the haze.
-pub const VEIL: f32 = 0.65;
+pub const VEIL: f32 = 0.45;
 pub const VEIL_BASE: f32 = 0.4;
+/// Brightest channel (linear, pre-exposure) of the colour the veil mixes toward: the airlight,
+/// scaled down when brighter, so a veil over a bright sky or sun doesn't clip it to white.
+pub const VEIL_TOP: f32 = 1.0;
 
 /// The haze map of one photo (see the module docs). Frame-normalised: [`Self::coeffs`] takes
 /// coordinates in 0..1 over the whole output frame.
@@ -87,16 +91,16 @@ pub struct HazeMap {
     pub comp: [f32; COMP_N],
 }
 
-/// `lin^(1/GAMMA)`; non-finite and negative values encode as 0.
+/// `lin^(1/GAMMA)` (`√lin`); non-finite and negative values encode as 0.
 #[inline]
 pub fn encode(v: f32) -> f32 {
-    if v.is_finite() && v > 0.0 { v.powf(1.0 / GAMMA) } else { 0.0 }
+    if v.is_finite() && v > 0.0 { v.sqrt() } else { 0.0 }
 }
 
-/// Inverse of [`encode`].
+/// Inverse of [`encode`] (`v²`).
 #[inline]
 pub fn decode(v: f32) -> f32 {
-    if v.is_finite() && v > 0.0 { v.powf(GAMMA) } else { 0.0 }
+    if v.is_finite() && v > 0.0 { v * v } else { 0.0 }
 }
 
 fn encode3(c: [f32; 3]) -> [f32; 3] {
@@ -108,6 +112,19 @@ fn encode3(c: [f32; 3]) -> [f32; 3] {
 #[inline]
 pub fn norm_dark(e: [f32; 3], air: [f32; 3]) -> f32 {
     let g = (e[0] / air[0].max(AIR_FLOOR)).min(e[1] / air[1].max(AIR_FLOOR)).min(e[2] / air[2].max(AIR_FLOOR));
+    if g.is_finite() { g.clamp(0.0, G_MAX) } else { 0.0 }
+}
+
+/// [`norm_dark`] of a linear pixel against the linear airlight, encoding once instead of three
+/// times: the encoding is monotonic, so `min_c(e_c / A_c) = min_c(lin_c / A_lin_c)^(1/GAMMA)`.
+#[inline]
+pub fn norm_dark_lin(lin: [f32; 3], air_lin: [f32; 3]) -> f32 {
+    let r = (0..3).fold(f32::INFINITY, |m, i| {
+        let v = lin[i];
+        let v = if v.is_finite() && v > 0.0 { v } else { 0.0 };
+        m.min(v / air_lin[i].max(AIR_FLOOR * AIR_FLOOR))
+    });
+    let g = encode(r);
     if g.is_finite() { g.clamp(0.0, G_MAX) } else { 0.0 }
 }
 
@@ -184,7 +201,7 @@ impl HazeMap {
 
     /// [`Self::dark`] with the coefficients already sampled.
     pub fn dark_with(&self, a: f32, b: f32, lin: [f32; 3]) -> f32 {
-        let d = a * norm_dark(encode3(lin), self.air) + b;
+        let d = a * norm_dark_lin(lin, self.air_lin) + b;
         if d.is_finite() { d.clamp(0.0, 1.0) } else { 0.0 }
     }
 
@@ -221,7 +238,9 @@ impl HazeMap {
         // (one amount per task: each is a pass over the samples and a median)
         lightcraft_raster::par_rows(&mut lut, 1, |i, out| {
             let k = (i + 1) as f32 / COMP_N as f32;
-            let after = median(samples.iter().map(|(c, d, m)| luminance_2020(recover_with(self, *c, 1.0, *d, k, || *m))).collect());
+            let am = Amount::new(self, k);
+            let after =
+                median(samples.iter().map(|(c, d, m)| luminance_2020(recover_with(self, &am, *c, 1.0, *d, || sky_weight_at(*m)).0)).collect());
             let ratio = before / after;
             let ratio = if ratio.is_finite() {
                 ratio
@@ -270,87 +289,151 @@ fn median(mut v: Vec<f32>) -> f32 {
     *v.select_nth_unstable_by(k, f32::total_cmp).1
 }
 
+/// What the per-pixel recovery needs of one amount, computed once per amount instead of per pixel
+/// (a render without mask Dehaze has one amount).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Amount {
+    /// The amount, −1..1.
+    pub k: f32,
+    /// Haze strength `OMEGA·k^OMEGA_POWER` (positive amounts).
+    omega: f32,
+    /// Lowest transmission `lerp(1, T_FLOOR, k)` (positive amounts).
+    tmin: f32,
+    /// Exposure compensation ([`HazeMap::comp`]).
+    comp: f32,
+    /// Linear (pre-exposure) bounds of the pixels that can be within [`SKY_K`] of the airlight:
+    /// a pixel with any channel outside them gets the full recovery without encoding it.
+    sky_lo: [f32; 3],
+    sky_hi: [f32; 3],
+    /// The colour negative amounts veil toward ([`veil_air`]).
+    veil: [f32; 3],
+}
+
+impl Amount {
+    /// The values of amount `k` (global plus masks; clamped to −1..1, 0 when not finite).
+    pub fn new(map: &HazeMap, k: f32) -> Amount {
+        let k = if k.is_finite() { k.clamp(-1.0, 1.0) } else { 0.0 };
+        let kp = k.max(0.0);
+        let reach = SKY_K * air_top(map);
+        Amount {
+            k,
+            omega: OMEGA * kp.powf(OMEGA_POWER),
+            tmin: 1.0 + (T_FLOOR - 1.0) * kp,
+            comp: map.comp(k),
+            sky_lo: map.air.map(|a| decode(a - reach)),
+            sky_hi: map.air.map(|a| decode(a + reach)),
+            veil: veil_air(map),
+        }
+    }
+}
+
 /// The V3 Dehaze of one pixel: `lin` is its white-balanced, pre-exposure colour, `gain` the
 /// exposure gain, `d` its haze ([`HazeMap::dark`]) and `k` the amount (−1..1, global plus masks).
 /// Returns the exposed, dehazed colour. A non-finite result falls back to the exposed input.
 pub fn recover(map: &HazeMap, lin: [f32; 3], gain: f32, d: f32, k: f32) -> [f32; 3] {
-    let k = if k.is_finite() { k.clamp(-1.0, 1.0) } else { 0.0 };
-    let j = recover_haze(map, lin, gain, d, k);
-    finish_recovery(map, lin, gain, k, j)
+    let am = Amount::new(map, k);
+    let (j, w) = recover_haze(map, &am, lin, gain, d);
+    finish_recovery(&am, lin, gain, j, w)
 }
 
 /// The V3 Dehaze of the pixel at frame-normalised `(nx, ny)` (0..1 over the whole output frame,
 /// so a window dehazes exactly like the whole render): `lin` is its white-balanced, pre-exposure
-/// colour, `gain` the exposure gain and `k` the amount (global plus masks; clamped to −1..1).
-/// [`HazeMap::dark`] and [`recover`] in one, encoding the pixel once. Returns the exposed colour;
-/// a non-finite result falls back to the exposed input.
-pub fn dehaze_at(map: &HazeMap, nx: f32, ny: f32, lin: [f32; 3], gain: f32, k: f32) -> [f32; 3] {
-    let k = if k.is_finite() { k.clamp(-1.0, 1.0) } else { 0.0 };
-    if k == 0.0 {
+/// colour, `gain` the exposure gain and `am` the amount ([`Amount::new`]). [`HazeMap::dark`] and
+/// [`recover`] in one. Returns the exposed colour; a non-finite result falls back to the exposed
+/// input.
+pub fn dehaze_at(map: &HazeMap, nx: f32, ny: f32, lin: [f32; 3], gain: f32, am: &Amount) -> [f32; 3] {
+    if am.k == 0.0 {
         return lin.map(|v| v * gain);
     }
-    let e = encode3(lin);
     let (a, b) = map.coeffs(nx, ny);
-    let d = a * norm_dark(e, map.air) + b;
-    let d = if d.is_finite() { d.clamp(0.0, 1.0) } else { 0.0 };
-    let j = recover_with(map, lin, gain, d, k, || sky_distance(map, e));
-    finish_recovery(map, lin, gain, k, j)
+    let d = map.dark_with(a, b, lin);
+    let (j, w) = recover_with(map, am, lin, gain, d, || sky_weight(map, am, lin));
+    finish_recovery(am, lin, gain, j, w)
 }
 
 /// [`recover`]'s exposure compensation and chroma blend (positive amounts) of the recovered `j`,
-/// and its fallback to the exposed input when anything is not finite.
-fn finish_recovery(map: &HazeMap, lin: [f32; 3], gain: f32, k: f32, mut j: [f32; 3]) -> [f32; 3] {
-    if k > 0.0 {
-        let comp = map.comp(k);
+/// and its fallback to the exposed input when anything is not finite. `w` is the pixel's sky
+/// weight ([`sky_weight`]): the compensation makes up for the recovery's darkening, so a pixel the
+/// sky tolerance left alone isn't brightened (no light band at the horizon).
+fn finish_recovery(am: &Amount, lin: [f32; 3], gain: f32, mut j: [f32; 3], w: f32) -> [f32; 3] {
+    let c = lin.map(|v| v * gain);
+    if am.k > 0.0 {
+        let comp = 1.0 + (am.comp - 1.0) * w;
         j = j.map(|v| v * comp);
         // keep J's luminance, blend some of the input's chromaticity back
-        let c = lin.map(|v| v * gain);
         let (yj, yc) = (luminance_2020(j), luminance_2020(c));
         if yj > 1e-9 && yc > 1e-9 {
             let s = yj / yc;
             j = std::array::from_fn(|i| j[i] + (c[i] * s - j[i]) * CHROMA_KEEP);
         }
     }
-    let c = lin.map(|v| v * gain);
     if j.iter().all(|v| v.is_finite()) { j } else { c }
 }
 
 /// The recovery of [`recover`] before its exposure compensation and chroma blend (what the
-/// compensation LUT measures). `k` is already clamped to −1..1.
-fn recover_haze(map: &HazeMap, lin: [f32; 3], gain: f32, d: f32, k: f32) -> [f32; 3] {
-    recover_with(map, lin, gain, d, k, || sky_distance(map, encode3(lin)))
+/// compensation LUT measures).
+fn recover_haze(map: &HazeMap, am: &Amount, lin: [f32; 3], gain: f32, d: f32) -> ([f32; 3], f32) {
+    recover_with(map, am, lin, gain, d, || sky_weight(map, am, lin))
+}
+
+/// The colour negative amounts veil toward (linear, pre-exposure): the airlight, scaled so its
+/// brightest channel is at most [`VEIL_TOP`].
+pub fn veil_air(map: &HazeMap) -> [f32; 3] {
+    let top = map.air_lin.iter().fold(0.0f32, |m, v| m.max(*v));
+    let s = if top > VEIL_TOP { VEIL_TOP / top } else { 1.0 };
+    map.air_lin.map(|v| v * s)
+}
+
+/// The airlight's brightest channel (encoded, at least [`AIR_FLOOR`]).
+fn air_top(map: &HazeMap) -> f32 {
+    map.air.iter().fold(AIR_FLOOR, |m, v| m.max(*v))
 }
 
 /// How far an encoded pixel `e` is from the airlight: its largest channel difference, relative to
 /// the airlight's brightest channel (so the same photo exposed brighter or darker is judged alike).
 fn sky_distance(map: &HazeMap, e: [f32; 3]) -> f32 {
-    let top = map.air.iter().fold(AIR_FLOOR, |m, v| m.max(*v));
-    (0..3).map(|i| (e[i] - map.air[i]).abs()).fold(0.0f32, f32::max) / top
+    (0..3).map(|i| (e[i] - map.air[i]).abs()).fold(0.0f32, f32::max) / air_top(map)
 }
 
-/// [`recover_haze`] with the pixel's [`sky_distance`] given (computed only when needed).
-fn recover_with(map: &HazeMap, lin: [f32; 3], gain: f32, d: f32, k: f32, sky: impl FnOnce() -> f32) -> [f32; 3] {
+/// The sky tolerance of a pixel at [`sky_distance`] `m`: 0 at the airlight, rising smoothly to 1
+/// at [`SKY_K`] (1 for NaN).
+fn sky_weight_at(m: f32) -> f32 {
+    let x = (m / SKY_K).clamp(0.0, 1.0);
+    if x.is_finite() { x * x * (3.0 - 2.0 * x) } else { 1.0 }
+}
+
+/// [`sky_weight_at`] of a linear (pre-exposure) pixel; encodes it only when it can be near the
+/// airlight.
+fn sky_weight(map: &HazeMap, am: &Amount, lin: [f32; 3]) -> f32 {
+    if (0..3).all(|i| lin[i] >= am.sky_lo[i] && lin[i] <= am.sky_hi[i]) { sky_weight_at(sky_distance(map, encode3(lin))) } else { 1.0 }
+}
+
+/// [`recover_haze`] with the pixel's sky weight given (computed only when needed). Returns the
+/// recovered colour and that weight (1 when the amount isn't positive).
+fn recover_with(map: &HazeMap, am: &Amount, lin: [f32; 3], gain: f32, d: f32, sky: impl FnOnce() -> f32) -> ([f32; 3], f32) {
     let c = lin.map(|v| v * gain);
     let air = map.air_lin.map(|v| v * gain);
     let d = if d.is_finite() { d.clamp(0.0, 1.0) } else { 0.0 };
-    if k > 0.0 {
-        let omega = OMEGA * k.powf(OMEGA_POWER);
-        let tmin = 1.0 + (T_FLOOR - 1.0) * k;
+    if am.k > 0.0 {
         // the map measures haze in the encoding; the recovery is linear, so is its haze share
         // (`min(e/A)` of an encoded pixel is `min(c/A)^(1/GAMMA)` of the linear one)
-        let mut t = (1.0 - omega * decode(d)).max(tmin);
-        // sky tolerance: pixels close to the airlight colour are left nearly alone
-        let m = sky();
-        if m < SKY_K {
-            t = if m > 1e-6 { (t * SKY_K / m).min(1.0) } else { 1.0 };
-        }
-        let t = t.max(T_FLOOR);
-        std::array::from_fn(|i| (air[i] + (c[i] - air[i]) / t).max(0.0))
-    } else if k < 0.0 {
-        let t = 1.0 - VEIL * -k * (VEIL_BASE + (1.0 - VEIL_BASE) * d);
-        std::array::from_fn(|i| c[i] * t + air[i] * (1.0 - t))
+        let t = (1.0 - am.omega * decode(d)).max(am.tmin);
+        // sky tolerance: pixels close to the airlight colour are left nearly alone; the gain
+        // above 1 fades in smoothly over 0..SKY_K, so the horizon gets no band
+        let s = sky();
+        let t = (t / (t + (1.0 - t) * s).max(1e-6)).clamp(T_FLOOR, 1.0);
+        (std::array::from_fn(|i| (air[i] + (c[i] - air[i]) / t).max(0.0)), s)
+    } else if am.k < 0.0 {
+        // a veil toward the airlight, mixed in a square-root encoding (lifts the shadows more
+        // than the median)
+        let t = 1.0 - VEIL * -am.k * (VEIL_BASE + (1.0 - VEIL_BASE) * d);
+        let mix = |v: f32, a: f32| {
+            let r = v.max(0.0).sqrt() * t + a.max(0.0).sqrt() * (1.0 - t);
+            r * r
+        };
+        (std::array::from_fn(|i| mix(c[i], am.veil[i] * gain)), 1.0)
     } else {
-        c
+        (c, 1.0)
     }
 }
 
@@ -377,8 +460,8 @@ pub fn proxy_size(frame: &Frame) -> (usize, usize) {
     frame.fit(edge.max(1), edge.max(1))
 }
 
-/// How many maps [`for_frame`] keeps (the least recently used goes first). A 1024-px proxy's map
-/// is about 5.6 MB.
+/// How many maps [`for_frame`] keeps (the least recently used goes first). A 768-px proxy's map
+/// is about 3.1 MB.
 pub const CACHE_KEEP: usize = 6;
 
 /// One cached map: its full key, and what a draft may reuse it for (the same source content,
@@ -599,18 +682,18 @@ mod tests {
         let after = y(recover(&m, p1, 1.0, 0.5, 0.5)) - y(recover(&m, p2, 1.0, 0.5, 0.5));
         assert!(after > before * 1.1, "contrast {before} -> {after}");
         // without the exposure compensation the hazy tones darken
-        assert!(y(recover_haze(&m, p1, 1.0, 0.5, 0.5)) < y(p1));
+        assert!(y(recover_haze(&m, &Amount::new(&m, 0.5), p1, 1.0, 0.5).0) < y(p1));
         let veiled = recover(&m, [0.01; 3], 1.0, 0.5, -1.0);
-        assert!(y(veiled) > 0.05, "a veil lifts black: {veiled:?}");
+        assert!(y(veiled) > 0.02, "a veil lifts black: {veiled:?}");
         let less = y(recover(&m, p1, 1.0, 0.5, -1.0)) - y(recover(&m, p2, 1.0, 0.5, -1.0));
-        assert!(less < before * 0.8, "negative lowers contrast: {before} -> {less}");
+        assert!(less < before * 0.9, "negative lowers contrast: {before} -> {less}");
     }
 
     #[test]
     fn proxy_is_capped_at_the_proxy_edge() {
         let s = DevelopSettings::default();
         let big = Frame::new(4000, 3000, &s, true);
-        assert_eq!(proxy_size(&big), (1024, 768));
+        assert_eq!(proxy_size(&big), (768, 576));
         let small = Frame::new(300, 200, &s, true);
         assert_eq!(proxy_size(&small), (300, 200));
     }

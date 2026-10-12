@@ -263,8 +263,6 @@ fn constants() -> String {
     {
         use lightcraft_pipeline::haze as hz;
         for (name, v) in [
-            ("HZ_GAMMA", hz::GAMMA),
-            ("HZ_INV_GAMMA", 1.0 / hz::GAMMA),
             ("HZ_AIR_FLOOR", hz::AIR_FLOOR),
             ("HZ_G_MAX", hz::G_MAX),
             ("HZ_OMEGA", hz::OMEGA),
@@ -274,6 +272,7 @@ fn constants() -> String {
             ("HZ_CHROMA_KEEP", hz::CHROMA_KEEP),
             ("HZ_VEIL", hz::VEIL),
             ("HZ_VEIL_BASE", hz::VEIL_BASE),
+            ("HZ_VEIL_TOP", hz::VEIL_TOP),
         ] {
             s += &format!("const {name}: f32 = {v:?};\n");
         }

@@ -6,7 +6,9 @@
 - New photos (and Reset) get rendering process 3 with a new, gentler Dehaze (issue #1237): it measures haze with
   a dark-channel estimate of the whole frame and clears it without darkening the photo or crushing its shadows
   (the old one did from about +25), with no dark halos, the same in the preview, a zoomed view and the export, on
-  the CPU and the GPU. Without Dehaze, process 3 renders like process 2. Photos you already edited keep their look,
+  the CPU and the GPU. Skies near the haze colour are left alone without a light band at the horizon, and negative
+  Dehaze adds a soft, near-neutral veil (about +0.7 to +0.85 EV at −100 on a foggy photo, where the old one added
+  +1.5) instead of washing the photo out. Process 3 differs from process 2 only in Dehaze. Photos you already edited keep their look,
   Dehaze included, until you choose Photo ▸ Update to Current Process. See [process versions](process-versions.md).
 
 ## 2026-10-11

@@ -398,6 +398,8 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
     let srgb = srgb_lut();
     let peak = fp.peak;
     let hdr = peak > 1.0;
+    // the amount's per-render values (pixels with mask Dehaze compute their own)
+    let haze_amount = p.haze.as_ref().map(|m| crate::haze::Amount::new(m, dehaze));
     let mut out = vec![T::default(); w * h];
     for_rows(&mut out, w, |y, row| {
         for (x, px) in row.iter_mut().enumerate() {
@@ -454,7 +456,11 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
                 // output frame (a window dehazes like the whole render)
                 let (nx, ny) = ((vx + x as f32 + 0.5) / vw, (vy + y as f32 + 0.5) / vh);
                 if gain > 0.0 && gain.is_finite() {
-                    c = crate::haze::dehaze_at(map, nx, ny, c.map(|v| v / gain), gain, dz);
+                    let am = match haze_amount {
+                        Some(am) if l_dehaze == 0.0 => am,
+                        _ => crate::haze::Amount::new(map, dz),
+                    };
+                    c = crate::haze::dehaze_at(map, nx, ny, c.map(|v| v / gain), gain, &am);
                 }
             } else if dz != 0.0
                 && let Some(dark) = &p.dark

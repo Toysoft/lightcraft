@@ -2,7 +2,10 @@
 //! +50, +100, print the median luminance shift, how many pixels clip to black, the width of the
 //! dark halo at a bright/dark edge, the hue of a neutral grey patch and what a flat grey image does.
 //!
-//! `cargo run --release -p lightcraft-pipeline --example dehaze_report -- [--size 1200] [image…]`
+//! `cargo run --release -p lightcraft-pipeline --example dehaze_report -- [--size 1200] [--out DIR] [image…]`
+//!
+//! `--out DIR` also writes each input's renders as PNGs (`<input>-v<process>-<amount>.png`) and a
+//! 3×2 contact sheet per process (`<input>-v<process>-sheet.png`: −100, −50, 0 / +25, +50, +100).
 //!
 //! Inputs: the procedural hazy valley (`lightcraft_scenes::hazy_valley`, which also has the edge
 //! and grey patch), two misty demo scenes, and any sRGB PNG/JPEG paths given (e.g. CC0 corpus
@@ -23,9 +26,12 @@ const HALO_STEP: f32 = 10.0;
 fn main() {
     let mut size = 1200usize;
     let mut paths = Vec::new();
+    let mut out: Option<std::path::PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
-        if a == "--size" {
+        if a == "--out" {
+            out = args.next().map(Into::into);
+        } else if a == "--size" {
             size = args.next().and_then(|v| v.parse().ok()).unwrap_or(size).max(64);
         } else {
             paths.push(a);
@@ -53,6 +59,9 @@ fn main() {
                 "amount", "med luma", "EV", "black %", "Δblack %", "halo dk", "halo br", "grey L", "C*", "h°", "Δh vs+25"
             );
             let renders: Vec<(f64, Rgba8)> = AMOUNTS.iter().map(|&a| (a, develop(src, process, a))).collect();
+            if let Some(dir) = &out {
+                save(dir, name, process, &renders);
+            }
             let Some((_, base)) = renders.iter().find(|(a, _)| *a == 0.0) else { continue };
             let base_med = median_luma(base);
             let base_black = black_pct(base);
@@ -86,6 +95,27 @@ fn main() {
             })
             .collect();
         println!("V{}  {}", process.version().0, diffs.join("  "));
+    }
+}
+
+/// Writes every render and a 3×2 sheet of them (half size) into `dir`.
+fn save(dir: &std::path::Path, name: &str, process: Process, renders: &[(f64, Rgba8)]) {
+    let stem: String = name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    let stem = format!("{}-v{}", stem.trim_matches('-'), process.version().0);
+    let to_image = |r: &Rgba8| image::RgbaImage::from_fn(r.width as u32, r.height as u32, |x, y| image::Rgba(r.get(x as usize, y as usize)));
+    let Some((_, first)) = renders.first() else { return };
+    let (tw, th) = ((first.width / 2) as u32, (first.height / 2) as u32);
+    let mut sheet = image::RgbaImage::from_pixel(tw * 3, th * 2, image::Rgba([0, 0, 0, 255]));
+    for (i, (amount, r)) in renders.iter().enumerate() {
+        let img = to_image(r);
+        if let Err(e) = img.save(dir.join(format!("{stem}-{amount:+.0}.png"))) {
+            eprintln!("cannot save: {e}");
+        }
+        let small = image::imageops::resize(&img, tw, th, image::imageops::FilterType::Triangle);
+        image::imageops::replace(&mut sheet, &small, i64::from((i as u32 % 3) * tw), i64::from((i as u32 / 3) * th));
+    }
+    if let Err(e) = sheet.save(dir.join(format!("{stem}-sheet.png"))) {
+        eprintln!("cannot save the sheet: {e}");
     }
 }
 
