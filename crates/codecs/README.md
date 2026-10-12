@@ -54,7 +54,7 @@ CRW, MRW, X3F) are detected so the engine can route them to `lightcraft-raw`; `d
 | PSD / PSB | merged composite: 8/16/32-bit gray, RGB, CMYK, indexed, duotone (as gray); raw/RLE | — | ICC (1039), EXIF (1058), XMP (1060); ZIP-compressed composite, Lab and 1-bit unsupported |
 | JPEG XL | yes (jxl-oxide, feature `jxl`, default on) | yes (jixel, `encode_jxl`, feature `jxl`, native only): lossy VarDCT / lossless Modular, 8/16-bit, effort (fast / normal), progressive; HDR as 16-bit Rec. 2020 PQ | decode: enum colour → rendered straight to linear Rec.2020 (XYB via linear sRGB primaries); ICC → our ICC path; orientation applied by the decoder (reported as 1). Encode: lossy files declare an enum encoding (sRGB, Display P3, Rec. 2020 BT.709 curve, Rec. 2020 PQ), lossless ones embed the ICC profile; EXIF / XMP in `Exif` / `xml ` boxes |
 | AVIF | **no** | yes (ravif/rav1e, native only, feature `avif`) | 8/10-bit sRGB, EXIF; no ICC in the muxer. HDR: `encode_avif_pq` writes 10-bit BT.2020 PQ (SDR white at 203 cd/m², CICP `nclx` + `clli`) |
-| HEIC/HEIF | yes with feature `heif` (lightcraft-heif: heic-rs + libheif-matching colour; 4:2:0/mono, 8–10-bit, grids, irot/imir/clap, ICC/nclx/VUI, EXIF/XMP, thumbnail item) | — | 4:2:2/4:4:4 (Canon/Sony HIF) unsupported |
+| HEIC/HEIF | yes with feature `heif` (lightcraft-heif: heic-rs + libheif-matching colour; 4:2:0/4:2:2/mono, 8–10-bit, grids, irot/imir/clap, ICC/nclx/VUI, EXIF/XMP, thumbnail item) | — | 4:4:4 unsupported |
 | Gain map JPEG (HDR) | gain map found and decoded (`gainmap::read_jpeg`): ISO 21496-1 metadata, else Adobe `hdrgm` XMP | yes (`gainmap::encode_jpeg`) | CIPA DC-007 MPF index (gain map typed `0x050000`), ISO 21496-1 APP2 on both images, `hdrgm` + Container XMP for Android/Chrome, Apple `HDRGainMap`/`HDRToneMap` XMP; gain maps are never used as thumbnails |
 
 ## Colour
@@ -112,8 +112,8 @@ Run `cargo test --release -p lightcraft-codecs --test bench -- --ignored --nocap
 - **AVIF decode**: no permissively licensed, pure-Rust AV1 decoder exists today (dav1d is C;
   rav1d-safe is AGPL). Files are sniffed and rejected with `Error::Unsupported`.
 - **HEIC** needs the `heif` feature (off by default: HEVC patents are the distributor's call);
-  without it, `Error::Unsupported` says the build has no HEIC support. 4:2:2 and 4:4:4 HEIF
-  (Canon/Sony HIF) is refused: heic-rs 0.1.1 loses sync on those bitstreams.
+  without it, `Error::Unsupported` says the build has no HEIC support. 4:4:4 HEIF is refused:
+  heic-rs loses sync on those bitstreams. 4:2:2 (Canon/Sony HIF) decodes.
 - JPEG: arithmetic coding unsupported (as in both decoders); extended XMP (> 64 KiB) neither read
   nor written; EXIF > 64 KiB not written. The encoder uses standard Huffman tables (interleaved
   baseline) for maximum compatibility.

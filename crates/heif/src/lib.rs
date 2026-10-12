@@ -120,9 +120,9 @@ impl std::error::Error for Error {}
 
 const SEQUENCE: &str = "this file holds an image sequence; only HEIF still images can be opened";
 
-/// heic-rs 0.1.1 reconstructs 4:2:0 and monochrome pictures exactly but fails on the 4:2:2 and
-/// 4:4:4 ones some cameras write (Canon and Sony "HIF"); those failures are reported as this.
-const CHROMA_422_444: &str = "4:2:2 and 4:4:4 HEIF images (as some Canon and Sony cameras write) can't be decoded yet";
+/// heic-rs reconstructs 4:2:0, 4:2:2 (Canon and Sony "HIF") and monochrome pictures exactly but
+/// still fails on 4:4:4 ones; those failures are reported as this.
+const CHROMA_444: &str = "4:4:4 HEIF images can't be decoded yet";
 
 pub(crate) fn err(e: heic_rs::Error) -> Error {
     match e {
@@ -284,7 +284,7 @@ struct Coded<'a> {
     /// The properties of the first coded picture (the item itself, or the first tile): where the
     /// HEVC configuration and its VUI live.
     first_props: ItemProps<'a>,
-    /// A failed 4:2:2 / 4:4:4 picture, for the error message.
+    /// `chroma_format_idc` of the first picture: a failed 4:4:4 one gets its own error message.
     chroma_format: u8,
 }
 
@@ -319,7 +319,7 @@ impl<'a> Coded<'a> {
         #[cfg(target_arch = "wasm32")]
         let frames: Result<Vec<Frame>, Error> = ids.iter().map(decode_one).collect();
         let frames = frames.map_err(|e| match e {
-            Error::Malformed(_) if chroma_format >= 2 => Error::Unsupported(CHROMA_422_444),
+            Error::Malformed(_) if chroma_format == 3 => Error::Unsupported(CHROMA_444),
             e => e,
         })?;
         Ok(Coded { frames, grid, first_props, chroma_format })

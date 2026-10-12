@@ -304,6 +304,21 @@ mod tests {
     }
 
     #[test]
+    fn chroma_422_is_upsampled_across_only() {
+        // 4:2:2 (Canon/Sony HIF), 4×2 luma, chroma 2×2: every luma row has its own chroma row,
+        // so a bright sample blends sideways (3:1) but never into the row below.
+        let mut f = frame(4, 2, 8, ChromaFormat::Yuv422, 128, 128, 128);
+        f.cr = vec![200, 128, 128, 128];
+        let p = Planes::Picture(&f);
+        let (mut buf, mut next) = (vec![0; 2], vec![0; 2]);
+        let mut row = |y, mode| chroma_at(&p, true, y, 4, mode, &mut buf, &mut next).unwrap();
+        assert_eq!(row(0, Upsampling::Bilinear), [200, 182, 146, 128]);
+        assert_eq!(row(1, Upsampling::Bilinear), [128; 4]);
+        assert_eq!(row(0, Upsampling::Nearest), [200, 200, 128, 128]);
+        assert_eq!(row(1, Upsampling::Nearest), [128; 4]);
+    }
+
+    #[test]
     fn alpha_and_bad_planes() {
         let f = frame(2, 2, 8, ChromaFormat::Yuv420, 128, 128, 128);
         let mut v = to_rgb16(&Planes::Picture(&f), Signal { matrix: 6, full_range: true }, true, Upsampling::Nearest).unwrap();
