@@ -7,6 +7,7 @@
 mod activity;
 mod before;
 pub(crate) mod browse;
+mod camera_profiles;
 mod color;
 pub(crate) mod convert;
 mod cull;
@@ -135,6 +136,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
     SPECS.get_or_init(|| {
         let mut v = Vec::new();
         v.extend(edit::specs());
+        v.extend(camera_profiles::specs());
         v.extend(library::specs());
         v.extend(develop::specs());
         v.extend(color::specs());

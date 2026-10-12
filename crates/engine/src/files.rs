@@ -340,20 +340,38 @@ pub fn bin_factor(raw: &lightcraft_raw::RawImage, max_edge: usize) -> Option<usi
 /// instead of each one waking the pool from outside and waiting for it (which costs more than the
 /// loops themselves when the machine is busy).
 pub fn load_bytes(bytes: &[u8], max_edge: usize) -> Result<(Rgb32f, SourceInfo), String> {
-    rayon::scope(|_| load_bytes_now(std::borrow::Cow::Borrowed(bytes), max_edge, None).map(|(img, _, info)| (img, info)))
+    rayon::scope(|_| load_bytes_now(std::borrow::Cow::Borrowed(bytes), max_edge, None, "").map(|(img, _, info)| (img, info)))
 }
 
 /// [`load_bytes`] taking the file's bytes: a raw file's bytes are freed as soon as it is decoded
 /// (less memory held while it is developed).
 pub fn load_vec(bytes: Vec<u8>, max_edge: usize) -> Result<(Rgb32f, SourceInfo), String> {
-    rayon::scope(move |_| load_bytes_now(std::borrow::Cow::Owned(bytes), max_edge, None).map(|(img, _, info)| (img, info)))
+    rayon::scope(move |_| load_bytes_now(std::borrow::Cow::Owned(bytes), max_edge, None, "").map(|(img, _, info)| (img, info)))
 }
 
 /// [`load_vec`] that also develops the photo's cached denoised picture (`spec`) from the same decode: the plain
 /// picture, the denoised one (`None` when it cannot be read or does not fit this raw: the plain one is then all
 /// there is) and the source facts. Both pictures are the same size.
 pub fn load_vec_pair(bytes: Vec<u8>, max_edge: usize, spec: &DenoiseSpec) -> Result<(Rgb32f, Option<Rgb32f>, SourceInfo), String> {
-    rayon::scope(move |_| load_bytes_now(std::borrow::Cow::Owned(bytes), max_edge, Some(spec)))
+    rayon::scope(move |_| load_bytes_now(std::borrow::Cow::Owned(bytes), max_edge, Some(spec), ""))
+}
+
+/// Decode with a persisted starting-colour choice, separate from the creative profile.
+pub fn load_bytes_selected(bytes: &[u8], max_edge: usize, selection: &str) -> Result<(Rgb32f, SourceInfo), String> {
+    rayon::scope(|_| load_bytes_now(std::borrow::Cow::Borrowed(bytes), max_edge, None, selection).map(|(img, _, info)| (img, info)))
+}
+
+pub fn fs_selected_loader() -> crate::media::SelectedLoader {
+    Arc::new(|path, edge, selection, denoise| {
+        let len = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+        let weight = usize::try_from(len).unwrap_or(usize::MAX).saturating_mul(if denoise.is_some() { 10 } else { 6 });
+        let gate = crate::memory::work_gate();
+        let _permit = if crate::memory::is_background() { gate.acquire(weight) } else { gate.acquire_urgent(weight) };
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let result = rayon::scope(move |_| load_bytes_now(std::borrow::Cow::Owned(bytes), edge, denoise, selection));
+        crate::memory::release();
+        result
+    })
 }
 
 /// The denoised camera RGB of `raw` from its cached product, as the plain development would have it: the default
@@ -382,6 +400,7 @@ fn load_bytes_now(
     bytes: std::borrow::Cow<'_, [u8]>,
     max_edge: usize,
     denoise: Option<&DenoiseSpec>,
+    camera_profile: &str,
 ) -> Result<(Rgb32f, Option<Rgb32f>, SourceInfo), String> {
     if lightcraft_raw::probe(&bytes).is_some() {
         let mut raw = match lightcraft_raw::decode(&bytes).map_err(|e| preview_reason(&bytes, e)) {
@@ -403,7 +422,8 @@ fn load_bytes_now(
         // the camera's measured matrices (`Photo::relative_wb` decides the same from the catalog's camera)
         let scale = WbScaleOf::new(raw.format, &raw.color, raw.wb_multipliers, &raw.metadata);
         // the source's segmentation mattes (DNG semantic masks), read while the starting colour is fitted
-        let ((xy, t, camera_look), mattes) = rayon::join(|| crate::camera_preview::starting_colour(&mut raw, &bytes), || dng_mattes(&bytes, &info));
+        let ((xy, t, camera_look, colour_source), mattes) =
+            rayon::join(|| crate::camera_preview::starting_colour_selected(&mut raw, &bytes, camera_profile), || dng_mattes(&bytes, &info));
         drop(bytes);
         // Previews and thumbnails bin the mosaic straight to (about) the size they need; only
         // larger levels (exports, 1:1) demosaic the whole sensor.
@@ -491,6 +511,7 @@ fn load_bytes_now(
                 legacy_relative_wb: scale.legacy_relative,
                 camera_color,
                 camera_tone,
+                colour_source: Some(colour_source),
                 mattes,
                 local_tone,
             },
@@ -867,6 +888,7 @@ impl crate::Session {
     pub fn with_fs(mut self) -> Self {
         let (l, p) = fs_hooks();
         self.media.file_loader = Some(l);
+        self.media.selected_loader = Some(fs_selected_loader());
         self.media.file_probe = Some(p);
         self.media.preview_loader = Some(fs_preview_loader());
         self.media.denoise.loader = Some(fs_pair_loader());

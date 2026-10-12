@@ -189,6 +189,10 @@ pub enum Treatment {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Profile {
+    /// Starting-colour camera profile: empty uses the model default, `builtin` bypasses local
+    /// overrides, or a content-addressed local profile id. Kept separately from creative looks.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub camera: String,
     /// Profile id from the profile registry (e.g. `lc.color`, `lc.vivid`, `lc.mono`).
     pub id: String,
     /// Creative profile amount 0..200 (%).
@@ -202,7 +206,7 @@ pub struct Profile {
 
 impl Default for Profile {
     fn default() -> Self {
-        Self { id: "lc.color".into(), amount: 100.0, camera_local_tone: false }
+        Self { id: "lc.color".into(), amount: 100.0, camera_local_tone: false, camera: String::new() }
     }
 }
 

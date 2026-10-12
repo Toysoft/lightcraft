@@ -18,7 +18,9 @@ pub mod activity;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod apple_photos;
 pub mod availability;
+pub mod calibration;
 pub(crate) mod camera_preview;
+pub mod camera_profile_store;
 pub mod camera_profiles;
 pub mod cmd;
 pub mod config;
@@ -166,6 +168,7 @@ static VISIBLE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 static LIBRARY_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 pub struct Session {
+    pub calibration: calibration::Job,
     library_generation: u64,
     /// Auto Sync: edits to the active photo also change the other selected photos (the settings
     /// that changed, nothing else).
@@ -324,6 +327,7 @@ impl Session {
 
     pub fn new() -> Session {
         Session {
+            calibration: calibration::Job::default(),
             library_generation: LIBRARY_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             auto_sync: false,
             catalog: Catalog::new(),

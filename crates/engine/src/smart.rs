@@ -17,7 +17,13 @@ const MAGIC: &[u8] = b"LCSP1\n";
 
 /// The proxy's file name for a photo (by its content, so copies share one).
 pub fn file_name(p: &Photo) -> String {
-    let h = lightcraft_preview::Hasher128::new().str(&crate::media::content_key(p)).finish();
+    let mut hash = lightcraft_preview::Hasher128::new();
+    hash.str(&crate::media::content_key(p));
+    let choice = crate::camera_profile_store::proxy_choice(&p.meta.camera, &p.develop.profile.camera);
+    if !choice.is_empty() {
+        hash.str("camera-profile").str(&choice);
+    }
+    let h = hash.finish();
     format!("{:032x}.lcsp", h.0)
 }
 
@@ -324,6 +330,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn camera_profile_choices_never_share_offline_pixels() {
+        let mut photo = lightcraft_catalog::Photo::new(
+            lightcraft_catalog::PhotoId(1),
+            lightcraft_catalog::Source::File { path: "test.ARW".into() },
+            "test.ARW",
+            "ARW",
+            100,
+            100,
+            "2026-10-12",
+        );
+        let original = file_name(&photo);
+        let mut settings = (*photo.develop).clone();
+        settings.profile.camera = "builtin".into();
+        photo.develop = Arc::new(settings.clone());
+        let builtin = file_name(&photo);
+        assert_ne!(original, builtin);
+        settings.profile.camera = "cp-00000000000000000000000000000000".into();
+        photo.develop = Arc::new(settings);
+        assert_ne!(builtin, file_name(&photo));
+        assert_ne!(original, file_name(&photo));
     }
 
     #[test]

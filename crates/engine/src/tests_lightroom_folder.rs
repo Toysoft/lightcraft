@@ -156,12 +156,22 @@ fn odd_folders_never_fail_the_check() {
     {
         use std::os::unix::ffi::OsStrExt;
         let bad = root.join(std::ffi::OsStr::from_bytes(b"caf\xe9 Previews.lrdata"));
-        std::fs::create_dir_all(&bad).unwrap();
-        std::fs::write(root.join("Cat.lrcat"), b"x").unwrap();
-        assert_eq!(lightroom_catalog_at(&bad), Some(LightroomPlace { catalog: Some(root.join("Cat.lrcat")) }), "non-UTF-8 name");
-        let lr = root.join(std::ffi::OsStr::from_bytes(b"\xff\xfe"));
+        let created = std::fs::create_dir_all(&bad);
+        // APFS rejects non-UTF-8 names with EILSEQ. Test its unavailable-path result,
+        // and still run the ordinary catalog/symlink checks with a representable directory.
+        let unrepresentable = cfg!(target_os = "macos") && created.as_ref().is_err_and(|e| e.raw_os_error() == Some(92));
+        if unrepresentable {
+            assert_eq!(lightroom_catalog_at(&bad), Some(LightroomPlace { catalog: None }));
+        } else {
+            created.unwrap();
+            std::fs::write(root.join("Cat.lrcat"), b"x").unwrap();
+            assert_eq!(lightroom_catalog_at(&bad), Some(LightroomPlace { catalog: Some(root.join("Cat.lrcat")) }), "non-UTF-8 name");
+        }
+        let lr = if unrepresentable { root.join("catalog") } else { root.join(std::ffi::OsStr::from_bytes(b"\xff\xfe")) };
         std::fs::create_dir_all(&lr).unwrap();
-        std::fs::write(lr.join(std::ffi::OsStr::from_bytes(b"\xff.lrcat")), b"x").unwrap();
+        if !unrepresentable {
+            std::fs::write(lr.join(std::ffi::OsStr::from_bytes(b"\xff.lrcat")), b"x").unwrap();
+        }
         std::fs::write(lr.join("b.lrcat"), b"x").unwrap();
         assert_eq!(lightroom_catalog_at(&lr), Some(LightroomPlace { catalog: Some(lr.join("b.lrcat")) }), "non-UTF-8 entries skipped");
         // a symlink to a catalog folder is one too; a dangling one is not

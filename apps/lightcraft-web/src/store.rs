@@ -160,6 +160,11 @@ impl Originals {
     pub fn install(&self, session: &mut lightcraft_engine::Session) {
         let (l, p) = self.hooks();
         session.media.file_loader = Some(l);
+        let selected_files = self.clone();
+        session.media.selected_loader = Some(std::sync::Arc::new(move |path, edge, selection, _| {
+            let bytes = selected_files.get(path).ok_or_else(|| format!("{path}: original not found in browser storage"))?;
+            lightcraft_engine::files::load_bytes_selected(&bytes, edge, selection).map(|(img, info)| (img, None, info))
+        }));
         session.media.file_probe = Some(p);
         let s = self.clone();
         session.media.preview_loader =

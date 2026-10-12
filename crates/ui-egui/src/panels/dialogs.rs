@@ -220,6 +220,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         confirm = true;
     }
     let title: String = match &dlg {
+        Dialog::CameraCalibration { .. } => "Camera Profile Calibration",
         Dialog::TextPrompt { title, .. } => title.as_str(),
         Dialog::NewAlbum { folder: true, .. } => "Create Folder",
         Dialog::NewAlbum { .. } => "Create Album",
@@ -287,6 +288,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .default_width(match dlg {
             Dialog::Import { .. } => crate::import::DIALOG_SIZE[0],
+            Dialog::CameraCalibration { .. } => 620.0,
             Dialog::SmartRules { .. } => 680.0,
             Dialog::AllMetadata { .. } => 620.0,
             Dialog::FaceModel { .. } => 460.0,
@@ -296,6 +298,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             body_h = dialog_body(ui, (!import).then_some(title.as_str()), body_max, |ui| match &mut dlg {
+                Dialog::CameraCalibration { state } => super::calibration::show(app, ui, state),
                 Dialog::AutoStack { gap } => {
                     ui.label(egui::RichText::new(crate::i18n::tr("Stack photos taken within this time of each other:")).color(t.text_label));
                     ui.add(
@@ -1176,7 +1179,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                 let informational = unusable_model
                     || matches!(
                         dlg,
-                        Dialog::About | Dialog::Shortcuts | Dialog::Settings { .. } | Dialog::SystemInfo { .. } | Dialog::AllMetadata { .. } | Dialog::WhatsNew
+                        Dialog::CameraCalibration { .. } | Dialog::About | Dialog::Shortcuts | Dialog::Settings { .. } | Dialog::SystemInfo { .. } | Dialog::AllMetadata { .. } | Dialog::WhatsNew
                     );
                 let sam = &app.session.segmenter;
                 let (sam_installed, sam_running, sam_failed) = (sam.installed(), sam.download_status().running, sam.download_status().error.is_some());
@@ -1682,7 +1685,7 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
         }
         Dialog::RemoveFolder { path, disk, .. } => app.run("library.removeFolder", json!({"path": path, "disk": disk})),
         d @ Dialog::SynchronizeFolder { .. } => crate::sync::confirm(app, d),
-        Dialog::About | Dialog::Shortcuts | Dialog::Settings { .. } => Ok(serde_json::Value::Null),
+        Dialog::CameraCalibration { .. } | Dialog::About | Dialog::Shortcuts | Dialog::Settings { .. } => Ok(serde_json::Value::Null),
     }
 }
 

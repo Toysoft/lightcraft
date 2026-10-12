@@ -763,6 +763,9 @@ pub struct NameEdit {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Dialog {
+    CameraCalibration {
+        state: crate::panels::calibration::Wizard,
+    },
     ContactSheet {
         options: lightcraft_engine::contact_sheet::Options,
     },

@@ -33,6 +33,8 @@ pub const BUNDLED: &[(&str, &str)] = &[
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CameraProfile {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
     pub version: u32,
     /// The camera model as the files report it (Exif `Model`), e.g. `ILCE-7M4`.
     pub model: String,
@@ -47,7 +49,7 @@ pub struct CameraProfile {
 
 impl CameraProfile {
     pub fn new(model: &str, files: usize, samples: usize, matrix: Mat3, hue_sat: Option<HsvTable>) -> CameraProfile {
-        CameraProfile { version: VERSION, model: model.to_owned(), files, samples, matrix: matrix.0, hue_sat }
+        CameraProfile { name: String::new(), version: VERSION, model: model.to_owned(), files, samples, matrix: matrix.0, hue_sat }
     }
 
     pub fn matrix(&self) -> Mat3 {
@@ -55,7 +57,7 @@ impl CameraProfile {
     }
 
     /// Whether the data is usable (bounded matrix, table shape matching its data).
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         let matrix = self.matrix.iter().flatten().all(|v| v.is_finite() && v.abs() < 8.0) && Mat3(self.matrix).inverse().is_some();
         let table = self.hue_sat.as_ref().is_none_or(|t| {
             let dims = (1..=4096).contains(&t.hue_divisions) && (2..=4096).contains(&t.sat_divisions) && (1..=4096).contains(&t.val_divisions);
@@ -100,7 +102,7 @@ fn parse(json: &[u8], origin: &str) -> Result<CameraProfile, String> {
 }
 
 /// The built-in profile for `model`, if any.
-fn bundled(model: &str) -> Option<CameraProfile> {
+pub(crate) fn bundled(model: &str) -> Option<CameraProfile> {
     let (_, json) = BUNDLED.iter().find(|(m, _)| *m == model)?;
     parse(json.as_bytes(), &format!("built-in profile {model}")).inspect_err(|e| eprintln!("lightcraft: ignoring camera profile {e}")).ok()
 }
@@ -116,13 +118,29 @@ pub fn save(profile: &CameraProfile, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn cache() -> &'static Mutex<HashMap<String, Option<Arc<CameraProfile>>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<Arc<CameraProfile>>>>> = OnceLock::new();
+/// A resolved profile and its origin, cached together so provenance cannot drift from the data.
+#[derive(Clone, Debug)]
+pub struct ResolvedProfile {
+    pub profile: Arc<CameraProfile>,
+    pub local: bool,
+}
+
+fn cache() -> &'static Mutex<HashMap<String, Option<ResolvedProfile>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<ResolvedProfile>>>> = OnceLock::new();
     CACHE.get_or_init(Default::default)
 }
 
 /// The profile for camera `model`: from [`dir`], else built in; read once per process.
 pub fn get(model: &str) -> Option<Arc<CameraProfile>> {
+    resolved(model).map(|p| p.profile)
+}
+
+/// The profile and the origin of the exact cached data used by the fitter.
+pub fn resolved(model: &str) -> Option<ResolvedProfile> {
+    crate::camera_profile_store::resolve(model, "").0
+}
+
+pub(crate) fn resolved_legacy(model: &str) -> Option<ResolvedProfile> {
     let model = model.trim();
     if model.is_empty() {
         return None;
@@ -131,10 +149,16 @@ pub fn get(model: &str) -> Option<Arc<CameraProfile>> {
     if let Some(hit) = cache.get(model) {
         return hit.clone();
     }
-    let path = dir().map(|d| d.join(file_name(model)));
+    let profile = resolve_from(model, dir().as_deref());
+    cache.insert(model.to_owned(), profile.clone());
+    profile
+}
+
+fn resolve_from(model: &str, directory: Option<&Path>) -> Option<ResolvedProfile> {
+    let path = directory.map(|d| d.join(file_name(model)));
     let profile = match path {
         Some(path) if path.is_file() => match load(&path) {
-            Ok(p) if p.model.trim() == model => Some(Arc::new(p)),
+            Ok(p) if p.model.trim() == model => Some(ResolvedProfile { profile: Arc::new(p), local: true }),
             Ok(p) => {
                 eprintln!("lightcraft: ignoring camera profile {}: it is for {:?}, not {model:?}", path.display(), p.model);
                 None
@@ -146,16 +170,14 @@ pub fn get(model: &str) -> Option<Arc<CameraProfile>> {
         },
         _ => None,
     };
-    let profile = profile.or_else(|| bundled(model).map(Arc::new));
-    cache.insert(model.to_owned(), profile.clone());
-    profile
+    profile.or_else(|| bundled(model).map(|p| ResolvedProfile { profile: Arc::new(p), local: false }))
 }
 
 /// Changes when the profiles folder's contents change (per process): part of the render cache
 /// keys, so thumbnails rendered before a profile existed are not reused after.
 pub fn cache_key() -> u64 {
     static KEY: OnceLock<u64> = OnceLock::new();
-    *KEY.get_or_init(|| {
+    KEY.get_or_init(|| {
         let entries = dir().and_then(|d| std::fs::read_dir(d).ok());
         let mut files: Vec<(String, u64, u64)> = entries
             .into_iter()
@@ -178,6 +200,7 @@ pub fn cache_key() -> u64 {
         }
         h.finish().0 as u64
     })
+    .wrapping_add(REVISION.load(std::sync::atomic::Ordering::Acquire))
 }
 
 /// Per camera model: the photos read and their pooled colour pairs.
@@ -236,6 +259,15 @@ impl Pool {
     }
 }
 
+static REVISION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Reload profiles after an explicit install, removal, or default change; new jobs get new keys.
+pub fn reload() {
+    crate::camera_profile_store::clear_cache();
+    cache().lock().unwrap_or_else(PoisonError::into_inner).clear();
+    REVISION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,6 +318,28 @@ mod tests {
             assert_eq!(bundled(model), Some(p));
         }
         assert!(bundled("No Such Camera").is_none());
+    }
+
+    #[test]
+    fn provenance_follows_validated_profile_not_file_presence() {
+        let dir = std::env::temp_dir().join(format!("lc-profile-origin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(file_name("ILCE-7M4"));
+        let builtin = resolve_from("ILCE-7M4", None).unwrap();
+        assert!(!builtin.local);
+        let local = profile();
+        save(&local, &dir).unwrap();
+        let resolved = resolve_from("ILCE-7M4", Some(&dir)).unwrap();
+        assert!(resolved.local);
+        assert_eq!(*resolved.profile, local);
+        std::fs::write(&path, b"broken").unwrap();
+        assert!(!resolve_from("ILCE-7M4", Some(&dir)).unwrap().local);
+        let mut other = local;
+        other.model = "another model".into();
+        std::fs::write(&path, serde_json::to_vec(&other).unwrap()).unwrap();
+        assert!(!resolve_from("ILCE-7M4", Some(&dir)).unwrap().local);
+        assert!(resolve_from("No Such Camera", Some(&dir)).is_none());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -355,6 +355,7 @@ impl Headless {
             || self.app.import.is_some()
             || self.app.export.is_some()
             || self.app.session.denoise_busy()
+            || self.app.session.calibration.running()
             || !self.app.tasks.is_empty()
             || !self.app.synthetic.is_empty()
             || !self.events.is_empty()
@@ -484,6 +485,13 @@ mod tests {
         h.step();
         let w = widgets(&mut h);
         assert!(w.contains("\"denoise:setup\""), "a raw photo with no model is offered the setup: {w}");
+        // Starting-colour choices add rows above Detail; bring its setup action inside the scroll viewport.
+        h.request("ui.hoverWidget", json!({"id": "section:detail"}), t);
+        h.request("ui.scroll", json!({"dy": -220.0}), t);
+        for _ in 0..4 {
+            h.step();
+        }
+        h.settle(SETTLE); // finish the smooth scroll before targeting the moving button
         // One click lands in Settings, with local installation available even without a download offer.
         let r = h.request("ui.clickWidget", json!({"id": "denoise:setup"}), t);
         assert_eq!(r["ok"], true, "{r}");

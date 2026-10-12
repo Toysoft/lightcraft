@@ -111,6 +111,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("view.infoOverlay", "Cycle Info Overlay", Some("Cmd+I"), "View"),
     ("view.navigator", "Navigator", None, "View"),
     ("panel.edit", "Edit", Some("E"), "Window"),
+    ("cameraProfile.wizard", "Build Camera Profile…", None, "Photo"),
     ("panel.profiles", "Profile Browser", None, "Window"),
     ("panel.crop", "Crop & Rotate", Some("C"), "Window"),
     ("panel.remove", "Remove", Some("H"), "Window"),
@@ -937,6 +938,10 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
         }
         "panel.edit" => {
             panel(app, &ctx, RightPanel::Edit, "Edit");
+            Ok(Value::Null)
+        }
+        "cameraProfile.wizard" => {
+            app.ui.dialog = Some(Dialog::CameraCalibration { state: Default::default() });
             Ok(Value::Null)
         }
         "panel.profiles" => {
