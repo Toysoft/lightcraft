@@ -8,9 +8,9 @@
 //! Built on a proxy of the whole output frame, long edge `P = min(`[`PROXY_EDGE`]`, native)`, after
 //! white balance (before exposure), in the gamma encoding `e = √lin` (scale-invariant: the map
 //! doesn't change with Exposure):
-//! 1. airlight `A`: the brightest (luminance) pixel among the top [`AIR_TOP`] of the patch dark
-//!    channel, pulled [`AIR_NEUTRAL`] of the way toward neutral and floored at [`AIR_FLOOR`]
-//!    (`A'`);
+//! 1. airlight `A`: the per-channel median of the top [`AIR_TOP`] of the patch dark channel,
+//!    leaving out the brightest [`AIR_SKIP_BRIGHT`] of the frame (the sun, clipped highlights),
+//!    pulled [`AIR_NEUTRAL`] of the way toward neutral and floored at [`AIR_FLOOR`] (`A'`);
 //! 2. normalised dark `g = min_c(e_c / A'_c)` (0..[`G_MAX`]), also the guide;
 //! 3. patch dark channel `d = minfilter(g, `[`PATCH`]`·P)` ([`lightcraft_raster::morph`]);
 //! 4. guided refinement of `d` by `g` ([`GUIDE_RADIUS`]`·P`, [`GUIDE_EPS`]), keeping the
@@ -37,6 +37,8 @@ pub const PROXY_EDGE: usize = 768;
 pub const GAMMA: f32 = 2.0;
 /// Share of the patch dark channel (its brightest end) the airlight is picked from.
 pub const AIR_TOP: f32 = 0.001;
+/// Share of the brightest pixels (the sun, its glare, clipped highlights) left out of the airlight.
+pub const AIR_SKIP_BRIGHT: f32 = 0.01;
 /// How far the airlight is pulled toward a neutral of its own luminance (0 = as picked).
 pub const AIR_NEUTRAL: f32 = 0.7;
 /// Lowest airlight channel (encoded): no division by zero, no runaway gain on dark photos.
@@ -140,7 +142,7 @@ impl HazeMap {
         let e = img.map(encode3);
         // 1. airlight
         let dark = crate::timed("haze dark", || lightcraft_raster::morph::min_filter(&e.map(crate::local::dark_of), r));
-        let picked = crate::timed("haze air", || brightest_of_haziest(&e, &dark)).unwrap_or([1.0; 3]);
+        let picked = crate::timed("haze air", || haze_colour(&e, &dark)).unwrap_or([1.0; 3]);
         let y = luminance_2020(picked);
         let air = picked.map(|c| {
             let v = c + (y - c) * AIR_NEUTRAL;
@@ -257,26 +259,29 @@ impl HazeMap {
     }
 }
 
-/// The colour of the brightest pixel (by luminance of `e`) among those whose patch dark channel
-/// is in its top [`AIR_TOP`]. Ties go to the first. `None` for an empty image.
-fn brightest_of_haziest(e: &Rgb32f, dark: &Plane) -> Option<[f32; 3]> {
-    let mut v: Vec<f32> = dark.data.iter().map(|x| if x.is_finite() { *x } else { 0.0 }).collect();
-    if v.is_empty() {
+/// The airlight colour: the per-channel median of the pixels whose patch dark channel is in its
+/// top [`AIR_TOP`], among the pixels that aren't in the brightest [`AIR_SKIP_BRIGHT`] (by
+/// luminance of `e`). Skipping those keeps the sun, its glare and clipped highlights (often
+/// magenta after white balance, and far above scene white in an HDR merge) out of the airlight;
+/// the median keeps one odd pixel from setting its colour. `None` for an empty image.
+fn haze_colour(e: &Rgb32f, dark: &Plane) -> Option<[f32; 3]> {
+    let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+    let ys: Vec<f32> = e.data.iter().map(|p| finite(luminance_2020(*p))).collect();
+    let ymax = nth_from_top(ys.clone(), AIR_SKIP_BRIGHT)?;
+    let kept = || e.data.iter().zip(&dark.data).zip(&ys).filter(move |(_, y)| **y <= ymax).map(|((p, d), _)| (*p, finite(*d)));
+    let thr = nth_from_top(kept().map(|(_, d)| d).collect(), AIR_TOP)?;
+    let cand: Vec<[f32; 3]> = kept().filter(|(_, d)| *d >= thr).map(|(p, _)| p).collect();
+    if cand.is_empty() {
         return None;
     }
-    let k = (((v.len() as f32) * (1.0 - AIR_TOP)) as usize).min(v.len() - 1);
-    let (_, thr, _) = v.select_nth_unstable_by(k, f32::total_cmp);
-    let thr = *thr;
-    let mut best: Option<(f32, [f32; 3])> = None;
-    for (p, d) in e.data.iter().zip(&dark.data) {
-        if *d >= thr {
-            let y = luminance_2020(*p);
-            if best.is_none_or(|(by, _)| y > by) {
-                best = Some((y, *p));
-            }
-        }
-    }
-    best.map(|(_, p)| p)
+    Some(std::array::from_fn(|c| median(cand.iter().map(|p| p[c]).collect())))
+}
+
+/// The value with a `share` (0..1) of `v` at or above it (`None` when empty).
+fn nth_from_top(mut v: Vec<f32>, share: f32) -> Option<f32> {
+    let last = v.len().checked_sub(1)?;
+    let k = (((v.len() as f32) * (1.0 - share)) as usize).min(last);
+    Some(*v.select_nth_unstable_by(k, f32::total_cmp).1)
 }
 
 /// Median of `v` (0 when empty).
@@ -582,6 +587,26 @@ mod tests {
         // haze is high in the veil, low in the foreground
         let (top, bottom) = (m.dark(0.5, 0.1, lin_of_encoded([0.70, 0.74, 0.80])), m.dark(0.3, 0.8, lin_of_encoded([0.10, 0.12, 0.08])));
         assert!(top > 0.8 && bottom < 0.3, "top {top} bottom {bottom}");
+    }
+
+    #[test]
+    fn a_bright_magenta_sun_is_not_the_airlight() {
+        // an HDR merge's sun: clipped, magenta after white balance, 15x scene white (~0.5 % of
+        // the frame); as the airlight it turned skies cyan
+        let mut img = hazy(200, 150);
+        for y in 10..18 {
+            for x in 20..40 {
+                if let Some(p) = img.data.get_mut(y * 200 + x) {
+                    *p = [15.5, 5.0, 14.0];
+                }
+            }
+        }
+        let m = HazeMap::build(&img);
+        let y = luminance_2020([0.70, 0.74, 0.80]);
+        for (i, c) in [0.70, 0.74, 0.80].into_iter().enumerate() {
+            let want = c + (y - c) * AIR_NEUTRAL;
+            assert!((m.air[i] - want).abs() < 1e-3, "air {:?} want ch{i} {want}", m.air);
+        }
     }
 
     #[test]
