@@ -294,6 +294,7 @@ pub struct Session {
     pub cache_mb: u32,
     /// Where smart previews are kept when not in the library folder (persisted in prefs.json).
     pub smart_previews_dir: Option<std::path::PathBuf>,
+    pub smart_previews_format: crate::smart::Format,
     /// Untouched Local records of folders not browsed for this many days are forgotten when the
     /// library opens (0 = never; persisted in prefs.json). See `cmd/browse.rs`.
     pub forget_local_days: u32,
@@ -391,6 +392,7 @@ impl Session {
             import_defaults: import::ImportDefaults::default(),
             cache_mb: 0,
             smart_previews_dir: None,
+            smart_previews_format: Default::default(),
             forget_local_days: lightcraft_catalog::DEFAULT_FORGET_DAYS,
             #[cfg(not(target_arch = "wasm32"))]
             apple_photos: None,
