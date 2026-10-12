@@ -1830,6 +1830,16 @@ fn view_folder_parent_shows_and_hides_for_agents_and_refuses_other_folders() {
         assert!(r["error"].as_str().is_some_and(|e| e.contains(why)), "{params}: {r}");
     }
     assert!(h.app.ui.folder_parents.is_empty(), "a refusal changes nothing");
+    // a folder listed because the one above it is: that one is what to show or hide
+    exec(&mut h, "view.folderParent", json!({"path": "/Users", "show": true}));
+    for show in [json!(true), json!(false), json!(null)] {
+        let r = h.request("engine.execute", json!({"command": "view.folderParent", "params": {"path": "/Users/me", "show": show}}), T);
+        assert!(r["error"].as_str().is_some_and(|e| e.contains("`/Users` above it")), "{show}: {r}");
+    }
+    assert_eq!(h.app.ui.folder_parents.iter().collect::<Vec<_>>(), ["/Users"]);
+    // showing what is shown is no error, and the answer names the folder the same way either way
+    assert_eq!(exec(&mut h, "view.folderParent", json!({"path": "/Users/", "show": true})), json!({"path": "/Users", "show": true}));
+    assert_eq!(exec(&mut h, "view.folderParent", json!({"path": "/Users/", "show": false})), json!({"path": "/Users", "show": false}));
 }
 
 /// Whatever is chosen is in view: a folder that would be passed over has its row while it is
@@ -1908,6 +1918,17 @@ fn a_count_never_covers_the_name_of_a_deep_row() {
         past += usize::from(r.left() >= panel.right());
     }
     assert!(past > 0, "the deepest rows' counts are past the edge");
+    // at every width, also where the content is only a little wider than the panel (a count that
+    // gave way used to be held back by the row's own end there, and was cut by the edge)
+    for width in (200..=330).step_by(2) {
+        let r = h.request("ui.set", json!({"leftWidth": width}), T);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        let panel = widget(&h, "panel:left_panel");
+        for (id, r) in h.app.widgets.iter().filter(|(w, _)| w.starts_with("count:libfolder:")) {
+            assert!(r.right() <= panel.right() || r.left() >= panel.right(), "at {width} pt {id} straddles the edge: {r:?} / {panel:?}");
+        }
+    }
 }
 
 /// Removing a folder from the library asks first, then moves its photos to Recently Deleted.

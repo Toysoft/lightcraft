@@ -1048,6 +1048,12 @@ fn local_says_where_its_listing_stops_and_offers_the_way_on() {
     let said = h.app.ui.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
     assert!(said.contains("“8”") && said.contains("Local"), "the click says what it did: {said:?}");
     assert!(!on_screen(&h, &more), "a place of its own now, the row has nothing left to offer");
+    // the row inside the first place says where its folders are, and is a row of its own: not
+    // the place's (one triangle each, so opening one does not open the other)
+    assert!(on_screen(&h, &format!("localDeeperNote:{eighth}")), "an open folder never seems to hold nothing");
+    // (both triangles go by the folder's widget id; each opens its own row, #1093)
+    let toggle = format!("folderToggle:{eighth}");
+    assert_eq!(h.app.widgets.iter().filter(|(w, _)| *w == toggle).count(), 2, "the row inside and the place have a triangle each");
 }
 
 #[test]

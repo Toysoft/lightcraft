@@ -2376,5 +2376,6 @@
   "Hides this row. Nothing on disk or in the library changes": "Blendet diese Zeile aus. Auf dem Datenträger und in der Bibliothek ändert sich nichts",
   "Go Deeper": "Tiefer gehen",
   "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further": "So tief liegende Ordner werden hier nicht aufgelistet. Klicken, um diesen Ordner als eigenen Ort zu „Lokal“ hinzuzufügen und ihn dort weiter zu öffnen",
-  "This folder stays listed while the grid shows its photos": "Dieser Ordner bleibt aufgelistet, solange das Raster seine Fotos zeigt"
+  "This folder stays listed while the grid shows its photos": "Dieser Ordner bleibt aufgelistet, solange das Raster seine Fotos zeigt",
+  "Opens as its own place": "Öffnet sich als eigener Ort"
 }

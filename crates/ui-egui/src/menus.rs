@@ -543,13 +543,16 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             // a folder asked for earlier can always be taken off again, also once it no longer
             // only leads on (photos or a second folder came into it, it was labelled or renamed)
             if show != Some(true) && app.ui.folder_parents.remove(&key) {
-                return Some(Ok(json!({"path": path, "show": false})));
+                return Some(Ok(json!({"path": key, "show": false})));
             }
+            use crate::panels::left::{FolderPlace, folder_place};
             let tree = app.caches.folder_tree(&app.session.catalog);
-            let leading = |key: &str| matches!(crate::panels::left::folder_place(&tree, key), Some((_, crate::panels::left::FolderPlace::Leading)));
-            let node = match crate::panels::left::folder_place(&tree, &key) {
-                Some((node, crate::panels::left::FolderPlace::Leading)) => node,
-                Some(_) => {
+            let node = match folder_place(app, &tree, &key) {
+                Some((node, FolderPlace::Leading)) => node.path.clone(),
+                Some((_, FolderPlace::Below(above))) => {
+                    return Some(Err(format!("{id}: `{path}` is listed because `{above}` above it is: show or hide that folder instead")));
+                }
+                Some((_, FolderPlace::Listed)) => {
                     return Some(Err(format!(
                         "{id}: `{path}` is always listed in Folders: only a folder that holds no photo itself and leads from its disk to one folder can be shown or hidden"
                     )));
@@ -557,18 +560,26 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                 None => return Some(Err(format!("{id}: `{path}` holds no photo of the library, so Folders has no place for it"))),
             };
             let show = show.unwrap_or(true);
-            if show {
-                let parents = &mut app.ui.folder_parents;
-                if parents.len() >= crate::state::MAX_FOLDER_PARENTS {
+            if show && !app.ui.folder_parents.contains(&key) {
+                if app.ui.folder_parents.len() >= crate::state::MAX_FOLDER_PARENTS {
                     // folders that stopped leading on take no room from the ones that do
-                    parents.retain(|k| leading(k));
+                    let stale: Vec<String> = app
+                        .ui
+                        .folder_parents
+                        .iter()
+                        .filter(|k| !matches!(folder_place(app, &tree, k), Some((_, FolderPlace::Leading | FolderPlace::Below(_)))))
+                        .cloned()
+                        .collect();
+                    for k in stale {
+                        app.ui.folder_parents.remove(&k);
+                    }
                 }
-                if parents.len() >= crate::state::MAX_FOLDER_PARENTS {
+                if app.ui.folder_parents.len() >= crate::state::MAX_FOLDER_PARENTS {
                     return Some(Err(format!("{id}: {} parent folders are shown already; hide one first", crate::state::MAX_FOLDER_PARENTS)));
                 }
-                parents.insert(key);
+                app.ui.folder_parents.insert(key);
             }
-            Ok(json!({"path": node.path, "show": show}))
+            Ok(json!({"path": node, "show": show}))
         }
         "view.appearance" => appearance_command(app, p),
         "view.theme" => theme_command(app, p),
