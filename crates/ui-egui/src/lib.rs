@@ -27,6 +27,7 @@ pub mod merge;
 mod model_setup;
 pub mod panels;
 pub mod pick;
+mod readout;
 pub mod region;
 pub mod render;
 pub mod shortcuts;
@@ -142,6 +143,8 @@ mod tests_titlebar;
 mod tests_type_contrast;
 #[cfg(test)]
 mod tests_type_on_photo;
+#[cfg(test)]
+mod tests_type_readout;
 #[cfg(test)]
 mod tests_type_scale;
 #[cfg(test)]
