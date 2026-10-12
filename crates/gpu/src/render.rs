@@ -8,6 +8,7 @@ use lightcraft_develop::DevelopSettings;
 use lightcraft_geom::Orientation;
 use lightcraft_pipeline::finish::{FinishParams, MASK_TERMS, mask_terms};
 use lightcraft_pipeline::geometry::SampleMode;
+use lightcraft_pipeline::haze::HazeMap;
 use lightcraft_pipeline::local::plane_at;
 use lightcraft_pipeline::{Plan, RenderRequest, Rendered, SourceInfo, local};
 use lightcraft_raster::resample::Filter;
@@ -23,9 +24,30 @@ pub struct GpuStages {
     entries: Mutex<Vec<Entry>>,
     /// The uploaded source (a view renders one photo at several sizes).
     source: Mutex<Option<(Arc<Rgb32f>, Arc<Buf>)>>,
+    /// The uploaded coefficients of process V3's haze map (the map is cached per photo on the
+    /// CPU; a tone drag must not upload them again on every tick).
+    haze: Mutex<Option<(Arc<HazeMap>, Arc<Buf>)>>,
+    /// Haze maps uploaded so far (diagnostics and tests).
+    haze_uploads: std::sync::atomic::AtomicU64,
 }
 
 const CAPACITY: usize = 2;
+
+/// The device copy of `of` kept in `slot`: the one there when it was uploaded from this very `of`,
+/// else a fresh upload (the previous buffer freed first) that replaces it. Also returns whether
+/// it uploaded.
+fn upload_once<T>(slot: &Mutex<Option<(Arc<T>, Arc<Buf>)>>, of: &Arc<T>, upload: impl FnOnce() -> Buf) -> (Arc<Buf>, bool) {
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, b)) = &*g
+        && Arc::ptr_eq(k, of)
+    {
+        return (b.clone(), false);
+    }
+    *g = None; // free the previous buffer first
+    let b = Arc::new(upload());
+    *g = Some((of.clone(), b.clone()));
+    (b, true)
+}
 
 #[derive(Clone)]
 struct Entry {
@@ -63,16 +85,21 @@ impl GpuStages {
     }
 
     fn source(&self, src: &Arc<Rgb32f>, upload: impl FnOnce() -> Buf) -> Arc<Buf> {
-        let mut g = self.source.lock().unwrap_or_else(|e| e.into_inner());
-        match &*g {
-            Some((s, b)) if Arc::ptr_eq(s, src) => b.clone(),
-            _ => {
-                *g = None; // free the previous photo's buffer first
-                let b = Arc::new(upload());
-                *g = Some((src.clone(), b.clone()));
-                b
-            }
+        upload_once(&self.source, src, upload).0
+    }
+
+    /// The device copy of `map`'s coefficients, uploaded only when the map changes.
+    fn haze(&self, map: &Arc<HazeMap>, upload: impl FnOnce() -> Buf) -> Arc<Buf> {
+        let (b, uploaded) = upload_once(&self.haze, map, upload);
+        if uploaded {
+            self.haze_uploads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
+        b
+    }
+
+    /// Haze maps these stages uploaded so far.
+    pub fn haze_uploads(&self) -> u64 {
+        self.haze_uploads.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Entry>> {
@@ -110,6 +137,9 @@ impl GpuStages {
         if let Some((_, b)) = &*self.source.lock().unwrap_or_else(|e| e.into_inner()) {
             add(b);
         }
+        if let Some((_, b)) = &*self.haze.lock().unwrap_or_else(|e| e.into_inner()) {
+            add(b);
+        }
         total
     }
 
@@ -117,6 +147,7 @@ impl GpuStages {
     pub fn clear(&self) {
         self.lock().clear();
         *self.source.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.haze.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -673,8 +704,20 @@ pub fn render(
         dark: prep.dark.is_some(),
         chroma: masks.is_some() && prep.chroma.is_some(),
     };
-    let (p, aux) = finish_block(&fp, &terms, &present);
+    // process V3's Dehaze: the whole frame's haze map (built on the CPU with the plan, so no
+    // airlight readback), its coefficients bound where V1 / V2 bind the dark plane
+    let haze_map = plan.haze.as_ref().filter(|_| prep.dark.is_none());
+    let haze = haze_map.map(|m| &**m);
+    let (p, aux) = finish_block(&fp, &terms, &present, haze);
     let aux = gpu.upload(&aux);
+    // (kept with the view's stages: uploaded once per map, not on every tick)
+    let haze_buf = haze_map.map(|m| {
+        let upload = || gpu.upload(&crate::params::haze_coeffs(m));
+        match stages {
+            Some(c) => c.haze(m, upload),
+            None => Arc::new(upload()),
+        }
+    });
     // cleared, so that work which never ran cannot pass for an image (see the check below)
     let out = cx.zeroed(n);
     if fault == Some(crate::Fault::Validation) {
@@ -696,7 +739,7 @@ pub fn render(
                 Some(&prep.base),
                 prep.clarity.as_deref(),
                 prep.texture.as_deref(),
-                prep.dark.as_deref(),
+                prep.dark.as_deref().or(haze_buf.as_deref()),
                 masks.as_ref(),
                 Some(&aux),
                 Some(&out),

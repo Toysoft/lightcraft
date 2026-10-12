@@ -280,8 +280,8 @@ impl FinishParams {
 pub fn base_tone(s: &DevelopSettings, info: &SourceInfo, peak: f32) -> ToneMap {
     let l = &s.light;
     match s.process.process() {
-        // V2 changes the Highlights/Shadows base (`local::tone_base`), not the tone map
-        Process::V1 | Process::V2 => match info.camera_tone.as_ref().filter(|_| info.raw) {
+        // V2 changes the Highlights/Shadows base (`local::tone_base`) and V3 Dehaze, not the tone map
+        Process::V1 | Process::V2 | Process::V3 => match info.camera_tone.as_ref().filter(|_| info.raw) {
             Some(curve) => ToneMap::camera_hdr(curve, l.contrast, l.whites, l.blacks, peak),
             None if info.raw => ToneMap::hdr(l.contrast, l.whites, l.blacks, peak),
             None => ToneMap::display_hdr(l.contrast, l.whites, l.blacks, peak),
@@ -398,8 +398,18 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
     let srgb = srgb_lut();
     let peak = fp.peak;
     let hdr = peak > 1.0;
+    // V3 Dehaze's per-render values: the map's context at this exposure, the global amount's
+    // (pixels with mask Dehaze compute their own) and where each output column samples the map
+    let haze = p.haze.as_ref().and_then(|m| Some((crate::haze::Ctx::new(m, gain)?, crate::haze::Amount::new(m, dehaze))));
+    let haze_cols: Vec<crate::haze::Axis> = match (&p.haze, &haze) {
+        (Some(m), Some(_)) => (0..w).map(|x| m.column((vx + x as f32 + 0.5) / vw)).collect(),
+        _ => Vec::new(),
+    };
     let mut out = vec![T::default(); w * h];
     for_rows(&mut out, w, |y, row| {
+        // the map's two proxy rows around this output row, blended once (on the first pixel that
+        // dehazes)
+        let mut haze_row: Option<crate::haze::HazeRow> = None;
         for (x, px) in row.iter_mut().enumerate() {
             let i = y * w + x;
             let raw = p.img.data[i];
@@ -448,6 +458,17 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
             // --- dehaze (scene linear)
             let dz = dehaze + l_dehaze;
             if dz != 0.0
+                && let Some(map) = &p.haze
+            {
+                // V3: the whole frame's haze map, sampled where this pixel sits in the whole
+                // output frame (a window dehazes like the whole render)
+                if let Some((ctx, global)) = &haze {
+                    let hr = haze_row.get_or_insert_with(|| map.row((vy + y as f32 + 0.5) / vh));
+                    let (a, b) = haze_cols.get(x).map_or((0.0, 0.0), |col| hr.coeffs(col));
+                    let am = if l_dehaze == 0.0 { *global } else { crate::haze::Amount::new(map, dz) };
+                    c = crate::haze::dehaze_at(ctx, &am, a, b, c);
+                }
+            } else if dz != 0.0
                 && let Some(dark) = &p.dark
             {
                 let d = (dark.data[i] / air_pre).clamp(0.0, 1.0);

@@ -160,3 +160,20 @@ fn the_process_is_not_an_edit_nor_part_of_copied_settings() {
 
 /// A process other than the latest: a newer LightCraft's number (no older one than V1 exists).
 const LATEST_PLUS_ONE: u32 = ProcessVersion::LATEST.0 + 1;
+
+/// Issue #1237: V3 is the latest; settings saved on V2 stay V2 (outdated, not upgraded on load) and
+/// round-trip as 2, V3 settings as 3.
+#[test]
+fn v3_is_the_latest_and_v2_settings_stay_v2() {
+    assert_eq!(Process::LATEST, Process::V3);
+    assert_eq!(Process::ALL, [Process::V1, Process::V2, Process::V3]);
+    assert_eq!(Process::V3.version(), ProcessVersion(3));
+    let v2 = DevelopSettings::from_json(&json!({"process": 2, "effects": {"dehaze": 30.0}})).unwrap();
+    assert_eq!((v2.process, v2.process.process()), (ProcessVersion(2), Process::V2));
+    assert!(v2.process.is_known() && v2.process.is_outdated());
+    assert_eq!(v2.to_json()["process"], json!(2));
+    let v3 = DevelopSettings { process: Process::V3.version(), ..v2.clone() };
+    assert!(v3.process.is_known() && !v3.process.is_outdated());
+    assert_eq!(DevelopSettings::from_json(&v3.to_json()).unwrap().process.process(), Process::V3);
+    assert_ne!(v3.hash64(), v2.hash64(), "another process is another preview");
+}

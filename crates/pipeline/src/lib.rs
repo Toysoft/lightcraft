@@ -30,6 +30,7 @@ pub mod cull;
 pub mod dust;
 pub mod finish;
 pub mod geometry;
+pub mod haze;
 pub mod local;
 pub mod local_tone;
 pub mod lut;
@@ -203,6 +204,9 @@ pub(crate) struct Prepared {
     pub clarity_blur: Option<Arc<Plane>>,
     pub texture_blur: Option<Arc<Plane>>,
     pub dark: Option<Arc<Plane>>,
+    /// Process V3's haze map of the whole frame ([`Plan::haze`]); V3 dehazes with it instead of
+    /// `dark` / `air`.
+    pub haze: Option<Arc<haze::HazeMap>>,
     /// Blurred chromaticity (`rgb / Y`) for local Moiré / Noise.
     pub chroma_blur: Option<Arc<Rgb32f>>,
     /// Airlight of `dark` (before exposure).
@@ -363,6 +367,8 @@ pub struct Plan<'a> {
     /// Key of the resampled source (together with the source buffer's identity).
     pub geo: u64,
     /// Key of the white-balanced, retouched, denoised image (and of the planes computed from it).
+    /// It doesn't depend on the rendering process: a plane that does is keyed by it on its own
+    /// ([`local::BaseKey`]), and V3's haze map has its own cache ([`haze::for_frame`]).
     pub lin_key: u64,
     /// [`Self::lin_key`] without the noise-reduction settings: draft renders reuse the smooth
     /// planes of an image that differs from this one only in its noise reduction.
@@ -371,6 +377,10 @@ pub struct Plan<'a> {
     pub eyes: Vec<redeye::EyeK>,
     /// The whole frame's dehaze airlight, for a windowed render (which can't see the whole frame).
     pub fixed_air: Option<f32>,
+    /// Process V3's dehaze haze map of the whole frame ([`haze::HazeMap`], cached per image): every
+    /// render of the photo (any size, any window, CPU or GPU) samples the same one. `None` unless
+    /// the settings dehaze under V3 ([`haze::wanted`]).
+    pub haze: Option<Arc<haze::HazeMap>>,
     /// A windowed render works on a larger window when spots reach into it (see
     /// [`spots::window_for_reads`]); this is the requested window inside the rendered one, which
     /// the result is cut to.
@@ -384,6 +394,12 @@ const AIRLIGHT_PROXY_EDGE: usize = 384;
 
 /// Resolve `s` against `src` for `req` (see [`Plan`]).
 pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &RenderRequest) -> Plan<'a> {
+    plan_with(src, info, s, req, true)
+}
+
+/// [`plan`]; without the haze map (`Plan::haze` stays `None`) unless `haze`, for callers that
+/// never dehaze (they only need the scene-linear stage).
+fn plan_with<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &RenderRequest, haze: bool) -> Plan<'a> {
     let mut settings: Cow<'a, DevelopSettings> = match profiles::effective(s) {
         Cow::Borrowed(b) => upright::resolve(src, info, b),
         Cow::Owned(o) => Cow::Owned(upright::resolve(src, info, &o).into_owned()),
@@ -403,12 +419,15 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
     let (full_w, full_h) = frame.fit(req.max_w, req.max_h);
     // sizes and scale are those of the whole output; a window only narrows what is drawn
     let px_per_long = frame.px_per_long(full_w);
+    // (of the whole frame, before any window narrows it)
+    let haze = (haze && haze::wanted(s)).then(|| haze::for_frame(src, info, s, &frame, req.quality == Quality::Draft));
     let mut fixed_air = None;
     let mut keep = None;
     let (frame, w, h) = match req.window {
         Some(win) => {
             let win = win.clamped(full_w, full_h);
-            if s.section_enabled("effects") && (s.effects.dehaze != 0.0 || s.masks.iter().any(|m| m.adjust.dehaze != 0.0)) {
+            // (V3 dehazes with the haze map, which is already the whole frame's)
+            if !haze::is_v3(s) && s.section_enabled("effects") && (s.effects.dehaze != 0.0 || s.masks.iter().any(|m| m.adjust.dehaze != 0.0)) {
                 let k = (AIRLIGHT_PROXY_EDGE as f64 / full_w.max(full_h) as f64).min(1.0);
                 let (pw, ph) = (((full_w as f64 * k).round() as usize).max(1), ((full_h as f64 * k).round() as usize).max(1));
                 fixed_air = Some(local::frame_airlight(src, info, s, &frame, pw, ph));
@@ -439,7 +458,7 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         src_long,
     ));
     let lin_key = hash_of((pre_nr_key, [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits)));
-    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
+    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, haze, keep, mattes: info.mattes.clone() }
 }
 
 /// Whether the scene-linear stage needs work only the CPU does (defringe, spot removal).
@@ -572,6 +591,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
     if let Some(a) = plan.fixed_air {
         prep.air = a;
     }
+    prep.haze = plan.haze.clone();
     lap("prepare", &mut t);
     if let Some((a, c)) = shared {
         c.put(CacheEntry { src: a.clone(), geo, sampled, lin: Some((lin_key, lin)), planes });
@@ -613,7 +633,8 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
 /// exposed scene colours, as [`MaskShape::ColorRange`](lightcraft_develop::MaskShape) compares
 /// them), averaged over 3 × 3 pixels of a render fitting `req`. `None` outside the image.
 pub fn color_range_sample(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest, p: lightcraft_geom::Point) -> Option<[f64; 3]> {
-    let plan = plan(src, info, s, req);
+    // (the scene-linear colours only: no haze map)
+    let plan = plan_with(src, info, s, req, false);
     let mut img = plan.frame.sample(src, plan.w, plan.h);
     lin_cpu(&mut img, info, &plan);
     let o = plan.frame.norm_to_out(plan.w, plan.h).apply(p);
@@ -683,6 +704,8 @@ pub(crate) fn for_rows<T: Send>(data: &mut [T], w: usize, f: impl Fn(usize, &mut
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_dehaze;
 #[cfg(test)]
 mod tests_geometry;
 #[cfg(test)]

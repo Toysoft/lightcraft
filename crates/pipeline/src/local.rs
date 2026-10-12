@@ -217,7 +217,7 @@ pub fn median_hv(p: &Plane, r: usize) -> Plane {
         for_rows(&mut out.data, src.width, |y, row| median_row(src.row(y), row, r));
         out
     };
-    transpose(&rows(&transpose(&rows(p))))
+    rows(&rows(p).transpose()).transpose()
 }
 
 /// Running median of `src` over `2r+1` taps (clamped edges) into `out`: a sorted window that
@@ -243,17 +243,6 @@ fn median_row(src: &[f32], out: &mut [f32], r: usize) {
     }
 }
 
-fn transpose(p: &Plane) -> Plane {
-    let (w, h) = (p.width, p.height);
-    let mut t = Plane::new(h, w);
-    for_rows(&mut t.data, h, |x, row| {
-        for (y, v) in row.iter_mut().enumerate() {
-            *v = p.data[y * w + x];
-        }
-    });
-    t
-}
-
 /// Detail scale of the highlights/shadows base from process V2, as a fraction of the long edge:
 /// the base is the edge-aware filter of the [`median_hv`] of log luminance at this radius, so
 /// twigs, lines and fine texture brighter or darker than their surroundings take their
@@ -273,7 +262,7 @@ pub fn base_detail_radius(px_per_long: f64) -> usize {
 pub fn tone_base_detail(s: &DevelopSettings, px_per_long: f64) -> usize {
     match s.process.process() {
         Process::V1 => 0,
-        Process::V2 => base_detail_radius(px_per_long),
+        Process::V2 | Process::V3 => base_detail_radius(px_per_long),
     }
 }
 
@@ -473,7 +462,8 @@ pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneS
         || local_any(|a| a.noise)
         || s.masks.iter().any(|m| m.adjust.defringe > 0.0))
     .then(|| (0.0018 * ppl).max(0.6));
-    let dark = (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze)).then(|| (0.02 * ppl).max(1.0));
+    // (from V3 Dehaze samples the whole frame's haze map instead: `crate::haze`)
+    let dark = (!crate::haze::is_v3(s) && (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze))).then(|| (0.02 * ppl).max(1.0));
     let chroma = (local_any(|a| a.moire) || s.masks.iter().any(|m| m.adjust.noise > 0.0)).then(|| (CHROMA_SIGMA * ppl).max(1.0));
     let base_detail = if base.is_some() { tone_base_detail(s, px_per_long) } else { 0 };
     PlaneSigmas { base, base_detail, clarity, texture, dark, chroma }
@@ -537,7 +527,7 @@ pub(crate) fn prepare(
     };
     let ev = s.light.exposure as f32;
     let masks = timed("masks", || masks::evaluate(&s.masks, frame, img.width, img.height, &img, &log_l, ev, mattes));
-    Prepared { img, log_l, base, clarity_blur, texture_blur, dark, chroma_blur, air, masks, px_per_long }
+    Prepared { img, log_l, base, clarity_blur, texture_blur, dark, haze: None, chroma_blur, air, masks, px_per_long }
 }
 
 /// The airlight of the whole output frame, estimated on a small render of it (`proxy_w` px wide):
