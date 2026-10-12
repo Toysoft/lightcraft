@@ -94,9 +94,9 @@ OkLCh, a modern perceptual colour space.
 <td width="50%" valign="top">
 
 ### ✨ Effects
-**Texture** for fine detail, **Clarity** for mid-tone punch, **Dehaze** (dark-channel prior with guided refinement;
-push it negative to add atmosphere), post-crop **Vignette** with highlight priority, roundness and feather, and
-resolution-independent film **Grain** with size and roughness.
+**Texture** for fine detail, **Clarity** for mid-tone punch, **Dehaze** (a smoothed dark-channel haze estimate,
+for now much stronger than Lightroom's, #1237; push it negative to add atmosphere), post-crop **Vignette** with
+highlight priority, roundness and feather, and resolution-independent film **Grain** with size and roughness.
 
 ### 📈 Tone Curve
 Parametric region curve with movable splits **plus** point curves for RGB, Red, Green and Blue. Curves are monotone by
