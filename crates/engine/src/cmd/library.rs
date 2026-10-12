@@ -962,8 +962,13 @@ pub fn specs() -> Vec<CommandSpec> {
                 }
                 let folder = bool_or(p, "folder", false);
                 let parent = p.get("parent").and_then(Value::as_u64).map(AlbumId);
-                let (photos, skipped) =
+                let (mut photos, skipped) =
                     if !folder && bool_or(p, "addSelected", false) { album_targets(s, s.targets(&Value::Null)) } else { (vec![], 0) };
+                // in the order they are shown (a Custom Order or sort carries over), not selection order
+                if photos.len() > 1 {
+                    let pos: std::collections::HashMap<PhotoId, usize> = s.visible().iter().enumerate().map(|(i, p)| (*p, i)).collect();
+                    photos.sort_by_key(|p| pos.get(p).copied().unwrap_or(usize::MAX));
+                }
                 let id = s.catalog.alloc_album_id();
                 let cover = photos.first().copied();
                 s.commit(
@@ -973,6 +978,40 @@ pub fn specs() -> Vec<CommandSpec> {
                     },
                 )?;
                 Ok(json!({"id": id.0, "skipped": skipped}))
+            }
+        ),
+        cmd!(
+            "album.duplicate",
+            "Duplicate Album",
+            [],
+            None,
+            "{id, name?} — a new regular album beside it with the same photos and Custom Order (a second order of the same photos) → {id}",
+            always,
+            |s, p| {
+                const C: &str = "album.duplicate";
+                let id = p.get("id").and_then(Value::as_u64).map(AlbumId).ok_or_else(|| bad(C, "missing `id`"))?;
+                let a = s.catalog.album(id).cloned().ok_or_else(|| bad(C, format!("no album {}", id.0)))?;
+                if a.folder || a.smart.is_some() || a.quick {
+                    return Err(bad(C, "only a regular album can be duplicated"));
+                }
+                let name =
+                    str_param(p, "name").map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| format!("{} copy", a.name));
+                let new = s.catalog.alloc_album_id();
+                let photo_order = s.catalog.album_photo_order(id);
+                let album = Album {
+                    id: new,
+                    name,
+                    parent: a.parent,
+                    folder: false,
+                    photos: a.photos.clone(),
+                    cover: a.cover,
+                    smart: None,
+                    quick: false,
+                    order: None,
+                    photo_order,
+                };
+                s.commit("Duplicate Album", Op::AddAlbum { album })?;
+                Ok(json!({"id": new.0}))
             }
         ),
         cmd!(

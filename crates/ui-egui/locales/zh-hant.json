@@ -1954,5 +1954,7 @@
   "Adding to Apple Photos…": "正在加入 Apple 照片…",
   "not added to Apple Photos (cancelled)": "未加入 Apple 照片（已取消）",
   "The first time, macOS asks whether LightCraft may control Photos.": "第一次使用時，macOS 會詢問是否允許 LightCraft 控制「照片」。",
-  "Adding to Apple Photos": "正在加入 Apple 照片"
+  "Adding to Apple Photos": "正在加入 Apple 照片",
+  "Duplicate Album": "複製相簿",
+  "Another album with the same photos, to arrange in its own order": "包含相同照片的另一個相簿，可按自己的順序排列"
 }

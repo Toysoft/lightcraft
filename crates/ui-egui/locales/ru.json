@@ -2146,5 +2146,7 @@
   "Adding to Apple Photos…": "Добавление в Apple Фото…",
   "not added to Apple Photos (cancelled)": "не добавлено в Apple Фото (отменено)",
   "The first time, macOS asks whether LightCraft may control Photos.": "В первый раз macOS спросит, может ли LightCraft управлять приложением «Фото».",
-  "Adding to Apple Photos": "Добавление в Apple Фото"
+  "Adding to Apple Photos": "Добавление в Apple Фото",
+  "Duplicate Album": "Дублировать альбом",
+  "Another album with the same photos, to arrange in its own order": "Ещё один альбом с теми же фото, чтобы упорядочить их по-своему"
 }

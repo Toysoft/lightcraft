@@ -123,3 +123,42 @@ fn rename_numbers_the_selection_in_custom_order() {
     assert_eq!(got.iter().map(|g| g.0).collect::<Vec<_>>(), vec![ids[4], ids[0]]);
     assert!(got[0].1.starts_with("Story-1.") && got[1].1.starts_with("Story-2."), "{got:?}");
 }
+
+// Feature: several orders of the same photos — Duplicate Album keeps the Custom Order, and each
+// copy is then arranged on its own (Lightroom Classic's way: one collection per order).
+#[test]
+fn duplicated_albums_keep_and_then_own_their_orders() {
+    let mut s = Session::with_demo();
+    let (a, ids) = album(&mut s);
+    let rev: Vec<u64> = ids.iter().rev().copied().collect();
+    s.execute("album.setPhotoOrder", &json!({"album": a, "ids": rev})).unwrap();
+    let b = s.execute("album.duplicate", &json!({"id": a})).unwrap()["id"].as_u64().unwrap();
+    let order_of = |s: &Session, id: u64| -> Vec<u64> { s.catalog.album_photo_order(AlbumId(id)).iter().map(|p| p.0).collect() };
+    assert_eq!(order_of(&s, b), rev);
+    assert_eq!(s.catalog.album(AlbumId(b)).unwrap().name, "Story copy");
+    s.execute("album.setPhotoOrder", &json!({"album": b, "ids": ids})).unwrap();
+    assert_eq!((order_of(&s, a), order_of(&s, b)), (rev.clone(), ids.clone()));
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.catalog.album(AlbumId(b)).is_none(), "one undo step each");
+    // not for folders, smart albums or unknown ids
+    let f = s.execute("album.create", &json!({"name": "F", "folder": true})).unwrap()["id"].as_u64().unwrap();
+    for id in [f, 999_999] {
+        assert!(s.execute("album.duplicate", &json!({"id": id})).is_err());
+    }
+    assert!(s.execute("album.duplicate", &json!({})).is_err());
+}
+
+// Feature: a new album from selected photos starts in the order they are shown.
+#[test]
+fn new_album_from_selection_keeps_the_shown_order() {
+    let mut s = Session::with_demo();
+    let (a, ids) = album(&mut s);
+    let rev: Vec<u64> = ids.iter().rev().copied().collect();
+    s.execute("album.setPhotoOrder", &json!({"album": a, "ids": rev})).unwrap();
+    s.execute("library.sort", &json!({"key": "custom"})).unwrap();
+    s.execute("library.select", &json!({"ids": ids})).unwrap();
+    let b = s.execute("album.create", &json!({"name": "Pick", "addSelected": true})).unwrap()["id"].as_u64().unwrap();
+    let got: Vec<u64> = s.catalog.album_photo_order(AlbumId(b)).iter().map(|p| p.0).collect();
+    assert_eq!(got, rev);
+}

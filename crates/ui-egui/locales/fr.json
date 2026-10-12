@@ -1954,5 +1954,7 @@
   "Adding to Apple Photos…": "Ajout à Apple Photos…",
   "not added to Apple Photos (cancelled)": "non ajouté à Apple Photos (annulé)",
   "The first time, macOS asks whether LightCraft may control Photos.": "La première fois, macOS demande si LightCraft peut contrôler Photos.",
-  "Adding to Apple Photos": "Ajout à Apple Photos"
+  "Adding to Apple Photos": "Ajout à Apple Photos",
+  "Duplicate Album": "Dupliquer l’album",
+  "Another album with the same photos, to arrange in its own order": "Un autre album avec les mêmes photos, à organiser dans son propre ordre"
 }
