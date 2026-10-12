@@ -1,5 +1,7 @@
 //! Dock changes exercise the same real catalog and command handlers as the application.
 use crate::{LightcraftApp, Services, docking::Panel, headless::Headless, state::RightPanel};
+use craft_ui::docking::Node;
+use craft_ui::layout::{SplitAxis, SplitSize};
 use egui::{Event, Modifiers, PointerButton};
 use serde_json::json;
 
@@ -331,4 +333,100 @@ fn panel_close_sync_replacement_cancels_held_divider() {
 #[test]
 fn externally_serialized_action_replacement_cancels_held_divider() {
     held_divider_replacement_route("public-action");
+}
+
+/// The mobile arrangement's defining geometry as owned data: the root split, the photo's tab
+/// group, and the accordion's rows in order with their open state.
+fn mobile_parts(workspace: &crate::docking::Workspace) -> (SplitAxis, SplitSize, Vec<Panel>, Vec<(Panel, bool)>) {
+    let Some(Node::Split { axis, size, first, second }) = workspace.layout.root.as_ref() else {
+        panic!("the mobile arrangement's root is a split");
+    };
+    let Node::Tabs { panels, .. } = first.as_ref() else {
+        panic!("the photo's tab group is the split's first child");
+    };
+    let Node::Stack { entries } = second.as_ref() else {
+        panic!("the Library, Tools and Presets rows are one accordion in the split's second child");
+    };
+    (*axis, *size, panels.clone(), entries.iter().map(|entry| (entry.panel, entry.open)).collect())
+}
+
+#[test]
+fn mobile_arrangement_is_the_photo_over_one_accordion() {
+    let mobile = crate::docking::Workspace::mobile();
+    mobile.validate().expect("the mobile arrangement is a valid workspace");
+    assert_ne!(mobile.layout, crate::docking::Workspace::default().layout, "the mobile arrangement is not the desktop tree");
+    let (axis, size, photo, rows) = mobile_parts(&mobile);
+    assert_eq!(axis, SplitAxis::Vertical, "the accordion is below the photo, not beside it");
+    assert_eq!(size, SplitSize::FixedSecond(260.0), "the photo takes the window and the strip keeps a fixed height");
+    assert_eq!(photo, vec![Panel::Canvas], "the photo is alone in its tab group");
+    assert_eq!(rows, vec![(Panel::Tools, true), (Panel::Presets, false), (Panel::Library, false)], "the accordion's rows, in order");
+    assert!(!mobile.layout.floating.iter().any(|group| group.panels.contains(&Panel::Canvas)), "the photo does not float");
+    // Visibility lives in the rows' open state rather than in `hidden`, so the frame's `sync` must see
+    // every row as present: `Layout::contains` walking `Node::Stack` entries is what makes that true.
+    for panel in Panel::ALL {
+        assert!(mobile.layout.contains(panel), "{panel:?} counts as present while it is only a closed row");
+    }
+    assert!(mobile.hidden.is_empty(), "the accordion expresses visibility through its rows");
+}
+
+#[test]
+fn mobile_command_survives_the_synced_frame_round_trip() {
+    let mut h = app();
+    let mobile = crate::docking::Workspace::mobile();
+    h.app.run("ui.dock.mobile", json!({})).expect("ui.dock.mobile is a UI command");
+    assert_eq!(h.app.ui.docking.as_ref().map(|workspace| &workspace.layout), Some(&mobile.layout), "the command installs the mobile tree");
+    // The frame re-reads the workspace, syncs it against the legacy visibility flags and publishes
+    // those flags back. A tree any of that rewrites is not a stable arrangement.
+    let installed = serde_json::to_value(&h.app.ui.docking).unwrap();
+    for _ in 0..8 {
+        h.step();
+    }
+    assert_eq!(serde_json::to_value(&h.app.ui.docking).unwrap(), installed, "the synced frame leaves the mobile arrangement alone");
+    let workspace = h.app.ui.docking.as_ref().expect("the arrangement is installed");
+    let (axis, _, photo, rows) = mobile_parts(workspace);
+    assert_eq!(axis, SplitAxis::Vertical, "the round trip keeps the photo above the strip");
+    assert_eq!(photo, vec![Panel::Canvas], "the photo is still alone after the round trip");
+    assert_eq!(rows, vec![(Panel::Tools, true), (Panel::Presets, false), (Panel::Library, false)], "the round trip keeps every row");
+    assert!(h.app.ui.left_panel, "the Library row publishes as a visible panel");
+    assert!(h.app.ui.presets, "the Presets row publishes as a visible panel");
+    assert_ne!(h.app.ui.right, RightPanel::None, "the Tools row keeps a right panel alive");
+}
+
+#[test]
+fn mobile_is_idempotent_and_reset_restores_the_desktop_start() {
+    let mut h = app();
+    let mobile_workspace = crate::docking::Workspace::mobile();
+    h.app.run("ui.dock.mobile", json!({})).unwrap();
+    assert_eq!(h.app.ui.docking.as_ref().map(|workspace| &workspace.layout), Some(&mobile_workspace.layout), "the first command installs the mobile tree");
+    let mobile = serde_json::to_value(&h.app.ui.docking).unwrap();
+    h.app.run("ui.dock.mobile", json!({})).unwrap();
+    assert_eq!(serde_json::to_value(&h.app.ui.docking).unwrap(), mobile, "a second ui.dock.mobile is the same arrangement");
+    h.step();
+    assert_eq!(serde_json::to_value(&h.app.ui.docking).unwrap(), mobile, "and it survives the frame that follows");
+    h.app.run("ui.dock.reset", json!({})).unwrap();
+    assert!(!h.app.ui.left_panel && !h.app.ui.presets, "the desktop start closes the Library and Presets columns");
+    let desktop = serde_json::to_value(&h.app.ui.docking).unwrap();
+    assert_ne!(desktop, mobile, "the reset is not the mobile tree");
+    let workspace = h.app.ui.docking.as_ref().expect("the reset workspace is installed");
+    assert!(!workspace.layout.contains(&Panel::Library) && !workspace.layout.contains(&Panel::Presets), "both columns are closed");
+    assert!(workspace.layout.contains(&Panel::Tools) && workspace.layout.contains(&Panel::Canvas), "the photo and the tool column stay");
+    let hidden: Vec<_> = workspace.hidden.iter().map(|(panel, _)| *panel).collect();
+    assert!(hidden.contains(&Panel::Library) && hidden.contains(&Panel::Presets), "the closed columns keep their place to return to");
+    h.step();
+    assert_eq!(serde_json::to_value(&h.app.ui.docking).unwrap(), desktop, "the desktop start survives the frame too");
+}
+
+#[test]
+fn arrangement_ids_are_a_no_op_and_a_bad_operation_still_errors() {
+    use crate::docking::Arrangement;
+    assert_eq!(Arrangement::of("ui.dock"), Arrangement::Current);
+    assert_eq!(Arrangement::of("ui.dock.reset"), Arrangement::Reset);
+    assert_eq!(Arrangement::of("ui.dock.mobile"), Arrangement::Mobile);
+    // An id the app does not route to the docking host changes nothing rather than erroring, so a
+    // mistyped id cannot blank the user's workspace. A mistyped *operation* is a real error.
+    assert_eq!(Arrangement::of("ui.dock.unknown"), Arrangement::Current);
+    let mut h = app();
+    let before = serde_json::to_value(&h.app.ui.docking).unwrap();
+    assert!(h.app.run("ui.dock", json!({"operation": "unknown"})).is_err(), "an unknown operation is reported");
+    assert_eq!(serde_json::to_value(&h.app.ui.docking).unwrap(), before, "and leaves the workspace alone");
 }
