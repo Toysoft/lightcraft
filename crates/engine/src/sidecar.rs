@@ -748,7 +748,9 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+// Sidecar save/repair round trips: they build sidecars that differ only in case, which is the
+// same file twice on a case-insensitive volume (Windows), so they are Unix-only.
+#[cfg(all(test, unix))]
 #[path = "sidecar/tests_repair_saves.rs"]
 mod tests_repair_saves;
 
@@ -756,6 +758,7 @@ mod tests_repair_saves;
 #[path = "sidecar/tests_repair_companions.rs"]
 mod tests_repair_companions;
 
-#[cfg(test)]
+// Companion provenance likewise, like tests_repair_saves.
+#[cfg(all(test, unix))]
 #[path = "sidecar/tests_repair_provenance.rs"]
 mod tests_repair_provenance;

@@ -429,6 +429,16 @@ mod tests {
         let seen = with_init_marker(Backends::DX12, || m.exists());
         set_init_marker(None);
         assert!(seen, "the marker exists while the device is created");
+        // `disarm` removes the marker best-effort and deliberately discards the error, so on
+        // Windows a scanner or indexer that holds the file open just long enough makes
+        // `remove_file` fail with a sharing violation. Poll briefly: this still checks that the
+        // marker really goes away when the scope ends, without making it a coin flip.
+        for _ in 0..100 {
+            if !m.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         assert!(!m.exists(), "and is removed afterwards");
         // a marker left behind by a crashed process is reported once; reading it leaves it in place
         std::fs::write(&m, "GPU device and kernel creation started (backends DX12)").unwrap();

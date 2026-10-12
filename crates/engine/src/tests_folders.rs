@@ -606,6 +606,10 @@ fn a_folder_is_created_on_disk_and_undo_removes_it() {
 #[test]
 fn photos_move_to_another_folder_with_their_sidecars_and_back_on_undo() {
     let dir = Scratch::new("move-photos");
+    // Compare as `PathBuf`, not as text: the catalog stores the native path the move wrote
+    // (`\` on Windows) while `Scratch::path` keeps the literal `/` from its argument, and
+    // `PathBuf` equality normalizes separators so the same file compares equal either way.
+    let at = |s: String| std::path::PathBuf::from(s);
     std::fs::create_dir_all(dir.0.join("in")).unwrap();
     std::fs::create_dir_all(dir.0.join("out")).unwrap();
     let mut s = Session::new();
@@ -621,17 +625,17 @@ fn photos_move_to_another_folder_with_their_sidecars_and_back_on_undo() {
     assert_eq!(std::fs::read_to_string(dir.path("out/a.jpg")).unwrap(), "A");
     assert!(dir.0.join("out/a.xmp").is_file(), "the sidecar goes along");
     assert!(!dir.0.join("in/a.jpg").exists() && !dir.0.join("in/a.xmp").exists());
-    assert_eq!(file_of(&s, a), dir.path("out/a.jpg"));
-    assert_eq!(file_of(&s, b), dir.path("out/b.jpg"));
-    assert_eq!(file_of(&s, vc), dir.path("out/a.jpg"), "the virtual copy follows");
+    assert_eq!(at(file_of(&s, a)), at(dir.path("out/a.jpg")));
+    assert_eq!(at(file_of(&s, b)), at(dir.path("out/b.jpg")));
+    assert_eq!(at(file_of(&s, vc)), at(dir.path("out/a.jpg")), "the virtual copy follows");
     s.execute("edit.undo", &json!({})).unwrap();
-    assert_eq!(file_of(&s, a), dir.path("in/a.jpg"));
-    assert_eq!(file_of(&s, vc), dir.path("in/a.jpg"));
+    assert_eq!(at(file_of(&s, a)), at(dir.path("in/a.jpg")));
+    assert_eq!(at(file_of(&s, vc)), at(dir.path("in/a.jpg")));
     assert!(dir.0.join("in/a.jpg").is_file() && dir.0.join("in/a.xmp").is_file() && dir.0.join("in/b.jpg").is_file());
     assert!(!dir.0.join("out/a.jpg").exists());
     s.execute("edit.redo", &json!({})).unwrap();
     assert!(dir.0.join("out/b.jpg").is_file());
-    assert_eq!(file_of(&s, b), dir.path("out/b.jpg"));
+    assert_eq!(at(file_of(&s, b)), at(dir.path("out/b.jpg")));
 }
 
 #[test]

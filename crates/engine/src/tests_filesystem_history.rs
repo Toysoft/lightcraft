@@ -3,7 +3,10 @@
 use lightcraft_catalog::{Op, Photo, PhotoId, Source};
 use serde_json::json;
 
-use crate::{Selection, Session};
+use crate::Session;
+// Only the case-sensitive-fs sidecar history tests below reach for `Selection`.
+#[cfg(unix)]
+use crate::Selection;
 
 fn select(s: &mut Session, ids: &[u64], active: u64) {
     s.execute("library.select", &json!({"ids": ids, "active": active})).unwrap();
@@ -42,6 +45,9 @@ fn assert_file_catalog_and_journal(s: &Session, fs: &crate::rename::tests::FakeF
     assert_eq!(replayed.catalog.to_snapshot(), s.catalog.to_snapshot());
 }
 
+/// Only used by the `#[cfg(unix)]` sidecar-history tests, which need two sidecars that differ
+/// only in case (one file on Windows).
+#[cfg(unix)]
 fn sidecar_history_fixture(redo: bool) -> (Session, crate::rename::tests::FakeFs, lightcraft_catalog::MemStore) {
     let store = lightcraft_catalog::MemStore::new();
     let mut s = memory_library(&store);
@@ -73,10 +79,12 @@ fn sidecar_history_fixture(redo: bool) -> (Session, crate::rename::tests::FakeFs
     (s, fs, store)
 }
 
+#[cfg(unix)]
 fn sidecar_history_entry(s: &Session, redo: bool) -> &crate::UndoEntry {
     if redo { s.redo.last().unwrap() } else { s.undo.last().unwrap() }
 }
 
+#[cfg(unix)]
 #[test]
 fn merged_renames_coalesce_physical_moves_and_keep_retry_inverses_and_journal() {
     use crate::rename::tests::FakeFs;
@@ -131,6 +139,7 @@ fn merged_renames_coalesce_physical_moves_and_keep_retry_inverses_and_journal() 
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn partial_file_history_failures_retry_without_losing_either_inverse_or_journal() {
     use crate::rename::tests::FakeFs;
@@ -214,6 +223,7 @@ fn partial_file_history_failures_retry_without_losing_either_inverse_or_journal(
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn history_retries_both_sidecar_styles_after_following_a_photo_with_failed_rollback() {
     use crate::rename::MoveFs;
@@ -289,6 +299,7 @@ fn history_retries_both_sidecar_styles_after_following_a_photo_with_failed_rollb
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn history_repairs_a_sidecar_whose_rollback_failed_before_retrying_the_photo() {
     use crate::sidecar::{SidecarNaming, sidecar_path};
@@ -328,6 +339,7 @@ fn history_repairs_a_sidecar_whose_rollback_failed_before_retrying_the_photo() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn initial_partial_rename_keeps_sidecar_repairs_for_noop_retry_and_history() {
     use crate::rename::tests::FakeFs;
@@ -404,6 +416,7 @@ fn initial_sidecar_rollback_failure_keeps_a_repair_only_history_step() {
     assert_file_catalog_and_journal(&s, &fs, &store);
 }
 
+#[cfg(unix)]
 #[test]
 fn discarded_file_history_keeps_sidecar_repairs_without_stale_catalog_inverses() {
     use crate::rename::MoveFs;
@@ -484,6 +497,7 @@ fn discarded_file_history_keeps_sidecar_repairs_without_stale_catalog_inverses()
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn merged_rename_failure_keeps_rolled_back_photo_identity() {
     use crate::rename::tests::FakeFs;

@@ -1,0 +1,139 @@
+# Continuous integration: run `cargo xtask ci` (the project's one quality gate, see AGENTS.md)
+# on Linux and Windows x64, and on macOS arm64 from main and the weekly schedule. Only FreeBSD
+# ran `cargo test` before this; these add the main platforms. The jobs are independent and run
+# in parallel; none is `needs:`-gated on another.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "**.rs"
+      - "**.toml"
+      - "**.lock"
+      # `cargo xtask ci` also runs the assets and parity gates, which read these:
+      - "assets/**"
+      - docs/parity-checklist.md
+      - .github/workflows/ci.yml
+  schedule:
+    - cron: "41 4 * * 1" # weekly, so drift in the runner images shows up
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  RUST_TEST_THREADS: "4"
+
+jobs:
+  linux-x64:
+    name: Linux x86_64 (build + test)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Fonts (optional build input; required in CI): see craftrules standards/fonts.md.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: 8dcdacd5153e64560d109541a47d806f26f048c0
+          path: craft-fonts
+      # `cargo xtask ci` ends with the wasm32 check, so the target must be installed or the
+      # step fails with "can't find crate for `std`" (the same reason release.yml sets it).
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ci-linux-x64-${{ hashFiles('Cargo.lock') }}
+      # Only what building and testing the workspace needs: the X11/Wayland/GL and
+      # fontconfig/freetype headers for egui/winit. The packaging tools release.yml needs
+      # (desktop-file-validate, appstreamcli, zsyncmake) are not run by `cargo xtask ci`.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev \
+            pkg-config libfontconfig1-dev libfreetype6-dev
+      - name: Run cargo xtask ci
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target
+        run: cargo xtask ci
+
+  windows-x64:
+    name: Windows x86_64 (build + test)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Fonts (optional build input; required in CI): see craftrules standards/fonts.md.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: 8dcdacd5153e64560d109541a47d806f26f048c0
+          path: craft-fonts
+      # `cargo xtask ci` ends with the wasm32 check, so the target must be installed or the
+      # step fails with "can't find crate for `std`" (the same reason release.yml sets it).
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ci-windows-x64-${{ hashFiles('Cargo.lock') }}
+      # No system dependencies: the X11/Wayland/GL and fontconfig headers Linux needs have no
+      # Windows equivalent here, and the HEIF decoder is pure Rust (heic-rs), so unlike Linux
+      # there is nothing to install. MSVC, freetype and fontconfig are part of the toolchain.
+      - name: Run cargo xtask ci
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+          # Off the workspace by default: the runner's checkout path is already long and MSVC
+          # hits the 260-character limit, which cargo's deep target/ paths can exceed.
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target
+        run: cargo xtask ci
+
+  macos-arm64:
+    name: macOS arm64 (build + test)
+    # Standard hosted runner, not macos-15-xlarge: the larger macOS runners are budget-capped
+    # and reserved for release.yml (see its comment). macOS minutes bill at roughly 10x Linux,
+    # so this skips pull_request and runs on pushes to main, the weekly schedule and dispatch.
+    # Deleting this one line is the whole "run on every PR" decision, if that is ever wanted.
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14 # arm64 (M1), 3 vCPU
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Fonts (optional build input; required in CI): see craftrules standards/fonts.md.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: 8dcdacd5153e64560d109541a47d806f26f048c0
+          path: craft-fonts
+      # `cargo xtask ci` ends with the wasm32 check, so the target must be installed or the
+      # step fails with "can't find crate for `std`" (the same reason release.yml sets it).
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ci-macos-arm64-${{ hashFiles('Cargo.lock') }}
+      # No system dependencies: no X11/Wayland/GL or fontconfig headers (macOS uses CoreText),
+      # and the HEIF decoder is pure Rust, so like Windows there is nothing to install.
+      - name: Run cargo xtask ci
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+          # 3 vCPU, so do not oversubscribe the test harness the way the 4-core runners do.
+          RUST_TEST_THREADS: "3"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target
+        run: cargo xtask ci

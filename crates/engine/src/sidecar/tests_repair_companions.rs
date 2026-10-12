@@ -66,6 +66,7 @@ fn assert_fresh(path: &Path) {
     assert!(data.keywords.unwrap().contains(&"café".to_string()));
 }
 
+#[cfg(unix)]
 #[test]
 fn partial_move_companions_allow_save_and_autowrite_without_weakening_collisions() {
     for upper_stem in [false, true] {
@@ -151,6 +152,7 @@ fn partial_move_companions_allow_save_and_autowrite_without_weakening_collisions
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn rollback_repair_and_shared_copy_keep_known_companions() {
     for rollback in [false, true] {
@@ -226,6 +228,7 @@ fn a_later_save_recognizes_companions_after_an_earlier_repair_retires() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn queued_stem_retry_preserves_shared_packet_after_batch_rollback() {
     let dir = crate::tests_xmp::temp_dir("queued-stem-batch-rollback");
