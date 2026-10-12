@@ -2385,6 +2385,14 @@ fn what_is_shown_is_named_as_its_row_names_it() {
     assert_eq!(said(&h, S::ByDate), Some(format!("{} and 1 more", crate::i18n::date_group_label("2026-01", false))));
     exec(&mut h, "library.filter", json!({"date": null, "dates": [], "keyword": "travel|lisbon"}));
     assert_eq!(said(&h, S::Keywords).as_deref(), Some("lisbon"), "the keyword's own name, not its path");
+    // a keyword of any length (they come from files) is cut to what a panel can show, at once
+    let long = "weddings ".repeat(20_000);
+    exec(&mut h, "library.filter", json!({"keyword": long}));
+    let said_long = said(&h, S::Keywords).unwrap_or_default();
+    assert!(said_long.chars().count() < 1000 && said_long.starts_with("weddings"), "{} characters", said_long.chars().count());
+    exec(&mut h, "view.sidebarSection", json!({"section": "keywords", "collapsed": true}));
+    h.settle(SETTLE);
+    assert!(has(&h, "sidebarSectionCurrent:keywords"));
     // Local: the folder browsed, by its name
     h.app.session.source = lightcraft_engine::LibrarySource::Folder;
     h.app.session.browse = Some(lightcraft_engine::Browse { path: "/somewhere/Weddings".into(), ..Default::default() });

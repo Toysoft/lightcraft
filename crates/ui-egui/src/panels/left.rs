@@ -59,6 +59,10 @@ fn paint_current_marks(ui: &egui::Ui, view: Rect) {
     }
 }
 
+/// The most characters of a name tried when it is cut to fit: more than the widest panel shows,
+/// and a bound on the layouts one very long name (a keyword from a file) costs each frame.
+const MAX_ELIDE_CHARS: usize = 160;
+
 /// `text` cut at its end to fit `max` (as `width` measures it), with an ellipsis; `None` when
 /// not even one character and the ellipsis fit. (Names are cut at the end: unlike a path, their
 /// start says the most.)
@@ -66,7 +70,8 @@ fn elide_end(text: &str, max: f32, width: impl Fn(&str) -> f32) -> Option<String
     if width(text) <= max {
         return Some(text.to_string());
     }
-    (1..text.chars().count())
+    // (a name from a file can be any length: no more of it is tried than a panel could show)
+    (1..text.chars().count().min(MAX_ELIDE_CHARS))
         .rev()
         .map(|keep| text.chars().take(keep).chain(std::iter::once('…')).collect::<String>())
         .find(|cand| width(cand) <= max)
@@ -472,7 +477,11 @@ impl Shown {
     /// The first name of `names` and how many follow; `None` for no name, or an empty one.
     fn of(names: Vec<String>) -> Option<Shown> {
         let more = names.len().saturating_sub(1);
-        names.into_iter().next().filter(|first| !first.trim().is_empty()).map(|first| Shown { first, more })
+        let first = names.into_iter().next().filter(|first| !first.trim().is_empty())?;
+        // (kept to a length a tooltip can show, however long a file made it)
+        let keep = 4 * MAX_ELIDE_CHARS;
+        let first = if first.chars().count() > keep { first.chars().take(keep).chain(std::iter::once('…')).collect() } else { first };
+        Some(Shown { first, more })
     }
 
     /// In full: `Lisbon`, or `Lisbon and 2 more`.
@@ -493,7 +502,7 @@ impl Shown {
         if self.more == 0 {
             return elide_end(&self.first, max, width);
         }
-        (1..self.first.chars().count())
+        (1..self.first.chars().count().min(MAX_ELIDE_CHARS))
             .rev()
             .map(|keep| self.with(&self.first.chars().take(keep).chain(std::iter::once('…')).collect::<String>()))
             .find(|cand| width(cand) <= max)
