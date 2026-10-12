@@ -381,8 +381,8 @@
   was close to the panel's own colour, and in Paper it was nearly the colour of a row the pointer rests on. In
   the light themes the count on that row is darker, so it reads on the fill.
 - A folded section that holds what is shown has the same bar and says its name after the section's title
-  ("Albums  Lisbon"), so folding Albums no longer hides which album you are in. A long name is cut to fit;
-  hover the header for all of it.
+  ("Albums  Lisbon") where the count of its rows was, so folding Albums no longer hides which album you are
+  in. A long name is cut to fit; hover the header for all of it.
 
 ### Folders opens at your photo folders
 - In the left panel's Folders, a disk now opens at the first folder that holds photos or branches. The folders

@@ -35,14 +35,41 @@ const MIN_NAME_ROOM: f32 = 36.0;
 /// How wide the bar of what is shown is.
 const CURRENT_MARK_W: f32 = 3.0;
 
-/// Paints the bar that says "this is what the grid shows" from `top` to `bottom` at the left
-/// edge of what is visible of the sidebar (so it stays when the rows are scrolled sideways),
-/// clear of the disclosure triangles; returns its rect.
+/// The bar that says "this is what the grid shows", from `top` to `bottom` at the left edge of
+/// what is visible of the sidebar. It is painted once the rows are ([`paint_current_marks`]):
+/// over whatever a sideways scroll brings under it, and over the scroll area's own shading of
+/// its edge, so it reads the same wherever the rows are scrolled to. Returns its rect.
 fn current_mark(ui: &egui::Ui, top: f32, bottom: f32) -> Rect {
+    ui.data_mut(|d| d.get_temp_mut_or_default::<Vec<[f32; 2]>>(egui::Id::new("left-current-marks")).push([top, bottom]));
     let left = ui.clip_rect().left();
-    let bar = Rect::from_min_max(pos2(left, top), pos2(left + CURRENT_MARK_W, bottom));
-    ui.painter().rect_filled(bar, 0.0, Tokens::get(ui.ctx()).selected_mark());
-    bar
+    Rect::from_min_max(pos2(left, top), pos2(left + CURRENT_MARK_W, bottom))
+}
+
+/// Paints the bars asked for this frame ([`current_mark`]) inside `view`, what is visible of the
+/// rows, and below the pinned header, which covers the rows it is over.
+fn paint_current_marks(ui: &egui::Ui, view: Rect) {
+    let marks = ui.data_mut(|d| std::mem::take(d.get_temp_mut_or_default::<Vec<[f32; 2]>>(egui::Id::new("left-current-marks"))));
+    let top_limit = pinned_rect(ui).map_or(view.top(), |p| p.bottom().max(view.top()));
+    let color = Tokens::get(ui.ctx()).selected_mark();
+    for [top, bottom] in marks {
+        let (top, bottom) = (top.max(top_limit), bottom.min(view.bottom()));
+        if bottom > top {
+            ui.painter().rect_filled(Rect::from_min_max(pos2(view.left(), top), pos2(view.left() + CURRENT_MARK_W, bottom)), 0.0, color);
+        }
+    }
+}
+
+/// `text` cut at its end to fit `max` (as `width` measures it), with an ellipsis; `None` when
+/// not even one character and the ellipsis fit. (Names are cut at the end: unlike a path, their
+/// start says the most.)
+fn elide_end(text: &str, max: f32, width: impl Fn(&str) -> f32) -> Option<String> {
+    if width(text) <= max {
+        return Some(text.to_string());
+    }
+    (1..text.chars().count())
+        .rev()
+        .map(|keep| text.chars().take(keep).chain(std::iter::once('…')).collect::<String>())
+        .find(|cand| width(cand) <= max)
 }
 
 /// A row says how wide it needs to be.
@@ -168,7 +195,10 @@ fn row_sensed(
     let label_rect = ui.painter().text(pos2(label_left, r.center().y), Align2::LEFT_CENTER, &shown, font.clone(), color);
     register(ui.ctx(), format!("label:{id}"), label_rect);
     let resp = if shown != label { resp.on_hover_text(label) } else { resp };
-    let mut needed = row_need(indent, full_w, mark_w, count_galley.as_ref().map(|g| g.size().x));
+    // (asked for in the heavier face whether shown or not, so choosing a row never changes how
+    // wide the rows are)
+    let need_w = if selected { full_w } else { ui.painter().layout_no_wrap(label.to_string(), t.semibold(13.5), color).size().x };
+    let mut needed = row_need(indent, need_w, mark_w, count_galley.as_ref().map(|g| g.size().x));
     if let Some(galley) = count_galley {
         let rect = Rect::from_min_size(pos2(edge - 18.0 - galley.size().x, r.center().y - galley.size().y / 2.0), galley.size());
         register(ui.ctx(), format!("count:{id}"), rect);
@@ -195,7 +225,8 @@ fn out_of_sight(app: &LightcraftApp, ui: &mut egui::Ui, id: &str, label: &str, c
     register(ui.ctx(), format!("source:{id}"), r);
     let t = Tokens::get(ui.ctx());
     let painter = ui.painter();
-    let name_w = painter.layout_no_wrap(label.to_string(), t.font(13.5), t.text_label).size().x;
+    // (in the heavier face, as the drawn row asks for its width)
+    let name_w = painter.layout_no_wrap(label.to_string(), t.semibold(13.5), t.text_label).size().x;
     let count_w = count.filter(|_| app.ui.show_counts).map(|n| painter.layout_no_wrap(n.to_string(), t.font(12.5), t.text_dim).size().x);
     note_width(ui, row_need(indent, name_w, if mark { MARK_W } else { 0.0 }, count_w));
     true
@@ -429,26 +460,65 @@ pub fn section_drag_feedback(app: &mut LightcraftApp, ctx: &egui::Context) {
     );
 }
 
-/// What the grid shows that has its row in `section`, as the grid's title or the filter names
-/// it: the album, the Local or library folder, the dates or the keywords. `None` when the
-/// section holds none of it (All Photos, Picks and the like are rows of no section).
-pub(crate) fn shown_in(app: &LightcraftApp, section: SidebarSection) -> Option<String> {
-    let s = &app.session;
-    // several dates or keywords: the first by name, and how many more
-    let several = |all: Vec<String>| match all.as_slice() {
-        [] => None,
-        [one] => Some(one.clone()),
-        [first, rest @ ..] => Some(crate::i18n::tr_format!("{first} and {n} more", first = first, n = rest.len())),
-    };
-    match section {
-        SidebarSection::Albums => matches!(s.source, LibrarySource::Album(_)).then(|| crate::i18n::source_title(s)),
-        SidebarSection::Local => (s.source == LibrarySource::Folder).then(|| crate::i18n::source_title(s)),
-        SidebarSection::Folders => (s.source == LibrarySource::LibraryFolder).then(|| crate::i18n::source_title(s)),
-        // as their rows say them: "September", not `2026-09`; a keyword's own name, not its path
-        SidebarSection::ByDate => several(s.filter.date.iter().chain(&s.filter.dates).map(|d| crate::i18n::date_group_label(d, false)).collect()),
-        SidebarSection::Keywords => {
-            several(s.filter.keyword.iter().chain(&s.filter.keywords).map(|k| k.rsplit('|').next().unwrap_or(k).to_string()).collect())
+/// What the grid shows of one section's rows, by name: one row, or the first of several and how
+/// many more.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Shown {
+    first: String,
+    more: usize,
+}
+
+impl Shown {
+    /// The first name of `names` and how many follow; `None` for no name, or an empty one.
+    fn of(names: Vec<String>) -> Option<Shown> {
+        let more = names.len().saturating_sub(1);
+        names.into_iter().next().filter(|first| !first.trim().is_empty()).map(|first| Shown { first, more })
+    }
+
+    /// In full: `Lisbon`, or `Lisbon and 2 more`.
+    pub(crate) fn full(&self) -> String {
+        self.with(&self.first)
+    }
+
+    fn with(&self, first: &str) -> String {
+        if self.more == 0 { first.to_string() } else { crate::i18n::tr_format!("{first} and {n} more", first = first, n = self.more) }
+    }
+
+    /// As much of it as fits `max` (as `width` measures it): the name gives way, cut at its end,
+    /// and "and n more" stays, so several never read as one. `None` when nothing of the name fits.
+    fn fitted(&self, max: f32, width: impl Fn(&str) -> f32) -> Option<String> {
+        if width(&self.full()) <= max {
+            return Some(self.full());
         }
+        if self.more == 0 {
+            return elide_end(&self.first, max, width);
+        }
+        (1..self.first.chars().count())
+            .rev()
+            .map(|keep| self.with(&self.first.chars().take(keep).chain(std::iter::once('…')).collect::<String>()))
+            .find(|cand| width(cand) <= max)
+    }
+}
+
+/// What the grid shows that has its row in `section`, named as those rows name it: the album
+/// (several: “2 albums”, as the grid's title says), the Local or library folder by its own name,
+/// the dates or the keywords. `None` when the section holds none of it (All Photos, Picks and
+/// the like are rows of no section).
+pub(crate) fn shown_in(app: &LightcraftApp, section: SidebarSection) -> Option<Shown> {
+    let s = &app.session;
+    match section {
+        SidebarSection::Albums => Shown::of(matches!(s.source, LibrarySource::Album(_)).then(|| crate::i18n::source_title(s)).into_iter().collect()),
+        SidebarSection::Local => {
+            let browsed = s.browse.as_ref().filter(|_| s.source == LibrarySource::Folder);
+            Shown::of(browsed.map(|b| folder_label(&b.path)).into_iter().collect())
+        }
+        SidebarSection::Folders if s.source == LibrarySource::LibraryFolder => {
+            Shown::of(s.source_library_folders().iter().map(|f| folder_label(f)).collect())
+        }
+        SidebarSection::Folders => None,
+        // as their rows say them: "September", not `2026-09`; a keyword's own name, not its path
+        SidebarSection::ByDate => Shown::of(s.filter.dates_wanted().iter().map(|d| crate::i18n::date_group_label(d, false)).collect()),
+        SidebarSection::Keywords => Shown::of(s.filter.keywords_wanted().iter().map(|k| k.rsplit('|').next().unwrap_or(k).to_string()).collect()),
     }
 }
 
@@ -481,7 +551,7 @@ fn section_header(app: &mut LightcraftApp, ui: &mut egui::Ui, section: SidebarSe
     // folded, the row that says "this is shown" is out of sight: the header says it instead
     let current = if open { None } else { shown_in(app, section) };
     let name = match &current {
-        Some(what) => crate::i18n::tr_format!("{title}, showing {what}", title = title, what = what),
+        Some(what) => crate::i18n::tr_format!("{title}, showing {what}", title = title, what = what.full()),
         None => title.to_string(),
     };
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, true, open, &name));
@@ -502,33 +572,32 @@ fn section_header(app: &mut LightcraftApp, ui: &mut egui::Ui, section: SidebarSe
     let room = !(section == SidebarSection::Albums && app.ui.dragging_album.is_some());
     // where the title's side of the header ends: at the count, the button or the edge
     let mut free_until = edge - 18.0 - if button.is_some() { HEADER_BUTTON + 4.0 } else { 0.0 };
-    if !open && rows > 0 && app.ui.show_counts && room {
-        // folded: how much is in there (left of the header's own button)
+    // folded: how much is in there (left of the header's own button); not beside the name of
+    // what is shown, where it would read as that row's own count
+    if !open && rows > 0 && app.ui.show_counts && room && current.is_none() {
         let count = ui.painter().text(pos2(free_until, r.center().y), Align2::RIGHT_CENTER, rows.to_string(), t.font(12.5), t.text_dim);
         register(ui.ctx(), format!("{widget}Count:{id}"), count);
         free_until = count.left();
     }
     if let Some(what) = &current {
         // the same bar as the row it stands in for, and that row's name after the title as far
-        // as there is room (never over the count or the button)
+        // as there is room (never over the button)
         let mark = current_mark(ui, r.top() + 2.0, r.bottom() - 2.0);
         register(ui.ctx(), format!("{widget}Current:{id}"), mark);
         let font = t.font(12.5);
         let measure = |s: &str| ui.painter().layout_no_wrap(s.to_string(), font.clone(), t.text_dim).size().x;
         let left = title_rect.right() + 10.0;
         let fits = if room { (free_until - 10.0 - left).max(0.0) } else { 0.0 };
-        let shown = if measure(what) <= fits { what.clone() } else { crate::widgets::elide_head(what, fits, measure) };
-        // (an ellipsis alone names nothing)
-        let named = shown.chars().any(|c| c != '…');
-        if named {
-            let at = ui.painter().text(pos2(left, r.center().y), Align2::LEFT_CENTER, &shown, font.clone(), t.text_dim);
+        let shown = what.fitted(fits, measure);
+        if let Some(shown) = &shown {
+            let at = ui.painter().text(pos2(left, r.center().y), Align2::LEFT_CENTER, shown, font.clone(), t.text_dim);
             register(ui.ctx(), format!("{widget}CurrentName:{id}"), at);
         }
         // in full on hover when it is cut or left out; not over the header's own button, whose
         // tooltip is the button's
         let on_button = button.is_some() && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| header_button_rect(ui, r).contains(p));
-        if (!named || shown != *what) && !on_button {
-            resp.clone().on_hover_text(crate::i18n::tr_format!("Showing {what}", what = what));
+        if shown.as_deref() != Some(what.full().as_str()) && !on_button {
+            resp.clone().on_hover_text(crate::i18n::tr_format!("Showing {what}", what = what.full()));
         }
     }
     if section == SidebarSection::Albums {
@@ -712,7 +781,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         }
         let counts = app.caches.counts(&app.session.catalog);
         let (total, picks, deleted) = (counts.total, counts.picks, counts.deleted);
-        egui::ScrollArea::both().id_salt("left-scroll").auto_shrink([false, false]).show_viewport(ui, |ui, viewport| {
+        let rows = egui::ScrollArea::both().id_salt("left-scroll").auto_shrink([false, false]).show_viewport(ui, |ui, viewport| {
             drag_auto_scroll(app, ui);
             // where the visible part of the content starts (screen y), for the pinned header
             let view_top = ui.cursor().top() + viewport.min.y;
@@ -811,6 +880,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 ui.ctx().request_repaint();
             }
         });
+        paint_current_marks(ui, rows.inner_rect);
     });
 }
 
