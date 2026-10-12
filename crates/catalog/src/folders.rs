@@ -182,6 +182,12 @@ pub fn is_startup_disk(path: &str) -> bool {
 /// A folder named by its last two names (`photos/travel`), so two folders called `travel` are
 /// told apart; the path itself when it has no names (`/`).
 pub fn folder_label(path: &str) -> String {
+    if is_remote(path) {
+        let sp = split_path(path, false);
+        let authority = sp.prefix.get(crate::query::REMOTE_SCHEME.len()..).unwrap_or(&sp.prefix);
+        let tail = sp.parts.get(sp.parts.len().saturating_sub(2)..).unwrap_or(&[]);
+        return if tail.is_empty() { authority.to_string() } else { tail.join("/") };
+    }
     let names: Vec<&str> = path.split(['/', '\\']).filter(|n| !n.is_empty()).collect();
     if names.is_empty() { path.to_string() } else { names.iter().skip(names.len().saturating_sub(2)).copied().collect::<Vec<_>>().join("/") }
 }

@@ -462,3 +462,12 @@ fn the_tree_and_the_filter_agree_on_remote_folders() {
     check(&c, &c.folder_tree(), &mut seen);
     assert!(seen >= 7, "{seen} rows checked");
 }
+
+#[test]
+fn remote_folders_are_labelled_by_account_and_names() {
+    use crate::folders::folder_label;
+    assert_eq!(folder_label("nextcloud://u@h/"), "u@h");
+    assert_eq!(folder_label("nextcloud://u@h/Sony A7R VI/2026"), "Sony A7R VI/2026");
+    assert_eq!(folder_label("nextcloud://u@h/a/b/c"), "b/c");
+    assert_eq!(folder_label("nextcloud://u@h/x\\y"), "x\\y");
+}
