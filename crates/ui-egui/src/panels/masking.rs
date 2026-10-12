@@ -297,9 +297,9 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
                 // type; Describe… opens its field here)
                 ui.horizontal(|ui| {
                     ui.add_space(30.0);
-                    let plus = text_button(ui, &format!("maskPlus:{}", m.id), "+", false).on_hover_text(crate::i18n::tr("Add to this mask"));
+                    let plus = mask_icon(ui, &format!("maskPlus:{}", m.id), Icon::Plus, "Add to this mask", false);
                     egui::Popup::menu(&plus).show(|ui| component_menu(app, ui, "add"));
-                    let minus = text_button(ui, &format!("maskMinus:{}", m.id), "−", false).on_hover_text(crate::i18n::tr("Subtract from this mask"));
+                    let minus = mask_icon(ui, &format!("maskMinus:{}", m.id), Icon::Minus, "Subtract from this mask", false);
                     egui::Popup::menu(&minus).show(|ui| component_menu(app, ui, "subtract"));
                 });
                 describe_field(app, ui, false);
@@ -368,16 +368,16 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             range_controls(app, ui, i, &c.shape);
         }
         ui.add_space(6.0);
-        // wraps: the five actions are wider than a narrow panel
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
-            let add = text_button(ui, "maskAddComp", crate::i18n::tr("Add"), false);
+        // one row of icons (issue #972), names on hover
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let add = mask_icon(ui, "maskAddComp", Icon::MaskAdd, "Add", false);
             egui::Popup::menu(&add).show(|ui| component_menu(app, ui, "add"));
-            let sub = text_button(ui, "maskSubComp", crate::i18n::tr("Subtract"), false);
+            let sub = mask_icon(ui, "maskSubComp", Icon::MaskSubtract, "Subtract", false);
             egui::Popup::menu(&sub).show(|ui| component_menu(app, ui, "subtract"));
-            let int = text_button(ui, "maskIntComp", crate::i18n::tr("Intersect"), false);
+            let int = mask_icon(ui, "maskIntComp", Icon::MaskIntersect, "Intersect", false);
             egui::Popup::menu(&int).show(|ui| component_menu(app, ui, "intersect"));
-            if text_button(ui, "maskInvert", crate::i18n::tr("Invert"), m.invert).clicked() {
+            if mask_icon(ui, "maskInvert", Icon::MaskInvert, "Invert", m.invert).clicked() {
                 let _ = app.run("mask.invert", json!({}));
             }
             if icon_button(ui, "maskDelete", Icon::Trash, vec2(26.0, 24.0), false, true, "Delete mask").clicked() {
@@ -869,6 +869,15 @@ fn brush_settings(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             }
         }
     }
+}
+
+/// A masks-panel icon button named `label` (translated; also its hover text), addressable as
+/// `button:{id}` like the text button it replaced, and `icon:{id}`.
+fn mask_icon(ui: &mut egui::Ui, id: &str, icon: Icon, label: &str, active: bool) -> egui::Response {
+    let name = crate::i18n::tr(label);
+    let r = crate::widgets::icon_button_named(ui, id, icon, vec2(28.0, 24.0), active, true, name, name);
+    crate::widgets::register(ui.ctx(), format!("button:{id}"), r.rect);
+    r
 }
 
 #[cfg(test)]

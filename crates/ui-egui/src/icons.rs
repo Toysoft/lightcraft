@@ -144,6 +144,16 @@ icons! {
     Straighten,
     /// Automatic: a wand with sparkles (Lucide `wand-sparkles`).
     Auto,
+    /// Mask component: add (two squares united; Lucide `squares-unite`).
+    MaskAdd,
+    /// Mask component: subtract (Lucide `squares-subtract`).
+    MaskSubtract,
+    /// Mask component: intersect (Lucide `squares-intersect`).
+    MaskIntersect,
+    /// Invert a mask: a frame, half filled (our own).
+    MaskInvert,
+    /// A minus sign (the counterpart of [`Icon::Plus`]).
+    Minus,
     /// Crop overlay: rule of thirds, in a 3:2 frame (the guides `crop_overlay` draws, our own).
     OverlayThirds,
     /// Crop overlay: a grid.
@@ -815,6 +825,55 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
                     "M11 3H9",
                 ]
             );
+        }
+        MaskAdd => {
+            // Lucide `squares-unite`
+            lucide!(
+                pen,
+                [
+                    "M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3a1 1 0 0 0 1 1h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-3a1 1 0 0 0-1-1z"
+                ]
+            );
+        }
+        MaskSubtract => {
+            // Lucide `squares-subtract`
+            lucide!(
+                pen,
+                [
+                    "M10 22a2 2 0 0 1-2-2",
+                    "M16 22h-2",
+                    "M16 4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3a1 1 0 0 0 1-1v-5a2 2 0 0 1 2-2h5a1 1 0 0 0 1-1z",
+                    "M20 8a2 2 0 0 1 2 2",
+                    "M22 14v2",
+                    "M22 20a2 2 0 0 1-2 2",
+                ]
+            );
+        }
+        MaskIntersect => {
+            // Lucide `squares-intersect`
+            lucide!(
+                pen,
+                [
+                    "M10 22a2 2 0 0 1-2-2",
+                    "M14 2a2 2 0 0 1 2 2",
+                    "M16 22h-2",
+                    "M2 10V8",
+                    "M2 4a2 2 0 0 1 2-2",
+                    "M20 8a2 2 0 0 1 2 2",
+                    "M22 14v2",
+                    "M22 20a2 2 0 0 1-2 2",
+                    "M4 16a2 2 0 0 1-2-2",
+                    "M8 10a2 2 0 0 1 2-2h5a1 1 0 0 1 1 1v5a2 2 0 0 1-2 2H9a1 1 0 0 1-1-1z",
+                    "M8 2h2",
+                ]
+            );
+        }
+        MaskInvert => {
+            pen.rect(3.0, 3.0, 17.0, 17.0, 2.0);
+            pen.fill(&[(10.0, 3.0), (17.0, 3.0), (17.0, 17.0), (10.0, 17.0)]);
+        }
+        Minus => {
+            pen.line(&[(4.0, 10.0), (16.0, 10.0)]);
         }
         OverlayThirds | OverlayGrid | OverlayGolden | OverlayDiagonal | OverlayTriangle | OverlaySpiral | OverlayNone => {
             overlay_icon(&pen, icon);
