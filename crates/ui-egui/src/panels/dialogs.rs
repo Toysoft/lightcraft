@@ -168,8 +168,8 @@ fn watermark_preview(
 /// About dialog tabs: (widget id suffix, label). The credits come from `crate::credits`.
 pub const ABOUT_TABS: &[(&str, &str)] = &[("about", "About"), ("contributors", "Contributors"), ("models", "Models")];
 
-/// Help ▸ What's New (docs/whats-new.md).
-pub const WHATS_NEW: &str = include_str!("../../../../docs/whats-new.md");
+/// Help ▸ What's New: published release history followed by development highlights.
+pub const WHATS_NEW: &str = concat!(include_str!("../../../../docs/release-history.md"), "\n", include_str!("../../../../docs/whats-new.md"));
 
 /// The import review and Settings keep window ids of their own, so the size each is given
 /// doesn't carry over to the other dialogs.

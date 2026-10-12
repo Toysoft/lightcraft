@@ -23,6 +23,19 @@ fn open(h: &mut Headless, id: &str) {
 }
 
 #[test]
+fn whats_new_displays_the_generated_release_history() {
+    let app = LightcraftApp::new(lightcraft_engine::Session::new(), Services::default());
+    let mut h = Headless::new(app, [1300.0, 900.0], 1.0);
+    open(&mut h, "app.whatsNew");
+    let text = h.painted_text();
+    assert!(text.iter().any(|t| t == "Release history"), "history heading is visible");
+    let history = include_str!("../../../docs/release-history.md");
+    if let Some(release) = history.lines().find_map(|line| line.strip_prefix("- ")) {
+        assert!(text.iter().any(|t| t == &format!("•  {release}")), "latest published version and date are visible: {text:?}");
+    }
+}
+
+#[test]
 fn information_dialogs_end_with_one_close() {
     let app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services { png: None, ..Default::default() });
     let mut h = Headless::new(app, [1300.0, 900.0], 1.0);
