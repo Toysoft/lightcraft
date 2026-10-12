@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.7.1"
@@ -162,3 +163,7 @@ jpeg-decoder = { opt-level = 3 }
 jpeg-encoder = { opt-level = 3 }
 png = { opt-level = 3 }
 miniz_oxide = { opt-level = 3 }
+
+# Patched copies of crates.io dependencies; see vendor/README.md.
+[patch.crates-io]
+wgpu-hal = { path = "vendor/wgpu-hal" }
