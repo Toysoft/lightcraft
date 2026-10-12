@@ -223,6 +223,7 @@ fn inspect_report(data: lightcraft_engine::lightroom_catalog::CatalogImport) -> 
         "photos": data.photos.len(),
         "collections": data.collections.iter().filter(|r| r.get("systemOnly").and_then(Value::as_f64).unwrap_or(0.0) == 0.0).count(),
         "missing": data.photos.iter().filter(|p| !std::path::Path::new(&p.path).is_file()).map(|p| &p.path).collect::<Vec<_>>(),
+        "editsNotImported": data.edits_not_imported,
         "warnings": data.warnings,
     })
 }
@@ -233,6 +234,9 @@ fn terminal(app: &mut LightcraftApp, ctx: &egui::Context, task: &LightroomTask, 
     if let Some(o) = value.as_object_mut() {
         o.entry("path").or_insert_with(|| json!(task.path));
     }
+    // Photos arriving without their Lightroom edits (the catalog's develop settings were unreadable)
+    // lead the summary, which then stays up longer: it is not a detail to find in the warnings.
+    let unedited = value.get("report").unwrap_or(&value).get("editsNotImported").and_then(Value::as_u64).unwrap_or(0);
     let message = if let Some(e) = value.get("error").and_then(Value::as_str) {
         let warning = value.get("indexWarning").and_then(Value::as_str).map_or(String::new(), |w| format!("; index warning: {w}"));
         if matches!(kind, Kind::Inspect) {
@@ -269,9 +273,18 @@ fn terminal(app: &mut LightcraftApp, ctx: &egui::Context, task: &LightroomTask, 
             crate::i18n::tr_format!("Lightroom import complete: {imported} photos added, {failed} failed", imported = imported, failed = failed)
         }
     };
+    let (message, seconds) = if unedited > 0 && value.get("error").is_none() && value.get("cancelled").is_none() {
+        let lead = crate::i18n::tr_format!(
+            "Lightroom edits were not imported for {count} photos: the catalog's develop settings could not be read",
+            count = unedited
+        );
+        (format!("{lead}. {message}"), 20.0)
+    } else {
+        (message, 6.0)
+    };
     app.lightroom_last = Some(value);
     app.lightroom = None;
-    app.toast_for(ctx, message, 6.0);
+    app.toast_for(ctx, message, seconds);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -518,6 +531,21 @@ mod tests {
         assert!(h.app.session.activity.list().is_empty());
     }
 
+    /// Issue #1234: photos that arrive without their Lightroom edits lead the import summary.
+    #[test]
+    fn unimported_edits_lead_the_import_summary() {
+        let mut h = demo();
+        let (task, tx, _, _, _) = fake_import(&h);
+        h.app.lightroom = Some(task);
+        h.app.lightroom_last = Some(serde_json::json!({"running": true, "kind": "import", "report": {"imported": 3, "editsNotImported": 2}}));
+        tx.send(Message::Finalized(Ok(()))).unwrap();
+        h.step();
+        let toast = h.app.ui.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
+        assert!(toast.starts_with("Lightroom edits were not imported for 2 photos"), "{toast}");
+        assert!(toast.contains("3 photos added"), "{toast}");
+        assert_eq!(h.app.lightroom_last.as_ref().unwrap()["editsNotImported"], 2);
+    }
+
     #[test]
     fn inspect_report_keeps_empty_catalog_shape() {
         let report = inspect_report(CatalogImport {
@@ -527,10 +555,12 @@ mod tests {
             members: Vec::new(),
             collection_content: Vec::new(),
             warnings: vec!["warning".into()],
+            edits_not_imported: 0,
         });
         assert_eq!(report["photos"], 0);
         assert_eq!(report["collections"], 0);
         assert_eq!(report["missing"], serde_json::json!([]));
         assert_eq!(report["warnings"], serde_json::json!(["warning"]));
+        assert_eq!(report["editsNotImported"], 0);
     }
 }
