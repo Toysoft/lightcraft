@@ -204,6 +204,9 @@ pub(crate) struct Prepared {
     pub clarity_blur: Option<Arc<Plane>>,
     pub texture_blur: Option<Arc<Plane>>,
     pub dark: Option<Arc<Plane>>,
+    /// Process V3's haze map of the whole frame ([`Plan::haze`]); V3 dehazes with it instead of
+    /// `dark` / `air`.
+    pub haze: Option<Arc<haze::HazeMap>>,
     /// Blurred chromaticity (`rgb / Y`) for local Moiré / Noise.
     pub chroma_blur: Option<Arc<Rgb32f>>,
     /// Airlight of `dark` (before exposure).
@@ -416,7 +419,8 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
     let (frame, w, h) = match req.window {
         Some(win) => {
             let win = win.clamped(full_w, full_h);
-            if s.section_enabled("effects") && (s.effects.dehaze != 0.0 || s.masks.iter().any(|m| m.adjust.dehaze != 0.0)) {
+            // (V3 dehazes with the haze map, which is already the whole frame's)
+            if haze.is_none() && s.section_enabled("effects") && (s.effects.dehaze != 0.0 || s.masks.iter().any(|m| m.adjust.dehaze != 0.0)) {
                 let k = (AIRLIGHT_PROXY_EDGE as f64 / full_w.max(full_h) as f64).min(1.0);
                 let (pw, ph) = (((full_w as f64 * k).round() as usize).max(1), ((full_h as f64 * k).round() as usize).max(1));
                 fixed_air = Some(local::frame_airlight(src, info, s, &frame, pw, ph));
@@ -583,6 +587,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
     if let Some(a) = plan.fixed_air {
         prep.air = a;
     }
+    prep.haze = plan.haze.clone();
     lap("prepare", &mut t);
     if let Some((a, c)) = shared {
         c.put(CacheEntry { src: a.clone(), geo, sampled, lin: Some((lin_key, lin)), planes });

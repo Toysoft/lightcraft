@@ -52,18 +52,19 @@ pub const GUIDE_EPS: f32 = 1e-3;
 /// Entries of the exposure-compensation LUT: amounts `0.05, 0.10, …, 1.0`.
 pub const COMP_N: usize = 20;
 /// Largest exposure compensation before the [`COMP_POWER`] (EV).
-pub const COMP_MAX_EV: f32 = 0.7;
+pub const COMP_MAX_EV: f32 = 1.4;
 /// Share (as a power) of the measured median darkening the compensation gives back.
-pub const COMP_POWER: f32 = 0.65;
+pub const COMP_POWER: f32 = 0.55;
 /// The compensation LUT measures every `COMP_STEP`-th proxy pixel.
 pub const COMP_STEP: usize = 7;
 
 /// Haze strength at +100: `ω = OMEGA·k^OMEGA_POWER`.
 pub const OMEGA: f32 = 0.95;
-pub const OMEGA_POWER: f32 = 1.5;
+pub const OMEGA_POWER: f32 = 0.6;
 /// Lowest transmission at +100 (`t ≥ lerp(1, T_FLOOR, k)`): bounds the gain at `1/T_FLOOR`.
 pub const T_FLOOR: f32 = 0.25;
-/// Sky tolerance: pixels within this (encoded, per channel) of the airlight are recovered less.
+/// Sky tolerance: pixels within this of the airlight (encoded, per channel, relative to its brightest
+/// channel) are recovered less.
 pub const SKY_K: f32 = 0.15;
 /// Share of the input's chromaticity blended back after recovery (keeps colours from swinging).
 pub const CHROMA_KEEP: f32 = 0.3;
@@ -274,7 +275,31 @@ fn median(mut v: Vec<f32>) -> f32 {
 /// Returns the exposed, dehazed colour. A non-finite result falls back to the exposed input.
 pub fn recover(map: &HazeMap, lin: [f32; 3], gain: f32, d: f32, k: f32) -> [f32; 3] {
     let k = if k.is_finite() { k.clamp(-1.0, 1.0) } else { 0.0 };
-    let mut j = recover_haze(map, lin, gain, d, k);
+    let j = recover_haze(map, lin, gain, d, k);
+    finish_recovery(map, lin, gain, k, j)
+}
+
+/// The V3 Dehaze of the pixel at frame-normalised `(nx, ny)` (0..1 over the whole output frame,
+/// so a window dehazes exactly like the whole render): `lin` is its white-balanced, pre-exposure
+/// colour, `gain` the exposure gain and `k` the amount (global plus masks; clamped to −1..1).
+/// [`HazeMap::dark`] and [`recover`] in one, encoding the pixel once. Returns the exposed colour;
+/// a non-finite result falls back to the exposed input.
+pub fn dehaze_at(map: &HazeMap, nx: f32, ny: f32, lin: [f32; 3], gain: f32, k: f32) -> [f32; 3] {
+    let k = if k.is_finite() { k.clamp(-1.0, 1.0) } else { 0.0 };
+    if k == 0.0 {
+        return lin.map(|v| v * gain);
+    }
+    let e = encode3(lin);
+    let (a, b) = map.coeffs(nx, ny);
+    let d = a * norm_dark(e, map.air) + b;
+    let d = if d.is_finite() { d.clamp(0.0, 1.0) } else { 0.0 };
+    let j = recover_with(map, lin, gain, d, k, || sky_distance(map, e));
+    finish_recovery(map, lin, gain, k, j)
+}
+
+/// [`recover`]'s exposure compensation and chroma blend (positive amounts) of the recovered `j`,
+/// and its fallback to the exposed input when anything is not finite.
+fn finish_recovery(map: &HazeMap, lin: [f32; 3], gain: f32, k: f32, mut j: [f32; 3]) -> [f32; 3] {
     if k > 0.0 {
         let comp = map.comp(k);
         j = j.map(|v| v * comp);
@@ -296,9 +321,11 @@ fn recover_haze(map: &HazeMap, lin: [f32; 3], gain: f32, d: f32, k: f32) -> [f32
     recover_with(map, lin, gain, d, k, || sky_distance(map, encode3(lin)))
 }
 
-/// How far an encoded pixel `e` is from the airlight: its largest channel difference.
+/// How far an encoded pixel `e` is from the airlight: its largest channel difference, relative to
+/// the airlight's brightest channel (so the same photo exposed brighter or darker is judged alike).
 fn sky_distance(map: &HazeMap, e: [f32; 3]) -> f32 {
-    (0..3).map(|i| (e[i] - map.air[i]).abs()).fold(0.0f32, f32::max)
+    let top = map.air.iter().fold(AIR_FLOOR, |m, v| m.max(*v));
+    (0..3).map(|i| (e[i] - map.air[i]).abs()).fold(0.0f32, f32::max) / top
 }
 
 /// [`recover_haze`] with the pixel's [`sky_distance`] given (computed only when needed).
@@ -309,7 +336,9 @@ fn recover_with(map: &HazeMap, lin: [f32; 3], gain: f32, d: f32, k: f32, sky: im
     if k > 0.0 {
         let omega = OMEGA * k.powf(OMEGA_POWER);
         let tmin = 1.0 + (T_FLOOR - 1.0) * k;
-        let mut t = (1.0 - omega * d).max(tmin);
+        // the map measures haze in the encoding; the recovery is linear, so is its haze share
+        // (`min(e/A)` of an encoded pixel is `min(c/A)^(1/GAMMA)` of the linear one)
+        let mut t = (1.0 - omega * decode(d)).max(tmin);
         // sky tolerance: pixels close to the airlight colour are left nearly alone
         let m = sky();
         if m < SKY_K {
@@ -349,6 +378,10 @@ pub fn proxy_size(frame: &Frame) -> (usize, usize) {
 pub fn for_frame(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, frame: &Frame) -> Arc<HazeMap> {
     static CACHE: Mutex<Vec<(u64, Arc<HazeMap>)>> = Mutex::new(Vec::new());
     const KEEP: usize = 4;
+    // (an empty source has nothing to sample: no haze)
+    if src.width == 0 || src.height == 0 || src.data.is_empty() {
+        return Arc::new(HazeMap::empty());
+    }
     let (pw, ph) = proxy_size(frame);
     let wb = crate::local::wb_matrix_for(info, s).map(|m| m.map(|r| r.map(f32::to_bits)));
     let key = crate::hash_of((crate::optics::fingerprint(src), format!("{frame:?}"), wb, s.process.process(), pw, ph));

@@ -71,6 +71,16 @@ fn diff(a: &Rgba8, b: &Rgba8) -> (f64, u8, f64) {
 }
 
 fn check(name: &str, src: &Arc<Rgb32f>, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest) -> (f64, u8) {
+    // Process V3's Dehaze (#1237) renders on the CPU until its kernel lands: the GPU declines it,
+    // and the rest of the edit is compared under V2's Dehaze instead.
+    let v2;
+    let s = if lightcraft_pipeline::haze::wanted(&s.effective()) {
+        assert!(lightcraft_gpu::render(src, info, s, req, None).is_none(), "{name}: the GPU must decline V3 Dehaze");
+        v2 = DevelopSettings { process: Process::V2.version(), ..s.clone() };
+        &v2
+    } else {
+        s
+    };
     let cpu = render(src, info, s, req).image;
     let gpu = lightcraft_gpu::render(src, info, s, req, None).expect("gpu render");
     let (mean, max, over) = diff(&cpu, &gpu.image);
@@ -541,7 +551,8 @@ fn cached_renders_match_uncached() {
     let info = SourceInfo { raw: true, ..Default::default() };
     let cache = StageCache::default();
     let req = RenderRequest::fit(640, 640);
-    let mut s = DevelopSettings::default();
+    // (V2: V3's Dehaze renders on the CPU until its kernel lands)
+    let mut s = DevelopSettings { process: Process::V2.version(), ..DevelopSettings::default() };
     typical(&mut s);
     for k in 0..4 {
         s.light.exposure = 0.1 * k as f64;

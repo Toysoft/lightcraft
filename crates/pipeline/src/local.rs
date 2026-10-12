@@ -473,7 +473,12 @@ pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneS
         || local_any(|a| a.noise)
         || s.masks.iter().any(|m| m.adjust.defringe > 0.0))
     .then(|| (0.0018 * ppl).max(0.6));
-    let dark = (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze)).then(|| (0.02 * ppl).max(1.0));
+    // (from V3 Dehaze samples the whole frame's haze map instead: `crate::haze`)
+    let v3_haze = match s.process.process() {
+        Process::V1 | Process::V2 => false,
+        Process::V3 => true,
+    };
+    let dark = (!v3_haze && (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze))).then(|| (0.02 * ppl).max(1.0));
     let chroma = (local_any(|a| a.moire) || s.masks.iter().any(|m| m.adjust.noise > 0.0)).then(|| (CHROMA_SIGMA * ppl).max(1.0));
     let base_detail = if base.is_some() { tone_base_detail(s, px_per_long) } else { 0 };
     PlaneSigmas { base, base_detail, clarity, texture, dark, chroma }
@@ -537,7 +542,7 @@ pub(crate) fn prepare(
     };
     let ev = s.light.exposure as f32;
     let masks = timed("masks", || masks::evaluate(&s.masks, frame, img.width, img.height, &img, &log_l, ev, mattes));
-    Prepared { img, log_l, base, clarity_blur, texture_blur, dark, chroma_blur, air, masks, px_per_long }
+    Prepared { img, log_l, base, clarity_blur, texture_blur, dark, haze: None, chroma_blur, air, masks, px_per_long }
 }
 
 /// The airlight of the whole output frame, estimated on a small render of it (`proxy_w` px wide):

@@ -448,6 +448,15 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
             // --- dehaze (scene linear)
             let dz = dehaze + l_dehaze;
             if dz != 0.0
+                && let Some(map) = &p.haze
+            {
+                // V3: the whole frame's haze map, sampled where this pixel sits in the whole
+                // output frame (a window dehazes like the whole render)
+                let (nx, ny) = ((vx + x as f32 + 0.5) / vw, (vy + y as f32 + 0.5) / vh);
+                if gain > 0.0 && gain.is_finite() {
+                    c = crate::haze::dehaze_at(map, nx, ny, c.map(|v| v / gain), gain, dz);
+                }
+            } else if dz != 0.0
                 && let Some(dark) = &p.dark
             {
                 let d = (dark.data[i] / air_pre).clamp(0.0, 1.0);
