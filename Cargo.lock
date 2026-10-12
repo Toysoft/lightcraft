@@ -3237,6 +3237,7 @@ dependencies = [
  "lightcraft-preview",
  "lightcraft-raster",
  "lightcraft-raw",
+ "lightcraft-relief",
  "lightcraft-scenes",
  "lightcraft-segment",
  "lightcraft-tiff",
@@ -3434,6 +3435,18 @@ dependencies = [
  "zune-core",
  "zune-jpeg",
  "zune-jpegxl",
+]
+
+[[package]]
+name = "lightcraft-relief"
+version = "0.7.0"
+dependencies = [
+ "candle-core",
+ "candle-nn",
+ "image",
+ "lightcraft-fetch",
+ "log",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

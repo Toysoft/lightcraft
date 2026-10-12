@@ -116,6 +116,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("panel.remove", "Remove", Some("H"), "Window"),
     ("panel.masking", "Masking", Some("M"), "Window"),
     ("panel.redeye", "Red Eye", None, "Window"),
+    ("panel.relight", "Relight", None, "Window"),
     ("panel.presets", "Presets", Some("Shift+P"), "Window"),
     ("panel.info", "Info", Some("I"), "Window"),
     ("panel.keywords", "Keywords", Some("K"), "Window"),
@@ -970,6 +971,10 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             panel(app, &ctx, RightPanel::RedEye, "Red Eye");
             Ok(Value::Null)
         }
+        "panel.relight" => {
+            panel(app, &ctx, RightPanel::Relight, "Relight");
+            Ok(Value::Null)
+        }
         "panel.info" => {
             panel(app, &ctx, RightPanel::Info, "Info");
             Ok(Value::Null)
@@ -994,9 +999,9 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "tool.done" => {
-            // Return commits a tool panel (crop, remove, red eye, masking): back to Edit
+            // Return commits a tool panel (crop, remove, red eye, relight, masking): back to Edit
             use RightPanel::*;
-            if app.ui.dialog.is_none() && matches!(app.ui.right, Crop | Remove | RedEye | Masking) {
+            if app.ui.dialog.is_none() && matches!(app.ui.right, Crop | Remove | RedEye | Relight | Masking) {
                 let _ = app.session.end_interaction();
                 app.ui.tool.clear();
                 app.ui.right = Edit;

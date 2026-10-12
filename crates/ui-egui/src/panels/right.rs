@@ -1,4 +1,4 @@
-//! The right-hand panel next to the tool strip: Edit, Crop, Remove, Masking, Red Eye, Info,
+//! The right-hand panel next to the tool strip: Edit, Relight, Crop, Remove, Masking, Red Eye, Info,
 //! Keywords, Versions, Activity.
 
 use egui::{Align2, Rect, Sense, pos2, vec2};
@@ -41,6 +41,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 RightPanel::Remove => remove(app, ui, id),
                 RightPanel::Masking => super::masking::show(app, ui, id),
                 RightPanel::RedEye => red_eye(app, ui, id),
+                RightPanel::Relight => super::relight::show(app, ui, id),
                 RightPanel::Info => info(app, ui, id),
                 RightPanel::Keywords => keywords(app, ui, id),
                 RightPanel::Versions => versions(app, ui, id),

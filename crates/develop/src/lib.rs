@@ -8,11 +8,13 @@
 
 pub mod controls;
 pub mod presets;
+pub mod relief;
 pub mod segmask;
 pub mod settings;
 
 pub use controls::{CONTROLS, ControlSpec, Section, Track};
 pub use presets::{Preset, SettingsGroup, apply_partial, extract_groups};
+pub use relief::{ReliefSample, RelightGeometry};
 pub use segmask::SegMask;
 pub use settings::*;
 
@@ -73,6 +75,10 @@ impl DevelopSettings {
         let d = DevelopSettings::default();
         a.wb = d.wb;
         a.process = d.process;
+        // (what an analysis saw of the scene is not an edit while nothing is lit with it)
+        if !a.relight.is_active() {
+            a.relight.geometry = None;
+        }
         a == d
     }
 
@@ -132,6 +138,7 @@ impl DevelopSettings {
             }
             Section::Color => self.wb.mode = WbMode::AsShot,
             Section::Detail => self.enhance.denoise_on = None,
+            Section::Relight => self.relight = Relight::default(),
             _ => {}
         }
     }
@@ -227,6 +234,28 @@ mod tests {
         assert!(on.to_json().get("hdr").is_some());
         assert_ne!(on.hash64(), s.hash64());
         assert_eq!(DevelopSettings::from_json(&on.to_json()).unwrap(), on);
+    }
+
+    #[test]
+    fn default_relight_is_not_serialized_and_an_edited_one_round_trips() {
+        let s = DevelopSettings::default();
+        assert!(s.to_json().get("relight").is_none(), "Relight off must not change the settings JSON or hash64");
+        assert!(!s.relight.is_active());
+        let mut on = s.clone();
+        on.relight.enabled = true;
+        assert!(!on.relight.is_active(), "enabled without a light or an ambient change renders the same");
+        on.relight.lights.push(RelightLight { kind: RelightKind::Spot, position: lightcraft_geom::Point::new(0.2, 0.7), ..Default::default() });
+        assert!(on.relight.is_active());
+        assert_eq!(on.to_json()["relight"]["lights"][0]["kind"], json!("spot"));
+        assert_ne!(on.hash64(), s.hash64());
+        assert_eq!(DevelopSettings::from_json(&on.to_json()).unwrap(), on);
+        // a light written by hand with only its place takes the defaults; an unknown kind is an error, not a panic
+        let partial = DevelopSettings::from_json(&json!({"relight": {"enabled": true, "lights": [{"position": {"x": 0.1, "y": 0.2}}]}})).unwrap();
+        assert_eq!(partial.relight.lights[0], RelightLight { position: lightcraft_geom::Point::new(0.1, 0.2), ..Default::default() });
+        assert!(DevelopSettings::from_json(&json!({"relight": {"lights": [{"kind": "laser"}]}})).is_err());
+        // it is its own section: a reset clears the lights and switches it off
+        on.reset_section(Section::Relight);
+        assert_eq!(on, s);
     }
 
     #[test]

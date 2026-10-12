@@ -833,6 +833,9 @@ fn main() -> eframe::Result {
                 // (never required: without it, AI masks offer to download it; see docs/ai-masks.md)
                 // and the user's own download locations, one base URL per line (LIGHTCRAFT_SAM3_MIRRORS too)
                 session = session.with_default_sam3_model();
+                // Relight: the MoGe-2 scene geometry model in <config>/models/moge-2-vits-normal, or LIGHTCRAFT_RELIEF_DIR
+                // (never required: without it Relight estimates the relief from the photo; see docs/relight.md)
+                session = session.with_default_relief_model();
                 let mut app = LightcraftApp::new(session, services(cc, app_log_file.as_deref()));
                 if let Some(ui) = prefs {
                     app.ui = ui;

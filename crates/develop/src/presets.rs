@@ -37,10 +37,11 @@ pub enum SettingsGroup {
     RedEye,
     LensBlur,
     Calibration,
+    Relight,
 }
 
 impl SettingsGroup {
-    pub const ALL: [SettingsGroup; 20] = [
+    pub const ALL: [SettingsGroup; 21] = [
         SettingsGroup::Profile,
         SettingsGroup::Treatment,
         SettingsGroup::WhiteBalance,
@@ -61,13 +62,16 @@ impl SettingsGroup {
         SettingsGroup::RedEye,
         SettingsGroup::LensBlur,
         SettingsGroup::Calibration,
+        SettingsGroup::Relight,
     ];
 
     /// Groups included by default when copying (Lightroom excludes crop, masks and spots by default).
     pub fn default_copy() -> Vec<SettingsGroup> {
         SettingsGroup::ALL
             .into_iter()
-            .filter(|g| !matches!(g, SettingsGroup::Crop | SettingsGroup::Masks | SettingsGroup::Spots | SettingsGroup::RedEye))
+            .filter(|g| {
+                !matches!(g, SettingsGroup::Crop | SettingsGroup::Masks | SettingsGroup::Spots | SettingsGroup::RedEye | SettingsGroup::Relight)
+            })
             .collect()
     }
 
@@ -93,6 +97,7 @@ impl SettingsGroup {
             SettingsGroup::RedEye => "Red Eye",
             SettingsGroup::LensBlur => "Lens Blur",
             SettingsGroup::Calibration => "Calibration",
+            SettingsGroup::Relight => "Relight",
         }
     }
 
@@ -119,6 +124,7 @@ impl SettingsGroup {
             SettingsGroup::RedEye => &["red_eye"],
             SettingsGroup::LensBlur => &["lens_blur"],
             SettingsGroup::Calibration => &["calibration"],
+            SettingsGroup::Relight => &["relight"],
         }
     }
 }

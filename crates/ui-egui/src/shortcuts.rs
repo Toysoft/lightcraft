@@ -478,6 +478,10 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
                         continue;
                     }
                     R::RedEye => continue,
+                    R::Relight => {
+                        let _ = app.run("relight.deleteLight", json!({"index": app.ui.relight_light}));
+                        continue;
+                    }
                     _ => {}
                 }
                 if crate::menus::confirm_delete(app) {

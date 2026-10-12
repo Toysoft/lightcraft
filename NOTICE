@@ -40,6 +40,21 @@ the facebook/sam3 checkpoint only when they choose to (in the app, or by hand), 
 License (https://github.com/facebookresearch/sam3/blob/main/LICENSE), a separate, non-OSI
 licence. See docs/ai-masks.md.
 
+crates/relief (lightcraft-relief) ports the MoGe-2 model code of Microsoft
+(https://github.com/microsoft/MoGe, moge/model/v2.py and moge/model/modules), Copyright (c)
+Microsoft Corporation, licensed under the MIT License, and the DINOv2 vision transformer it is
+built on (https://github.com/facebookresearch/dinov2, dinov2/models/vision_transformer.py),
+Copyright (c) Meta Platforms, Inc. and affiliates, licensed under the Apache License 2.0. The
+port was modified by the LightCraft contributors (2026): translated from Python/PyTorch to Rust
+on candle and reduced to inference of one configuration; each ported file says so. Because of
+the DINOv2 part, crates/relief is licensed under the Apache License 2.0 only (LICENSE-APACHE),
+not under the MIT option.
+
+The MoGe-2 weights are not part of LightCraft and are never distributed with it. A user
+downloads the Ruicheng/moge-2-vits-normal checkpoint only when they choose to (in the app, or
+by hand), under the MIT License (https://huggingface.co/Ruicheng/moge-2-vits-normal). See
+docs/relight.md.
+
 AI denoise weights are not part of LightCraft and are never distributed with it.
 The default build offers user-supplied models only. The optional rawnind-model
 feature offers a separately downloaded RawNIND UtNet2 Bayer checkpoint under

@@ -137,6 +137,10 @@ pub struct DevelopSettings {
     pub red_eye: Vec<RedEye>,
     pub lens_blur: LensBlur,
     pub enhance: Enhance,
+    /// Relight: lights added to the photo ([`Relight`]). Not written while it is the default, so settings
+    /// without it keep their JSON and `hash64`.
+    #[serde(skip_serializing_if = "Relight::is_default")]
+    pub relight: Relight,
     /// Camera calibration: shadows tint and primary hue/saturation (applied before tone mapping).
     pub calibration: Calibration,
     /// Section on/off toggles (the "eye" buttons on panel headers): section id → enabled.
@@ -172,6 +176,7 @@ impl Default for DevelopSettings {
             red_eye: Vec::new(),
             lens_blur: LensBlur::default(),
             enhance: Enhance::default(),
+            relight: Relight::default(),
             calibration: Calibration::default(),
             disabled_sections: Vec::new(),
         }
@@ -1101,6 +1106,130 @@ pub struct Enhance {
 impl Enhance {
     pub fn denoise_enabled(&self) -> bool {
         self.denoise_on.unwrap_or(self.denoise > 0.0)
+    }
+}
+
+/// Most lights a photo's [`Relight`] holds.
+pub const MAX_RELIGHT_LIGHTS: usize = 8;
+
+/// Relight: lights placed on the photo. The pipeline estimates the scene's relief from the photo
+/// itself and shades it with these lights (`lightcraft_pipeline::relight`); the result multiplies
+/// the photo in scene-linear light, so the lights add to the light that was there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Relight {
+    pub enabled: bool,
+    /// The photo's own light, −100 (none: only the added lights) .. 100 (doubled).
+    pub ambient: f64,
+    /// 0..100: how smooth the estimated relief is (low follows fine detail, high only broad shapes).
+    pub softness: f64,
+    /// 0..100: specular highlights where the relief faces between a light and the viewer.
+    pub shine: f64,
+    /// The relief casts shadows away from each light.
+    pub shadows: bool,
+    /// 0..100: width of the shadows' penumbra.
+    pub shadow_softness: f64,
+    /// Up to [`MAX_RELIGHT_LIGHTS`] lights.
+    pub lights: Vec<RelightLight>,
+    /// The scene's geometry (surface normals and depth) as a model saw it, when the photo was
+    /// analyzed; without it the relief is estimated from the photo's brightness. Shared, not
+    /// copied, by the settings' clones (history steps, previews).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<std::sync::Arc<crate::RelightGeometry>>,
+}
+
+impl Default for Relight {
+    fn default() -> Self {
+        Self { enabled: false, ambient: 0.0, softness: 40.0, shine: 0.0, shadows: false, shadow_softness: 50.0, lights: Vec::new(), geometry: None }
+    }
+}
+
+impl Relight {
+    /// Whether these are the default Relight settings (off, nothing changed).
+    pub fn is_default(&self) -> bool {
+        *self == Relight::default()
+    }
+
+    /// Whether a render differs from one without Relight.
+    pub fn is_active(&self) -> bool {
+        self.enabled && (self.ambient != 0.0 || !self.lights.is_empty())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RelightKind {
+    /// A lamp at a place above the photo, shining in every direction.
+    #[default]
+    Point,
+    /// Parallel light from far away (the sun): the same direction everywhere.
+    Directional,
+    /// A lamp at a place above the photo, shining a cone in one direction.
+    Spot,
+}
+
+impl RelightKind {
+    pub const ALL: [RelightKind; 3] = [RelightKind::Point, RelightKind::Directional, RelightKind::Spot];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RelightKind::Point => "Point",
+            RelightKind::Directional => "Directional",
+            RelightKind::Spot => "Spot",
+        }
+    }
+
+    /// Point and Spot lights have a place on the photo; a Directional light only a direction.
+    pub fn has_position(self) -> bool {
+        !matches!(self, RelightKind::Directional)
+    }
+
+    /// Directional and Spot lights point somewhere (`angle`, `elevation`).
+    pub fn has_direction(self) -> bool {
+        !matches!(self, RelightKind::Point)
+    }
+}
+
+/// One light of a [`Relight`].
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RelightLight {
+    pub kind: RelightKind,
+    /// Where the light is, normalized to the uncropped oriented image (Point, Spot).
+    pub position: Point,
+    /// 0..200 (%).
+    pub intensity: f64,
+    /// Light colour: hue in degrees 0..360 and saturation 0..100 (0 = white).
+    pub hue: f64,
+    pub sat: f64,
+    /// Degrees clockwise from the top of the photo: where a Directional light comes from, or which
+    /// way a Spot points.
+    pub angle: f64,
+    /// 0..90 degrees. Directional: the light's height above the photo's plane (90 = head-on).
+    /// Spot: how steeply it points down at the photo (90 = straight down).
+    pub elevation: f64,
+    /// 0..100: how far above the photo the light is (Point, Spot).
+    pub depth: f64,
+    /// 0..100: how far the light reaches (Point, Spot).
+    pub falloff: f64,
+    /// 0..100: width of a Spot's cone.
+    pub cone: f64,
+}
+
+impl Default for RelightLight {
+    fn default() -> Self {
+        Self {
+            kind: RelightKind::Point,
+            position: Point::new(0.5, 0.5),
+            intensity: 100.0,
+            hue: 40.0,
+            sat: 0.0,
+            angle: 315.0,
+            elevation: 45.0,
+            depth: 30.0,
+            falloff: 50.0,
+            cone: 40.0,
+        }
     }
 }
 

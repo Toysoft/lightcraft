@@ -33,6 +33,7 @@ mod prefs;
 mod preset_files;
 pub mod previews;
 mod query;
+mod relight;
 mod sync;
 mod xmp;
 
@@ -140,6 +141,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(color::specs());
         v.extend(curves::specs());
         v.extend(masks::specs());
+        v.extend(relight::specs());
         v.extend(organize::specs());
         v.extend(keywords::specs());
         v.extend(manage::specs());

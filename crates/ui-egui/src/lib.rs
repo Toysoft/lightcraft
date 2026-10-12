@@ -106,6 +106,8 @@ mod tests_preview_limit;
 #[cfg(test)]
 mod tests_quit_unsaved;
 #[cfg(test)]
+mod tests_relight;
+#[cfg(test)]
 mod tests_scroll;
 #[cfg(test)]
 mod tests_switch_library;
@@ -398,6 +400,7 @@ impl LightcraftApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         // AI mask requests run on the model's worker; frames apply their results (never wait)
         session.segmenter.background = true;
+        session.relief.background = true;
         Self {
             session,
             ui: UiState::default(),
@@ -705,6 +708,23 @@ impl LightcraftApp {
             Some(DownloadOutcome::Failed(e)) => self.toast_error(ctx, e),
             None if self.session.place_names.downloading() => ctx.request_repaint_after(std::time::Duration::from_millis(500)),
             None => {}
+        }
+    }
+
+    /// Relight: keep the scene a background analysis saw with its photo, say so (or why it failed),
+    /// and keep the panel fresh while the model works or downloads. Never waits for the model.
+    fn relight_scene(&mut self, ctx: &egui::Context) {
+        match self.session.relief_poll() {
+            Some(Ok(_)) => {
+                self.toast(ctx, crate::i18n::tr("Scene analyzed: Relight now follows the photo's shapes"));
+                ctx.request_repaint();
+            }
+            Some(Err(why)) => self.toast_error(ctx, why),
+            None => {}
+        }
+        let status = self.session.relief.status();
+        if status.analyzing.is_some() || status.downloading {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
     }
 
@@ -1286,6 +1306,7 @@ impl LightcraftApp {
         // panels set it again this frame while the pointer rests on a preset or profile
         self.hover_preview = None;
         self.ai_mask_detail(&ctx);
+        self.relight_scene(&ctx);
         self.place_names_outcome(&ctx);
         if self.ui.fullscreen {
             // full-screen preview: the photo alone on black
