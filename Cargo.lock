@@ -2548,9 +2548,8 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "heic-rs"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adf9dde634bb6d5b718bacd01bef80192f2334306b2f785519a0136cca7b9618"
+version = "0.1.4"
+source = "git+https://github.com/jaredt17/heic-rs?branch=fix%2F422-chroma#e3d0a074978323ccf49089703233d4831076ccb0"
 dependencies = [
  "rayon",
 ]

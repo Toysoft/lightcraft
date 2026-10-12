@@ -13,10 +13,10 @@ result matches libheif to within one code value:
 - `imir` axis 0 flips top and bottom, as libheif writes and reads it (heic-rs names it the other way);
 - a grid's ICC profile may sit on its tiles.
 
-Single pictures and grid-tiled photos, 4:2:0 and monochrome, 8- to 10-bit, alpha auxiliary images
-(other auxiliary images — HDR gain maps, depth — are ignored), the container's rotation/mirror/crop,
-ICC, EXIF and XMP, and the file's thumbnail item. 4:2:2 and 4:4:4 (Canon/Sony "HIF") are refused
-with `Error::Unsupported`: heic-rs 0.1.1 loses sync on them. Read-only.
+Single pictures and grid-tiled photos, 4:2:0, 4:2:2 (Canon and Sony "HIF") and monochrome, 8- to
+10-bit, alpha auxiliary images (other auxiliary images — HDR gain maps, depth — are ignored), the
+container's rotation/mirror/crop, ICC, EXIF and XMP, and the file's thumbnail item. 4:4:4 is
+refused with `Error::Unsupported`: heic-rs still loses sync on it. Read-only.
 
 ```rust
 let info = lightcraft_heif::probe(&bytes)?;           // size, depth, alpha: check limits first
@@ -25,7 +25,7 @@ let img = lightcraft_heif::decode(&bytes, &lightcraft_heif::Options::default())?
 let thumb = lightcraft_heif::decode_thumbnail(&bytes, 256, &Default::default())?; // Option<Decoded>
 ```
 
-Errors are `Error::Unsupported` (image sequences, overlays, 4:2:2/4:4:4, …), `Error::Limit` or
+Errors are `Error::Unsupported` (image sequences, overlays, 4:4:4, …), `Error::Limit` or
 `Error::Malformed`. It never panics: every call into heic-rs runs under `catch_unwind`, and a panic
 inside it (PhotoCraft's fuzzing found two in 0.1.1) becomes `Error::Malformed`.
 

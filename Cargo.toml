@@ -162,3 +162,7 @@ jpeg-decoder = { opt-level = 3 }
 jpeg-encoder = { opt-level = 3 }
 png = { opt-level = 3 }
 miniz_oxide = { opt-level = 3 }
+
+# Temporary: heic-rs with the 4:2:2 fix (tbraun96/heic-rs#10). Replace with the release that includes it.
+[patch.crates-io]
+heic-rs = { git = "https://github.com/jaredt17/heic-rs", branch = "fix/422-chroma" }
