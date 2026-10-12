@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (LR-VIEW-MOBILE-LAYOUT: opt-in mobile layout — Window ▸ Mobile Layout; rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -50,12 +50,12 @@ cited here still exists. Formerly docs/parity.md.
 | V. Preferences (PREF) | 6 | 2 | 2 | 2 | 1/1 (100%) | 4/5 (80%) |
 | W. Cloud & AI infrastructure (CLOUD / AI) | 1 | 0 | 1 | 2 | — | — |
 | X. Cross-cutting behaviours (BEHAV) | 23 | 6 | 1 | 1 | 8/8 (100%) | 7/10 (70%) |
-| Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
+| Y. Menus | 85 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 76 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
 | Lightroom Classic extras | 34 | 16 | 35 | 8 | — | 24/26 (92%) |
-| **Total** | 407 | 50 | 73 | 35 | 192/200 (96%) | 145/157 (92%) |
+| **Total** | 409 | 51 | 72 | 35 | 193/201 (96%) | 145/157 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.5%** of 530 in-scope rows — P0 98.0% of 200 · P1 95.2% of 157 · P2 49.7% of 172.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.7%** of 532 in-scope rows — P0 98.0% of 201 · P1 95.2% of 157 · P2 50.3% of 173.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -567,6 +567,7 @@ visible menu bar yet: the menu model is only exposed through the control channel
 | MENU-PHOTO-MOVETOCLOUD | Move/copy to cloud | OOS | 🚫 | | |
 | MENU-WINDOW-MINIMIZE | Minimize / zoom | P1 | ✅ | `apps/lightcraft/src/native_menu.rs` | the system's Minimize (⌘M) and Zoom items at the top of Window |
 | MENU-WINDOW-PANELS | Panel switches | P0 | ✅ | `cmd:panel.edit`, `cmd:panel.crop`, `cmd:panel.remove`, `cmd:panel.masking`, `cmd:panel.presets`, `cmd:panel.versions` | |
+| MENU-WINDOW-MOBILE | Mobile layout | P2 | ✅ | `cmd:ui.dock.mobile`, `cmd:ui.dock.reset` | an extra (the reference app has no such item): the opt-in photo-first arrangement — the photo fills the window and Library, Tools and Presets become one accordion strip along the bottom. Window ▸ Mobile Layout switches to it; Reset Panel Layout returns. See [mobile-layout.md](mobile-layout.md). |
 | MENU-WINDOW-BRINGFRONT | Bring all to front | P2 | ✅ | `apps/lightcraft/src/native_menu.rs` | the system's item at the end of Window |
 | MENU-HELP-HELP | Help | P2 | ✅ | `cmd:app.help` | opens the documentation |
 | MENU-HELP-TUTORIALS | Tutorials | OOS | 🚫 | | |

@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (zoom row: Compare and Reference sharp at 1:1) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (LR-VIEW-MOBILE-LAYOUT: the opt-in mobile layout, Window ▸ Mobile Layout; zoom row: Compare and Reference sharp at 1:1) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 How LightCraft's interaction compares with Lightroom's: views, panels, tools and handles, modifier
 keys, shortcuts, zoom, context menus and feel. Rows for individual menu items and shortcuts live in
@@ -8,13 +8,17 @@ keys, shortcuts, zoom, context menus and feel. Rows for individual menu items an
 assessment and the notes that don't fit a row. Visual reference for agents: `plan/lightroom/`
 (local, gitignored; `10-observed-ui.md` and screenshots).
 
+One arrangement here is an addition rather than a parity item: the opt-in photo-first mobile layout
+(Window ▸ Mobile Layout, `cmd:ui.dock.mobile`), which neither target has an equivalent of. It is
+described in [mobile-layout.md](mobile-layout.md).
+
 ## Measured counts (2026-10-10)
 
-- 226 engine commands (`crates/engine/src/cmd/`, 30 modules) and 143 UI commands (`UI_COMMANDS` in
+- 226 engine commands (`crates/engine/src/cmd/`, 30 modules) and 144 UI commands (`UI_COMMANDS` in
   `crates/ui-egui/src/menus.rs`, 73 with a shortcut) plus 10 language commands; 23 secondary
   shortcut bindings (`ALIASES`, `crates/ui-egui/src/shortcuts.rs`); a keymap editor.
 - 122 develop controls plus 10 indexed templates (`crates/develop/src/controls.rs`).
-- Checklist: menus 95.3% (86 in-scope rows), desktop shortcuts 94.4% (81 rows), Classic extras
+- Checklist: menus 95.5% (89 in-scope rows), desktop shortcuts 94.4% (81 rows), Classic extras
   48.2% (82 rows), measured by recounting [parity-checklist.md](parity-checklist.md).
 - 31 panel modules (`crates/ui-egui/src/panels/`), 26 context-menu sites.
 
@@ -78,5 +82,6 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | LR-VIEW-MOBILE-LAYOUT: an opt-in photo-first arrangement (Window ▸ Mobile Layout) in which Library, Tools and Presets become one accordion strip under the photo; an addition, not a parity item, described in [mobile-layout.md](mobile-layout.md) |
 | 2026-10-11 | minor | Zoom row: Compare and Reference get zoom windows; what remains of LR-VIEW-ZOOM is overlays and soft proofing |
 | 2026-10-10 | major | Created: measured command and shortcut counts, assessment by area, estimates; moved the shortcut conflicts section here from the checklist |
