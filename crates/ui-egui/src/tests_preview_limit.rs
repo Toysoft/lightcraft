@@ -863,6 +863,36 @@ mod in_the_loupe {
         assert!(a.right() <= b.left() + 0.5, "{a:?} / {b:?}");
     }
 
+    // Given a monitor profile in use (Settings ▸ Display), zoomed to 1:1 the window is drawn, in
+    // the loupe and in each Compare pane, as without one (#1354). A view's job is keyed for the
+    // display it renders for, and the window was remembered under the key it had before, so no
+    // window texture ever matched: the zoomed view stayed the canvas-sized render, magnified.
+    #[test]
+    fn with_a_display_profile_the_windows_are_drawn() {
+        let dir = std::env::temp_dir().join(format!("lightcraft-display-window-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p3 = dir.join("p3.icc");
+        std::fs::write(&p3, lightcraft_codecs::icc::write_named(lightcraft_codecs::NamedSpace::DisplayP3)).unwrap();
+        let (mut h, _) = detail();
+        let r = h.request("engine.execute", json!({"command": "app.displayProfile", "params": {"path": p3.to_string_lossy()}}), T);
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.app.renderer.display_id().is_some());
+        h.request("engine.execute", json!({"command": "view.zoom100"}), T);
+        h.settle(SETTLE);
+        h.step();
+        assert!(h.app.renderer.textures.contains_key(&Slot::Region), "the window rendered");
+        assert!(!drawn(&h, Slot::Region).is_empty(), "and it is painted over the loupe");
+        h.request("engine.execute", json!({"command": "view.compare"}), T);
+        h.app.ui.zoom = crate::state::Zoom::Percent(100.0);
+        h.settle(SETTLE);
+        h.step();
+        for i in 0..2u8 {
+            assert!(h.app.renderer.textures.contains_key(&Slot::CompareRegion(i)), "pane {i}: the window rendered");
+            assert!(!drawn(&h, Slot::CompareRegion(i)).is_empty(), "pane {i}: and it is painted");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // Given Reference view at 1:1, the reference and the active photo both get windows; a slider
     // drag on the active photo asks for no new window until it ends
     #[test]
