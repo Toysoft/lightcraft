@@ -142,6 +142,8 @@ mod tests_titlebar;
 #[cfg(test)]
 mod tests_type_contrast;
 #[cfg(test)]
+mod tests_type_fit;
+#[cfg(test)]
 mod tests_type_on_photo;
 #[cfg(test)]
 mod tests_type_readout;
