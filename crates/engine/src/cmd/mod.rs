@@ -181,6 +181,12 @@ pub(crate) fn names_photos(p: &Value) -> bool {
     ["ids", "id"].iter().any(|k| p.get(k).is_some_and(|v| !v.is_null()))
 }
 
+/// Refuse `action` for a Nextcloud photo: it reads or writes beside the original, which stays on
+/// the server.
+pub(crate) fn local_only(path: &str, action: &str) -> Result<()> {
+    if lightcraft_catalog::is_remote(path) { Err(EngineError::Other(format!("{action} isn't available for Nextcloud photos"))) } else { Ok(()) }
+}
+
 pub(crate) fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }

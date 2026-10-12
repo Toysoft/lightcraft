@@ -47,6 +47,9 @@ pub struct ImportRequest {
 /// worker thread, with the same options).
 pub fn import_params(s: &Session, p: &Value) -> Result<ImportRequest> {
     let paths = strs(p, "paths");
+    if paths.iter().any(|x| lightcraft_catalog::is_remote(x)) {
+        return Err(bad("library.import", "use library.importNextcloud for Nextcloud folders"));
+    }
     let mode = match str_param(p, "mode").unwrap_or("add") {
         "add" => crate::import::ImportMode::Add,
         "copy" => crate::import::ImportMode::Copy,

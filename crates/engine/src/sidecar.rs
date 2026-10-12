@@ -65,6 +65,9 @@ pub fn sidecar_path(original: &str, naming: SidecarNaming) -> PathBuf {
 /// An existing sidecar for `original`: the preferred naming first, then the other one (also
 /// accepting an upper-case `.XMP`).
 pub fn find_sidecar(original: &str, naming: SidecarNaming) -> Option<PathBuf> {
+    if lightcraft_catalog::is_remote(original) {
+        return None;
+    }
     let other = if naming == SidecarNaming::Stem { SidecarNaming::Full } else { SidecarNaming::Stem };
     [naming, other]
         .into_iter()
@@ -459,6 +462,9 @@ fn file_path(p: &Photo) -> Option<&str> {
 
 /// The XMP packet that describes a photo on disk: its sidecar, else (raw/DNG) the embedded XMP.
 pub fn read_packet(original: &str, kind: MediaKind, naming: SidecarNaming) -> Option<(String, PathBuf)> {
+    if lightcraft_catalog::is_remote(original) {
+        return None;
+    }
     if let Some(sc) = find_sidecar(original, naming)
         && let Ok(s) = std::fs::read_to_string(&sc)
     {
@@ -549,6 +555,7 @@ impl Session {
             return Err(EngineError::Other(format!("{} is a virtual copy: its settings live only in the library", p.file_name)));
         }
         let orig = file_path(p).ok_or_else(|| EngineError::Other(format!("{} is not a file on disk", p.file_name)))?;
+        crate::cmd::local_only(orig, "Saving XMP")?;
         let naming = owners.naming(p, self.xmp.naming);
         let preferred = sidecar_path(orig, naming);
         let other = if naming == SidecarNaming::Stem { SidecarNaming::Full } else { SidecarNaming::Stem };
@@ -639,7 +646,7 @@ impl Session {
         }
         let owners = StemOwners::of(&self.catalog);
         for id in ids {
-            if self.catalog.photo(id).is_some_and(|p| file_path(p).is_some() && p.copy_of.is_none())
+            if self.catalog.photo(id).is_some_and(|p| file_path(p).is_some_and(|f| !lightcraft_catalog::is_remote(f)) && p.copy_of.is_none())
                 && let Err(e) = self.save_sidecar_with(id, &owners)
             {
                 log::warn!("auto-write XMP: {e}");

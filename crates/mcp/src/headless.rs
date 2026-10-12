@@ -181,6 +181,10 @@ pub fn expand_paths(paths: &[String]) -> Vec<String> {
     let photo = |p: &Path| p.extension().is_some_and(|e| PHOTO_EXTENSIONS.contains(&e.to_string_lossy().to_lowercase().as_str()));
     let mut out = Vec::new();
     for p in paths {
+        if lightcraft_engine::catalog::is_remote(p) {
+            out.push(p.clone());
+            continue;
+        }
         let path = Path::new(p);
         if path.is_dir() {
             let w = lightcraft_engine::walk::files_in(path, None, lightcraft_engine::walk::Limits::default(), photo);
@@ -211,6 +215,12 @@ pub fn write_image(path: &Path, img: &Rgba8, quality: u8) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `nextcloud://` path is not a file-system path: it must not be made absolute.
+    #[test]
+    fn expand_paths_leaves_remote_paths_alone() {
+        assert_eq!(expand_paths(&["nextcloud://a@b/x.jpg".into()]), ["nextcloud://a@b/x.jpg"]);
+    }
 
     /// Headless sessions look for the SAM 3 model where the desktop app does, and `segment.model.status` reports it (issue #619).
     #[test]

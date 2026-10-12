@@ -41,7 +41,7 @@ pub fn missing(s: &Session) -> Vec<(PhotoId, String)> {
     if cfg!(target_arch = "wasm32") {
         return Vec::new();
     }
-    missing_with(&s.catalog, |f| Path::new(f).exists())
+    missing_with(&s.catalog, s.media.availability.probe().as_ref())
 }
 
 /// Whether photo `id` is in scope and its file is gone (the Missing Photos view checks only
@@ -60,6 +60,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "photo.relink";
     let id = p.get("id").and_then(Value::as_u64).map(PhotoId).or(s.active()).ok_or_else(|| bad(C, "no photo (give `id`)"))?;
     let path = str_param(p, "path").ok_or_else(|| bad(C, "missing `path`"))?;
+    super::local_only(path, "Relinking")?;
     let abs = std::path::absolute(path).map_err(|e| bad(C, e.to_string()))?;
     if !abs.is_file() {
         return Err(bad(C, format!("{path}: no such file")));
@@ -212,14 +213,21 @@ impl FindPlan {
 ///
 /// Files that are already some photo's original, or that another photo was just matched with,
 /// are not used.
-pub fn plan_find_missing(candidates: &[FindCandidate], folder: &str) -> std::result::Result<FindPlan, String> {
+pub fn plan_find_missing(
+    candidates: &[FindCandidate],
+    folder: &str,
+    exists: &crate::availability::ExistsProbe,
+) -> std::result::Result<FindPlan, String> {
+    if lightcraft_catalog::is_remote(folder) {
+        return Err("Find Missing Photos isn't available for Nextcloud folders".into());
+    }
     if !Path::new(folder).is_dir() {
         return Err(format!("{folder}: not a folder"));
     }
     if cfg!(target_arch = "wasm32") {
         return Ok(FindPlan::default());
     }
-    let lost: Vec<&FindCandidate> = candidates.iter().filter(|c| !Path::new(&c.path).exists()).collect();
+    let lost: Vec<&FindCandidate> = candidates.iter().filter(|c| !lightcraft_catalog::is_remote(&c.path) && !exists(&c.path)).collect();
     if lost.is_empty() {
         return Ok(FindPlan::default());
     }
@@ -332,7 +340,7 @@ fn find_missing(s: &mut Session, p: &Value) -> Result<Value> {
         return commit_find(s, FindPlan::from_json(p));
     }
     let folder = str_param(p, "folder").ok_or_else(|| bad(C, "missing `folder`"))?;
-    let plan = plan_find_missing(&find_candidates(&s.catalog), folder).map_err(|e| bad(C, e))?;
+    let plan = plan_find_missing(&find_candidates(&s.catalog), folder, &s.media.availability.probe()).map_err(|e| bad(C, e))?;
     commit_find(s, plan)
 }
 

@@ -934,6 +934,9 @@ impl Session {
     /// committed as a smaller undoable rename, so the library points at them (nothing goes
     /// missing), and the error lists them (old → new).
     pub fn apply_rename(&mut self, plans: &[RenamePlan]) -> Result<usize> {
+        for path in plans.iter().filter_map(|p| p.from_path.as_deref()) {
+            crate::cmd::local_only(path, "Renaming files")?;
+        }
         self.apply_rename_with(&RealFs, plans)
     }
 

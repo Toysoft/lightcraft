@@ -505,7 +505,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(query "photo.smartPreview", "Smart Preview Status", [], None, "{id?} → {smartPreview: bool, originalOnline: bool}", always, |s, p| {
             let id = s.targets(p).first().copied().ok_or_else(|| bad("photo.smartPreview", "no photo"))?;
             let online = match s.catalog.photo(id).map(|p| p.source.clone()) {
-                Some(lightcraft_catalog::Source::File { path }) => std::path::Path::new(&path).exists(),
+                Some(lightcraft_catalog::Source::File { path }) => (s.media.availability.probe())(&path),
                 _ => true,
             };
             Ok(json!({"smartPreview": has_smart_preview(s, id), "originalOnline": online}))

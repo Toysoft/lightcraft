@@ -393,7 +393,7 @@ impl Session {
         let (key, mut d) = self.segment_key(id).ok_or("no such photo")?;
         let p = self.catalog.photo(id).ok_or("no such photo")?.clone();
         let missing = match &p.source {
-            lightcraft_catalog::Source::File { path } if !std::path::Path::new(path).exists() => Some(path.clone()),
+            lightcraft_catalog::Source::File { path } if !(self.media.availability.probe())(path) => Some(path.clone()),
             _ => None,
         };
         let render = match region {

@@ -1353,7 +1353,8 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                 return Some(Err("Find Missing Photos is already searching".into()));
             }
             let candidates = lightcraft_engine::cmd::missing::find_candidates(&app.session.catalog);
-            let work = move || lightcraft_engine::cmd::missing::plan_find_missing(&candidates, &folder);
+            let exists = app.session.media.availability.probe();
+            let work = move || lightcraft_engine::cmd::missing::plan_find_missing(&candidates, &folder, &exists);
             let done = |app: &mut LightcraftApp, ctx: &egui::Context, plan: Result<lightcraft_engine::cmd::missing::FindPlan, String>| {
                 // relinked under the session as it is now: photos relinked meanwhile and files
                 // now in use are skipped

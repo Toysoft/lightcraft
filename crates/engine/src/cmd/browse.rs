@@ -20,6 +20,7 @@ use crate::{Browse, LibrarySource, Result, Session};
 fn browse(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "library.browse";
     let path = str_param(p, "path").ok_or_else(|| bad(C, "missing `path`"))?;
+    super::local_only(path, "Browsing")?;
     let dir = std::path::absolute(Path::new(path)).map_err(|e| bad(C, e.to_string()))?;
     if !dir.is_dir() {
         return Err(bad(C, format!("{path}: not a folder")));
@@ -311,6 +312,7 @@ fn create_folder(s: &mut Session, p: &Value) -> Result<Value> {
         .map(str::trim)
         .filter(|n| !n.is_empty() && !n.contains(['/', '\\']) && *n != "." && *n != "..")
         .ok_or_else(|| bad(C, "give a folder name (no slashes)"))?;
+    super::local_only(parent, "Creating folders")?;
     if !Path::new(parent).is_dir() {
         return Err(bad(C, format!("{parent} is not a folder (offline, moved or deleted?)")));
     }
@@ -333,6 +335,7 @@ fn create_folder(s: &mut Session, p: &Value) -> Result<Value> {
 fn move_to_folder(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "photo.moveToFolder";
     let folder = folder_param(p, "folder").ok_or_else(|| bad(C, "missing folder"))?;
+    super::local_only(folder, "Moving files")?;
     let dir = Path::new(folder);
     if !dir.is_dir() {
         return Err(bad(C, format!("{folder} is not a folder (create it first with folder.create)")));
@@ -352,6 +355,7 @@ fn move_to_folder(s: &mut Session, p: &Value) -> Result<Value> {
         let lightcraft_catalog::Source::File { path } = &ph.source else {
             return Err(bad(C, format!("{} has no file on disk", ph.file_name)));
         };
+        super::local_only(path, "Moving files")?;
         if plans.iter().any(|pl| pl.from_path.as_deref() == Some(path.as_str())) {
             continue; // a virtual copy of a photo already moving
         }
@@ -419,6 +423,9 @@ fn follow_library_folder(chosen: &mut Option<String>, from: &str, to: &str) {
 /// the photos inside, as one undo step: undo renames the folder back and restores the photos'
 /// paths, redo repeats the move — each refused (and reported) when the destination is taken.
 pub(crate) fn move_folder(s: &mut Session, from: &str, to: &str) -> std::result::Result<usize, String> {
+    for path in [from, to] {
+        super::local_only(path, "Renaming folders").map_err(|e| e.to_string())?;
+    }
     let (src, dst) = (Path::new(from), Path::new(to));
     if !src.is_dir() {
         return Err(format!("{from} is not a folder"));

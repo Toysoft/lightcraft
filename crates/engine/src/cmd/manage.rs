@@ -10,7 +10,13 @@ use crate::Result;
 fn rename_args(s: &crate::Session, p: &Value, c: &str) -> Result<(Vec<lightcraft_catalog::PhotoId>, String, usize)> {
     let template = str_param(p, "template").ok_or_else(|| bad(c, "missing `template`"))?.to_string();
     let start = p.get("start").and_then(Value::as_u64).unwrap_or(1) as usize;
-    Ok((s.targets(p), template, start))
+    let ids = s.targets(p);
+    for ph in ids.iter().filter_map(|id| s.catalog.photo(*id)) {
+        if let lightcraft_catalog::Source::File { path } = &ph.source {
+            super::local_only(path, "Renaming files")?;
+        }
+    }
+    Ok((ids, template, start))
 }
 
 /// A named set of colour-label names (red, yellow, green, blue, purple; empty = the colour's name).

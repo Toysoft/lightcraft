@@ -1021,6 +1021,8 @@ mod tests_prefs;
 #[cfg(test)]
 mod tests_process;
 #[cfg(test)]
+mod tests_remote_paths;
+#[cfg(test)]
 mod tests_segment;
 #[cfg(test)]
 mod tests_settings_files;

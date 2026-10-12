@@ -201,8 +201,9 @@ fn find_missing_planned_on_a_worker_matches_the_command() {
     let (dir, mut s) = renamed_and_ambiguous_scene("missing-worker");
     let folder = dir.join("moved").to_string_lossy().to_string();
     let candidates = find_candidates(&s.catalog);
+    let exists = s.media.availability.probe();
     let f = folder.clone();
-    let plan = std::thread::spawn(move || plan_find_missing(&candidates, &f)).join().unwrap().unwrap();
+    let plan = std::thread::spawn(move || plan_find_missing(&candidates, &f, &exists)).join().unwrap().unwrap();
     assert_eq!((plan.found.len(), plan.missing, plan.ambiguous.len()), (2, 1, 1), "{plan:?}");
     let applied = s.execute("library.findMissing", &plan.to_json()).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
@@ -220,7 +221,7 @@ fn find_missing_planned_on_a_worker_matches_the_command() {
 fn find_missing_plan_is_rechecked_when_applied() {
     use crate::cmd::missing::{find_candidates, plan_find_missing};
     let (dir, mut s) = renamed_and_ambiguous_scene("missing-recheck");
-    let plan = plan_find_missing(&find_candidates(&s.catalog), &dir.join("moved").to_string_lossy()).unwrap();
+    let plan = plan_find_missing(&find_candidates(&s.catalog), &dir.join("moved").to_string_lossy(), &s.media.availability.probe()).unwrap();
     let to = |name: &str| plan.found.iter().find(|f| f.from.ends_with(name)).unwrap().clone();
     let (a, b) = (to("a.png"), to("b.png"));
     // meanwhile: a is relinked by hand (elsewhere), and the ambiguous c is pointed at b's file

@@ -165,6 +165,7 @@ impl SyncInput {
         if path.is_empty() {
             return Err(invalid("missing `path`"));
         }
+        crate::cmd::local_only(path, "Synchronize Folder")?;
         if lightcraft_catalog::folders::is_startup_disk(path) {
             return Err(invalid("choose a folder, not the whole startup disk"));
         }

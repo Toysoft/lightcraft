@@ -347,7 +347,10 @@ impl Session {
         for id in ids {
             let p = self.catalog.photo(*id).ok_or(lightcraft_catalog::CatalogError::NoPhoto(*id))?;
             match &p.source {
-                Source::File { path } => sources.push((*id, path.clone())),
+                Source::File { path } => {
+                    crate::cmd::local_only(path, "Photo Merge")?;
+                    sources.push((*id, path.clone()))
+                }
                 Source::Demo { .. } => return Err(EngineError::Other(format!("{} is a demo photo; Photo Merge needs photo files", p.file_name))),
             }
         }

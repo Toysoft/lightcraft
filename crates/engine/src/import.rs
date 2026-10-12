@@ -614,7 +614,7 @@ pub fn scan_with(mut input: ScanInput, paths: &[String], progress: &ScanProgress
         .iter()
         .map(|f| {
             let info = input.cache.remove(f)?;
-            let size = std::fs::metadata(f).map(|m| m.len()).ok();
+            let size = if lightcraft_catalog::is_remote(f) { None } else { std::fs::metadata(f).map(|m| m.len()).ok() };
             (size.is_none() || size == Some(info.file_size)).then_some(info)
         })
         .collect();
@@ -911,9 +911,11 @@ impl ImportJob {
             .iter()
             .map(|f| {
                 // (the web's files are not std::fs files: kept as probed)
-                self.cache
-                    .remove(f)
-                    .filter(|info| cfg!(target_arch = "wasm32") || std::fs::metadata(f).is_ok_and(|m| m.is_file() && m.len() == info.file_size))
+                self.cache.remove(f).filter(|info| {
+                    cfg!(target_arch = "wasm32")
+                        || lightcraft_catalog::is_remote(f)
+                        || std::fs::metadata(f).is_ok_and(|m| m.is_file() && m.len() == info.file_size)
+                })
             })
             .collect();
         let missing: Vec<String> = todo.iter().zip(&cached).filter(|(_, c)| c.is_none()).map(|(f, _)| f.clone()).collect();
@@ -1223,10 +1225,10 @@ fn run_transfer(t: Transfer, file_bytes: Option<&crate::merge::ByteReader>) -> P
 
 /// A trashed photo's file is not where the library had it (never on the web, where paths are
 /// storage keys, not files).
-fn trashed_file_is_gone(cat: &lightcraft_catalog::Catalog, id: PhotoId) -> bool {
+fn trashed_file_is_gone(cat: &lightcraft_catalog::Catalog, exists: &crate::availability::ExistsProbe, id: PhotoId) -> bool {
     !cfg!(target_arch = "wasm32")
         && match cat.photo(id).map(|p| &p.source) {
-            Some(Source::File { path }) => !Path::new(path).exists(),
+            Some(Source::File { path }) => !exists(path),
             _ => false,
         }
 }
@@ -1277,7 +1279,7 @@ pub fn commit_prepared(s: &mut Session, opts: &ImportOptions, now: &str, prepare
                             ops.push(Op::SetDeleted { id, deleted: false });
                             // matched by content from another path, and the file the record
                             // points at is gone (moved, renamed): the photo follows the file
-                            if reason == "content" && trashed_file_is_gone(&s.catalog, id) {
+                            if reason == "content" && trashed_file_is_gone(&s.catalog, &s.media.availability.probe(), id) {
                                 ops.push(crate::cmd::missing::relink_op(id, &path));
                             }
                             report.restored.push(id.0);

@@ -56,9 +56,20 @@ pub(crate) fn write_dng_with(file_bytes: Option<&crate::merge::ByteReader>, path
     Ok(out.to_string_lossy().to_string())
 }
 
+/// Refuse `action` when any of `ids` is a Nextcloud photo (it writes beside the original).
+fn refuse_remote(s: &Session, ids: &[lightcraft_catalog::PhotoId], action: &str) -> Result<()> {
+    for ph in ids.iter().filter_map(|id| s.catalog.photo(*id)) {
+        if let Source::File { path } = &ph.source {
+            super::local_only(path, action)?;
+        }
+    }
+    Ok(())
+}
+
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "photo.convertToDng";
     let ids = s.targets(p);
+    refuse_remote(s, &ids, "Convert to DNG")?;
     let mut ops = Vec::new();
     let mut converted = Vec::new();
     let mut skipped = Vec::new();
@@ -156,6 +167,7 @@ fn edit_external(s: &mut Session, p: &Value) -> Result<Value> {
         conflict: crate::export::Conflict::Unique,
         ..Default::default()
     };
+    refuse_remote(s, &ids, "Edit In")?;
     let mut copies = Vec::new();
     for id in ids {
         copies.push(edit_copy(s, p, id, &opts)?);
@@ -320,7 +332,9 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
 fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "photo.duplicate";
     let mut made = Vec::new();
-    for id in s.targets(p) {
+    let ids = s.targets(p);
+    refuse_remote(s, &ids, "Duplicate")?;
+    for id in ids {
         let Some(ph) = s.catalog.photo(id).map(|p| (**p).clone()) else { continue };
         let Source::File { path } = &ph.source else { return Err(bad(C, "a generated demo photo has no file to duplicate")) };
         let src = Path::new(path);
