@@ -975,6 +975,15 @@ pub enum Dialog {
     ConfirmDelete {
         count: usize,
     },
+    BuildSmartPreviews {
+        params: serde_json::Value,
+        path: std::path::PathBuf,
+        count: usize,
+        estimated_bytes: u64,
+        checking: bool,
+        free_bytes: Option<u64>,
+        space_error: Option<String>,
+    },
     /// Confirm taking a folder's photos out of the library (`library.removeFolder`).
     RemoveFolder {
         path: String,
