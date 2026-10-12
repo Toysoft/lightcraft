@@ -2145,5 +2145,14 @@
   "Adding to Apple Photos…": "Додавання до Apple Фото…",
   "not added to Apple Photos (cancelled)": "не додано до Apple Фото (скасовано)",
   "The first time, macOS asks whether LightCraft may control Photos.": "Першого разу macOS запитає, чи може LightCraft керувати програмою «Фото».",
-  "Adding to Apple Photos": "Додавання до Apple Фото"
+  "Adding to Apple Photos": "Додавання до Apple Фото",
+  "Timelapse Video…": "Відео таймлапс…",
+  "Export Timelapse Video": "Експорт відео таймлапс",
+  "Timelapse Video": "Відео таймлапс",
+  "Choose File…": "Вибрати файл…",
+  "Frames per Photo": "Кадрів на фото",
+  "Cross-Fade Frames": "Кадрів переходу",
+  "Fit (letterbox)": "Вписати (поля)",
+  "Fill (crop)": "Заповнити (обрізати)",
+  "Each photo with its own edits, in the order shown. No audio.": "Кожне фото зі своїми правками, у показаному порядку. Без звуку."
 }

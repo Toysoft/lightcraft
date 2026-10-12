@@ -1951,5 +1951,14 @@
   "Adding to Apple Photos…": "Añadiendo a Fotos de Apple…",
   "not added to Apple Photos (cancelled)": "no se añadieron a Fotos de Apple (cancelado)",
   "The first time, macOS asks whether LightCraft may control Photos.": "La primera vez, macOS pregunta si LightCraft puede controlar Fotos.",
-  "Adding to Apple Photos": "Añadiendo a Fotos de Apple"
+  "Adding to Apple Photos": "Añadiendo a Fotos de Apple",
+  "Timelapse Video…": "Vídeo time-lapse…",
+  "Export Timelapse Video": "Exportar vídeo time-lapse",
+  "Timelapse Video": "Vídeo time-lapse",
+  "Choose File…": "Elegir archivo…",
+  "Frames per Photo": "Fotogramas por foto",
+  "Cross-Fade Frames": "Fotogramas de fundido",
+  "Fit (letterbox)": "Encajar (bandas)",
+  "Fill (crop)": "Rellenar (recortar)",
+  "Each photo with its own edits, in the order shown. No audio.": "Cada foto con sus propios ajustes, en el orden mostrado. Sin audio."
 }
