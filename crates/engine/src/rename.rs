@@ -1241,6 +1241,8 @@ pub(crate) mod tests {
 
     /// Compare the unfinished operation and every observed packet after partial progress.
     /// Companion order is incidental; paths and recorded content versions are exact.
+    /// Only the `#[cfg(unix)]` sidecar-repair tests use it.
+    #[cfg(unix)]
     pub(crate) fn assert_repair_packets(actual: &SidecarMove, unfinished: &SidecarMove, packets: &[(PathBuf, &[u8])]) {
         let mut expected = unfinished.clone();
         expected.companions =
@@ -1311,10 +1313,13 @@ pub(crate) mod tests {
                     assert_eq!(to.join(old_sidecar.file_name().unwrap()).exists(), copied);
                     for (step, current) in [("edit.undo", &from), ("edit.redo", &to)] {
                         s.execute(step, &serde_json::json!({})).unwrap();
-                        assert_eq!(
-                            s.catalog.photo(PhotoId(1)).unwrap().source,
-                            Source::File { path: current.join("b.jpg").to_string_lossy().into_owned() }
-                        );
+                        // Compare as `Path`: the recorded source is the native path the move wrote
+                        // (`\` on Windows), while `join` keeps the `/` of its argument, and only
+                        // `Path`'s equality normalizes separators.
+                        let Source::File { path } = &s.catalog.photo(PhotoId(1)).unwrap().source else {
+                            panic!("the photo is still a file source");
+                        };
+                        assert_eq!(std::path::Path::new(path), current.join("b.jpg"), "{step}");
                         assert_eq!(std::fs::read(current.join(sidecar.file_name().unwrap())).unwrap(), b"Retained edits");
                         assert_eq!(current.join(old_sidecar.file_name().unwrap()).exists(), copied);
                     }
