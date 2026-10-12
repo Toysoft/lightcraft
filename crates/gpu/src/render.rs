@@ -33,6 +33,22 @@ pub struct GpuStages {
 
 const CAPACITY: usize = 2;
 
+/// The device copy of `of` kept in `slot`: the one there when it was uploaded from this very `of`,
+/// else a fresh upload (the previous buffer freed first) that replaces it. Also returns whether
+/// it uploaded.
+fn upload_once<T>(slot: &Mutex<Option<(Arc<T>, Arc<Buf>)>>, of: &Arc<T>, upload: impl FnOnce() -> Buf) -> (Arc<Buf>, bool) {
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, b)) = &*g
+        && Arc::ptr_eq(k, of)
+    {
+        return (b.clone(), false);
+    }
+    *g = None; // free the previous buffer first
+    let b = Arc::new(upload());
+    *g = Some((of.clone(), b.clone()));
+    (b, true)
+}
+
 #[derive(Clone)]
 struct Entry {
     src: Arc<Rgb32f>,
@@ -69,31 +85,16 @@ impl GpuStages {
     }
 
     fn source(&self, src: &Arc<Rgb32f>, upload: impl FnOnce() -> Buf) -> Arc<Buf> {
-        let mut g = self.source.lock().unwrap_or_else(|e| e.into_inner());
-        match &*g {
-            Some((s, b)) if Arc::ptr_eq(s, src) => b.clone(),
-            _ => {
-                *g = None; // free the previous photo's buffer first
-                let b = Arc::new(upload());
-                *g = Some((src.clone(), b.clone()));
-                b
-            }
-        }
+        upload_once(&self.source, src, upload).0
     }
 
     /// The device copy of `map`'s coefficients, uploaded only when the map changes.
     fn haze(&self, map: &Arc<HazeMap>, upload: impl FnOnce() -> Buf) -> Arc<Buf> {
-        let mut g = self.haze.lock().unwrap_or_else(|e| e.into_inner());
-        match &*g {
-            Some((m, b)) if Arc::ptr_eq(m, map) => b.clone(),
-            _ => {
-                *g = None;
-                self.haze_uploads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let b = Arc::new(upload());
-                *g = Some((map.clone(), b.clone()));
-                b
-            }
+        let (b, uploaded) = upload_once(&self.haze, map, upload);
+        if uploaded {
+            self.haze_uploads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
+        b
     }
 
     /// Haze maps these stages uploaded so far.

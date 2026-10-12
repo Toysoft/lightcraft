@@ -398,10 +398,18 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
     let srgb = srgb_lut();
     let peak = fp.peak;
     let hdr = peak > 1.0;
-    // the amount's per-render values (pixels with mask Dehaze compute their own)
-    let haze_amount = p.haze.as_ref().map(|m| crate::haze::Amount::new(m, dehaze));
+    // V3 Dehaze's per-render values: the map's context at this exposure, the global amount's
+    // (pixels with mask Dehaze compute their own) and where each output column samples the map
+    let haze = p.haze.as_ref().and_then(|m| Some((crate::haze::Ctx::new(m, gain)?, crate::haze::Amount::new(m, dehaze))));
+    let haze_cols: Vec<crate::haze::Axis> = match (&p.haze, &haze) {
+        (Some(m), Some(_)) => (0..w).map(|x| m.column((vx + x as f32 + 0.5) / vw)).collect(),
+        _ => Vec::new(),
+    };
     let mut out = vec![T::default(); w * h];
     for_rows(&mut out, w, |y, row| {
+        // the map's two proxy rows around this output row, blended once (on the first pixel that
+        // dehazes)
+        let mut haze_row: Option<crate::haze::HazeRow> = None;
         for (x, px) in row.iter_mut().enumerate() {
             let i = y * w + x;
             let raw = p.img.data[i];
@@ -454,13 +462,11 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
             {
                 // V3: the whole frame's haze map, sampled where this pixel sits in the whole
                 // output frame (a window dehazes like the whole render)
-                let (nx, ny) = ((vx + x as f32 + 0.5) / vw, (vy + y as f32 + 0.5) / vh);
-                if gain > 0.0 && gain.is_finite() {
-                    let am = match haze_amount {
-                        Some(am) if l_dehaze == 0.0 => am,
-                        _ => crate::haze::Amount::new(map, dz),
-                    };
-                    c = crate::haze::dehaze_at(map, nx, ny, c.map(|v| v / gain), gain, &am);
+                if let Some((ctx, global)) = &haze {
+                    let hr = haze_row.get_or_insert_with(|| map.row((vy + y as f32 + 0.5) / vh));
+                    let (a, b) = haze_cols.get(x).map_or((0.0, 0.0), |col| hr.coeffs(col));
+                    let am = if l_dehaze == 0.0 { *global } else { crate::haze::Amount::new(map, dz) };
+                    c = crate::haze::dehaze_at(ctx, &am, a, b, c);
                 }
             } else if dz != 0.0
                 && let Some(dark) = &p.dark

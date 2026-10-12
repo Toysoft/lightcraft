@@ -39,7 +39,6 @@ const FIELDS: &[(&str, usize)] = &[
     ("HAZE_W", 1),
     ("HAZE_H", 1),
     ("HAZE_AIR", 3),
-    ("HAZE_AIR_LIN", 3),
     ("HAZE_COMP", COMP_N),
     ("OPS_IDENTITY", 1),
     ("VIBRANCE", 1),
@@ -199,7 +198,6 @@ pub fn finish_block(fp: &FinishParams, masks: &[[f32; MASK_TERMS]], present: &Pr
         p.u("HAZE_W", w as u32);
         p.u("HAZE_H", h as u32);
         p.fs("HAZE_AIR", &m.air);
-        p.fs("HAZE_AIR_LIN", &m.air_lin);
         p.fs("HAZE_COMP", &m.comp);
     }
 

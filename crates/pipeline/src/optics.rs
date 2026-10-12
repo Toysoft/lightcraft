@@ -550,7 +550,7 @@ fn estimate_lateral_ca_uncached(img: &Rgb32f) -> [f64; 2] {
 const PURPLE_HUES: (f32, f32) = (240.0, 360.0);
 const GREEN_HUES: (f32, f32) = (90.0, 210.0);
 
-fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+pub(crate) fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
     let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }

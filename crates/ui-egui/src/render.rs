@@ -486,6 +486,7 @@ impl Renderer {
         self.thumb_inputs.clear();
         self.textures.clear();
         self.stages.clear();
+        lightcraft_pipeline::haze::clear_cache();
         self.quick_tried.clear();
         self.failed.clear();
         self.prefetched.clear();
@@ -801,11 +802,17 @@ impl Renderer {
     /// Clear stage caches, least useful first, until what they hold fits [`Self::stage_budget`].
     fn trim_stages(&mut self) {
         let sizes: Vec<(Slot, usize)> = self.stages.iter().map(|(slot, c)| (*slot, c.bytes() + lightcraft_engine::gpu::stage_bytes(c))).collect();
+        let mut trimmed = false;
         for slot in stage_trim_order(&sizes, self.stage_budget()) {
             if let Some(c) = self.stages.get(&slot) {
                 c.clear();
                 self.stages_trimmed += 1;
+                trimmed = true;
             }
+        }
+        // (V3's haze maps are cached per photo, outside the views' stage caches)
+        if trimmed {
+            lightcraft_pipeline::haze::clear_cache();
         }
     }
 
@@ -816,7 +823,7 @@ impl Renderer {
         let tex: usize = self.textures.values().map(|t| t.size[0] * t.size[1] * 4).sum();
         let copies: usize = self.textures.values().filter_map(|t| t.pixels.as_ref()).map(|p| p.pixels.len() * 4).sum();
         serde_json::json!({
-            "stageCaches": {"count": self.stages.len(), "cpuBytes": cpu, "gpuBytes": gpu, "budgetBytes": self.stage_budget(), "trimmed": self.stages_trimmed, "sharedSourceBytes": lightcraft_engine::gpu::shared_source_bytes()},
+            "stageCaches": {"count": self.stages.len(), "cpuBytes": cpu, "gpuBytes": gpu, "budgetBytes": self.stage_budget(), "trimmed": self.stages_trimmed, "sharedSourceBytes": lightcraft_engine::gpu::shared_source_bytes(), "hazeMapBytes": lightcraft_pipeline::haze::cache_bytes()},
             "textures": {"count": self.textures.len(), "bytes": tex, "cpuCopyBytes": copies},
         })
     }
@@ -1370,6 +1377,7 @@ mod stage_budget_tests {
         assert!(m["stageCaches"]["budgetBytes"].as_u64().unwrap() > 0, "{m}");
         assert_eq!(m["stageCaches"]["trimmed"], 0);
         assert!(m["stageCaches"]["sharedSourceBytes"].is_u64(), "the one device copy of a big original is reported: {m}");
+        assert!(m["stageCaches"]["hazeMapBytes"].is_u64(), "and the V3 Dehaze haze maps: {m}");
     }
 }
 
