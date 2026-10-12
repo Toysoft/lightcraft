@@ -1,6 +1,6 @@
 # Gaps: where LightCraft falls short of Lightroom
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (gap 29: process V3 added for the new Dehaze; gap 29: Dehaze too strong, #1237; gap 3 no longer says only V1 exists; CR3 entry names the EOS R7 C-RAW fix and the refused CRX variants; CI and Windows / Linux entries note the 0.6.0 riscv64 build; camera colour: tone curve from black-and-white camera JPEGs; Compare and Reference get sharp zoom windows; gap 4 shrinks; gap 14: the HDR switch is read from crs XMP; gaps 2 and 10: EOS R5 Mark II CR3 verified) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (gap 29: V3 Dehaze landed, retitled to older edits and Lightroom comparison; gap 29: process V3 added for the new Dehaze; gap 29: Dehaze too strong, #1237; gap 3 no longer says only V1 exists; CR3 entry names the EOS R7 C-RAW fix and the refused CRX variants; CI and Windows / Linux entries note the 0.6.0 riscv64 build; camera colour: tone curve from black-and-white camera JPEGs; Compare and Reference get sharp zoom windows; gap 4 shrinks; gap 14: the HDR switch is read from crs XMP; gaps 2 and 10: EOS R5 Mark II CR3 verified) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 Every known shortfall, one entry each, ranked by user impact (how many Lightroom users hit it, and
 how hard it blocks them), then by effort. **Agents pick work from the top** (the first entry nobody is
@@ -43,7 +43,7 @@ Hours are Opus 5.5 agent wall-clock hours (see [target-app-parity.md](target-app
 | 26 | **Performance at scale**: 85k-photo library opens in 1.7–4.7 s; 100k grid test pending; colour NR at half resolution | ROADMAP log, gpu-pipeline.md | large-catalog users | 15–30 | [target-app-parity](target-app-parity.md#by-dimension) |
 | 27 | **Windows / Linux runtime coverage**: Windows installer UI unverified on Windows (#79); GPU path proven on Apple only; the Linux riscv64 tarball (new in 0.6.0, #844) is cross-compiled and never run beyond a QEMU smoke test | ROADMAP, issues, `release.yml` | non-Mac users find bugs first | 15–30 | [hardware-parity](hardware-parity.md) |
 | 28 | **Small Classic shortcuts and keys**: rating `[` `]`, flag cycling, filter-bar keys, F1 help, panel keys (Tab, F5–F8) | [ui-parity](ui-parity.md#shortcuts) | Classic muscle memory | 4–8 | [ui-parity](ui-parity.md) |
-| 29 | **Dehaze too strong** (LR-EDIT-EFFECTS-DEHAZE, #1237): +20–30 darkens the whole photo and crushes shadows, dark halos around bright areas from +10; the haze estimate is a Gaussian-blurred min(R,G,B) with a scalar airlight, no min filter or guided refinement, so ordinary tones count as haze | measured in #1237: +50 takes a 900 px render's median luma from 36 to 11 and pixels below 4 from 6% to 27%; checklist row 🟡 | anyone who uses Dehaze, and edits imported from Lightroom with Dehaze set | 8–15 | [process-versions](process-versions.md) |
+| 29 | **Dehaze on older edits and against Lightroom** (LR-EDIT-EFFECTS-DEHAZE, #1237): process V3's Dehaze (guided dark-channel haze map of the whole frame, gentle recovery) is in; photos edited under V1 / V2 keep the old one (+20–30 darkens the whole photo, crushes shadows, dark halos from +10) until Update to Current Process; V3 is not yet compared with Lightroom renders | measured on the hazy valley: V3 +50 −0.25 EV median, no extra black, no halo (V1 +100: −2.03 EV, 6.5 % black, 55 px halo); checklist row 🟡 | photos edited with Dehaze before V3, and anyone matching Lightroom's look | 3–6 | [process-versions](process-versions.md) |
 
 Beta-blocking gaps (B) total **~230–430 h**; with the stability and platform work they need around them,
 **~340–600 h** to beta (incl. 40–80 h for the ~92 open core-path user issues) (see [target-app-parity.md](target-app-parity.md#stage)).
@@ -73,6 +73,7 @@ Beta-blocking gaps (B) total **~230–430 h**; with the stability and platform w
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | Gap 29: process V3's Dehaze landed (CPU and GPU); retitled to what remains: V1 / V2 edits keep the old Dehaze, no Lightroom comparison yet; 8–15 h → 3–6 h |
 | 2026-10-12 | minor | Gap 29: process V3 added (the latest) to carry the new Dehaze; it renders like V2 until that lands. Gap 3 lists V1–V3 |
 | 2026-10-12 | minor | Gap 29 added: Dehaze far stronger than Lightroom's, no guided refinement (#1237; V3 dehaze in progress); gap 3's stale "only V1 exists" fixed (V1 and V2 exist) |
 | 2026-10-11 | minor | Reviewed against main after 0.6.0: CR3 entry names the CRX variants `crx.rs` still refuses and the R7 / R6 Mark II C-RAW state (decoding, not verified, so the measured numbers don't move); CI and Windows / Linux entries note the riscv64 release build (#844); R7 fix added to Closed recently. Panel docking (UI.9, #869) closes no listed gap |

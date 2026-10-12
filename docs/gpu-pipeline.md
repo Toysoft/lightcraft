@@ -153,7 +153,8 @@ walks the drive.
 - One command encoder per render; the only mid-render readback is the airlight samples (process V1 / V2
   dehaze, when the dark channel is recomputed). Process V3's Dehaze (issue #1237) needs none: its haze
   map is built on the CPU with the plan (a fixed proxy of the whole frame, cached per image) and the
-  `finish` kernel samples its a / b coefficients (uploaded in the `dark` slot) bilinearly at each
+  `finish` kernel samples its a / b coefficients (uploaded in the `dark` slot once per map and kept
+  with the view's `GpuStages`, so a tone drag uploads nothing new) bilinearly at each
   pixel's frame-normalised position, with the airlight and compensation LUT in the parameter block,
   so windows and whole renders dehaze alike. Dropped buffers are recycled (exact size, ≤ 2 GB pool) once the
   thread that dropped them has submitted — allocating and zero-filling fresh 100–300 MB buffers

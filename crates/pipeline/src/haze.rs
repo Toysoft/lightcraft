@@ -354,14 +354,19 @@ fn recover_with(map: &HazeMap, lin: [f32; 3], gain: f32, d: f32, k: f32, sky: im
     }
 }
 
-/// Whether `s` dehazes with a [`HazeMap`]: process V3 with Dehaze (the Effects slider, its section
-/// on, or any mask's) not zero.
-pub fn wanted(s: &DevelopSettings) -> bool {
-    let v3 = match s.process.process() {
+/// Whether `s` renders under process V3, whose Dehaze uses a [`HazeMap`].
+pub fn is_v3(s: &DevelopSettings) -> bool {
+    match s.process.process() {
         Process::V1 | Process::V2 => false,
         Process::V3 => true,
-    };
-    v3 && ((s.section_enabled("effects") && s.effects.dehaze != 0.0) || s.masks.iter().any(|m| m.adjust.dehaze != 0.0))
+    }
+}
+
+/// Whether `s` dehazes with a [`HazeMap`]: process V3 with Dehaze (the Effects slider, its section
+/// on, or a mask's that the render evaluates: visible, with components) not zero.
+pub fn wanted(s: &DevelopSettings) -> bool {
+    let masks = s.masks.iter().any(|m| m.visible && !m.components.is_empty() && m.adjust.dehaze != 0.0);
+    is_v3(s) && ((s.section_enabled("effects") && s.effects.dehaze != 0.0) || masks)
 }
 
 /// Proxy size (px) of the map of `frame` (the whole output frame).
@@ -372,33 +377,88 @@ pub fn proxy_size(frame: &Frame) -> (usize, usize) {
     frame.fit(edge.max(1), edge.max(1))
 }
 
+/// How many maps [`for_frame`] keeps (the least recently used goes first). A 1024-px proxy's map
+/// is about 5.6 MB.
+pub const CACHE_KEEP: usize = 6;
+
+/// One cached map: its full key, and what a draft may reuse it for (the same source content,
+/// process and proxy size).
+struct Cached {
+    key: u64,
+    src: u64,
+    shape: (Process, usize, usize),
+    map: Arc<HazeMap>,
+}
+
+/// The maps [`for_frame`] keeps: at most [`CACHE_KEEP`], the least recently used first out.
+struct MapCache(Vec<Cached>);
+
+impl MapCache {
+    const fn new() -> MapCache {
+        MapCache(Vec::new())
+    }
+
+    /// The map keyed `key`, or (`reuse`) the most recently used one of that source and shape. A
+    /// hit becomes the most recently used.
+    fn get(&mut self, key: u64, reuse: Option<(u64, (Process, usize, usize))>) -> Option<Arc<HazeMap>> {
+        let c = &mut self.0;
+        let i = c
+            .iter()
+            .rposition(|e| e.key == key)
+            .or_else(|| reuse.and_then(|(src, shape)| c.iter().rposition(|e| e.src == src && e.shape == shape)))?;
+        let e = c.remove(i);
+        let map = e.map.clone();
+        c.push(e);
+        Some(map)
+    }
+
+    fn put(&mut self, e: Cached) {
+        let c = &mut self.0;
+        c.retain(|o| o.key != e.key);
+        c.push(e);
+        while c.len() > CACHE_KEEP {
+            c.remove(0);
+        }
+    }
+}
+
+static CACHE: Mutex<MapCache> = Mutex::new(MapCache::new());
+
+fn cache() -> std::sync::MutexGuard<'static, MapCache> {
+    CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// The haze map of `src` developed with `s` through `frame` (the whole output frame, before any
-/// window), from a cache of the last few maps (keyed by the source's content fingerprint, the
-/// frame, the white balance, the process and the proxy size).
-pub fn for_frame(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, frame: &Frame) -> Arc<HazeMap> {
-    static CACHE: Mutex<Vec<(u64, Arc<HazeMap>)>> = Mutex::new(Vec::new());
-    const KEEP: usize = 4;
+/// window), from a cache of the last [`CACHE_KEEP`] maps used (keyed by the source's content
+/// fingerprint, the frame, the white balance, the camera local tone mapping, the process and the
+/// proxy size).
+///
+/// A `draft` (an interactive drag) that misses reuses the most recently used map of the same
+/// source, process and proxy size instead of building one: a White Balance, crop or lens drag
+/// would otherwise rebuild it on every tick. The map is smooth, so the stand-in is close; the
+/// final-quality render after the drag builds the exact one.
+pub fn for_frame(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, frame: &Frame, draft: bool) -> Arc<HazeMap> {
     // (an empty source has nothing to sample: no haze)
     if src.width == 0 || src.height == 0 || src.data.is_empty() {
         return Arc::new(HazeMap::empty());
     }
     let (pw, ph) = proxy_size(frame);
     let wb = crate::local::wb_matrix_for(info, s).map(|m| m.map(|r| r.map(f32::to_bits)));
-    let key = crate::hash_of((crate::optics::fingerprint(src), format!("{frame:?}"), wb, s.process.process(), pw, ph));
-    if let Some(m) = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().find(|(k, _)| *k == key) {
-        return m.1.clone();
+    let fp = crate::optics::fingerprint(src);
+    let shape = (s.process.process(), pw, ph);
+    let local_tone = crate::local_tone::enabled(info, s);
+    let key = crate::hash_of((fp, format!("{frame:?}"), wb, local_tone, shape));
+    if let Some(map) = cache().get(key, draft.then_some((fp, shape))) {
+        return map;
     }
     let map = Arc::new(crate::timed("haze map", || {
         let mut img = crate::timed("haze proxy", || frame.sample(src, pw, ph));
+        // (the pixels the map is applied to went through the camera's local tone mapping)
+        crate::local_tone::apply_frame(&mut img, info, s, frame);
         crate::local::white_balance(&mut img, info, s);
         HazeMap::build(&img)
     }));
-    let mut c = CACHE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    c.retain(|(k, _)| *k != key);
-    c.push((key, map.clone()));
-    while c.len() > KEEP {
-        c.remove(0);
-    }
+    cache().put(Cached { key, src: fp, shape, map: map.clone() });
     map
 }
 
@@ -553,6 +613,47 @@ mod tests {
         assert_eq!(proxy_size(&big), (1024, 768));
         let small = Frame::new(300, 200, &s, true);
         assert_eq!(proxy_size(&small), (300, 200));
+    }
+
+    #[test]
+    fn the_cache_evicts_the_least_recently_used_and_stays_bounded() {
+        let shape = (Process::V3, 10, 10);
+        let entry = |key: u64, src: u64| Cached { key, src, shape, map: Arc::new(HazeMap::empty()) };
+        let mut c = MapCache::new();
+        for k in 0..CACHE_KEEP as u64 {
+            c.put(entry(k, 100 + k));
+        }
+        let first = c.get(0, None).expect("cached");
+        // more maps than it keeps: the one used on every tick stays, the oldest unused goes
+        for k in 0..3u64 {
+            c.put(entry(1000 + k, 1000 + k));
+            assert!(c.get(0, None).is_some_and(|m| Arc::ptr_eq(&m, &first)), "evicted the map in use");
+        }
+        assert_eq!(c.0.len(), CACHE_KEEP);
+        assert!(c.get(1, None).is_none() && c.get(2, None).is_none(), "the least recently used went");
+        // a draft that misses reuses the latest of the same source and shape; a final render doesn't
+        assert!(c.get(77, None).is_none());
+        assert!(c.get(77, Some((100, shape))).is_some_and(|m| Arc::ptr_eq(&m, &first)));
+        assert!(c.get(77, Some((100, (Process::V3, 11, 10)))).is_none(), "another proxy size");
+        assert!(c.get(77, Some((5, shape))).is_none(), "another source");
+    }
+
+    #[test]
+    fn wanted_ignores_masks_the_render_skips() {
+        use lightcraft_develop::{LocalAdjustments, Mask, MaskComponent, MaskOp, MaskShape};
+        let comp = MaskComponent {
+            name: None,
+            op: MaskOp::Add,
+            invert: false,
+            shape: MaskShape::Linear { start: lightcraft_geom::Point::new(0.5, 0.0), end: lightcraft_geom::Point::new(0.5, 1.0) },
+        };
+        let mask = Mask { components: vec![comp], adjust: LocalAdjustments { dehaze: 40.0, ..Default::default() }, ..Default::default() };
+        let mut s = DevelopSettings { process: Process::V3.version(), masks: vec![mask.clone()], ..DevelopSettings::default() };
+        assert!(wanted(&s));
+        s.masks = vec![Mask { visible: false, ..mask.clone() }];
+        assert!(!wanted(&s), "a hidden mask");
+        s.masks = vec![Mask { components: vec![], ..mask }];
+        assert!(!wanted(&s), "a mask without components");
     }
 
     #[test]

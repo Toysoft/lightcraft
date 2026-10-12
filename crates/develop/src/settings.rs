@@ -86,7 +86,7 @@ pub enum Process {
     V2,
     /// Dehaze estimates haze with a dark-channel prior on a fixed proxy of the whole frame (patch
     /// minimum, guided refinement, colour airlight) and recovers it gently, so +25..+50 no longer
-    /// darkens the photo and crushes shadows (issue #1237). Until that lands it renders like V2.
+    /// darkens the photo and crushes shadows (issue #1237). Without Dehaze it renders like V2.
     V3,
 }
 

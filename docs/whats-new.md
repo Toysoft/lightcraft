@@ -3,10 +3,11 @@
 ## 2026-10-12
 
 ### Rendering process 3 (Dehaze)
-- New photos (and Reset) get rendering process 3, which will carry a new, gentler Dehaze (issue #1237): today's
-  darkens the whole photo and crushes shadows from about +25. Process 3 renders like process 2 until the new
-  Dehaze lands. Photos you already edited keep their look, Dehaze included, until you choose Photo ▸ Update to
-  Current Process. See [process versions](process-versions.md).
+- New photos (and Reset) get rendering process 3 with a new, gentler Dehaze (issue #1237): it measures haze with
+  a dark-channel estimate of the whole frame and clears it without darkening the photo or crushing its shadows
+  (the old one did from about +25), with no dark halos, the same in the preview, a zoomed view and the export, on
+  the CPU and the GPU. Without Dehaze, process 3 renders like process 2. Photos you already edited keep their look,
+  Dehaze included, until you choose Photo ▸ Update to Current Process. See [process versions](process-versions.md).
 
 ## 2026-10-11
 

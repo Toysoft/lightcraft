@@ -393,6 +393,12 @@ const AIRLIGHT_PROXY_EDGE: usize = 384;
 
 /// Resolve `s` against `src` for `req` (see [`Plan`]).
 pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &RenderRequest) -> Plan<'a> {
+    plan_with(src, info, s, req, true)
+}
+
+/// [`plan`]; without the haze map (`Plan::haze` stays `None`) unless `haze`, for callers that
+/// never dehaze (they only need the scene-linear stage).
+fn plan_with<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &RenderRequest, haze: bool) -> Plan<'a> {
     let mut settings: Cow<'a, DevelopSettings> = match profiles::effective(s) {
         Cow::Borrowed(b) => upright::resolve(src, info, b),
         Cow::Owned(o) => Cow::Owned(upright::resolve(src, info, &o).into_owned()),
@@ -413,14 +419,14 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
     // sizes and scale are those of the whole output; a window only narrows what is drawn
     let px_per_long = frame.px_per_long(full_w);
     // (of the whole frame, before any window narrows it)
-    let haze = haze::wanted(s).then(|| haze::for_frame(src, info, s, &frame));
+    let haze = (haze && haze::wanted(s)).then(|| haze::for_frame(src, info, s, &frame, req.quality == Quality::Draft));
     let mut fixed_air = None;
     let mut keep = None;
     let (frame, w, h) = match req.window {
         Some(win) => {
             let win = win.clamped(full_w, full_h);
             // (V3 dehazes with the haze map, which is already the whole frame's)
-            if haze.is_none() && s.section_enabled("effects") && (s.effects.dehaze != 0.0 || s.masks.iter().any(|m| m.adjust.dehaze != 0.0)) {
+            if !haze::is_v3(s) && s.section_enabled("effects") && (s.effects.dehaze != 0.0 || s.masks.iter().any(|m| m.adjust.dehaze != 0.0)) {
                 let k = (AIRLIGHT_PROXY_EDGE as f64 / full_w.max(full_h) as f64).min(1.0);
                 let (pw, ph) = (((full_w as f64 * k).round() as usize).max(1), ((full_h as f64 * k).round() as usize).max(1));
                 fixed_air = Some(local::frame_airlight(src, info, s, &frame, pw, ph));
@@ -629,7 +635,8 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
 /// exposed scene colours, as [`MaskShape::ColorRange`](lightcraft_develop::MaskShape) compares
 /// them), averaged over 3 × 3 pixels of a render fitting `req`. `None` outside the image.
 pub fn color_range_sample(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest, p: lightcraft_geom::Point) -> Option<[f64; 3]> {
-    let plan = plan(src, info, s, req);
+    // (the scene-linear colours only: no haze map)
+    let plan = plan_with(src, info, s, req, false);
     let mut img = plan.frame.sample(src, plan.w, plan.h);
     lin_cpu(&mut img, info, &plan);
     let o = plan.frame.norm_to_out(plan.w, plan.h).apply(p);

@@ -263,7 +263,8 @@ fn v3_dehaze_survives_hostile_pixels() {
     let s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
     let empty = Rgb32f::new(0, 0);
     let frame = crate::geometry::Frame::new(0, 0, &s, true);
-    let map = crate::haze::for_frame(&empty, &SourceInfo::default(), &s, &frame);
+    let map = crate::haze::for_frame(&empty, &SourceInfo::default(), &s, &frame, false);
+    assert_eq!(crate::haze::for_frame(&empty, &SourceInfo::default(), &s, &frame, true).size(), (1, 1));
     assert_eq!(map.size(), (1, 1));
 }
 
@@ -409,6 +410,77 @@ fn v3_haze_map_is_built_once() {
     let a = plan(&src, &info, &s, &RenderRequest::fit(1500, 1000)).haze;
     let b = plan(&src, &info, &s, &RenderRequest::fit(600, 400)).haze;
     let (Some(a), Some(b)) = (a, b) else { panic!("no haze map") };
-    assert!(Arc::ptr_eq(&a, &b), "the second plan reuses the cached map");
+    // (by value: other tests share the process-wide cache and may evict it in between)
+    assert!(*a == *b, "the second plan gets the same map");
     assert_eq!(a.size(), (1024, 683));
+}
+
+/// The cached map follows everything it depends on: the white balance, the crop, the orientation,
+/// the source's content and the camera's local tone mapping give another map; Exposure doesn't.
+/// A draft (a drag) that misses reuses the latest map of the photo instead of building one.
+#[test]
+fn v3_haze_map_follows_what_it_depends_on() {
+    use lightcraft_develop::WbMode;
+    // (sizes no other test uses: its own cache entries)
+    let (w, h) = (W + 7, H + 5);
+    let src = hazy_valley(w, h);
+    let info = SourceInfo { raw: true, ..Default::default() };
+    let req = RenderRequest::fit(w, h);
+    let base = dehazed(Process::V3, 50.0, false);
+    let map = |src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, req: &RenderRequest| {
+        let Some(m) = plan(src, info, s, req).haze else { panic!("no haze map") };
+        m
+    };
+    let m0 = map(&src, &info, &base, &req);
+    let mut exposed = base.clone();
+    exposed.light.exposure = 1.0;
+    assert!(*map(&src, &info, &exposed, &req) == *m0, "exposure keeps the map");
+    let mut warm = base.clone();
+    (warm.wb.mode, warm.wb.temp) = (WbMode::Custom, 3500.0);
+    let mut cropped = base.clone();
+    cropped.crop.geometry = lightcraft_geom::crop_fit_angle(w as f64, h as f64, 8.0, Some(1.0));
+    let mut turned = base.clone();
+    turned.orientation = lightcraft_geom::Orientation::Rotate90;
+    for (what, s) in [("white balance", &warm), ("crop", &cropped), ("orientation", &turned)] {
+        assert!(*map(&src, &info, s, &req) != *m0, "{what} gives another map");
+    }
+    let brighter = Rgb32f { data: src.data.iter().map(|p| [p[0] * 1.3, p[1], p[2] * 0.8]).collect(), ..src.clone() };
+    assert!(*map(&brighter, &info, &base, &req) != *m0, "other pixels give another map");
+    // a drag: the white balance's draft reuses the map, the final render builds its own
+    let draft = RenderRequest { quality: crate::Quality::Draft, ..req };
+    let mut dragged = base.clone();
+    (dragged.wb.mode, dragged.wb.temp) = (WbMode::Custom, 6100.0);
+    let m1 = map(&src, &info, &base, &req);
+    assert!(Arc::ptr_eq(&map(&src, &info, &dragged, &draft), &m1), "a draft reuses the photo's latest map");
+    assert!(*map(&src, &info, &dragged, &req) != *m1, "the final render builds the exact map");
+}
+
+/// The map is measured on the pixels it is applied to: with the camera's local tone mapping (a
+/// ProRAW gain table) on, it sees the gain, and toggling it gives another map.
+#[test]
+fn v3_haze_map_sees_the_camera_local_tone_mapping() {
+    use lightcraft_raw::gaintable::{GainTableMap, SourcePlacement};
+    let (w, h) = (W + 11, H + 3);
+    let src = hazy_valley(w, h);
+    // gain 1 on the left edge, 4 on the right, whatever the colour
+    let map = GainTableMap {
+        points_v: 1,
+        points_h: 2,
+        points_n: 2,
+        spacing_v: 1.0,
+        spacing_h: 1.0,
+        origin_v: 0.0,
+        origin_h: 0.0,
+        weights: [0.0, 0.0, 0.0, 0.0, 1.0],
+        gamma: 1.0,
+        gains: vec![1.0, 1.0, 4.0, 4.0],
+    };
+    let placement = SourcePlacement { rect: [0.0, 0.0, 1.0, 1.0], orientation: lightcraft_geom::Orientation::Normal };
+    let info = SourceInfo { raw: true, local_tone: Some(Arc::new(crate::local_tone::LocalTone { map, placement })), ..Default::default() };
+    let req = RenderRequest::fit(w, h);
+    let off = dehazed(Process::V3, 50.0, false);
+    let mut on = off.clone();
+    on.profile.camera_local_tone = true;
+    let (Some(a), Some(b)) = (plan(&src, &info, &off, &req).haze, plan(&src, &info, &on, &req).haze) else { panic!("no haze map") };
+    assert!(*a != *b, "the local tone mapping changes the haze map");
 }

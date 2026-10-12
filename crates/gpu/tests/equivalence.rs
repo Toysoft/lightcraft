@@ -196,8 +196,21 @@ fn cases() -> Vec<(&'static str, Edit)> {
             s.grain.size = 40.0;
             s.grain.roughness = 60.0;
         }),
+        // (the default process is V3; V1 / V2 keep their dark-plane Dehaze and airlight readback)
         ("dehaze -", |s| s.effects.dehaze = -50.0),
         ("dehaze +", |s| s.effects.dehaze = 60.0),
+        ("dehaze - (V2)", |s| {
+            s.process = Process::V2.version();
+            s.effects.dehaze = -50.0;
+        }),
+        ("dehaze + (V2)", |s| {
+            s.process = Process::V2.version();
+            s.effects.dehaze = 60.0;
+        }),
+        ("typical (V1)", |s| {
+            s.process = Process::V1.version();
+            typical(s);
+        }),
         ("dehaze -100", |s| s.effects.dehaze = -100.0),
         ("dehaze +100", |s| s.effects.dehaze = 100.0),
         ("dehaze in a mask, past +100", |s| {
@@ -854,6 +867,30 @@ fn v3_dehaze_matches() {
         }
     }
     eprintln!("worst: mean {:.4} LSB, max {} LSB", worst.0, worst.1);
+}
+
+/// A tone drag on a V3-dehazed photo uploads the haze map's coefficients once, not on every tick;
+/// a change the map depends on (white balance) uploads the new one.
+#[test]
+fn v3_haze_map_is_uploaded_once_per_map() {
+    if !gpu() {
+        return;
+    }
+    let src = Arc::new(lightcraft_scenes::hazy_valley(1210, 790));
+    let info = SourceInfo::default();
+    let req = RenderRequest::fit(900, 900);
+    let stages = StageCache::default();
+    let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+    s.effects.dehaze = 50.0;
+    for ev in [0.0, 0.2, 0.4, 0.6] {
+        s.light.exposure = ev;
+        lightcraft_gpu::render(&src, &info, &s, &req, Some(&stages)).expect("gpu render");
+    }
+    assert_eq!(lightcraft_gpu::haze_uploads(&stages), 1, "one upload for four exposure ticks");
+    s.wb.mode = WbMode::Custom;
+    s.wb.temp = 4000.0;
+    lightcraft_gpu::render(&src, &info, &s, &req, Some(&stages)).expect("gpu render");
+    assert_eq!(lightcraft_gpu::haze_uploads(&stages), 2, "another map, another upload");
 }
 
 /// Issue #323: windows of a zoomed frame. The GPU renders the window like the CPU does: the
