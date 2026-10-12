@@ -319,3 +319,20 @@ fn a_choice_this_version_does_not_know_costs_no_other_preference() {
         let _ = std::fs::remove_dir_all(d);
     }
 }
+
+/// Whether two folders are on one volume: a folder not made yet counts as where the folder above
+/// it is, and one whose folder above is missing too (a drive that is not connected) is not known.
+#[cfg(unix)]
+#[test]
+fn folders_are_on_one_volume_or_not_or_it_is_not_known() {
+    use crate::cmd::backup::same_drive;
+    let dir = std::env::temp_dir().join(format!("lc-engine-same-drive-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(same_drive(&dir, &dir), Some(true));
+    assert_eq!(same_drive(&dir, &dir.join("not-made-yet")), Some(true), "as the folder above it");
+    assert_eq!(same_drive(&dir, &dir.join("not-connected/backups")), None, "nothing is known of a folder whose folder above is missing");
+    assert_eq!(same_drive(&dir, std::path::Path::new("")), None);
+    assert_eq!(same_drive(&dir, std::path::Path::new("/dev")), Some(false), "/dev is a file system of its own");
+    let _ = std::fs::remove_dir_all(&dir);
+}
