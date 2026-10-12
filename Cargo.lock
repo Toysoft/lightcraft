@@ -1089,15 +1089,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-atomic"
+version = "0.1.0"
+dependencies = [
+ "rustix 1.1.5",
+]
+
+[[package]]
 name = "craft-nextcloud"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "craft-atomic",
  "percent-encoding",
  "quick-xml 0.41.0",
  "rustls",
  "rustls-platform-verifier",
  "serde",
+ "serde_json",
  "sha2",
  "ureq",
 ]

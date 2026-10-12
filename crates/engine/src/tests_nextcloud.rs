@@ -1,9 +1,11 @@
 //! Nextcloud accounts and settings (`engine::remote`, `nextcloud.*`): the settings file, removing an
-//! account, an account this computer doesn't have, and the app password never leaving the credential store.
+//! account, an account this computer doesn't have, signing in (against craft's `FakeServer`), and the app
+//! password never leaving the credential store.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use craft_nextcloud::testing::FakeServer;
 use serde_json::{Value, json};
 
 use crate::Session;
@@ -209,4 +211,197 @@ fn a_password_rejected_meanwhile_is_not_cached() {
     assert_eq!(s.remote.client("bob@cloud.example").unwrap_err(), again);
     assert_eq!(s.remote.client("bob@cloud.example").unwrap_err(), again, "nothing was cached");
     assert_eq!(keys(&s), [("bob@cloud.example".to_string(), AccountState::SignedOut)]);
+}
+
+// ---------- sign-in (NC4)
+
+/// Poll until `done` holds (fail after 10 s).
+fn wait_until(what: &str, done: impl Fn() -> bool) {
+    let t = std::time::Instant::now();
+    while !done() {
+        assert!(t.elapsed() < std::time::Duration::from_secs(10), "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// The one sign-in row: (kind, label, cancellable).
+fn sign_in_row(s: &Session) -> (&'static str, String, bool) {
+    let rows = s.activity.list();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    (rows[0].kind, rows[0].label.clone(), rows[0].cancellable)
+}
+
+const WAITING: &str = "Waiting for Nextcloud approval…";
+
+#[test]
+fn plain_sign_in_adds_the_account() {
+    let fake = FakeServer::start();
+    let d = temp("plain-sign-in");
+    let (mut s, creds) = nc_session(&d);
+    let r = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap();
+    assert_eq!(r["state"], "waiting", "{r}");
+    assert!(r["loginUrl"].as_str().unwrap().starts_with(&fake.url()), "{r}");
+    assert_eq!(sign_in_row(&s), ("nextcloud", WAITING.to_string(), true));
+    assert!(s.remote.accounts().is_empty(), "not added before approval");
+
+    fake.approve_login();
+    wait_until("the sign-in never finished", || s.activity.list().is_empty());
+    let key = fake.account().key();
+    assert_eq!(keys(&s), [(key.clone(), AccountState::SignedIn)]);
+    assert_eq!(creds.get(&fake.account()).unwrap().as_deref(), Some(FakeServer::PASSWORD));
+    assert!(!r.to_string().contains(FakeServer::PASSWORD), "{r}");
+    let file = std::fs::read_to_string(d.join("nextcloud.json")).unwrap();
+    assert!(file.contains(FakeServer::USER) && !file.contains(FakeServer::PASSWORD), "{file}");
+    let root = s.remote.accounts()[0].0.root();
+    assert!(s.remote.client(&key).unwrap().list(&root).is_ok(), "the stored password works");
+    let prefs = s.execute("nextcloud.preferences", &json!({})).unwrap();
+    assert!(!prefs.to_string().contains(FakeServer::PASSWORD), "{prefs}");
+}
+
+#[test]
+fn wait_true_blocks_until_signed_in() {
+    let fake = FakeServer::start();
+    let d = temp("wait-sign-in");
+    let (mut s, _) = nc_session(&d);
+    let activity = s.activity.clone();
+    let key = fake.account().key();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            wait_until("no sign-in row", || activity.list().iter().any(|r| r.kind == "nextcloud" && r.label == WAITING));
+            fake.approve_login();
+        });
+        let r = s.execute("nextcloud.addAccount", &json!({"server": fake.url(), "wait": true})).unwrap();
+        assert_eq!(r, json!({"state": "signedIn", "account": key}));
+    });
+    assert!(s.activity.list().is_empty(), "the row is gone");
+    assert_eq!(keys(&s), [(key, AccountState::SignedIn)]);
+}
+
+#[test]
+fn tls_sign_in_asks_for_trust() {
+    let fake = FakeServer::start_tls(crate::remote::provider());
+    let fp = fake.fingerprint().unwrap();
+    let d = temp("tls-sign-in");
+    let (mut s, _) = nc_session(&d);
+    let r = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap();
+    assert_eq!(r, json!({"state": "needsTrust", "fingerprint": fp.to_string()}));
+    assert!(s.activity.list().is_empty() && s.remote.accounts().is_empty(), "nothing waits for the answer");
+
+    let other = craft_nextcloud::Fingerprint([0xAB; 32]).to_string();
+    let e = s.execute("nextcloud.addAccount", &json!({"server": fake.url(), "trust": other})).unwrap_err().to_string();
+    assert!(e.contains("The certificate's fingerprint changed; check it with the server's admin"), "{e}");
+    let e = s.execute("nextcloud.addAccount", &json!({"server": fake.url(), "trust": "nope"})).unwrap_err().to_string();
+    assert!(e.contains("trust"), "{e}");
+    assert!(s.activity.list().is_empty() && s.remote.accounts().is_empty());
+
+    let r = s.execute("nextcloud.addAccount", &json!({"server": fake.url(), "trust": fp.to_string()})).unwrap();
+    assert_eq!(r["state"], "waiting", "{r}");
+    fake.approve_login();
+    wait_until("the sign-in never finished", || s.activity.list().is_empty());
+    let accounts = s.remote.accounts();
+    assert_eq!(accounts.len(), 1);
+    assert_eq!((accounts[0].0.trust, accounts[0].1), (Some(fp), AccountState::SignedIn));
+    let key = accounts[0].0.key();
+    assert!(s.remote.client(&key).unwrap().list(&accounts[0].0.root()).is_ok(), "the pinned certificate is trusted");
+
+    // signing in again reuses the pinned certificate: no question asked
+    s.remote.note_error(&key, &craft_nextcloud::Error::Unauthorized);
+    let r = s.execute("nextcloud.signIn", &json!({"account": key, "wait": true})).unwrap();
+    assert_eq!(r, json!({"state": "signedIn", "account": key}));
+    assert_eq!(s.remote.accounts()[0].0.trust, Some(fp));
+}
+
+#[test]
+fn cancelling_the_row_stops_sign_in() {
+    let fake = FakeServer::start();
+    let d = temp("cancel-sign-in");
+    let (mut s, creds) = nc_session(&d);
+    s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap();
+    let id = s.activity.list()[0].id;
+    s.activity.cancel(id).unwrap();
+    // the row goes when the sign-in thread ends
+    wait_until("the row stayed", || s.activity.list().is_empty());
+    assert!(s.remote.accounts().is_empty(), "a cancelled sign-in adds nothing");
+    assert_eq!(creds.get(&fake.account()).unwrap(), None);
+}
+
+#[test]
+fn sign_in_again_signs_the_account_back_in() {
+    let fake = FakeServer::start();
+    let d = temp("sign-in-again");
+    write_settings(&d, &[fake.account()]);
+    let (mut s, creds) = nc_session(&d);
+    let key = fake.account().key();
+    assert!(s.remote.client(&key).is_err(), "no password: signed out");
+    assert_eq!(keys(&s), [(key.clone(), AccountState::SignedOut)]);
+
+    // cancelled: back to signed out
+    let r = s.execute("nextcloud.signIn", &json!({"account": key})).unwrap();
+    assert_eq!(r["state"], "waiting", "{r}");
+    assert_eq!(keys(&s), [(key.clone(), AccountState::SigningIn)]);
+    assert!(s.remote.client(&key).is_err(), "no client while signing in");
+    assert_eq!(sign_in_row(&s).0, "nextcloud");
+    s.activity.cancel(s.activity.list()[0].id).unwrap();
+    wait_until("the row stayed", || s.activity.list().is_empty());
+    assert_eq!(keys(&s), [(key.clone(), AccountState::SignedOut)]);
+
+    // approved: signed in, with the new password
+    s.execute("nextcloud.signIn", &json!({"account": key})).unwrap();
+    fake.approve_login();
+    wait_until("the sign-in never finished", || s.activity.list().is_empty());
+    assert_eq!(keys(&s), [(key.clone(), AccountState::SignedIn)]);
+    assert_eq!(creds.get(&fake.account()).unwrap().as_deref(), Some(FakeServer::PASSWORD));
+    assert!(s.remote.client(&key).is_ok());
+
+    let e = s.execute("nextcloud.signIn", &json!({"account": "bob@nowhere"})).unwrap_err().to_string();
+    assert!(e.contains("No Nextcloud account bob@nowhere"), "{e}");
+    let e = s.execute("nextcloud.signIn", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("account"), "{e}");
+    let e = s.execute("nextcloud.addAccount", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("server"), "{e}");
+}
+
+#[test]
+fn no_keyring_is_an_actionable_error() {
+    struct LockedKeyring;
+    impl CredentialStore for LockedKeyring {
+        fn get(&self, _: &Account) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn set(&self, _: &Account, _: &str) -> Result<(), String> {
+            Err("The OS keyring is locked".into())
+        }
+        fn delete(&self, _: &Account) -> Result<(), String> {
+            Ok(())
+        }
+    }
+    let fake = FakeServer::start();
+    fake.approve_login();
+    let d = temp("no-keyring");
+    let mut s = Session::new();
+    let config = RemoteConfig { settings_file: Some(d.join("nextcloud.json")), cache_dir: None, credentials: Some(Arc::new(LockedKeyring)) };
+    s.remote.configure(config.clone());
+    let e = s.execute("nextcloud.addAccount", &json!({"server": fake.url(), "wait": true})).unwrap_err().to_string();
+    assert!(e.contains("The OS keyring is locked"), "{e}");
+    assert!(s.remote.accounts().is_empty() && s.activity.list().is_empty());
+
+    s.remote.configure(RemoteConfig { credentials: None, ..config });
+    let e = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap_err().to_string();
+    assert!(e.contains("This build can't store Nextcloud passwords (no OS keyring support)"), "{e}");
+    assert!(s.activity.list().is_empty());
+}
+
+/// R8: a changed certificate signs the account out like a revoked password; signing in again
+/// re-trusts it (it's never re-pinned silently).
+#[test]
+fn certificate_change_signs_the_account_out() {
+    let d = temp("cert-changed");
+    write_settings(&d, &[account("bob")]);
+    let (s, creds) = nc_session(&d);
+    creds.set(&account("bob"), "pw").unwrap();
+    let key = "bob@cloud.example";
+    s.remote.client(key).unwrap();
+    s.remote.note_error(key, &craft_nextcloud::Error::CertificateChanged);
+    assert_eq!(keys(&s)[0].1, AccountState::SignedOut);
+    assert!(s.remote.client(key).unwrap_err().contains("again"));
 }

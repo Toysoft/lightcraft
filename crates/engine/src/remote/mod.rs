@@ -5,18 +5,23 @@
 //! Settings live in one JSON file (`{"accounts": [Account…], "cacheBudgetMb": 20000}`, see
 //! [`crate::Session::with_default_nextcloud`]). It is hostile input: a missing, corrupt or oversized file
 //! means no accounts, never an error.
+//!
+//! Signing in ([`Remote::sign_in`]) is Login Flow v2: the user approves LightCraft in a browser while a
+//! thread asks the server every 2 s, shown as a cancellable `nextcloud` activity row.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use craft_nextcloud::rustls::crypto::CryptoProvider;
-pub use craft_nextcloud::{Account, RemotePath};
-use craft_nextcloud::{Client, Error};
+pub use craft_nextcloud::{Account, Fingerprint, RemotePath};
+use craft_nextcloud::{Client, Error, SignIn, SignInState};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
-use crate::activity::Activity;
+use crate::activity::{Activity, Cancel};
 use crate::denoise::{read_capped, write_atomic};
 
 /// Largest settings file read; a bigger one is ignored.
@@ -25,6 +30,8 @@ const MAX_SETTINGS: usize = 1 << 20;
 const DEFAULT_CACHE_BUDGET_MB: u64 = 20_000;
 /// How long one failed connection marks an account unreachable.
 const UNREACHABLE_FOR: Duration = Duration::from_secs(30);
+/// How often a waiting sign-in asks the server whether the user approved it.
+const POLL_EVERY: Duration = Duration::from_secs(2);
 
 /// Where app passwords are kept (the OS keyring in the apps; memory in tests).
 pub trait CredentialStore: Send + Sync {
@@ -130,10 +137,13 @@ fn sign_in_again(key: &str) -> String {
     format!("Sign in to Nextcloud ({key}) again: Settings ▸ Nextcloud")
 }
 
+fn no_store() -> String {
+    "This build can't store Nextcloud passwords (no OS keyring support)".into()
+}
+
 /// The session's Nextcloud accounts. Shared (`Arc`) with the threads that load remote photos.
 pub struct Remote {
-    // Sign-in and downloads (NC4, NC5) show their rows here.
-    #[allow(dead_code)]
+    /// Sign-ins and downloads show their rows here.
     activity: Activity,
     inner: Mutex<Inner>,
 }
@@ -170,7 +180,7 @@ impl Remote {
         // since another request may have been rejected (or the account removed) meanwhile
         let usable = |inner: &Inner| -> Result<Account, String> {
             let account = inner.account(account_key).cloned().ok_or_else(|| unknown(account_key))?;
-            if inner.state(account_key) == AccountState::SignedOut {
+            if matches!(inner.state(account_key), AccountState::SignedOut | AccountState::SigningIn) {
                 return Err(sign_in_again(account_key));
             }
             Ok(account)
@@ -199,17 +209,20 @@ impl Remote {
         Ok(client)
     }
 
-    /// What a failed request says about its account: a rejected password signs it out (requests
-    /// short-circuit until it signs in again), a connection failure marks it unreachable for 30 s.
+    /// What a failed request says about its account: a rejected password or a changed certificate
+    /// signs it out (requests short-circuit until it signs in again, which re-trusts the certificate;
+    /// it's never re-pinned silently), a connection failure marks it unreachable for 30 s.
     /// The one place errors change an account's state.
     pub(crate) fn note_error(&self, account_key: &str, e: &Error) {
         let mut inner = self.lock();
         let state = match e {
-            Error::Unauthorized => {
+            Error::Unauthorized | Error::CertificateChanged => {
                 inner.clients.remove(account_key);
                 AccountState::SignedOut
             }
-            Error::Unreachable(_) if inner.state(account_key) != AccountState::SignedOut => AccountState::Unreachable,
+            Error::Unreachable(_) if !matches!(inner.state(account_key), AccountState::SignedOut | AccountState::SigningIn) => {
+                AccountState::Unreachable
+            }
             _ => return,
         };
         inner.states.insert(account_key.to_string(), (state, Instant::now()));
@@ -232,6 +245,135 @@ impl Remote {
         let mut settings = inner.settings.clone();
         settings.accounts.retain(|a| a.key() != key);
         inner.save(settings)
+    }
+
+    /// Sign in to `server` (as the user typed it) and add the account, or replace it when it's already
+    /// here. The first request runs here; it answers `{"state": "needsTrust", "fingerprint"}` for an
+    /// untrusted certificate unless `trust` is that fingerprint (a different one is an error). Then a
+    /// thread waits for the approval, holding a cancellable activity row, and this returns
+    /// `{"state": "waiting", "loginUrl"}`; with `wait` it returns `{"state": "signedIn", "account"}`
+    /// once approved (or the failure).
+    pub fn sign_in(self: &Arc<Self>, server: &str, trust: Option<Fingerprint>, wait: bool) -> Result<Value, String> {
+        self.start_sign_in(server, trust, None, wait)
+    }
+
+    /// [`Remote::sign_in`] again for account `key`, with its server and trusted certificate. It is
+    /// `SigningIn` while the sign-in waits, and signed out if it fails or is cancelled.
+    pub fn sign_in_again(self: &Arc<Self>, key: &str, wait: bool) -> Result<Value, String> {
+        let account = self.lock().account(key).cloned().ok_or_else(|| unknown(key))?;
+        self.start_sign_in(&account.server, account.trust, Some(key), wait)
+    }
+
+    fn start_sign_in(self: &Arc<Self>, server: &str, trust: Option<Fingerprint>, again: Option<&str>, wait: bool) -> Result<Value, String> {
+        if self.lock().config.credentials.is_none() {
+            return Err(no_store());
+        }
+        // A sign-in object isn't kept between calls: answering `needsTrust` means starting again with
+        // `trust`, and the certificate it then finds must be the one the user saw.
+        let mut sign_in = SignIn::start(server, provider());
+        if let SignInState::NeedsTrust { fingerprint } = *sign_in.state() {
+            match trust {
+                None => return Ok(json!({"state": "needsTrust", "fingerprint": fingerprint.to_string()})),
+                Some(t) if t != fingerprint => return Err("The certificate's fingerprint changed; check it with the server's admin".into()),
+                Some(_) => {
+                    sign_in.confirm_trust(true);
+                }
+            }
+        }
+        let login_url = match sign_in.state() {
+            SignInState::Waiting { login_url } => login_url.clone(),
+            SignInState::Failed(e) => return Err(e.to_string()),
+            // the start ends waiting or failed once trust is answered
+            SignInState::NeedsTrust { .. } | SignInState::Done { .. } => return Err(Error::Malformed("unexpected sign-in state".into()).to_string()),
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let task = self.activity.start("nextcloud", "Waiting for Nextcloud approval…", Cancel::Flag(cancel.clone()));
+        let again = again.map(str::to_string);
+        if let Some(key) = &again {
+            self.set_state_of(key, |_| true, AccountState::SigningIn);
+        }
+        if wait {
+            let key = self.wait_for_approval(sign_in, &cancel, again.as_deref())?;
+            return Ok(json!({"state": "signedIn", "account": key}));
+        }
+        let remote = self.clone();
+        let thread_again = again.clone();
+        std::thread::Builder::new()
+            .name("nextcloud-sign-in".into())
+            .spawn(move || {
+                // the row goes when the thread ends, however it ends
+                let _task = task;
+                if let Err(e) = remote.wait_for_approval(sign_in, &cancel, thread_again.as_deref()) {
+                    log::warn!("Nextcloud sign-in: {e}");
+                }
+            })
+            .map_err(|e| {
+                if let Some(key) = &again {
+                    self.set_state_of(key, |s| s == AccountState::SigningIn, AccountState::SignedOut);
+                }
+                format!("could not start the sign-in: {e}")
+            })?;
+        Ok(json!({"state": "waiting", "loginUrl": login_url}))
+    }
+
+    /// Ask every 2 s until the user approves (then keep the account), the sign-in fails or times
+    /// out, or `cancel` is set. An `again` account still signing in at the end is signed out.
+    ///
+    /// Everything it changes goes through `Remote` as configured *then*: after a
+    /// [`Remote::configure`] meanwhile, an approved account joins the new settings and a forgotten
+    /// `SigningIn` state is left alone.
+    fn wait_for_approval(&self, mut sign_in: SignIn, cancel: &AtomicBool, again: Option<&str>) -> Result<String, String> {
+        let result = loop {
+            let asked = Instant::now();
+            while asked.elapsed() < POLL_EVERY && !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            if cancel.load(Ordering::Relaxed) {
+                break Err(Error::Cancelled.to_string());
+            }
+            match sign_in.poll() {
+                SignInState::Waiting { .. } => {}
+                SignInState::Done { account, app_password } => break self.add_signed_in(account.clone(), app_password),
+                SignInState::Failed(e) => break Err(e.to_string()),
+                SignInState::NeedsTrust { .. } => break Err(Error::Malformed("unexpected sign-in state".into()).to_string()),
+            }
+        };
+        if let Some(key) = again {
+            self.set_state_of(key, |s| s == AccountState::SigningIn, AccountState::SignedOut);
+        }
+        result
+    }
+
+    /// An approved sign-in: the password goes to the store, the account (with its trusted
+    /// certificate) is added to the settings or replaces the one with its key, and it's signed in
+    /// with a client built afresh.
+    fn add_signed_in(&self, account: Account, password: &str) -> Result<String, String> {
+        let store = self.lock().config.credentials.clone().ok_or_else(no_store)?;
+        // the store may be the OS keyring (slow, may prompt): not under the lock
+        store.set(&account, password)?;
+        let key = account.key();
+        let mut inner = self.lock();
+        let mut settings = inner.settings.clone();
+        match settings.accounts.iter_mut().find(|a| a.key() == key) {
+            Some(old) => *old = account,
+            None => settings.accounts.push(account),
+        }
+        inner.save(settings)?;
+        inner.clients.remove(&key);
+        // ponytail: a request that started with the old password before this sign-in can still answer
+        // 401 and sign the account out again (`note_error`); a per-account sign-in generation that
+        // `note_error` checks would ignore such late answers, if they show up.
+        inner.states.remove(&key);
+        Ok(key)
+    }
+
+    /// Set account `key`'s state to `to` if its current state passes `when`; nothing for an account
+    /// that isn't (or is no longer) configured.
+    fn set_state_of(&self, key: &str, when: impl Fn(AccountState) -> bool, to: AccountState) {
+        let mut inner = self.lock();
+        if inner.account(key).is_some() && when(inner.state(key)) {
+            inner.states.insert(key.to_string(), (to, Instant::now()));
+        }
     }
 
     /// Disk budget for downloaded originals, in MB (10^6 bytes).
