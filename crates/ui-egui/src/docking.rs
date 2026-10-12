@@ -109,11 +109,7 @@ impl Workspace {
                     SplitSize::FixedSecond(MOBILE_STRIP_HEIGHT),
                     tabs(Panel::Canvas),
                     Node::Stack {
-                        entries: vec![
-                            row(Panel::Tools, true, 300.0),
-                            row(Panel::Presets, false, 260.0),
-                            row(Panel::Library, false, 300.0),
-                        ],
+                        entries: vec![row(Panel::Tools, true, 300.0), row(Panel::Presets, false, 260.0), row(Panel::Library, false, 300.0)],
                     },
                 )),
                 floating: Vec::new(),

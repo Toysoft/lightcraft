@@ -397,7 +397,11 @@ fn mobile_is_idempotent_and_reset_restores_the_desktop_start() {
     let mut h = app();
     let mobile_workspace = crate::docking::Workspace::mobile();
     h.app.run("ui.dock.mobile", json!({})).unwrap();
-    assert_eq!(h.app.ui.docking.as_ref().map(|workspace| &workspace.layout), Some(&mobile_workspace.layout), "the first command installs the mobile tree");
+    assert_eq!(
+        h.app.ui.docking.as_ref().map(|workspace| &workspace.layout),
+        Some(&mobile_workspace.layout),
+        "the first command installs the mobile tree"
+    );
     let mobile = serde_json::to_value(&h.app.ui.docking).unwrap();
     h.app.run("ui.dock.mobile", json!({})).unwrap();
     assert_eq!(serde_json::to_value(&h.app.ui.docking).unwrap(), mobile, "a second ui.dock.mobile is the same arrangement");
