@@ -97,6 +97,8 @@ pub enum Icon {
     Sun,
     /// Appearance Mode ▸ Dark: a crescent moon.
     Moon,
+    /// Relight: a lamp (a bulb on its base, with rays).
+    Lamp,
 }
 
 struct Pen<'a> {
@@ -203,6 +205,21 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
                 let a = (i as f32 * 45.0).to_radians();
                 let (c, s) = (a.cos(), a.sin());
                 pen.line(&[(10.0 + 5.4 * c, 10.0 + 5.4 * s), (10.0 + 7.4 * c, 10.0 + 7.4 * s)]);
+            }
+        }
+        Lamp => {
+            // the bulb, open at the bottom where it meets the base
+            pen.arc(10.0, 8.5, 4.3, 125.0, 415.0);
+            pen.line(&[(7.5, 12.0), (7.5, 14.0), (12.5, 14.0), (12.5, 12.0)]);
+            pen.line(&[(8.5, 16.5), (11.5, 16.5)]);
+            for (a, b) in [
+                ((10.0, 1.0), (10.0, 2.4)),
+                ((2.6, 8.5), (4.0, 8.5)),
+                ((16.0, 8.5), (17.4, 8.5)),
+                ((4.6, 3.1), (5.6, 4.1)),
+                ((15.4, 3.1), (14.4, 4.1)),
+            ] {
+                pen.line(&[a, b]);
             }
         }
         Moon => {

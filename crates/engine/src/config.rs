@@ -77,6 +77,19 @@ impl Session {
         self
     }
 
+    /// Look for the scene geometry model (Relight) in `$LIGHTCRAFT_RELIEF_DIR` if set, else
+    /// `<config>/models/moge-2-vits-normal`, and for the user's download mirrors in
+    /// `<config>/models/relief-mirrors.txt`.
+    pub fn with_default_relief_model(mut self) -> Self {
+        let models = config_dir().map(|d| d.join("models"));
+        self.relief.dir = std::env::var_os("LIGHTCRAFT_RELIEF_DIR")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| models.as_ref().map(|d| d.join("moge-2-vits-normal")));
+        self.relief.mirrors_file = models.map(|d| d.join("relief-mirrors.txt"));
+        self
+    }
+
     /// Keep face models in the shared default folder ([`default_face_models_dir`]).
     pub fn with_default_face_models(mut self) -> Self {
         self.face_models_dir = default_face_models_dir();

@@ -38,6 +38,7 @@ lightcraft-mcp = { path = "crates/mcp" }
 lightcraft-fetch = { path = "crates/fetch" }
 lightcraft-heif = { path = "crates/heif" }
 lightcraft-segment = { path = "crates/segment" }
+lightcraft-relief = { path = "crates/relief" }
 lightcraft-geocode = { path = "crates/geocode" }
 
 # foundation

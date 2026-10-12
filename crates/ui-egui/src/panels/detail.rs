@@ -61,6 +61,10 @@ pub enum Gesture {
     Eye {
         a: Point,
     },
+    /// Relight: light `light` being dragged to a new place (or, a Directional one, turned).
+    Light {
+        light: usize,
+    },
     /// Targeted adjustment drag from `at` (normalized); `acc` = vertical travel not yet applied.
     Targeted {
         at: Point,
@@ -724,7 +728,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         }
     }
     // Cursor selection must also run on gesture frames, when tool input is suppressed.
-    if !matches!(right, RightPanel::Crop | RightPanel::Masking | RightPanel::Remove | RightPanel::RedEye) {
+    if !matches!(right, RightPanel::Crop | RightPanel::Masking | RightPanel::Remove | RightPanel::RedEye | RightPanel::Relight) {
         general_cursor(app, ui, &resp, img_rect, main_area);
     }
     if !navigating {
@@ -733,6 +737,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             RightPanel::Masking => mask_overlay(app, ui, &resp, &map, &d),
             RightPanel::Remove => remove_overlay(app, ui, &resp, &map, &d),
             RightPanel::RedEye => eye_overlay(app, ui, &resp, &map, &d),
+            RightPanel::Relight => relight_overlay(app, ui, &resp, &map, &d),
             _ => {
                 // side by side / stacked: Before shows the same frame, so a click in its view (white
                 // balance, colour samples, targeted adjustment) means the same point of the photo.
@@ -2117,6 +2122,123 @@ fn eye_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response
         })
     {
         app.ui.eye = i;
+    }
+}
+
+// ------------------------------------------------------------------------ relight
+
+/// Screen distance within which a press takes hold of a light's marker.
+const LIGHT_GRAB: f32 = 14.0;
+
+/// Relight tool: every light has a marker on the photo (`relightMarker:<i>`). A click on a marker
+/// selects its light, a drag that starts on it moves the light; nothing else on the photo moves a
+/// light. A Directional light has no place: its marker sits on a ring around the middle of the
+/// photo, on the side its light comes from, and dragging it turns the light. Directional and Spot
+/// lights carry a figure ([`super::relight_gizmo::Gizmo`]) that turns with their sliders.
+fn relight_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response, map: &CanvasMap, d: &DevelopSettings) {
+    use lightcraft_develop::{RelightKind, RelightLight};
+    let lights = &d.relight.lights;
+    let selected = super::relight::selected(app, d);
+    // screen points per unit of each normalized axis (they differ: the photo isn't square)
+    let o = map.screen(Point::new(0.0, 0.0));
+    let (sx, sy) = (map.screen(Point::new(1.0, 0.0)).distance(o).max(1e-3), map.screen(Point::new(0.0, 1.0)).distance(o).max(1e-3));
+    let crop = d.crop.geometry.rect;
+    let middle = crop.center();
+    let ring = 0.3 * (crop.width() as f32 * sx).min(crop.height() as f32 * sy);
+    // `len` screen points in a direction on the photo (degrees clockwise from its top), as a step in normalized coordinates
+    let step = |angle: f64, len: f32| {
+        let a = if angle.is_finite() { angle.to_radians() } else { 0.0 };
+        Point::new(a.sin() * (len / sx) as f64, -a.cos() * (len / sy) as f64)
+    };
+    let marker = |l: &RelightLight| {
+        if l.kind.has_position() {
+            map.screen(l.position)
+        } else {
+            let s = step(l.angle, ring);
+            map.screen(Point::new(middle.x + s.x, middle.y + s.y))
+        }
+    };
+    let p = ui.painter();
+    for (i, l) in lights.iter().enumerate() {
+        let c = marker(l);
+        if !(c.x.is_finite() && c.y.is_finite()) {
+            continue;
+        }
+        let color = if i == selected { Color32::WHITE } else { Color32::from_white_alpha(170) };
+        let stroke = Stroke::new(if i == selected { 2.0 } else { 1.25 }, color);
+        p.circle_filled(c, 10.0, Color32::from_black_alpha(110));
+        p.circle_stroke(c, 10.0, stroke);
+        crate::icons::paint(p, Rect::from_center_size(c, vec2(13.0, 13.0)), crate::icons::Icon::Lamp, color);
+        register(ui.ctx(), format!("relightMarker:{i}"), Rect::from_center_size(c, vec2(20.0, 20.0)));
+        // which way it shines, as a figure turned in space by its angle, elevation and cone: a
+        // Directional light travels towards the middle, a Spot along its angle
+        let towards = match l.kind {
+            RelightKind::Point => None,
+            RelightKind::Directional => Some(map.screen(middle)),
+            RelightKind::Spot => {
+                let s = step(l.angle, 40.0);
+                Some(map.screen(Point::new(l.position.x + s.x, l.position.y + s.y)))
+            }
+        };
+        if let Some(to) = towards {
+            let size = if i == selected { 58.0 } else { 44.0 };
+            super::relight_gizmo::Gizmo::new(l.kind, to - c, l.elevation, l.cone, size).paint(p, c, color, stroke.width);
+        }
+    }
+    let hit = |q: Pos2| {
+        lights
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (i, marker(l).distance(q)))
+            .filter(|(_, far)| *far <= LIGHT_GRAB)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    };
+    if let Some(q) = resp.hover_pos()
+        && hit(q).is_some()
+    {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    // put light `i` where the pointer is: its place, or (Directional) the side it shines from
+    let place = |app: &mut LightcraftApp, i: usize, q: Pos2| {
+        let Some(l) = lights.get(i) else { return };
+        let n = map.norm(q);
+        if l.kind.has_position() {
+            let _ = app.run("relight.updateLight", json!({"index": i, "position": [n.x, n.y]}));
+        } else {
+            let (vx, vy) = ((n.x - middle.x) as f32 * sx, (n.y - middle.y) as f32 * sy);
+            if vx.hypot(vy) > 4.0 {
+                let angle = vx.atan2(-vy).to_degrees().rem_euclid(360.0);
+                let _ = app.run("develop.set", json!({"control": format!("relightLight.{i}.angle"), "value": angle}));
+            }
+        }
+    };
+    // A light moves only when its own marker is dragged: a press anywhere else on the photo (a
+    // click, a drag to look around) leaves every light where it is.
+    if resp.drag_started()
+        && let Some(q) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
+        && let Some(i) = hit(q)
+    {
+        // from where the button went down (a drag is recognized only after some movement)
+        app.ui.relight_light = i;
+        // the whole drag is one undo step
+        let _ = app.run("develop.beginInteraction", json!({"label": "Move Light"}));
+        app.gesture = Some(Gesture::Light { light: i });
+    }
+    if let Some(Gesture::Light { light }) = app.gesture
+        && resp.dragged()
+        && let Some(q) = resp.interact_pointer_pos()
+    {
+        place(app, light, q);
+    }
+    if resp.drag_stopped() && matches!(app.gesture, Some(Gesture::Light { .. })) {
+        app.gesture = None;
+        let _ = app.run("develop.endInteraction", json!({}));
+    } else if resp.clicked()
+        && let Some(q) = resp.interact_pointer_pos()
+        && let Some(i) = hit(q)
+    {
+        app.ui.relight_light = i;
     }
 }
 

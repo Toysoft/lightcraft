@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (LR-EDIT-RELIGHT: Relight, beyond Lightroom; rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -31,7 +31,7 @@ cited here still exists. Formerly docs/parity.md.
 | C. Views & navigation (VIEW) | 15 | 1 | 1 | 0 | 8/9 (89%) | 4/4 (100%) |
 | D. Search & filter (FILT) | 11 | 1 | 1 | 0 | 4/4 (100%) | 4/4 (100%) |
 | E. Metadata (META) | 5 | 1 | 0 | 0 | 2/2 (100%) | 2/2 (100%) |
-| F. Edit panel — global adjustments (EDIT) | 43 | 2 | 3 | 1 | 28/28 (100%) | 13/14 (93%) |
+| F. Edit panel — global adjustments (EDIT) | 43 | 3 | 3 | 1 | 28/28 (100%) | 13/14 (93%) |
 | G. Profiles (PROF) | 7 | 1 | 3 | 0 | 3/4 (75%) | 3/3 (100%) |
 | H. Crop & rotate (CROP) | 9 | 0 | 0 | 1 | 6/6 (100%) | 3/3 (100%) |
 | I. Remove / healing (REM) | 8 | 1 | 2 | 2 | 4/4 (100%) | 2/3 (67%) |
@@ -53,9 +53,9 @@ cited here still exists. Formerly docs/parity.md.
 | Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 76 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
 | Lightroom Classic extras | 34 | 16 | 35 | 8 | — | 24/26 (92%) |
-| **Total** | 407 | 50 | 73 | 35 | 192/200 (96%) | 145/157 (92%) |
+| **Total** | 408 | 52 | 72 | 35 | 193/201 (96%) | 145/157 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.5%** of 530 in-scope rows — P0 98.0% of 200 · P1 95.2% of 157 · P2 49.7% of 172.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.6%** of 532 in-scope rows — P0 98.0% of 201 · P1 95.2% of 157 · P2 50.0% of 173.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -224,6 +224,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-EDIT-SECTION-TOGGLE | Section on/off | P1 | ✅ | `cmd:develop.sectionEnabled`, `crates/develop/src/lib.rs` (`effective`) | the eye on a section header hides its adjustments: Light (with the curve), Color (white balance, presence, mixers, grading, point colour), Effects, Detail, Optics, Geometry, Calibration; masks stay on (issue #316 fixed Light, Color and Detail, which had no effect) |
 | LR-EDIT-RESET | Reset all / section / slider | P0 | ✅ | `cmd:develop.reset`, `cmd:develop.resetSection`, `cmd:develop.resetControl`, `crates/ui-egui/src/widgets.rs` (double-click) | no "reset to open" |
 | LR-EDIT-SHOWORIG | Show original | P0 | ✅ | `cmd:view.showOriginal` | |
+| LR-EDIT-RELIGHT | Relight: lights placed on the photo (beyond Lightroom) | P2 | 🟡 | `cmd:panel.relight`, `cmd:relight.enable`, `cmd:relight.addLight`, `cmd:relight.updateLight`, `cmd:relight.deleteLight`, `cmd:relight.shadows`, `cmd:relight.reset`, `cmd:relight.analyze`, `cmd:relight.clearGeometry`, `cmd:relight.model`, `cmd:relight.model.download`, `cmd:relight.model.cancel`, `ctl:relight.*`, `crates/develop/src/controls.rs` (`relightLight.<i>.*`), `crates/develop/src/relief.rs`, `crates/pipeline/src/relight.rs`, `crates/relief/src/model.rs`, `crates/engine/src/relief.rs`, `crates/ui-egui/src/panels/relight.rs`, `crates/ui-egui/src/tests_relight.rs`, `docs/relight.md` | the lamp button under Edit in the tool strip opens the Relight panel: up to 8 Point, Directional or Spot lights (intensity, colour, angle, elevation, depth, falloff, cone), placed and dragged on the photo; Ambient, Softness, Shine and cast shadows for the scene. Analyze Photo runs MoGe-2 (ViT-S, pure Rust on candle, optional 134 MB MIT-licensed download, about 15 s on a CPU, in the background) and keeps the surface normals and depth it saw with the photo (a 256 px grid in the settings), so renders and exports never need the model; the depth's scale is fitted to the normals, lamps hang in front of the surface under their marker, and things cast shadows on what is behind them. Without the analysis the relief is guessed from brightness. Applied in scene-linear light before white balance; the lighting is computed on a 512 px render of the whole uncropped frame and upsampled with the photo's luminance as a guide, so previews, zoom windows and exports are lit alike and lights keep their place under a crop. Not a Lightroom feature. Still 🟡: the model runs on the CPU outside macOS; the scene is orthographic (no camera perspective), so a lamp far into a deep scene reaches further than it would; hard-edged shadows show the 512 px grid; a 90° rotation after the analysis needs a new one; a relit photo's scene-linear stage leaves the GPU path; not written to XMP `crs:` tags; only English and Spanish texts |
 
 ## G. Profiles (PROF)
 
@@ -787,6 +788,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | LR-EDIT-RELIGHT: Relight (lights placed on the photo; scene normals and depth from MoGe-2, or a relief guessed from brightness without it), a feature beyond Lightroom, 🟡 |
 | 2026-10-11 | minor | KEY-SLIDER-TYPE: honor immediate Return/Escape and keep typed keys in the value editor; add regression references |
 | 2026-10-11 | minor | LR-PROF-CAMERACOLOR: raws with a black-and-white camera JPEG take its tone curve (issue #577) |
 | 2026-10-11 | minor | LR-VIEW-ZOOM and LR-VIEW-COMPARE: Compare and Reference are sharp at 1:1 (zoom windows per pane, two originals kept decoded while they are open); statuses unchanged |

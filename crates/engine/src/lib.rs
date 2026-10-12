@@ -57,6 +57,7 @@ pub mod preset_import;
 pub mod preset_luminar;
 pub mod presets;
 pub mod proof;
+pub mod relief;
 pub mod rename;
 pub mod segment;
 pub mod sidecar;
@@ -238,6 +239,8 @@ pub struct Session {
     pub active_mask: Option<u32>,
     /// AI masks (SAM 3): the model and the last photo prepared for it.
     pub segmenter: segment::Segmenter,
+    /// Relight scene analysis: the geometry model, its download and the analysis in flight.
+    pub relief: relief::Relief,
     /// Selected spot (Remove panel), by index into the active photo's spots.
     pub active_spot: Option<usize>,
     /// The persistent library this session writes to (`None` = in-memory only).
@@ -364,6 +367,7 @@ impl Session {
             depth: 0,
             active_mask: None,
             segmenter: segment::Segmenter::default(),
+            relief: relief::Relief::default(),
             active_spot: None,
             library: None,
             library_identity: Arc::new(()),
@@ -1020,6 +1024,8 @@ mod tests_persist;
 mod tests_prefs;
 #[cfg(test)]
 mod tests_process;
+#[cfg(test)]
+mod tests_relight;
 #[cfg(test)]
 mod tests_segment;
 #[cfg(test)]

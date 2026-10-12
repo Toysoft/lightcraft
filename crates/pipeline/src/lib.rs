@@ -8,7 +8,7 @@
 //! 1. geometry — user orientation, lens corrections (distortion, CA, vignetting), perspective, crop +
 //!    straighten, flips; one resample at output resolution; then defringe
 //! 2. scene-linear — white balance, exposure, dehaze, local tone (highlights/shadows), texture,
-//!    clarity, local adjustments (masks)
+//!    clarity, local adjustments (masks); Relight ([`relight`]) multiplies the image before them
 //! 3. tone map — contrast / whites / blacks filmic curve on luminance, highlight desaturation
 //! 4. colour — vibrance, saturation, colour mixer, colour grading, B&W (OkLCh)
 //! 5. display — gamut map to the output space (sRGB unless [`RenderRequest::space`] says otherwise), encode, tone curves (parametric + point), vignette, grain
@@ -38,6 +38,7 @@ pub mod optics;
 pub mod output;
 pub mod profiles;
 pub mod redeye;
+pub mod relight;
 pub mod spots;
 pub mod tone;
 pub mod transform;
@@ -377,6 +378,8 @@ pub struct Plan<'a> {
     pub keep: Option<PixelWindow>,
     /// The source's segmentation mattes ([`SourceInfo::mattes`]).
     pub mattes: Option<Arc<masks::Mattes>>,
+    /// The lighting Relight adds, computed on a small render of the whole frame ([`relight::resolve`]).
+    pub relight: Option<Arc<relight::Field>>,
 }
 
 /// Long edge of the small render a windowed render estimates the whole frame's airlight from.
@@ -436,17 +439,20 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         format!("{:?}", s.optics),
         // and the local tone mapping
         local_tone::enabled(info, s),
+        // and Relight
+        relight::key(s),
         src_long,
     ));
     let lin_key = hash_of((pre_nr_key, [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits)));
-    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
+    let relight = relight::resolve(src, info, s);
+    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone(), relight }
 }
 
-/// Whether the scene-linear stage needs work only the CPU does (defringe, spot removal).
+/// Whether the scene-linear stage needs work only the CPU does (defringe, spot removal, Relight).
 pub fn lin_needs_cpu(s: &DevelopSettings, info: &SourceInfo) -> bool {
     let o = &s.optics;
     let defringe = s.section_enabled("optics") && (o.defringe_purple_amount > 0.0 || o.defringe_green_amount > 0.0);
-    defringe || !s.spots.is_empty() || local_tone::enabled(info, s)
+    defringe || !s.spots.is_empty() || local_tone::enabled(info, s) || relight::active(s)
 }
 
 /// The white-balanced, defringed, retouched image (before noise reduction): the CPU part of the
@@ -455,6 +461,8 @@ pub fn lin_cpu(img: &mut Rgb32f, info: &SourceInfo, p: &Plan<'_>) {
     let s = &*p.settings;
     // (before the white balance: the gain's input is the as-shot development, as in the file)
     local_tone::apply(img, info, p);
+    // (a gain per pixel, guided by the luminance the relief was estimated from: before white balance)
+    relight::apply(img, p);
     local::white_balance(img, info, s);
     optics::defringe(img, s, p.px_per_long / optics::DEFRINGE_REF_LONG);
     spots::apply(img, &s.spots, &p.frame, p.px_per_long);

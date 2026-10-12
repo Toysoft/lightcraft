@@ -31,6 +31,8 @@ pub enum RightPanel {
     Remove,
     Masking,
     RedEye,
+    /// Relight: lights placed on the photo.
+    Relight,
     Versions,
     Activity,
     Keywords,
@@ -41,7 +43,16 @@ pub enum RightPanel {
 
 impl RightPanel {
     pub fn is_edit_tool(self) -> bool {
-        matches!(self, RightPanel::Edit | RightPanel::Profiles | RightPanel::Crop | RightPanel::Remove | RightPanel::Masking | RightPanel::RedEye)
+        matches!(
+            self,
+            RightPanel::Edit
+                | RightPanel::Profiles
+                | RightPanel::Crop
+                | RightPanel::Remove
+                | RightPanel::Masking
+                | RightPanel::RedEye
+                | RightPanel::Relight
+        )
     }
 }
 
@@ -672,6 +683,12 @@ pub struct UiState {
     /// Red Eye panel: selected correction, and whether new ones are pet eyes.
     pub eye: usize,
     pub eye_pet: bool,
+    /// Relight panel: the selected light.
+    pub relight_light: usize,
+    /// Photos whose scene Relight already analyzed by itself in this run (once each: removing the
+    /// analysis, or a failure, is not answered by another one).
+    #[serde(skip)]
+    pub relight_analyzed: std::collections::HashSet<u64>,
     /// Remove tool: Visualize Spots (high-pass black/white view) and its threshold 0..100.
     pub visualize_spots: bool,
     pub spots_threshold: f32,
@@ -1108,6 +1125,8 @@ impl Default for UiState {
             hdr_visualize: false,
             eye: 0,
             eye_pet: false,
+            relight_light: 0,
+            relight_analyzed: Default::default(),
             visualize_spots: false,
             spots_threshold: 50.0,
             auto_advance: false,

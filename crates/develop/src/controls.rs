@@ -28,6 +28,7 @@ pub enum Section {
     Calibration,
     PointColor,
     RedEye,
+    Relight,
 }
 
 impl Section {
@@ -49,6 +50,7 @@ impl Section {
             Section::Calibration => "Calibration",
             Section::PointColor => "Point Color",
             Section::RedEye => "Red Eye",
+            Section::Relight => "Relight",
         }
     }
 }
@@ -253,6 +255,11 @@ controls! {
     "calibration.blueHue" => calibration.blue_hue, "Blue Hue", Calibration, -100, 100, 0, 1, 0, Gradient { from: "#30a0d0", to: "#8040d0" };
     "calibration.blueSat" => calibration.blue_sat, "Blue Saturation", Calibration, -100, 100, 0, 1, 0, Gradient { from: "#7a7a7a", to: "#3a60e0" };
     "crop.angle" => crop.geometry.angle, "Straighten", Geometry, -45, 45, 0, 0.01, 2, Centered;
+    "relight.ambient" => relight.ambient, "Ambient", Relight, -100, 100, 0, 1, 0, Centered;
+    "relight.softness" => relight.softness, "Softness", Relight, 0, 100, 40, 1, 0, Plain;
+    "relight.shine" => relight.shine, "Shine", Relight, 0, 100, 0, 1, 0, Plain;
+    "relight.shadowSoftness" => relight.shadow_softness, "Shadow Softness", Relight, 0, 100, 50, 1, 0, Plain;
+    "relight.shadowOpacity" => relight.shadow_opacity, "Shadow Opacity", Relight, 0, 100, 100, 1, 0, Plain;
 }
 
 /// Template specs of the indexed controls (`<family>.<field>`; addressed as `<family>.<i>.<field>`).
@@ -367,6 +374,84 @@ pub static INDEXED: &[ControlSpec] = &[
         decimals: 0,
         track: Gradient { from: "#d0d0d0", to: "#101010" },
     },
+    ControlSpec {
+        id: "relightLight.intensity",
+        label: "Intensity",
+        section: Section::Relight,
+        min: 0.0,
+        max: 200.0,
+        default: 100.0,
+        step: 1.0,
+        decimals: 0,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "relightLight.temp",
+        label: "Temperature",
+        section: Section::Relight,
+        min: 2000.0,
+        max: 12000.0,
+        default: 6500.0,
+        step: 50.0,
+        decimals: 0,
+        // (the light's own colour: warm at low Kelvin, unlike white balance, which corrects it)
+        track: Gradient { from: "#ff9838", to: "#b8d0ff" },
+    },
+    ControlSpec {
+        id: "relightLight.angle",
+        label: "Angle",
+        section: Section::Relight,
+        min: 0.0,
+        max: 360.0,
+        default: 315.0,
+        step: 1.0,
+        decimals: 0,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "relightLight.elevation",
+        label: "Elevation",
+        section: Section::Relight,
+        min: -180.0,
+        max: 180.0,
+        default: 45.0,
+        step: 1.0,
+        decimals: 0,
+        track: Centered,
+    },
+    ControlSpec {
+        id: "relightLight.depth",
+        label: "Depth",
+        section: Section::Relight,
+        min: 0.0,
+        max: 100.0,
+        default: 30.0,
+        step: 1.0,
+        decimals: 0,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "relightLight.falloff",
+        label: "Falloff",
+        section: Section::Relight,
+        min: 0.0,
+        max: 100.0,
+        default: 50.0,
+        step: 1.0,
+        decimals: 0,
+        track: Plain,
+    },
+    ControlSpec {
+        id: "relightLight.cone",
+        label: "Cone",
+        section: Section::Relight,
+        min: 0.0,
+        max: 100.0,
+        default: 40.0,
+        step: 1.0,
+        decimals: 0,
+        track: Plain,
+    },
 ];
 
 /// `pointColor.3.hueShift` → (`pointColor`, 3, `hueShift`).
@@ -401,13 +486,31 @@ fn indexed_field<'a>(s: &'a mut DevelopSettings, id: &str) -> Option<&'a mut f64
                 _ => return None,
             })
         }
+        "relightLight" => {
+            let l = s.relight.lights.get_mut(i)?;
+            Some(match field {
+                "intensity" => &mut l.intensity,
+                "temp" => &mut l.temp,
+                "angle" => &mut l.angle,
+                "elevation" => &mut l.elevation,
+                "depth" => &mut l.depth,
+                "falloff" => &mut l.falloff,
+                "cone" => &mut l.cone,
+                _ => return None,
+            })
+        }
         _ => None,
     }
 }
 
 fn indexed_get(s: &DevelopSettings, id: &str) -> Option<f64> {
     // (a clone keeps one accessor for get and set; these lists are tiny)
-    let mut c = DevelopSettings { point_colors: s.point_colors.clone(), red_eye: s.red_eye.clone(), ..DevelopSettings::default() };
+    let mut c = DevelopSettings {
+        point_colors: s.point_colors.clone(),
+        red_eye: s.red_eye.clone(),
+        relight: s.relight.clone(),
+        ..DevelopSettings::default()
+    };
     indexed_field(&mut c, id).map(|v| *v)
 }
 
@@ -415,6 +518,12 @@ fn indexed_set(s: &mut DevelopSettings, id: &str, v: f64) -> bool {
     match indexed_field(s, id) {
         Some(f) => {
             *f = v;
+            // a light whose temperature is set takes its colour from it again, not from its own colour
+            if let Some(("relightLight", i, "temp")) = split_indexed(id)
+                && let Some(light) = s.relight.lights.get_mut(i)
+            {
+                light.use_color = false;
+            }
             true
         }
         None => false,
@@ -439,6 +548,7 @@ pub fn indexed_instances(s: &DevelopSettings) -> Vec<(String, &'static ControlSp
         let n = match fam {
             "pointColor" => s.point_colors.len(),
             "redEye" => s.red_eye.len(),
+            "relightLight" => s.relight.lights.len(),
             _ => 0,
         };
         for i in 0..n {
@@ -498,6 +608,32 @@ mod tests {
         for (id, spec) in indexed_instances(&s) {
             assert!(get(&s, &id).is_some(), "{id}");
             assert!(spec.min <= spec.default && spec.default <= spec.max);
+        }
+    }
+
+    #[test]
+    fn relight_lights_are_indexed_controls_next_to_the_global_ones() {
+        let mut s = DevelopSettings::default();
+        assert_eq!(get(&s, "relight.softness"), Some(40.0));
+        assert!(!set(&mut s, "relightLight.0.intensity", 50.0), "no light yet");
+        s.relight.lights.push(Default::default());
+        assert!(set(&mut s, "relightLight.0.intensity", 900.0));
+        assert_eq!(s.relight.lights[0].intensity, 200.0, "clamped by the template spec");
+        assert!(set(&mut s, "relightLight.0.elevation", f64::NAN));
+        assert_eq!(s.relight.lights[0].elevation, 45.0, "not a number: the default");
+        assert_eq!(find("relightLight.3.cone").map(|c| c.id), Some("relightLight.cone"));
+        // setting the temperature puts it in use in place of the light's own colour; other sliders don't
+        s.relight.lights[0].use_color = true;
+        assert!(set(&mut s, "relightLight.0.intensity", 80.0) && s.relight.lights[0].use_color);
+        assert!(set(&mut s, "relightLight.0.temp", 3200.0));
+        assert_eq!((s.relight.lights[0].temp, s.relight.lights[0].use_color), (3200.0, false));
+        set(&mut s, "relightLight.0.temp", 6500.0);
+        assert!(find("relightLight.0.ambient").is_none() && find("relight.0.softness").is_none());
+        // every template reads the default of a new light
+        for (id, spec) in indexed_instances(&s) {
+            if id.starts_with("relightLight.") && id != "relightLight.0.intensity" {
+                assert_eq!(get(&s, &id), Some(spec.default), "{id}");
+            }
         }
     }
 

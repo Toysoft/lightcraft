@@ -1,4 +1,4 @@
-//! The vertical tool strip at the far right (Presets, Edit, Crop, Remove, Masking, Red Eye …).
+//! The vertical tool strip at the far right (Presets, Edit, Relight, Crop, Remove, Masking, Red Eye …).
 
 use egui::vec2;
 use serde_json::json;
@@ -30,6 +30,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 }
                 for (id, icon, panel, tip) in [
                     ("edit", Icon::Sliders, RightPanel::Edit, "Edit (E)"),
+                    ("relight", Icon::Lamp, RightPanel::Relight, "Relight"),
                     ("crop", Icon::Crop, RightPanel::Crop, "Crop & Rotate (C)"),
                     ("remove", Icon::Eraser, RightPanel::Remove, "Remove (H)"),
                     ("masking", Icon::Mask, RightPanel::Masking, "Masking (M)"),
@@ -39,7 +40,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                     if icon_button(ui, id, icon, sz, on, has_photo, tip).clicked() {
                         let _ = app.run(&format!("panel.{id}"), json!({}));
                     }
-                    if id == "edit" {
+                    if id == "relight" {
                         separator(ui, &t);
                     }
                 }
