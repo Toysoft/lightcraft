@@ -4,7 +4,7 @@ use lightcraft_develop::{BrushStroke, LocalAdjustments, Mask, MaskComponent, Mas
 use lightcraft_geom::Point;
 use serde_json::{Value, json};
 
-use super::{CommandSpec, bad, bool_or, cmd, f64_or, has_active, ok, point, str_param};
+use super::{CommandSpec, always, bad, bool_or, cmd, f64_or, has_active, ok, point, str_param};
 use crate::segment::{Click, MAX_CLICKS};
 use crate::{Result, Session};
 
@@ -50,6 +50,29 @@ fn shape_from(kind: &str, p: &Value, c: &str) -> Result<MaskShape> {
             ));
         }
     })
+}
+
+/// New Sky selections use the same stored model result as Describe. Old `MaskShape::Sky`
+/// values retain their existing source-matte/heuristic rendering when reopened.
+fn new_shape(s: &Session, kind: &str, p: &Value, c: &str) -> Result<MaskShape> {
+    if kind != "sky" {
+        return shape_from(kind, p, c);
+    }
+    let ai = match p.get("ai") {
+        None => s.segmenter.installed() || s.segmenter.remote_endpoint().is_some(),
+        Some(v) => v.as_bool().ok_or_else(|| bad(c, "ai must be true or false"))?,
+    };
+    let seg = match p.get("seg") {
+        None => None,
+        Some(v) => {
+            let seg: lightcraft_develop::SegMask = serde_json::from_value(v.clone()).map_err(|e| bad(c, format!("invalid sky segmentation: {e}")))?;
+            if seg.bounds().is_none() || seg.logits().is_none() {
+                return Err(bad(c, "invalid sky segmentation data"));
+            }
+            Some(seg)
+        }
+    };
+    if ai || seg.is_some() { Ok(MaskShape::Prompt { text: "sky".into(), seg, detail: vec![], edge: 0.0 }) } else { Ok(MaskShape::Sky) }
 }
 
 /// `[[x, y], …]` normalized points under `key`.
@@ -154,17 +177,53 @@ fn find(masks: &mut [Mask], id: u32, c: &str) -> Result<usize> {
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(
+            "mask.subject.discover",
+            "Find Subject Candidates",
+            [],
+            None,
+            "{background?: bool} — experimental local BLIP/SAM picker",
+            has_active,
+            |s, p| {
+                s.subject_start(bool_or(p, "background", false)).map_err(ai_err)?;
+                Ok(json!({"pending": true}))
+            }
+        ),
+        cmd!(query "mask.subject.status", "Subject Candidates", [], None, "{} — transient candidate state", always, |s, _| {
+            s.subject_poll();
+            let p = &s.segmenter.subjects;
+            Ok(json!({"photo": p.photo, "busy": p.busy, "open": p.open, "error": p.error, "candidates": p.candidates}))
+        }),
+        cmd!("mask.subject.choose", "Choose Subject Candidate", [], None, "{index, selected: bool}", has_active, |s, p| {
+            if s.segmenter.subjects.photo != s.active() {
+                return Err(ai_err("The active photo changed."));
+            }
+            let index =
+                p.get("index").and_then(Value::as_u64).and_then(|v| usize::try_from(v).ok()).ok_or_else(|| ai_err("Invalid candidate index"))?;
+            let selected = p.get("selected").and_then(Value::as_bool).ok_or_else(|| ai_err("Give selected: true or false"))?;
+            let c = s.segmenter.subjects.candidates.get_mut(index).ok_or_else(|| ai_err("No such candidate"))?;
+            c.selected = selected;
+            Ok(json!({}))
+        }),
+        cmd!("mask.subject.create", "Create Subject Mask", [], None, "{} — combine chosen candidates in one undo step", has_active, |s, _| {
+            s.subject_create().map_err(ai_err)?;
+            Ok(json!({"activeMask": s.active_mask}))
+        }),
+        cmd!("mask.subject.dismiss", "Dismiss Subject Picker", [], None, "{} — close without changing masks", always, |s, _| {
+            s.segmenter.subjects.open = false;
+            Ok(json!({}))
+        }),
+        cmd!(
             "mask.add",
             "Create New Mask",
             [],
             None,
-            "{kind: brush|linear|radial|sky|subject|background|luminanceRange|colorRange|object|prompt, ...shape params (start/end, center/rx/ry/angle/feather, lo/hi…; object: points/exclude [[x,y],…]; prompt: text; object/prompt: seg? a stored segmentation, no model needed), name?} — AI kinds need the SAM 3 model; in the app a prompt returns {pending} and the mask appears when found",
+            "{kind: brush|linear|radial|sky|subject|background|luminanceRange|colorRange|object|prompt, ...shape params (start/end, center/rx/ry/angle/feather, lo/hi…; object: points/exclude [[x,y],…]; sky: ai? (auto when installed; false keeps the approximate/source-matte selection); prompt: text; object/prompt/sky: seg? a stored segmentation, no model needed), name?} — AI kinds need the SAM 3 model; in the app a prompt returns {pending} and the mask appears when found",
             has_active,
             |s, p| {
                 let kind = str_param(p, "kind").unwrap_or("radial").to_string();
-                let mut shape = shape_from(&kind, p, "mask.add")?;
+                let mut shape = new_shape(s, &kind, p, "mask.add")?;
                 let later = resolve_ai(s, &mut shape, "mask.add")?;
-                let name = str_param(p, "name").map(str::to_string);
+                let name = str_param(p, "name").map(str::to_string).or_else(|| (kind == "sky").then(|| "Sky".into()));
                 if let Later::Text(text) = &later {
                     let id = s.active().ok_or_else(|| bad("mask.add", "no active photo"))?;
                     s.segment_text_later(id, None, "add", name, text).map_err(ai_err)?;
@@ -189,7 +248,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add/Subtract/Intersect Mask",
             [],
             None,
-            "{id?: maskId, op: add|subtract|intersect, kind, ...shape params}",
+            "{id?: maskId, op: add|subtract|intersect, kind, ...shape params (sky: ai?, seg?)}",
             has_active,
             |s, p| {
                 let kind = str_param(p, "kind").unwrap_or("brush").to_string();
@@ -201,7 +260,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 if !s.develop_of(id).is_some_and(|d| d.masks.iter().any(|m| m.id == mid)) {
                     return Err(bad("mask.addComponent", format!("no mask {mid}")));
                 }
-                let mut shape = shape_from(&kind, p, "mask.addComponent")?;
+                let mut shape = new_shape(s, &kind, p, "mask.addComponent")?;
                 let later = resolve_ai(s, &mut shape, "mask.addComponent")?;
                 if let Later::Text(text) = &later {
                     let op = p.get("op").and_then(Value::as_str).unwrap_or("add");

@@ -1,4 +1,4 @@
-# AI masks (Object and Describe)
+# AI masks (Sky, Object and Describe)
 
 LightCraft selects objects with **SAM 3** (Segment Anything with Concepts, Meta 2025), run in
 pure Rust by `crates/segment` on [candle](https://github.com/huggingface/candle): on the GPU
@@ -14,6 +14,11 @@ In the Masking panel (M):
 
 - **Object**: click the thing you want; every click refines the selection. ⌥-click (Alt) a part
   to leave it out. Clicks show as green (include) and red (leave out) dots.
+- **Sky**: with SAM 3 installed (or a remote worker configured), selects `sky` through the same
+  background worker as Describe. No-match and model failures create no empty mask. Without a model,
+  Sky keeps the source-matte/approximate selection; the panel identifies approximations. Previously
+  saved Sky masks keep their rendering. New model results are stored as Describe shapes with the
+  fixed `sky` prompt, so reopening and exporting need no model.
 - **Describe**: type what to select — `sky`, `trees`, `the red car` — and press Return. Every
   instance the model finds (score above 0.5) joins the mask; if nothing matches, nothing is
   created and you are told so.
@@ -176,7 +181,22 @@ Therefore:
 - Whoever hosts a mirror redistributes the SAM Materials and must follow the licence (ship it
   next to the files).
 
+## Sky validation
+
+The Sky command is covered by model-free persistence/component tests and synthetic worker
+no-match/failure tests. A manual check on 2026-10-12 used the installed SAM 3 weights and the
+CC0 Sony A7R IVA sample `arw-sony-a7rm4a-compressed` from the corpus manifest: clicking Sky
+created a stored 288×288 segmentation. The overlay selected the sky above trees and rooftops;
+this is a smoke check, not a broad boundary-quality benchmark. Replaying that segmentation
+in a separate session with no model configured, with a −1 EV local exposure adjustment,
+produced a byte-identical 1200×800 CPU render. No image or model weights are bundled by this change.
+
 ## Commands (control channel, MCP)
+
+`mask.add {"kind":"sky"}` and `mask.addComponent {"kind":"sky","op":"subtract"}`
+use SAM 3 when configured. Set `ai: true` to require the model (missing weights are an error), or
+`ai: false` to explicitly keep the source-matte/heuristic path. A stored `seg` can be replayed
+with kind `sky` without weights. Subject and Background are unchanged.
 
 | Command | Params | |
 |---|---|---|
@@ -236,3 +256,43 @@ python3 -m venv .venv-sam3 && .venv-sam3/bin/pip install -r tools/requirements-s
 .venv-sam3/bin/python tools/sam3_reference.py photo.jpg ref.safetensors
 LIGHTCRAFT_SAM3_DIR=<model dir> LIGHTCRAFT_SAM3_REF=ref.safetensors cargo test -p lightcraft-segment --release -- --nocapture
 ```
+
+## Selection provenance and late results
+
+Sky, Subject, Background and People still use a file's semantic mattes when available,
+otherwise classical approximate selection. The Masking panel explicitly identifies that
+approximation and suggests Brush refinement or Object / Describe. It is not equivalent to
+SAM inference; this label does not improve the heuristic's segmentation quality.
+
+A background Object / Describe / Detail result is now tied to the rendered input that
+produced it. Changing the photo's look, geometry, orientation, reloaded lens coefficients,
+or camera profile while inference runs causes the old result to be discarded with a retry
+notice. An unchanged result is accepted normally. Detail jobs carry the full-photo input
+identity separately from their temporary encode-cache key. Regression tests inject stored
+segmentations without downloading weights or running inference.
+
+## Experimental Subject candidate picker (local prototype)
+
+Set `LIGHTCRAFT_BLIP_DIR` to a local directory containing BLIP-base's `pytorch_model.bin`
+and `vocab.txt` to opt into the prototype Subject / Background buttons. Model:
+[Salesforce/blip-image-captioning-base](https://huggingface.co/Salesforce/blip-image-captioning-base),
+revision `82a37760796d32b1411fe092ab5d4e227313294b` (BSD-3-Clause); no model is bundled or downloaded
+by this prototype. Both BLIP and a local SAM 3 installation are required. Candle is pinned to
+0.9.2 with default features off; this adds no Python or C/C++ inference runtime.
+
+Subject runs a local caption on a background worker, extracts up to six phrases, then asks SAM
+for each. Unmatched phrases and near-identical masks are omitted. Red thumbnails show the actual
+selections. Choose one or more and press **Create mask**: the components are stored together in
+one undoable edit. Background uses the same picker and inverts the union. Cancel leaves edits
+untouched; computation already running finishes in the background. A changed photo cannot accept
+stale suggestions. Existing saved masks are unchanged, and Describe / Object remain available.
+
+This is an evaluation interface, not a completed parity feature. The phrase extractor is simple,
+BLIP can omit objects or describe them incorrectly, and SAM groups all instances of a phrase
+(e.g. multiple people) rather than offering each instance separately. It does not identify every
+object. Verified candidates are reused when reopening the picker on the same unchanged photo.
+Model installation, cancellation during inference, per-instance selection and broader image
+coverage remain future work. No network is used during inference.
+
+Commands: `mask.subject.discover {background?: bool}`, `mask.subject.status`,
+`mask.subject.choose {index, selected}`, `mask.subject.create`, `mask.subject.dismiss`.
