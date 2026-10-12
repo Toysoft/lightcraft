@@ -30,6 +30,7 @@ pub mod cull;
 pub mod dust;
 pub mod finish;
 pub mod geometry;
+pub mod haze;
 pub mod local;
 pub mod local_tone;
 pub mod lut;
@@ -372,6 +373,10 @@ pub struct Plan<'a> {
     pub eyes: Vec<redeye::EyeK>,
     /// The whole frame's dehaze airlight, for a windowed render (which can't see the whole frame).
     pub fixed_air: Option<f32>,
+    /// Process V3's dehaze haze map of the whole frame ([`haze::HazeMap`], cached per image): every
+    /// render of the photo (any size, any window, CPU or GPU) samples the same one. `None` unless
+    /// the settings dehaze under V3 ([`haze::wanted`]).
+    pub haze: Option<Arc<haze::HazeMap>>,
     /// A windowed render works on a larger window when spots reach into it (see
     /// [`spots::window_for_reads`]); this is the requested window inside the rendered one, which
     /// the result is cut to.
@@ -404,6 +409,8 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
     let (full_w, full_h) = frame.fit(req.max_w, req.max_h);
     // sizes and scale are those of the whole output; a window only narrows what is drawn
     let px_per_long = frame.px_per_long(full_w);
+    // (of the whole frame, before any window narrows it)
+    let haze = haze::wanted(s).then(|| haze::for_frame(src, info, s, &frame));
     let mut fixed_air = None;
     let mut keep = None;
     let (frame, w, h) = match req.window {
@@ -443,7 +450,7 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         s.process.process(),
     ));
     let lin_key = hash_of((pre_nr_key, [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits)));
-    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
+    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, haze, keep, mattes: info.mattes.clone() }
 }
 
 /// Whether the scene-linear stage needs work only the CPU does (defringe, spot removal).

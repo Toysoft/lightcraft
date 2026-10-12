@@ -98,3 +98,47 @@ fn warm_caches_across_processes_match_fresh_renders() {
         }
     }
 }
+
+/// The V3 haze map is built only when V3 dehazes (globally or in a mask), and every render of the
+/// photo gets the same one: preview and export sizes, a zoomed window, any exposure.
+#[test]
+fn v3_plans_carry_one_haze_map_per_photo() {
+    let src = scene();
+    let info = SourceInfo::default();
+    let req = RenderRequest::fit(W, H);
+    assert!(plan(&src, &info, &dehazed(Process::V3, 0.0, false), &req).haze.is_none());
+    assert!(plan(&src, &info, &dehazed(Process::V2, 50.0, true), &req).haze.is_none());
+    assert!(plan(&src, &info, &dehazed(Process::V1, 50.0, false), &req).haze.is_none());
+    let local_only = plan(&src, &info, &dehazed(Process::V3, 0.0, true), &req).haze;
+    let Some(map) = plan(&src, &info, &dehazed(Process::V3, 50.0, false), &req).haze else { panic!("no haze map for V3 Dehaze") };
+    assert!(local_only.is_some_and(|m| *m == *map), "a mask's dehaze uses the same map");
+    let reqs = [
+        RenderRequest::fit(W / 3, H / 3),
+        RenderRequest::fit(4 * W, 4 * H),
+        RenderRequest { window: Some(PixelWindow { x: 300, y: 200, w: 150, h: 90 }), ..RenderRequest::fit(3 * W, 3 * H) },
+        RenderRequest { depth: OutputDepth::U16, ..req },
+    ];
+    for (i, r) in reqs.iter().enumerate() {
+        for amount in [-60.0, 50.0, 100.0] {
+            let mut s = dehazed(Process::V3, amount, false);
+            s.light.exposure = 1.5;
+            let Some(m) = plan(&src, &info, &s, r).haze else { panic!("request {i}: no haze map") };
+            assert!(*m == *map, "request {i}, dehaze {amount}: another haze map");
+        }
+    }
+    // (the scene is smaller than the proxy edge: the proxy is the frame at its own size)
+    assert_eq!(map.size(), (W, H));
+}
+
+/// A large photo's map is built on the fixed-size proxy, once: the next plan reuses it.
+#[test]
+fn v3_haze_map_is_built_once() {
+    let src = hazy_valley(3000, 2000);
+    let info = SourceInfo::default();
+    let s = dehazed(Process::V3, 50.0, false);
+    let a = plan(&src, &info, &s, &RenderRequest::fit(1500, 1000)).haze;
+    let b = plan(&src, &info, &s, &RenderRequest::fit(600, 400)).haze;
+    let (Some(a), Some(b)) = (a, b) else { panic!("no haze map") };
+    assert!(Arc::ptr_eq(&a, &b), "the second plan reuses the cached map");
+    assert_eq!(a.size(), (1024, 683));
+}
