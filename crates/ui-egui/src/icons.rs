@@ -124,6 +124,40 @@ icons! {
     Luminance,
     /// Depth Range mask: stacked layers, near to far.
     Depth,
+    /// Aspect ratio locked: a closed chain link (Lucide `link-2`).
+    Link,
+    /// Aspect ratio free: a broken chain link (Lucide `link-2-off`).
+    Unlink,
+    /// Rotate 90° anticlockwise (Lucide `rotate-ccw`).
+    RotateLeft,
+    /// Rotate 90° clockwise (Lucide `rotate-cw`).
+    RotateRight,
+    /// Mirror left to right: two triangles either side of a dashed vertical axis (Lucide `flip-horizontal-2`).
+    FlipH,
+    /// Mirror top to bottom: two triangles either side of a dashed horizontal axis (Lucide `flip-vertical-2`).
+    FlipV,
+    /// Swap the crop's aspect (landscape ↔ portrait): a wide and a tall frame with a turning arrow.
+    SwapAspect,
+    /// Reset: an arrow curving back (Lucide `undo-2`).
+    Reset,
+    /// The straighten tool: a ruler laid across (Lucide `ruler`).
+    Straighten,
+    /// Automatic: a wand with sparkles (Lucide `wand-sparkles`).
+    Auto,
+    /// Crop overlay: rule of thirds, in a 3:2 frame (the guides `crop_overlay` draws, our own).
+    OverlayThirds,
+    /// Crop overlay: a grid.
+    OverlayGrid,
+    /// Crop overlay: golden-section lines.
+    OverlayGolden,
+    /// Crop overlay: 45° diagonals from the corners.
+    OverlayDiagonal,
+    /// Crop overlay: the harmonic triangle.
+    OverlayTriangle,
+    /// Crop overlay: the golden spiral.
+    OverlaySpiral,
+    /// Crop overlay: none (an empty frame).
+    OverlayNone,
 }
 
 struct Pen<'a> {
@@ -718,6 +752,100 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
                 ]
             );
         }
+        Link => {
+            // Lucide `link-2`
+            lucide!(pen, ["M9 17H7A5 5 0 0 1 7 7h2", "M15 7h2a5 5 0 1 1 0 10h-2", "M8 12h8"]);
+        }
+        Unlink => {
+            // Lucide `link-2-off`
+            lucide!(pen, ["M9 17H7A5 5 0 0 1 7 7", "M15 7h2a5 5 0 0 1 4 8", "M8 12h4", "M2 2l20 20"]);
+        }
+        RotateLeft => {
+            // Lucide `rotate-ccw`
+            lucide!(pen, ["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5"]);
+        }
+        RotateRight => {
+            // Lucide `rotate-cw`
+            lucide!(pen, ["M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8", "M21 3v5h-5"]);
+        }
+        FlipH => {
+            // Lucide `flip-horizontal-2`
+            lucide!(pen, ["m3 7 5 5-5 5V7", "m21 7-5 5 5 5V7", "M12 20v2", "M12 14v2", "M12 8v2", "M12 2v2"]);
+        }
+        FlipV => {
+            // Lucide `flip-vertical-2`
+            lucide!(pen, ["m17 3-5 5-5-5h10", "m17 21-5-5-5 5h10", "M4 12H2", "M10 12H8", "M16 12h-2", "M22 12h-2"]);
+        }
+        SwapAspect => {
+            // our own: a wide frame, a tall frame, and an arrow turning from one to the other
+            pen.rect(2.0, 10.0, 12.0, 17.0, 1.0);
+            pen.rect(13.0, 5.0, 18.0, 17.0, 1.0);
+            pen.arc(10.0, 8.0, 5.0, 180.0, 270.0);
+            pen.line(&[(8.0, 1.5), (10.0, 3.0), (8.0, 4.5)]);
+        }
+        Reset => {
+            // Lucide `undo-2`
+            lucide!(pen, ["M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"]);
+        }
+        Straighten => {
+            // Lucide `ruler`
+            lucide!(
+                pen,
+                [
+                    "M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z",
+                    "m14.5 12.5 2-2",
+                    "m11.5 9.5 2-2",
+                    "m8.5 6.5 2-2",
+                    "m17.5 15.5 2-2",
+                ]
+            );
+        }
+        Auto => {
+            // Lucide `wand-sparkles`
+            lucide!(
+                pen,
+                [
+                    "m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72",
+                    "m14 7 3 3",
+                    "M5 6v4",
+                    "M19 14v4",
+                    "M10 2v2",
+                    "M7 8H3",
+                    "M21 16h-4",
+                    "M11 3H9",
+                ]
+            );
+        }
+        OverlayThirds | OverlayGrid | OverlayGolden | OverlayDiagonal | OverlayTriangle | OverlaySpiral | OverlayNone => {
+            overlay_icon(&pen, icon);
+        }
+    }
+}
+
+/// A crop overlay's own guides (the ones the crop tool draws) in a 3:2 frame, a thinner pen inside.
+fn overlay_icon(pen: &Pen, icon: Icon) {
+    use crate::state::CropOverlay as O;
+    let kind = match icon {
+        Icon::OverlayThirds => O::Thirds,
+        Icon::OverlayGrid => O::Grid,
+        Icon::OverlayGolden => O::Golden,
+        Icon::OverlayDiagonal => O::Diagonal,
+        Icon::OverlayTriangle => O::Triangle,
+        Icon::OverlaySpiral => O::Spiral,
+        _ => O::None,
+    };
+    let (x0, y0, w, h) = (2.0, 4.5, 16.0, 11.0);
+    pen.rect(x0, y0, x0 + w, y0 + h, 1.0);
+    let thin = Pen { s: Stroke::new((pen.s.width * 0.7).max(1.0), pen.s.color), ..*pen };
+    let guides = if kind == O::Grid {
+        // the tool's 8×8 grid is too dense for an icon: quarters read as "a grid"
+        [0.25f32, 0.5, 0.75].iter().flat_map(|&f| [vec![(f, 0.0), (f, 1.0)], vec![(0.0, f), (1.0, f)]]).collect()
+    } else {
+        crate::panels::crop_overlay::paths(kind, 0, w, h)
+    };
+    for g in guides {
+        let pts: Vec<(f32, f32)> = g.iter().map(|&(u, v)| (x0 + u * w, y0 + v * h)).collect();
+        thin.line(&pts);
     }
 }
 
