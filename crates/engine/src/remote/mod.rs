@@ -326,7 +326,7 @@ impl Remote {
         }
         // A sign-in object isn't kept between calls: answering `needsTrust` means starting again with
         // `trust`, and the certificate it then finds must be the one the user saw.
-        let mut sign_in = SignIn::start(server, provider());
+        let mut sign_in = SignIn::start(server, "LightCraft", provider());
         if let SignInState::NeedsTrust { fingerprint } = *sign_in.state() {
             if trust.or(pinned) == Some(fingerprint) {
                 sign_in.confirm_trust(true);
