@@ -157,6 +157,8 @@ mod tests_sam_setup;
 #[cfg(test)]
 mod tests_scroll;
 #[cfg(test)]
+mod tests_side_keys;
+#[cfg(test)]
 mod tests_slider_reset;
 #[cfg(test)]
 mod tests_slideshow;

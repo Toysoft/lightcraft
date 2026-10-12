@@ -2376,5 +2376,8 @@
   "Go Deeper": "Ir más adentro",
   "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further": "Las carpetas a esta profundidad no se muestran aquí. Haz clic para añadir esta carpeta a Local como un lugar propio y seguir abriéndola",
   "This folder stays listed while the grid shows its photos": "Esta carpeta sigue en la lista mientras la cuadrícula muestre sus fotos",
-  "Opens as its own place": "Se abre como lugar propio"
+  "Opens as its own place": "Se abre como lugar propio",
+  "Keyboard in Sidebar": "Teclado en la barra lateral",
+  "Keys are in the sidebar: arrows move, Enter opens, type to find, Esc goes back to the photos": "Las teclas están en la barra lateral: las flechas mueven, Intro abre, escribe para buscar, Esc vuelve a las fotos",
+  "This row has no name to change": "Esta fila no tiene un nombre que cambiar"
 }

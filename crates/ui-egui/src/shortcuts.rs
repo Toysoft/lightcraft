@@ -341,6 +341,13 @@ fn keyboard_owned(app: &LightcraftApp, ctx: &egui::Context) -> bool {
     })
 }
 
+/// Whether the shortcut of Keyboard in Sidebar itself was pressed: the one unmodified key that
+/// stays a shortcut while the sidebar has the keys, so the key that starts the mode also ends it.
+fn sidebar_keys_pressed(app: &LightcraftApp, ctx: &egui::Context) -> bool {
+    let default = bindable().iter().find(|b| b.id == "view.sidebarKeys").and_then(|b| b.default);
+    binding(&app.ui.settings.keymap, "view.sidebarKeys", default).and_then(parse).is_some_and(|(m, k)| ctx.input(|i| matches(i, m, k)))
+}
+
 pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
     if !matches!(app.ui.dialog, Some(crate::state::Dialog::Shortcuts)) {
         app.recording_shortcut = None;
@@ -354,6 +361,10 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
     }
     // don't steal keys from text fields or from the keymap editor recording a shortcut
     if keyboard_owned(app, ctx) || app.recording_shortcut.is_some() || app.ui.name_edit.is_some() {
+        return;
+    }
+    // Keyboard in Sidebar: keys without Cmd / Ctrl / Alt are the sidebar's, bar the key that ends it
+    if crate::panels::side_keys::owns_keys(app, ctx) && !sidebar_keys_pressed(app, ctx) {
         return;
     }
     let mut fire: Vec<String> = Vec::new();

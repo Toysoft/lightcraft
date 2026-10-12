@@ -138,6 +138,7 @@ fn row_sensed(
     register(ui.ctx(), format!("source:{id}"), r);
     let mark_w = if mark.is_some() { MARK_W } else { 0.0 };
     let said = spoken.unwrap_or(label);
+    let keys = super::side_keys::note_row(app, ui, id, said, indent, false, None, selected, &resp);
     let name = match count {
         Some(n) => crate::i18n::tr_format!("{label}, {n} photos", label = said, n = n),
         None => said.to_string(),
@@ -158,6 +159,9 @@ fn row_sensed(
         register(ui.ctx(), format!("currentMark:{id}"), mark);
     } else if resp.hovered() {
         ui.painter().rect_filled(inner, 4.0, t.hover.gamma_multiply(0.6));
+    }
+    if keys.cursor {
+        super::side_keys::ring(ui, inner);
     }
     paint(
         ui.painter(),
@@ -221,9 +225,21 @@ fn row_sensed(
 /// rows scroll by), and the caller skips it. A library can have thousands of keywords or folders,
 /// and drawing them all every frame slows the whole app down (issue #1011). A row the sidebar is
 /// asked to scroll to is drawn. `label`, `count` and `mark` as for [`row_sensed`].
-fn out_of_sight(app: &LightcraftApp, ui: &mut egui::Ui, id: &str, label: &str, count: Option<usize>, indent: f32, mark: bool) -> bool {
+/// `selected` too. With the keys in the sidebar the row is still one of theirs (the arrows pass
+/// over it), and it is drawn when the cursor is on it or a key asked something of it.
+#[allow(clippy::too_many_arguments)]
+fn out_of_sight(
+    app: &LightcraftApp,
+    ui: &mut egui::Ui,
+    id: &str,
+    label: &str,
+    count: Option<usize>,
+    indent: f32,
+    mark: bool,
+    selected: bool,
+) -> bool {
     let r = Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), ROW_HEIGHT));
-    if ui.is_rect_visible(r) || scroll_asked(ui, id) {
+    if ui.is_rect_visible(r) || scroll_asked(ui, id) || super::side_keys::note_unseen(app, ui, id, label, indent, selected) {
         return false;
     }
     ui.allocate_space(r.size());
@@ -282,7 +298,8 @@ fn set_tree_open(ui: &egui::Ui, key: egui::Id, open: bool) {
 /// (it sits on the row and takes its clicks, so a row's context menu is attached to it too).
 fn tree_toggle(ui: &mut egui::Ui, row: &egui::Response, indent: f32, key: egui::Id, open: &mut bool, widget: String) -> egui::Response {
     let tri = disclosure_chevron(ui, row, indent, *open, key.with("triangle"), widget);
-    if tri.clicked() {
+    // Left / Right on the row, with the keys in the sidebar, is a click on its chevron
+    if tri.clicked() != super::side_keys::note_open(ui, *open) {
         *open = !*open;
         set_tree_open(ui, key, *open);
     }
@@ -294,7 +311,7 @@ fn tree_toggle(ui: &mut egui::Ui, row: &egui::Response, indent: f32, key: egui::
 /// Space above a section's header.
 const SECTION_GAP: f32 = 10.0;
 /// Height of a section's header.
-const SECTION_HEADER: f32 = 34.0;
+pub(super) const SECTION_HEADER: f32 = 34.0;
 
 /// One sidebar section: the gap above it, its header, and (while it is open) the rows `body`
 /// draws. Every section goes through here, so they all fold, space and announce themselves alike.
@@ -547,7 +564,14 @@ fn section_header(app: &mut LightcraftApp, ui: &mut egui::Ui, section: SidebarSe
     let (interact, widget) = if pinned { ("sidebar-section-pinned", "sidebarSectionPinned") } else { ("sidebar-section", "sidebarSection") };
     let resp = ui.interact(r, ui.id().with((interact, id)), Sense::click_and_drag());
     register(ui.ctx(), format!("{widget}:{id}"), r);
-    let toggled = resp.clicked();
+    // (the pinned copy is the same header: the keys know the one in the list)
+    let keys = if pinned {
+        Default::default()
+    } else {
+        let open = !app.ui.sidebar.is_collapsed(section);
+        super::side_keys::note_row(app, ui, &format!("{widget}:{id}"), title, 0.0, true, Some(open), false, &resp)
+    };
+    let toggled = resp.clicked() || keys.chosen;
     if toggled {
         app.ui.sidebar.toggle_collapsed(section);
     }
@@ -574,6 +598,9 @@ fn section_header(app: &mut LightcraftApp, ui: &mut egui::Ui, section: SidebarSe
     if hovered {
         let bar = Rect::from_min_max(r.min + vec2(8.0, 2.0), pos2((edge - 8.0).max(r.left() + 8.0), r.bottom() - 2.0));
         ui.painter().rect_filled(bar, 4.0, t.hover.gamma_multiply(0.6));
+    }
+    if keys.cursor {
+        super::side_keys::ring(ui, Rect::from_min_max(r.min + vec2(8.0, 2.0), pos2((edge - 8.0).max(r.left() + 8.0), r.bottom() - 2.0)));
     }
     let c = pos2(r.left() + 10.0, r.center().y);
     register(ui.ctx(), format!("{widget}Chevron:{id}"), Rect::from_center_size(c, vec2(16.0, 16.0)));
@@ -770,6 +797,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     super::side_select::begin_left(app);
     frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
+        super::side_keys::begin(app, ui, ui.max_rect());
         // the title offers the sections' menu too: where hidden sections come back from
         let (hr, title) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
         crate::widgets::announce(&title, crate::i18n::tr("My Photos"));
@@ -814,18 +842,21 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 ("recentlyAdded", Icon::Clock, "Recently Added", None, LibrarySource::RecentlyAdded),
                 ("picks", Icon::FlagPick, "Picks", Some(picks), LibrarySource::Picks),
             ] {
-                if row(app, ui, id, icon, label, count, src == s, 0.0).clicked() {
+                let resp = row(app, ui, id, icon, label, count, src == s, 0.0);
+                if super::side_keys::chosen(ui, &resp) {
                     app.act("library.source", json!({"kind": id}));
                 }
             }
             // photos whose files can't be found (checked every few seconds, not every frame)
             let missing = missing_count(app, ui);
-            if (missing > 0 || src == LibrarySource::Missing)
-                && row(app, ui, "missing", Icon::Folder, "Missing Photos", Some(missing), src == LibrarySource::Missing, 0.0).clicked()
-            {
+            if (missing > 0 || src == LibrarySource::Missing) && {
+                let resp = row(app, ui, "missing", Icon::Folder, "Missing Photos", Some(missing), src == LibrarySource::Missing, 0.0);
+                super::side_keys::chosen(ui, &resp)
+            } {
                 app.act("library.source", json!({"kind": "missing"}));
             }
-            if row(app, ui, "recentlyDeleted", Icon::Trash, "Recently Deleted", Some(deleted), src == LibrarySource::RecentlyDeleted, 0.0).clicked() {
+            let resp = row(app, ui, "recentlyDeleted", Icon::Trash, "Recently Deleted", Some(deleted), src == LibrarySource::RecentlyDeleted, 0.0);
+            if super::side_keys::chosen(ui, &resp) {
                 app.act("library.source", json!({"kind": "recentlyDeleted"}));
             }
             // the album just made: the folders down to it open, once (also when the section is shut)
@@ -1012,8 +1043,10 @@ fn local_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, now: &LocalNow) {
         let reveal = local.owner == Some(i);
         folder_tree(app, ui, path, name, path, 0.0, current, reveal, transient);
     }
-    if app.services.pick_folder.is_some() && row(app, ui, "local:browse", Icon::Plus, crate::i18n::tr("Browse Folder…"), None, false, 0.0).clicked()
-    {
+    if app.services.pick_folder.is_some() && {
+        let resp = row(app, ui, "local:browse", Icon::Plus, crate::i18n::tr("Browse Folder…"), None, false, 0.0);
+        super::side_keys::chosen(ui, &resp)
+    } {
         let picked = app.services.pick_folder.as_mut().and_then(|f| f());
         if let Some(path) = picked {
             match app.run("library.browse", json!({"path": path})) {
@@ -1029,10 +1062,9 @@ fn local_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, now: &LocalNow) {
     let hidden = app.ui.hidden_locations.len();
     if hidden > 0 {
         let label = crate::i18n::tr_format!("Show {hidden} hidden location{}", if hidden == 1 { "" } else { "s" }, hidden = hidden);
-        if row(app, ui, "local:restoreHidden", Icon::Folder, &label, None, false, 0.0)
-            .on_hover_text(crate::i18n::tr("Put the locations you removed from Local back (no files change)"))
-            .clicked()
-        {
+        let resp = row(app, ui, "local:restoreHidden", Icon::Folder, &label, None, false, 0.0)
+            .on_hover_text(crate::i18n::tr("Put the locations you removed from Local back (no files change)"));
+        if super::side_keys::chosen(ui, &resp) {
             app.act("local.restoreHidden", json!({}));
         }
     }
@@ -1243,7 +1275,7 @@ fn folder_tree(
     let resp = row(app, ui, &format!("local:{path}"), Icon::Folder, name, None, sel, indent).on_hover_text(path);
     let tr = tree_toggle(ui, &resp, indent, open_id, &mut open, format!("folderToggle:{path}"));
     if !tr.clicked()
-        && resp.clicked()
+        && super::side_keys::chosen(ui, &resp)
         && let Err(e) = app.run("library.browse", json!({"path": path}))
     {
         app.toast(ui.ctx(), e);
@@ -1319,7 +1351,7 @@ fn folder_tree(
                 .on_hover_text(crate::i18n::tr(
                     "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further",
                 ));
-            if more.clicked() && app.act("local.addRoot", json!({"path": path})).is_some() {
+            if super::side_keys::chosen(ui, &more) && app.act("local.addRoot", json!({"path": path})).is_some() {
                 // this row is the folder inside another place from now on: it stays open as it was
                 set_tree_open(ui, open_id, true);
                 app.toast(ui.ctx(), crate::i18n::tr_format!("“{name}” is now a place in Local: open it there", name = name));
@@ -1338,7 +1370,7 @@ fn date_row(app: &mut LightcraftApp, ui: &mut egui::Ui, key: &str, label: &str, 
     if key.len() < 10 {
         tree_toggle(ui, &resp, indent, open_id, &mut open, format!("dateToggle:{key}"));
     }
-    if resp.clicked() {
+    if super::side_keys::chosen(ui, &resp) {
         super::side_select::date_clicked(app, ui, key);
     }
     open
@@ -1394,7 +1426,7 @@ fn albums_tree(app: &mut LightcraftApp, ui: &mut egui::Ui, all: &AlbumKids, pare
                 folder_menu(app, &tri, a);
             }
             // the row itself is the source: the photos of the albums inside the folder
-            if resp.clicked() {
+            if super::side_keys::chosen(ui, &resp) {
                 super::side_select::album_clicked(app, ui, a.id);
             }
             folder_menu(app, &resp, a);
@@ -1440,7 +1472,7 @@ fn albums_tree(app: &mut LightcraftApp, ui: &mut egui::Ui, all: &AlbumKids, pare
                 }
                 resp = resp.on_hover_text(tip);
             }
-            if resp.clicked() {
+            if super::side_keys::chosen(ui, &resp) {
                 super::side_select::album_clicked(app, ui, a.id);
             }
             folder_menu(app, &resp, a);
@@ -2067,7 +2099,7 @@ fn folder_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[FolderNode],
         }
         let name = if n.selectable { n.name.clone() } else { crate::i18n::tr("This Computer").to_string() };
         let id = format!("libfolder:{}", n.path);
-        if !out_of_sight(app, ui, &id, &name, Some(n.count), indent, n.label.is_some()) {
+        if !out_of_sight(app, ui, &id, &name, Some(n.count), indent, n.label.is_some(), sel) {
             folder_row(app, ui, n, &id, &name, indent, open_id, &mut open, sel, FolderParents { above, asked_for });
         }
         if open && !n.children.is_empty() {
@@ -2108,7 +2140,7 @@ fn folder_row(
     }
     let tip = if n.children.is_empty() { n.path.clone() } else { format!("{} ({})", n.path, crate::i18n::tr("includes the folders inside it")) };
     let resp = resp.on_hover_text(tip);
-    if resp.clicked() && !toggled {
+    if super::side_keys::chosen(ui, &resp) && !toggled {
         if n.selectable {
             super::side_select::folder_clicked(app, ui, &n.path);
         } else {
@@ -2480,7 +2512,7 @@ fn keyword_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[KeywordNode
         let id = format!("keyword:{}", n.path);
         let sel = super::side_select::keyword_shown(app, &n.path);
         app.ui.side.keywords.saw(n.path.clone());
-        if !out_of_sight(app, ui, &id, &n.name, Some(n.count), indent, false) {
+        if !out_of_sight(app, ui, &id, &n.name, Some(n.count), indent, false, sel) {
             keyword_row(app, ui, n, &id, indent, open_id, &mut open, sel);
         }
         if open {
@@ -2507,7 +2539,7 @@ fn keyword_row(
         tree_toggle(ui, &resp, indent, k, open, format!("keywordToggle:{}", n.path));
     }
     let resp = resp.on_hover_text(if n.children.is_empty() { n.path.clone() } else { format!("{} (includes the keywords below it)", n.path) });
-    if resp.clicked() {
+    if super::side_keys::chosen(ui, &resp) {
         super::side_select::keyword_clicked(app, ui, &n.path);
     }
     resp.context_menu(|ui| {

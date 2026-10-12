@@ -719,6 +719,20 @@ pub struct UiState {
     /// disk to the library's first folder and were asked for with Show Parent Folder: the
     /// sidebar's Folders lists them, where it otherwise passes them over.
     pub folder_parents: std::collections::BTreeSet<String>,
+    /// Keyboard in Sidebar (`view.sidebarKeys`): the arrow keys, Enter, typing and F2 are the left
+    /// sidebar's (see [`crate::panels::side_keys`]). A mode of the moment: never saved.
+    #[serde(skip)]
+    pub sidebar_keys: bool,
+    /// The row the sidebar's keys are on (its widget id without `source:`, or a header's id).
+    #[serde(skip)]
+    pub sidebar_cursor: Option<String>,
+    /// Frames the sidebar has left to appear in after the keys were asked into it while it was
+    /// hidden, before they are given back (see [`crate::panels::side_keys::owns_keys`]).
+    #[serde(skip)]
+    pub sidebar_keys_grace: u8,
+    /// The cursor moved by a key: its row scrolls into view when it is drawn next.
+    #[serde(skip)]
+    pub sidebar_cursor_moved: bool,
     /// What settings files said before [`UiState::sidebar`]: the ids of the folded sections. Read
     /// so they stay folded ([`UiState::sanitized`] moves them over), never written.
     #[serde(skip_serializing)]
@@ -1323,6 +1337,10 @@ impl Default for UiState {
             face_boxes: true,
             sidebar: Default::default(),
             folder_parents: Default::default(),
+            sidebar_keys: false,
+            sidebar_cursor: None,
+            sidebar_keys_grace: 0,
+            sidebar_cursor_moved: false,
             collapsed_sidebar: Vec::new(),
             name_edit: None,
             person_page: None,

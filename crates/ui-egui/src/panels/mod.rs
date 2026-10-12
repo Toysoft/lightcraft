@@ -30,6 +30,7 @@ pub mod right;
 pub mod rules_editor;
 pub mod second;
 pub mod settings;
+pub(crate) mod side_keys;
 pub mod side_select;
 pub mod slide_layout;
 pub mod slide_overlays;
