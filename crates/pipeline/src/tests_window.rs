@@ -380,7 +380,7 @@ fn auto_mask_strokes_match_the_whole_render() {
 // frame does: the photo is analysed whole (crate::auto_mask), not the window's pixels
 #[test]
 fn automatic_ai_masks_do_not_depend_on_the_window() {
-    use lcc_develop::{Mask, MaskComponent, MaskOp, MaskShape};
+    use lightcraft_develop::{Mask, MaskComponent, MaskOp, MaskShape};
     for shape in [MaskShape::Sky, MaskShape::Subject] {
         let mut s = DevelopSettings::default();
         let mut m =

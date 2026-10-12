@@ -1,13 +1,13 @@
 //! Evaluation of the AI masks without a model (Sky, Subject, Landscape) against reference masks:
-//! the procedural demo scenes (`lcc-scenes`) know what each pixel shows ([`lcc_scenes::Label`]),
+//! the procedural demo scenes (`lightcraft-scenes`) know what each pixel shows ([`lightcraft_scenes::Label`]),
 //! so every scene of the demo library is a labelled photo. Scores are soft IoU
 //! (Σ min / Σ max of the mask and the reference share) per scene; the tests print the table
-//! (`cargo test -p lcc-pipeline mask_eval -- --nocapture`) and hold the means to a floor, so a
+//! (`cargo test -p lightcraft-pipeline mask_eval -- --nocapture`) and hold the means to a floor, so a
 //! change that makes a mask worse fails. Numbers are recorded in docs/ai-masks.md.
 
-use lcc_develop::{DevelopSettings, MaskShape};
-use lcc_raster::Plane;
-use lcc_scenes::Label;
+use lightcraft_develop::{DevelopSettings, MaskShape};
+use lightcraft_raster::Plane;
+use lightcraft_scenes::Label;
 
 use crate::geometry::Frame;
 use crate::masks::{Mattes, shape_alpha};
@@ -30,7 +30,7 @@ fn iou(a: &Plane, truth: &[[f32; 4]], label: Label) -> Option<f64> {
 /// with the photo analysed ([`crate::auto_mask`], `auto`) or with the per-pixel fallback.
 fn evaluate(shape: &MaskShape, label: Label, auto: bool) -> f64 {
     let mut scores = Vec::new();
-    for scene in lcc_scenes::demo_library() {
+    for scene in lightcraft_scenes::demo_library() {
         let img = scene.render_fit(EDGE);
         let (w, h) = (img.width, img.height);
         let truth = scene.labels(w, h);

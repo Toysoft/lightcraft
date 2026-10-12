@@ -26,9 +26,9 @@
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use lcc_develop::{DevelopSettings, MaskShape};
-use lcc_geom::Point;
-use lcc_raster::{Plane, Rgb32f};
+use lightcraft_develop::{DevelopSettings, MaskShape};
+use lightcraft_geom::Point;
+use lightcraft_raster::{Plane, Rgb32f};
 
 use crate::SourceInfo;
 use crate::geometry::Frame;
@@ -210,13 +210,16 @@ pub fn analyze(img: &Rgb32f) -> AutoMasks {
     let k = ys.len() / 2;
     ys.select_nth_unstable_by(k, |a, b| a.total_cmp(b));
     let gain = 0.18 / ys.get(k).copied().unwrap_or(0.18).max(1e-4);
-    let lab: Vec<[f32; 3]> =
-        img.data.iter().map(|c| lcc_color::perceptual::oklab_from_2020(crate::masks::tonemap_for_select(c.map(|v| (v * gain).max(0.0))))).collect();
+    let lab: Vec<[f32; 3]> = img
+        .data
+        .iter()
+        .map(|c| lightcraft_color::perceptual::oklab_from_2020(crate::masks::tonemap_for_select(c.map(|v| (v * gain).max(0.0)))))
+        .collect();
     let l = Plane { width: w, height: h, data: lab.iter().map(|p| p[0]).collect() };
     // texture: deviation from a small blur of lightness
-    let blur = lcc_raster::blur::gaussian(&l, 1.5);
+    let blur = lightcraft_raster::blur::gaussian(&l, 1.5);
     let tex_raw = l.zip_map(&blur, |a, b| (a - b).abs());
-    let tex = lcc_raster::blur::gaussian(&tex_raw, 1.0);
+    let tex = lightcraft_raster::blur::gaussian(&tex_raw, 1.0);
     let smoothness: Vec<f32> = tex.data.iter().map(|t| 1.0 - smooth(0.006, 0.03, *t)).collect();
 
     let sky = sky(&lab, &smoothness, w, h);
@@ -318,7 +321,7 @@ fn sky(lab: &[[f32; 3]], smoothness: &[f32], w: usize, h: usize) -> Sky {
             }
         }
     }
-    let alpha = lcc_raster::blur::gaussian(&alpha, 0.7);
+    let alpha = lightcraft_raster::blur::gaussian(&alpha, 0.7);
     Sky { alpha, line, centres: centres_now }
 }
 
@@ -340,7 +343,7 @@ fn subject(lab: &[[f32; 3]], tex: &Plane, w: usize, h: usize) -> Plane {
     let k = (tsorted.len() * 9 / 10).min(tsorted.len().saturating_sub(1));
     tsorted.select_nth_unstable_by(k, |a, b| a.total_cmp(b));
     let t90 = tsorted.get(k).copied().unwrap_or(1.0).max(1e-4);
-    let sharp = lcc_raster::blur::gaussian(&tex.map(|t| (t / t90).min(1.5)), (w.max(h) as f32) * 0.02);
+    let sharp = lightcraft_raster::blur::gaussian(&tex.map(|t| (t / t90).min(1.5)), (w.max(h) as f32) * 0.02);
     let mut sal = Plane::new(w, h);
     let (cx, cy) = (w as f32 / 2.0, h as f32 * 0.5);
     let r = w.max(h) as f32;
@@ -356,13 +359,13 @@ fn subject(lab: &[[f32; 3]], tex: &Plane, w: usize, h: usize) -> Plane {
             }
         }
     }
-    let sal = lcc_raster::blur::gaussian(&sal, (w.max(h) as f32) * 0.008);
+    let sal = lightcraft_raster::blur::gaussian(&sal, (w.max(h) as f32) * 0.008);
     let t = otsu(&sal.data);
     let mut bin: Vec<bool> = sal.data.iter().map(|v| *v > t).collect();
     keep_main_regions(&mut bin, &sal.data, w, h);
     let mut out = Plane { width: w, height: h, data: bin.iter().map(|b| if *b { 1.0 } else { 0.0 }).collect() };
     // soft edge proportional to the frame
-    out = lcc_raster::blur::gaussian(&out, (w.max(h) as f32) * 0.004);
+    out = lightcraft_raster::blur::gaussian(&out, (w.max(h) as f32) * 0.004);
     out
 }
 
@@ -476,7 +479,7 @@ fn landscape(lab: &[[f32; 3]], smoothness: &[f32], sky: &Sky, w: usize, h: usize
         }
     }
     let r = w.max(h) as f32 * 0.006;
-    (lcc_raster::blur::gaussian(&water, r), lcc_raster::blur::gaussian(&veg, r))
+    (lightcraft_raster::blur::gaussian(&water, r), lightcraft_raster::blur::gaussian(&veg, r))
 }
 
 #[cfg(test)]
