@@ -281,7 +281,7 @@ impl Default for AppSettings {
             library_path: String::new(),
             recent_libraries: Vec::new(),
             startup_view: StartupView::Last,
-            confirm_delete: false,
+            confirm_delete: true,
             gpu: true,
             preview_limit: 0,
             external_editor: String::new(),

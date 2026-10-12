@@ -1137,7 +1137,7 @@ pub fn context_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         if ui.button(crate::i18n::tr("Delete Permanently")).clicked() {
             let _ = app.run("photo.deletePermanently", json!({}));
         }
-    } else if ui.button(crate::i18n::tr("Delete Photo")).clicked() {
+    } else if ui.button(crate::i18n::tr("Delete Photo")).clicked() && !crate::menus::confirm_delete(app) {
         let _ = app.run("photo.delete", json!({}));
     }
 }
