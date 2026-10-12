@@ -11,24 +11,33 @@
 //!
 //! It is done in three parts, so the app never waits on a disk in a frame:
 //!
-//! 1. [`Relocation::new`] reads the request against the session and refuses what needs no disk
-//!    to refuse (cheap; no file-system access).
+//! 1. [`Relocation::new`] reads the request against the session: it works out where each photo's
+//!    file would be and refuses what needs no disk to refuse (no file-system access). It keeps
+//!    the places and what the library recorded of the files, not the library.
 //! 2. [`Relocation::look`] reads the disk, never the session, so it can run on a worker thread:
-//!    it works out where each photo's file would be and counts how many of them are there.
+//!    it tells for each place whether the photo's file is there.
 //! 3. [`Located::commit`] relinks the photos, on the session as it is by then.
 //!
-//! The count is the guard against choosing the wrong folder (one level too high or too low is
-//! the likely mistake): a folder with none of the files is not the folder, and one with only
-//! some of them is taken only on request (`incomplete`); the others then stay missing at the new
-//! place, where Synchronize Folder finds them.
+//! Looking is the guard against choosing the wrong folder (one level too high or too low is the
+//! likely mistake), and a file being at a place does not make it the photo's ([`Sought`]):
+//!
+//! * a place that is, as the library has it, the file of another photo of the folder (the new
+//!   place is inside the folder, or the folder inside it) is taken only when the file's content
+//!   is the photo's. Otherwise the step is refused, whatever was asked: the photo would show
+//!   the other photo's picture under its own edits;
+//! * a file of another size than the library recorded is not the file it knew: it is not counted
+//!   as found;
+//! * a folder with none of the files is not the folder, and one with only some of them (or with
+//!   files of another size) is taken only on request (`incomplete`). Files that aren't there
+//!   then stay missing at the new place, where Synchronize Folder finds them.
 //!
 //! Paths are compared by folder identity ([`lightcraft_catalog::query::folder_key`]), not by
 //! [`std::path::Path`]: on Linux and macOS `D:\Photos\a.jpg` is one file name to `Path`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use lightcraft_catalog::query::{folder_key, folder_rest};
 use lightcraft_catalog::{Catalog, Filter, Op, PhotoId, Sort, Source};
@@ -47,10 +56,80 @@ pub struct Relocation {
     pub from: String,
     /// Where it is said to be now (absolute, spelled the way this computer spells paths).
     pub to: String,
-    /// The library as it was when asked: [`Relocation::look`] reads it on a worker thread.
-    catalog: Catalog,
+    /// The photos that would follow the folder.
+    photos: Vec<RelocatedPhoto>,
+    /// The places [`Relocation::look`] looks at.
+    files: Vec<Sought>,
     /// Which library that is ([`Located::commit`] is for no other).
     library: Arc<()>,
+}
+
+/// A place a file of the folder would be, and what tells whether the file there is the photo's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sought {
+    pub path: String,
+    /// The size the library recorded for the file (0: none, as for photos of a catalog that
+    /// came from another app).
+    size: u64,
+    /// The contents the library recorded for the photos that would be here (a virtual copy
+    /// shares its photo's file); empty when it recorded none.
+    hashes: Vec<String>,
+    /// The place is, as the library has it, the file of another photo of the folder: only its
+    /// content tells whose the file there is.
+    claimed: bool,
+    /// A library photo's (not only one's in Recently Deleted or browsed in Local, which nobody
+    /// is looking for): counted in [`Located::total`].
+    counted: bool,
+}
+
+/// What is at a place ([`Sought`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Seen {
+    /// No file.
+    Missing,
+    /// A file of the size the library recorded (of the photo's content, at a claimed place).
+    Same,
+    /// A file, and the library recorded no size to tell by.
+    Unverified,
+    /// A file of another size.
+    Different,
+    /// A file at a claimed place that is not known to be the photo's.
+    Claimed,
+}
+
+impl Sought {
+    fn seen(&self) -> Seen {
+        let Ok(meta) = std::fs::metadata(&self.path) else { return Seen::Missing };
+        if !meta.is_file() {
+            return Seen::Missing;
+        }
+        if self.claimed {
+            // (read only here: a folder located inside itself is rare, and reading every file of
+            // a folder on a network share takes hours)
+            let content = crate::cmd::missing::file_hash(&self.path);
+            let proven = !self.hashes.is_empty() && content.is_some_and(|c| self.hashes.iter().all(|h| *h == c));
+            return if proven { Seen::Same } else { Seen::Claimed };
+        }
+        match self.size {
+            0 => Seen::Unverified,
+            n if n == meta.len() => Seen::Same,
+            _ => Seen::Different,
+        }
+    }
+}
+
+/// What [`look_at`] saw at the places of the library's files.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Tally {
+    /// Files that are there and not known to be other files…
+    pub found: usize,
+    /// …those among them the library recorded no size for.
+    pub unverified: usize,
+    /// Files there of another size than the library recorded.
+    pub different: usize,
+    /// Claimed places whose file is not known to be the photo's, and one of them.
+    claimed: usize,
+    claimed_example: Option<String>,
 }
 
 /// One photo of the folder and where its file is once the folder is located.
@@ -70,10 +149,16 @@ pub struct Located {
     pub to: String,
     pub photos: Vec<RelocatedPhoto>,
     /// Files of library photos (not those in Recently Deleted or only browsed in Local; a
-    /// virtual copy shares its photo's file) that are at the new place…
+    /// virtual copy shares its photo's file) that are at the new place and not known to be
+    /// other files…
     pub found: usize,
     /// …of this many.
     pub total: usize,
+    /// Those of `found` the library recorded no size for: a file is there, and nothing tells
+    /// whether it is the photo's.
+    pub unverified: usize,
+    /// Files at the new place of another size than the library recorded (not in `found`).
+    pub different: usize,
     /// The library the photos are of: one opened meanwhile is not touched.
     library: Arc<()>,
 }
@@ -82,7 +167,8 @@ impl Relocation {
     /// Read a request to locate folder `path` of the library at `to`. Refused: the startup disk,
     /// a folder no library photo was imported from, a whole disk or a folder that holds disks
     /// without `disk` (as for Synchronize Folder), the place the library already looks, and the
-    /// library's own folder. No file-system access.
+    /// library's own folder, and a place where a file is already another photo's (one not of
+    /// this folder; two photos would share one file). No file-system access.
     pub fn new(s: &Session, path: &str, to: &str, disk: bool) -> Result<Relocation> {
         let (path, to) = (path.trim(), to.trim());
         if path.is_empty() {
@@ -112,59 +198,84 @@ impl Relocation {
         if s.library.as_ref().is_some_and(|l| l.on_disk && abs.starts_with(&l.dir)) {
             return Err(invalid(format!("{to} is inside the library's own folder, which is no place for photos")));
         }
-        Ok(Relocation { from: path.to_string(), to, catalog: s.catalog.clone(), library: Arc::clone(&s.library_identity) })
-    }
-
-    /// Where each photo of the folder would be, and how many of the library's files are there.
-    /// Reads the disk, never the session. Refused when `to` is not a folder, or when a file
-    /// there is already another library photo's (two photos would share one file).
-    ///
-    /// `progress` counts the files looked for; with its `cancel` set the count stops early
-    /// (and is then of no use: the caller drops the result).
-    pub fn look(self, progress: &ScanProgress) -> std::result::Result<Located, String> {
-        let Relocation { from, to, catalog, library } = self;
-        if !Path::new(&to).is_dir() {
-            return Err(format!("{to} is not a folder"));
-        }
-        let Destinations { photos, files } = destinations(&catalog, &from, &to);
+        let Destinations { photos, files } = destinations(&s.catalog, path, &to);
         let moving: HashSet<PhotoId> = photos.iter().map(|r| r.id).collect();
         let places: HashSet<String> = photos.iter().map(|r| r.to.clone()).collect();
         // (said before any file is looked for; [`Located::commit`] asks again of the library as it is then)
-        giving_way(&catalog, &moving, &places, &to)?;
-        let found = count_found(&files, progress);
-        Ok(Located { from, to, photos, found, total: files.len(), library })
+        giving_way(&s.catalog, &moving, &places, &to).map_err(invalid)?;
+        Ok(Relocation { from: path.to_string(), to, photos, files, library: Arc::clone(&s.library_identity) })
     }
 
-    /// The files [`Relocation::look`] would look for (tests).
+    /// Whether the folder's files are at the new place. Reads the disk, never the session.
+    /// Refused when `to` is not a folder, or when a file there is another photo's of this
+    /// folder and not known to be the photo's that would point at it ([`Sought`]).
+    ///
+    /// `progress` counts the places looked at; with its `cancel` set the looking stops early
+    /// (and is then of no use: the caller drops the result).
+    pub fn look(self, progress: &ScanProgress) -> std::result::Result<Located, String> {
+        let Relocation { from, to, photos, files, library } = self;
+        if !Path::new(&to).is_dir() {
+            return Err(format!("{to} is not a folder"));
+        }
+        let total = files.iter().filter(|f| f.counted).count();
+        let Tally { found, unverified, different, claimed, claimed_example } = look_at(&files, progress);
+        if let Some(first) = claimed_example {
+            let n = claimed;
+            let (is, s) = if n == 1 { ("is", "") } else { ("are", "s") };
+            return Err(format!(
+                "{n} file{s} in {to} {is} the file{s} of other photos of this folder, as far as the library can tell (such as {first}): the folder can't be located there"
+            ));
+        }
+        Ok(Located { from, to, photos, found, total, unverified, different, library })
+    }
+
+    /// The places [`Relocation::look`] looks at (tests).
     #[cfg(test)]
-    pub(crate) fn files(&self) -> Vec<String> {
-        destinations(&self.catalog, &self.from, &self.to).files
+    pub(crate) fn files(&self) -> &[Sought] {
+        &self.files
     }
 }
 
-/// Where the photos of a folder would be, and the library's files among those places.
+/// Where the photos of a folder would be, and the places to look at.
 struct Destinations {
     photos: Vec<RelocatedPhoto>,
-    /// Each once (a virtual copy shares its photo's file); not those of photos in Recently
-    /// Deleted or only browsed in Local, which nobody is looking for.
-    files: Vec<String>,
+    /// Each place once (a virtual copy shares its photo's file): those of the library's photos,
+    /// and every claimed one ([`Sought::claimed`]), whoever would point at it.
+    files: Vec<Sought>,
 }
 
 fn destinations(catalog: &Catalog, from: &str, to: &str) -> Destinations {
     let base = PathBuf::from(to);
-    let mut out = Destinations { photos: Vec::new(), files: Vec::new() };
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut photos: Vec<RelocatedPhoto> = Vec::new();
+    let mut files: Vec<Sought> = Vec::new();
+    let mut at: HashMap<String, usize> = HashMap::new();
     for p in catalog.photos() {
         let Source::File { path } = &p.source else { continue };
         let Some(rest) = folder_rest(path, from).filter(|r| !r.is_empty()) else { continue };
         // joined by the platform, so the result is spelled like a path read from this disk
         let dest = rest.iter().fold(base.clone(), |d, name| d.join(name)).to_string_lossy().to_string();
-        if p.in_library() && seen.insert(dest.clone()) {
-            out.files.push(dest.clone());
+        let i = *at.entry(dest.clone()).or_insert_with(|| {
+            files.push(Sought { path: dest.clone(), size: 0, hashes: Vec::new(), claimed: false, counted: false });
+            files.len() - 1
+        });
+        if let Some(f) = files.get_mut(i) {
+            f.counted |= p.in_library();
+            if f.size == 0 {
+                f.size = p.file_size;
+            }
+            if let Some(h) = crate::cmd::missing::stored_hash(p).filter(|h| !f.hashes.iter().any(|x| x == h)) {
+                f.hashes.push(h.to_string());
+            }
         }
-        out.photos.push(RelocatedPhoto { id: p.id, from: path.clone(), to: dest });
+        photos.push(RelocatedPhoto { id: p.id, from: path.clone(), to: dest });
     }
-    out
+    // a place one of the photos is at now is that photo's file, as far as the library knows
+    let now: HashSet<&str> = photos.iter().map(|r| r.from.as_str()).collect();
+    for f in &mut files {
+        f.claimed = now.contains(f.path.as_str());
+    }
+    files.retain(|f| f.counted || f.claimed);
+    Destinations { photos, files }
 }
 
 /// The records that give way when the photos `moving` point at `places` (every place one of
@@ -208,23 +319,42 @@ fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-/// How many of `files` are files on disk, looked for on several threads (a network share
-/// answers each slowly). `progress.total` / `done` follow; stops early when `progress.cancel`
-/// is set, with the count so far.
-pub fn count_found(files: &[String], progress: &ScanProgress) -> usize {
+/// What is at each of `files`, looked at on several threads (a network share answers each
+/// slowly). `progress.total` / `done` follow; stops early when `progress.cancel` is set, with
+/// what was seen so far.
+pub fn look_at(files: &[Sought], progress: &ScanProgress) -> Tally {
+    use std::sync::atomic::AtomicUsize;
     progress.total.store(files.len(), Relaxed);
     progress.done.store(0, Relaxed);
     if cfg!(target_arch = "wasm32") {
-        return 0;
+        return Tally::default();
     }
     let cancel = &progress.cancel;
-    let found = std::sync::atomic::AtomicUsize::new(0);
-    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (found, unverified, different, claimed, next) =
+        (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0));
+    let example: Mutex<Option<String>> = Mutex::new(None);
     let work = || {
         while !cancel.load(Relaxed) {
             let Some(f) = files.get(next.fetch_add(1, Relaxed)) else { break };
-            if Path::new(f).is_file() {
-                found.fetch_add(1, Relaxed);
+            match f.seen() {
+                Seen::Claimed => {
+                    claimed.fetch_add(1, Relaxed);
+                    example.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(|| f.path.clone());
+                }
+                // (a place only a photo in Recently Deleted or a Local record would point at is
+                // looked at for whose file it is, not counted)
+                _ if !f.counted => {}
+                Seen::Same => {
+                    found.fetch_add(1, Relaxed);
+                }
+                Seen::Unverified => {
+                    found.fetch_add(1, Relaxed);
+                    unverified.fetch_add(1, Relaxed);
+                }
+                Seen::Different => {
+                    different.fetch_add(1, Relaxed);
+                }
+                Seen::Missing => {}
             }
             progress.done.fetch_add(1, Relaxed);
         }
@@ -238,28 +368,43 @@ pub fn count_found(files: &[String], progress: &ScanProgress) -> usize {
                     sc.spawn(work);
                 }
             });
-            return found.into_inner();
+        } else {
+            work();
         }
     }
+    #[cfg(target_arch = "wasm32")]
     work();
-    found.into_inner()
+    Tally {
+        found: found.into_inner(),
+        unverified: unverified.into_inner(),
+        different: different.into_inner(),
+        claimed: claimed.into_inner(),
+        claimed_example: example.into_inner().unwrap_or_else(PoisonError::into_inner),
+    }
 }
 
 impl Located {
     /// Why this is not (or not plainly) the folder, if it isn't: none of the files are there, or
-    /// only some and `incomplete` wasn't said.
+    /// only some (the others are not there, or are of another size than the library recorded)
+    /// and `incomplete` wasn't said.
     pub fn refusal(&self, incomplete: bool) -> Option<String> {
-        let Located { from, to, found, total, .. } = self;
+        let Located { from, to, found, total, different, .. } = self;
+        // files of another size are said: they are what tells a disk laid out alike from the folder
+        let others = match *different {
+            0 => String::new(),
+            1 => "; 1 file there is not the one the library recorded (another size)".to_string(),
+            n => format!("; {n} files there are not the ones the library recorded (another size)"),
+        };
         if *found == 0 {
             return Some(format!(
-                "none of the {total} file{} of {from} {} in {to}: choose the folder it is now",
+                "none of the {total} file{} of {from} {} in {to}{others}: choose the folder it is now",
                 plural(*total),
                 if *total == 1 { "is" } else { "are" }
             ));
         }
         (found < total && !incomplete).then(|| {
             format!(
-                "only {found} of the {total} files of {from} are in {to}: pass `incomplete: true` to locate it there anyway (the others stay missing)"
+                "only {found} of the {total} files of {from} are in {to}{others}: pass `incomplete: true` to locate it there anyway (files that aren't there stay missing)"
             )
         })
     }
@@ -270,7 +415,7 @@ impl Located {
     /// is at the new place is asked again. Records of files there that were only browsed in
     /// Local, untouched, go as the library's photos take their place (a file has one record;
     /// otherwise Synchronize Folder would offer every file as new); undo brings them back.
-    /// → `{folder, path, relinked, found, notFound, replacedLocal}`.
+    /// → `{folder, path, relinked, found, unverified, different, notFound, replacedLocal}`.
     pub fn commit(self, s: &mut Session, incomplete: bool) -> Result<Value> {
         // (photo ids mean something else in another library)
         if !Arc::ptr_eq(&self.library, &s.library_identity) {
@@ -279,7 +424,7 @@ impl Located {
         if let Some(why) = self.refusal(incomplete) {
             return Err(invalid(why));
         }
-        let Located { from, to, photos, found, total, .. } = self;
+        let Located { from, to, photos, found, total, unverified, different, .. } = self;
         let before = s.visible_cloned();
         let mut ops: Vec<Op> = Vec::new();
         let mut moving: HashSet<PhotoId> = HashSet::new();
@@ -317,7 +462,9 @@ impl Located {
             "path": to,
             "relinked": relinked,
             "found": found,
-            "notFound": total.saturating_sub(found),
+            "unverified": unverified,
+            "different": different,
+            "notFound": total.saturating_sub(found).saturating_sub(different),
             "replacedLocal": replaced.len(),
         }))
     }

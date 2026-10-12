@@ -86,12 +86,12 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The stored content hash of a photo, without the `:dupN` suffix duplicates get.
-fn stored_hash(p: &Photo) -> Option<&str> {
+pub(crate) fn stored_hash(p: &Photo) -> Option<&str> {
     p.content_hash.as_deref().map(|h| h.split(':').next().unwrap_or(h)).filter(|h| !h.is_empty())
 }
 
 /// The content hash of the file at `path` (as import computes it), if it can be read.
-fn file_hash(path: &str) -> Option<String> {
+pub(crate) fn file_hash(path: &str) -> Option<String> {
     std::fs::read(path).ok().map(|b| lightcraft_preview::hash_bytes(&b).to_string())
 }
 

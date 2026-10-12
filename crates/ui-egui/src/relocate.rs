@@ -9,7 +9,9 @@
 //!
 //! * every file is there: the photos are relinked (one undo step, no file touched);
 //! * none is: it is not the folder, and a toast says so (the dialog it came from stays open);
-//! * only some are: a dialog asks whether to locate the folder there anyway.
+//! * only some are (the others are not there, or are not the size the library recorded): a
+//!   dialog asks whether to locate the folder there anyway;
+//! * a file there is another photo's of the same folder: refused, and a toast says so.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -119,6 +121,7 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
                     synchronize: request.synchronize,
                     found: located.found,
                     total: located.total,
+                    different: located.different,
                 });
             }
         } else if !asking {
@@ -190,11 +193,15 @@ fn finish(app: &mut LightcraftApp, ctx: &egui::Context, request: Request, locate
 
 /// The question when only some of the folder's files are at the new place.
 pub fn body(ui: &mut egui::Ui, dlg: &Dialog) {
-    let Dialog::LocateFolder { to, found, total, .. } = dlg else { return };
+    let Dialog::LocateFolder { to, found, total, different, .. } = dlg else { return };
     let t = Tokens::get(ui.ctx());
     ui.set_min_width(420.0);
     ui.label(crate::i18n::tr_format!("Only {found} of this folder's {total} photos are in:", found = found, total = total));
     ui.label(egui::RichText::new(to.as_str()).strong());
+    if *different > 0 {
+        // (what tells a file changed where it lies, or another disk laid out alike, from the folder)
+        ui.label(crate::i18n::tr_format!("Files there that are not the size the library recorded: {n}", n = different));
+    }
     ui.add_space(6.0);
     ui.label(crate::i18n::tr("Locate the folder there anyway?"));
     ui.label(

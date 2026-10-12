@@ -15,6 +15,8 @@
 //!   it and nothing is changed.
 //! * A dialog opened meanwhile is not taken away by the question, and a Synchronize dialog that
 //!   was closed is not opened again.
+//!
+//! More scenarios, from the review of the pull request, are at the end.
 
 use std::time::Duration;
 
@@ -319,4 +321,27 @@ fn synchronize_is_not_opened_again_once_its_dialog_was_closed() {
     assert!(h.step_until(T, |h| h.app.relocate.is_none() && toast(h).contains("Folder located")), "{:?}", toast(&h));
     h.step();
     assert!(h.app.ui.dialog.is_none(), "{:?}", h.app.ui.dialog);
+}
+
+// ── Review of #1122 ──────────────────────────────────────────────────────────────────────────
+//
+// * A file at the new place that is not the size the library recorded is said in the question.
+
+#[test]
+fn a_file_that_is_not_the_size_the_library_recorded_is_said_in_the_question() {
+    let dir = Scratch::new("other-size");
+    let mut h = moved_folder(&dir, "archive/journey");
+    // another picture under the same name
+    let img = lightcraft_raster::Rgba8 {
+        width: 40,
+        height: 30,
+        data: (0..1200usize).map(|i| [(i * 7) as u8, (i * 3) as u8, (i / 5) as u8, 255]).collect(),
+    };
+    let bytes = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+    std::fs::write(dir.path("archive/journey/b.png"), bytes).unwrap();
+
+    row_menu(&mut h, &dir.path("trip"), "folderLocate");
+    let asked = |h: &Headless| matches!(&h.app.ui.dialog, Some(Dialog::LocateFolder { found: 1, total: 2, different: 1, .. }));
+    assert!(h.step_until(T, asked), "{:?} · {:?}", h.app.ui.dialog, toast(&h));
+    shot(&mut h, "locate-different.png");
 }

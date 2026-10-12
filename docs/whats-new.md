@@ -474,7 +474,10 @@
   colour labels follow, and Synchronize Folder then scans it there. Only the library changes, no file is touched,
   and it is one undo step.
 - The photos' files are looked for in the chosen folder first, in the background (a row in the activity stack; ✕
-  stops it). A folder with none of them is not taken; one with only some asks before going on.
+  stops it). A folder with none of them is not taken; one with only some asks before going on. A file counts when
+  it is the size the library recorded; files of another size are said in the question. A file that is another
+  photo's of the same folder (the chosen folder is inside the old one, or the reverse) is never taken for it, unless
+  its content is the photo's.
 - Agents and the CLI: `folder.updateLocation {folder, path}`.
 
 ### HDR and panorama merges of CR2 keep their colour

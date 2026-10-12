@@ -266,6 +266,7 @@
   "{n} preset{}": "Пресетів: {n}{:.0}",
   "None of this folder's photos are in “{name}”: choose the folder it is now": "Жодного фото цієї теки немає в «{name}»: виберіть теку, якою вона стала",
   "Only {found} of this folder's {total} photos are in:": "Лише {found} із {total} фото цієї теки є в:",
+  "Files there that are not the size the library recorded: {n}": "Файли там, розмір яких не збігається із записаним у бібліотеці: {n}",
   "Folder located. Photos relinked: {n}": "Теку знайдено. Перезв’язано фото: {n}",
   "{name} opened in the other editor": "{name} відкрито в іншому редакторі",
   "{n} originals opened in the other editor": "Відкрито оригіналів в іншому редакторі: {n}",

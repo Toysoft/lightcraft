@@ -22,7 +22,7 @@ use lightcraft_catalog::{ColorLabel, Op, PhotoId, Source};
 use serde_json::{Value, json};
 
 use crate::Session;
-use crate::relocate::{Relocation, count_found};
+use crate::relocate::{Relocation, look_at};
 
 /// A scratch folder that goes away with the test, however it ends.
 struct Scratch(PathBuf);
@@ -330,13 +330,13 @@ fn the_plan_names_each_file_once_and_the_count_can_be_stopped() {
     let plan = Relocation::new(&s, &dir.path("trip"), &now, false).unwrap();
     assert_eq!(plan.files().len(), 2, "{:?}", plan.files());
     let progress = crate::import::ScanProgress::default();
-    assert_eq!(count_found(&plan.files(), &progress), 2);
+    assert_eq!(look_at(plan.files(), &progress).found, 2);
     assert_eq!((progress.done.load(Ordering::Relaxed), progress.total.load(Ordering::Relaxed)), (2, 2));
 
     // ✕ on its row in the activity stack
     let stopped = crate::import::ScanProgress::default();
     stopped.cancel.store(true, Ordering::Relaxed);
-    assert_eq!(count_found(&plan.files(), &stopped), 0, "nothing more is looked for");
+    assert_eq!(look_at(plan.files(), &stopped).found, 0, "nothing more is looked for");
 
     let r = relocate(&mut s, &dir.path("trip"), &now);
     assert_eq!((r["relinked"].as_u64(), r["found"].as_u64()), (Some(3), Some(2)), "the copy follows its photo: {r}");
@@ -560,4 +560,164 @@ fn a_folder_whose_files_went_into_a_folder_inside_it_is_located_there() {
     assert_eq!(files(&s), [dir.path("trip/2019/a.png"), dir.path("trip/2019/day1/b.png")]);
     s.undo_step().unwrap();
     assert_eq!(files(&s), [dir.path("trip/a.png"), dir.path("trip/day1/b.png")]);
+}
+
+// ── Is the file there the photo's? (review of #1122) ─────────────────────────────────────────
+//
+// * A file being at the new place does not make it the photo's. A place that is, as the library
+//   has it, another photo's file of the same folder (the new place is inside the folder, or the
+//   folder inside it) is taken only when the file's content is the photo's; "anyway" does not
+//   cover it, and neither does a library that recorded no sizes or contents.
+// * A file of another size than the library recorded is not counted as found: it is said, and
+//   taken only on request. A folder where no file is the library's is not the folder.
+
+/// A library holding `a/x.png` and `a/b/x.png`: the same name one level apart.
+fn same_name_one_level_apart(dir: &Scratch) -> Session {
+    write_png(&dir.path("a/x.png"), 1);
+    write_png(&dir.path("a/b/x.png"), 2);
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [dir.path("a")]})).unwrap();
+    assert_eq!(s.catalog.len(), 2);
+    s
+}
+
+/// As a catalog from another app leaves its photos: no size and no content recorded.
+fn forget_sizes_and_contents(s: &mut Session) {
+    let ops: Vec<Op> = s
+        .catalog
+        .photos()
+        .map(|p| Op::SetContent {
+            id: p.id,
+            width: p.width,
+            height: p.height,
+            file_size: 0,
+            content_hash: None,
+            preview_only: None,
+            preview_checked: String::new(),
+        })
+        .collect();
+    s.commit("Forget", Op::Batch { ops }).unwrap();
+}
+
+#[test]
+fn a_place_inside_the_folder_never_gives_a_photo_another_photos_file() {
+    let dir = Scratch::new("nested");
+    let mut s = same_name_one_level_apart(&dir);
+    // one level too low: `a/b/x.png` is the other photo's file, and nothing moved
+    for incomplete in [false, true] {
+        let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("a/b"), "incomplete": incomplete}));
+        assert!(e.contains("other photos of this folder") && e.contains(dir.path("a/b/x.png").as_str()), "incomplete {incomplete}: {e}");
+    }
+}
+
+#[test]
+fn nor_when_the_library_recorded_no_size_and_no_content() {
+    let dir = Scratch::new("nested-blind");
+    let mut s = same_name_one_level_apart(&dir);
+    forget_sizes_and_contents(&mut s);
+    for incomplete in [false, true] {
+        let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("a/b"), "incomplete": incomplete}));
+        assert!(e.contains("other photos of this folder"), "incomplete {incomplete}: {e}");
+    }
+}
+
+#[test]
+fn nor_a_photo_in_recently_deleted() {
+    let dir = Scratch::new("nested-deleted");
+    let mut s = same_name_one_level_apart(&dir);
+    write_png(&dir.path("a/k.png"), 3);
+    s.execute("library.import", &json!({"paths": [dir.path("a/k.png")]})).unwrap();
+    let upper = s.catalog.photos().find(|p| matches!(&p.source, Source::File { path } if *path == dir.path("a/x.png"))).map(|p| p.id).unwrap();
+    s.execute("photo.delete", &json!({"ids": [upper.0]})).unwrap();
+    // `k.png` is in `a/b` too, so one of the library's two files is found there
+    std::fs::copy(dir.path("a/k.png"), dir.path("a/b/k.png")).unwrap();
+
+    let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("a/b"), "incomplete": true}));
+    assert!(e.contains("other photos of this folder"), "restoring it would show the other photo's file: {e}");
+}
+
+#[test]
+fn files_that_did_go_one_level_down_are_told_by_their_content() {
+    let dir = Scratch::new("shifted");
+    let mut s = same_name_one_level_apart(&dir);
+    let upper = s.catalog.photos().find(|p| matches!(&p.source, Source::File { path } if *path == dir.path("a/x.png"))).map(|p| p.id).unwrap();
+    // everything in `a` was put into `a/b`: `a/b/x.png` went to `a/b/b/x.png`, `a/x.png` to `a/b/x.png`
+    std::fs::create_dir_all(dir.0.join("a/b/b")).unwrap();
+    std::fs::rename(dir.0.join("a/b/x.png"), dir.0.join("a/b/b/x.png")).unwrap();
+    std::fs::rename(dir.0.join("a/x.png"), dir.0.join("a/b/x.png")).unwrap();
+
+    let r = relocate(&mut s, &dir.path("a"), &dir.path("a/b"));
+
+    assert_eq!((r["relinked"].as_u64(), r["found"].as_u64(), r["notFound"].as_u64()), (Some(2), Some(2), Some(0)), "{r}");
+    assert!(matches!(&s.catalog.photo(upper).unwrap().source, Source::File { path } if *path == dir.path("a/b/x.png")));
+    assert!(s.execute("library.missing", &json!({})).unwrap().as_array().unwrap().is_empty());
+
+    // without contents recorded nothing tells the two apart: refused rather than guessed
+    s.undo_step().unwrap();
+    forget_sizes_and_contents(&mut s);
+    let e = refused(&mut s, json!({"folder": dir.path("a"), "path": dir.path("a/b")}));
+    assert!(e.contains("other photos of this folder"), "{e}");
+}
+
+/// Another picture under the same name (not the size the library recorded).
+fn write_other(path: &str) {
+    let (w, h) = (40usize, 30usize);
+    let data: Vec<[u8; 4]> = (0..w * h).map(|i| [(i * 7) as u8, (i * 3) as u8, (i / 5) as u8, 255]).collect();
+    let img = lightcraft_raster::Rgba8 { width: w, height: h, data };
+    let bytes = lightcraft_codecs::encode_png(&lightcraft_codecs::EncodeImage::rgba8(&img), &lightcraft_codecs::EncodeMeta::default()).unwrap();
+    assert_ne!(bytes.len() as u64, std::fs::metadata(path).unwrap().len(), "the test needs another size");
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn a_file_of_another_size_is_not_counted_as_found() {
+    let dir = Scratch::new("other-size");
+    let mut s = library(&dir);
+    let now = moved_away(&dir);
+    write_other(&dir.path("archive/journey/a.png"));
+
+    let e = refused(&mut s, json!({"folder": dir.path("trip"), "path": now}));
+    assert!(
+        e.contains("1 of the 2 files") && e.contains("1 file there is not the one the library recorded") && e.contains("incomplete: true"),
+        "{e}"
+    );
+
+    // on request it is taken: the file was changed where it lies, as files are
+    let r = s.execute("folder.updateLocation", &json!({"folder": dir.path("trip"), "path": now, "incomplete": true})).unwrap();
+    assert_eq!(
+        (r["relinked"].as_u64(), r["found"].as_u64(), r["different"].as_u64(), r["notFound"].as_u64()),
+        (Some(2), Some(1), Some(1), Some(0)),
+        "{r}"
+    );
+}
+
+#[test]
+fn a_folder_where_no_file_is_the_librarys_is_not_the_folder() {
+    let dir = Scratch::new("other-disk");
+    let mut s = library(&dir);
+    let now = moved_away(&dir);
+    // the same names in the same folders, other pictures: another disk laid out alike
+    write_other(&dir.path("archive/journey/a.png"));
+    write_other(&dir.path("archive/journey/day1/b.png"));
+
+    for incomplete in [false, true] {
+        let e = refused(&mut s, json!({"folder": dir.path("trip"), "path": now, "incomplete": incomplete}));
+        assert!(
+            e.contains("none of the 2 files") && e.contains("2 files there are not the ones the library recorded"),
+            "incomplete {incomplete}: {e}"
+        );
+    }
+}
+
+#[test]
+fn a_file_whose_size_the_library_never_recorded_is_taken_and_said() {
+    let dir = Scratch::new("no-size");
+    let mut s = library(&dir);
+    forget_sizes_and_contents(&mut s);
+    let now = moved_away(&dir);
+    write_other(&dir.path("archive/journey/a.png"));
+
+    let r = relocate(&mut s, &dir.path("trip"), &now);
+
+    assert_eq!((r["found"].as_u64(), r["unverified"].as_u64(), r["different"].as_u64()), (Some(2), Some(2), Some(0)), "{r}");
 }

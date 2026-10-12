@@ -1250,6 +1250,9 @@ pub enum Dialog {
         synchronize: bool,
         found: usize,
         total: usize,
+        /// Files there of another size than the library recorded (not among `found`).
+        #[serde(default)]
+        different: usize,
     },
     About,
     Shortcuts,
