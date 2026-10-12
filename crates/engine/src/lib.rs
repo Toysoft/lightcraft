@@ -57,6 +57,8 @@ pub mod preset_import;
 pub mod preset_luminar;
 pub mod presets;
 pub mod proof;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod remote;
 pub mod rename;
 pub mod segment;
 pub mod sidecar;
@@ -309,6 +311,10 @@ pub struct Session {
     /// (lightcraft-cli, a script) never ends in the middle of one.
     #[cfg(not(target_arch = "wasm32"))]
     pub apple_photos_background: bool,
+    /// Nextcloud accounts and their clients; no accounts until a host configures it
+    /// ([`Session::with_default_nextcloud`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub remote: Arc<remote::Remote>,
 }
 
 impl Default for Session {
@@ -323,6 +329,7 @@ impl Session {
     }
 
     pub fn new() -> Session {
+        let activity = activity::Activity::default();
         Session {
             library_generation: LIBRARY_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             auto_sync: false,
@@ -384,7 +391,9 @@ impl Session {
             before: Default::default(),
             import_probes: Default::default(),
             folder_changes: None,
-            activity: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            remote: Arc::new(remote::Remote::new(activity.clone())),
+            activity,
             preview_build: None,
             import_defaults: import::ImportDefaults::default(),
             cache_mb: 0,
@@ -1012,6 +1021,9 @@ mod tests_library;
 mod tests_lightroom_folder;
 #[cfg(test)]
 mod tests_merge;
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod tests_nextcloud;
 #[cfg(test)]
 mod tests_organize;
 #[cfg(test)]

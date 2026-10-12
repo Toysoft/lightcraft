@@ -11,6 +11,7 @@ repository = "https://github.com/storytold/lightcraft"
 
 [workspace.dependencies]
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
+craft-nextcloud = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675" }
 # internal
 lightcraft-denoise-core = { path = "crates/denoise-core" }
 lightcraft-denoise = { path = "crates/denoise", default-features = false }
@@ -106,6 +107,10 @@ wasm-bindgen = "0.2.129"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = "0.3"
+
+# DROP before the upstream PR: local craft-libs until craft-nextcloud is merged and the rev bumped.
+[patch."https://github.com/storytold/craft-libs"]
+craft-nextcloud = { path = "../craft-libs/crates/nextcloud" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

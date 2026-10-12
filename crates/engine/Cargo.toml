@@ -40,9 +40,11 @@ harfrust = { version = "0.12", default-features = false, features = ["std"] }
 unicode-segmentation = "1.13"
 lightcraft-segment = { workspace = true, optional = true }
 
-# model downloads run natively only (the web build fetches no models)
+# model downloads and Nextcloud run natively only (the web build fetches no models)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 lightcraft-fetch = { workspace = true }
+craft-nextcloud = { workspace = true }
+rustls-rustcrypto = "0.0.2-alpha"
 
 [features]
 # AI masks with SAM 3 (Object / Describe). Off for the web and CLI builds.
@@ -57,3 +59,7 @@ jxl-oxide = { workspace = true }
 lightcraft-heif = { workspace = true, features = ["testdata"] }
 libc = { workspace = true }
 lightcraft-tiff = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# `FakeServer`, a scripted in-process Nextcloud
+craft-nextcloud = { workspace = true, features = ["testing"] }

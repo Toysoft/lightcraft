@@ -22,15 +22,16 @@ enum Platform {
 /// The override is the complete directory; no application-name suffix is appended. An explicitly
 /// empty value disables the settings directory instead of falling back to a personal profile.
 pub fn config_dir() -> Option<PathBuf> {
-    let platform = if cfg!(target_os = "macos") {
-        Platform::Mac
-    } else if cfg!(windows) {
-        Platform::Windows
-    } else {
-        Platform::Other
-    };
-    config_dir_with(platform, |name| std::env::var_os(name))
+    config_dir_with(PLATFORM, |name| std::env::var_os(name))
 }
+
+const PLATFORM: Platform = if cfg!(target_os = "macos") {
+    Platform::Mac
+} else if cfg!(windows) {
+    Platform::Windows
+} else {
+    Platform::Other
+};
 
 fn config_dir_with(platform: Platform, env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     if let Some(dir) = env("LIGHTCRAFT_CONFIG_DIR") {
@@ -41,6 +42,26 @@ fn config_dir_with(platform: Platform, env: impl Fn(&str) -> Option<OsString>) -
         Platform::Windows => env("APPDATA").map(|a| PathBuf::from(a).join("LightCraft")),
         Platform::Other => {
             env("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| env("HOME").map(|h| PathBuf::from(h).join(".config"))).map(|c| c.join("lightcraft"))
+        }
+    }
+}
+
+/// LightCraft's cache folder (downloaded Nextcloud originals): `~/Library/Caches/LightCraft` on macOS,
+/// `%LOCALAPPDATA%\LightCraft\Cache` on Windows, else `$XDG_CACHE_HOME/lightcraft` or `~/.cache/lightcraft`.
+/// A nonempty `$LIGHTCRAFT_CACHE_DIR` overrides it (the complete directory); an empty one disables it.
+pub fn cache_dir() -> Option<PathBuf> {
+    cache_dir_with(PLATFORM, |name| std::env::var_os(name))
+}
+
+fn cache_dir_with(platform: Platform, env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    if let Some(dir) = env("LIGHTCRAFT_CACHE_DIR") {
+        return (!dir.is_empty()).then(|| PathBuf::from(dir));
+    }
+    match platform {
+        Platform::Mac => env("HOME").map(|h| PathBuf::from(h).join("Library/Caches/LightCraft")),
+        Platform::Windows => env("LOCALAPPDATA").map(|a| PathBuf::from(a).join("LightCraft").join("Cache")),
+        Platform::Other => {
+            env("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| env("HOME").map(|h| PathBuf::from(h).join(".cache"))).map(|c| c.join("lightcraft"))
         }
     }
 }
@@ -86,6 +107,17 @@ impl Session {
     /// Keep denoise models in the shared default folder ([`default_denoise_models_dir`]).
     pub fn with_default_denoise_models(mut self) -> Self {
         self.set_denoise_models_dir(default_denoise_models_dir());
+        self
+    }
+
+    /// Keep Nextcloud accounts in `<config>/nextcloud.json` and downloaded originals in `<cache>/nextcloud`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_default_nextcloud(self) -> Self {
+        self.remote.configure(crate::remote::RemoteConfig {
+            settings_file: config_dir().map(|d| d.join("nextcloud.json")),
+            cache_dir: cache_dir().map(|d| d.join("nextcloud")),
+            credentials: None,
+        });
         self
     }
 
@@ -137,6 +169,31 @@ mod config_tests {
         assert_eq!(resolve(Platform::Other, &[("HOME", "/user")]), Some(PathBuf::from("/user/.config/lightcraft")));
         for platform in [Platform::Mac, Platform::Windows, Platform::Other] {
             assert_eq!(resolve(platform, &[]), None);
+        }
+    }
+
+    fn resolve_cache(platform: Platform, vars: &[(&str, &str)]) -> Option<PathBuf> {
+        cache_dir_with(platform, |name| vars.iter().find_map(|(key, value)| (*key == name).then(|| OsString::from(value))))
+    }
+
+    #[test]
+    fn cache_dir_per_platform() {
+        let vars = [("HOME", "/user"), ("LOCALAPPDATA", "/local"), ("XDG_CACHE_HOME", "/xdg")];
+        assert_eq!(resolve_cache(Platform::Mac, &vars), Some(PathBuf::from("/user/Library/Caches/LightCraft")));
+        assert_eq!(resolve_cache(Platform::Windows, &vars), Some(PathBuf::from("/local/LightCraft/Cache")));
+        assert_eq!(resolve_cache(Platform::Other, &vars), Some(PathBuf::from("/xdg/lightcraft")));
+        assert_eq!(resolve_cache(Platform::Other, &[("HOME", "/user")]), Some(PathBuf::from("/user/.cache/lightcraft")));
+        for platform in [Platform::Mac, Platform::Windows, Platform::Other] {
+            assert_eq!(resolve_cache(platform, &[]), None);
+            assert_eq!(
+                resolve_cache(platform, &[("LIGHTCRAFT_CACHE_DIR", "isolated/cache"), ("HOME", "/user")]),
+                Some(PathBuf::from("isolated/cache"))
+            );
+            assert_eq!(
+                resolve_cache(platform, &[("LIGHTCRAFT_CACHE_DIR", ""), ("HOME", "/user"), ("LOCALAPPDATA", "/local")]),
+                None,
+                "empty disables"
+            );
         }
     }
 
