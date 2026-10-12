@@ -67,3 +67,25 @@ pub fn push(blobs: &mut Vec<Vec<u8>>, bytes: Vec<u8>) -> Result<usize, String> {
     blobs.push(bytes);
     Ok(id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn envelope_rejects_truncation_trailing_bytes_and_hostile_lengths() {
+        let bytes = pack(&serde_json::json!({"schema":1}), &[vec![1, 2, 3]]).unwrap();
+        for end in [0, 7, 8, 11, 12, bytes.len() - 1] {
+            assert!(unpack(bytes.get(..end).unwrap()).is_err());
+        }
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        assert!(unpack(&trailing).is_err());
+        let mut hostile = b"CRAFTS01".to_vec();
+        hostile.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(unpack(&hostile).is_err());
+        let (meta, blobs) = unpack(&bytes).unwrap();
+        assert_eq!(meta["schema"], 1);
+        assert_eq!(blob(&blobs, 0).unwrap(), [1, 2, 3]);
+        assert!(blob(&blobs, usize::MAX).is_err());
+    }
+}

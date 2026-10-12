@@ -1120,6 +1120,18 @@ impl Session {
     }
 }
 
+// Recovery retains exact observed sidecar packet versions without adding serde to preview.
+mod craft_hash {
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S: Serializer>(hash: &lightcraft_preview::Hash128, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&hash.to_string())
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<lightcraft_preview::Hash128, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        lightcraft_preview::Hash128::parse(&text).ok_or_else(|| serde::de::Error::custom("Invalid sidecar packet hash"))
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1650,18 +1662,6 @@ pub(crate) mod tests {
         assert_eq!(expand("{folder}{name}{num}", &p, 1), "beach.NEF");
         // a bare {seq} is padded to the caller's width
         assert_eq!(expand_tokens("{seq}|{seq:2}", &p, 7, 3), "007|07");
-    }
-}
-
-// Recovery retains exact observed sidecar packet versions without adding serde to preview.
-mod craft_hash {
-    use serde::{Deserialize, Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(hash: &lightcraft_preview::Hash128, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&hash.to_string())
-    }
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<lightcraft_preview::Hash128, D::Error> {
-        let text = String::deserialize(deserializer)?;
-        lightcraft_preview::Hash128::parse(&text).ok_or_else(|| serde::de::Error::custom("Invalid sidecar packet hash"))
     }
 }
 

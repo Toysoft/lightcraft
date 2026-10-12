@@ -134,6 +134,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
     static SPECS: std::sync::OnceLock<Vec<CommandSpec>> = std::sync::OnceLock::new();
     SPECS.get_or_init(|| {
         let mut v = Vec::new();
+        v.extend(crate::recovery_cmds::specs());
         v.extend(edit::specs());
         v.extend(library::specs());
         v.extend(develop::specs());

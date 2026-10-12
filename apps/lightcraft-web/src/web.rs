@@ -202,7 +202,9 @@ fn services(originals: Originals, backend: Option<Backend>, files: Files, frozen
             // once the backup is in place, stop saving the old library (the page reloads)
             safety::pick_and_restore(b, move || {
                 frozen.set(true);
-                craft_fresh_library();
+                if let Some(storage) = window().and_then(|w| w.session_storage().ok().flatten()) {
+                    let _ = storage.set_item("lightcraft-rust-session:skip", "1");
+                }
             });
             Ok(json!({"started": true}))
         })),
@@ -282,12 +284,11 @@ struct Boot {
     lib_dir: String,
 }
 
-#[wasm_bindgen(inline_js = "export async function craft_session_id(){return await globalThis.CraftSession.opened;} ")]
-extern "C" {
-    async fn craft_session_id() -> JsValue;
-}
 async fn boot(opts: Options) -> Boot {
-    let session_id = craft_session_id().await.as_string().unwrap_or_else(|| "temporary".into());
+    let session_id = window().and_then(|w| w.crypto().ok()).map(|c| c.random_uuid());
+    // Without secure randomness use memory rather than sharing a writer identity.
+    let opts = if session_id.is_none() { Options { store: "memory".into(), ..opts } } else { opts };
+    let session_id = session_id.unwrap_or_default();
     let t0 = perf_now();
     let backend = if opts.store == "memory" {
         None
@@ -398,6 +399,7 @@ struct WebApp {
     bench: Option<Bench>,
     first_frame_logged: bool,
     last_save: f64,
+    recovery_revision: u64,
 }
 
 impl WebApp {
@@ -474,7 +476,9 @@ impl WebApp {
         log::info!("lightcraft: {n} render workers");
         CTX.with(|c| *c.borrow_mut() = Some(cc.egui_ctx.clone()));
         let origin = lightcraft_ui_egui::now_ms() - perf_now();
+        let recovery_revision = app.session.catalog.revision;
         WebApp {
+            recovery_revision,
             app,
             originals,
             files,
@@ -629,7 +633,7 @@ impl WebApp {
 
 impl eframe::App for WebApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if !craft_bridge::restore(|bytes| self.app.craft_restore(bytes)) {
+        if !craft_bridge::restore(self.app.session.catalog.revision == self.recovery_revision, |bytes| self.app.craft_restore(bytes)) {
             return;
         }
         for text in safety::take_notices() {
@@ -673,10 +677,11 @@ impl eframe::App for WebApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if !craft_bridge::restore(|bytes| self.app.craft_restore(bytes)) {
+        if !craft_bridge::restore(self.app.session.catalog.revision == self.recovery_revision, |bytes| self.app.craft_restore(bytes)) {
             return;
         }
         self.app.ui(ui);
+        craft_bridge::ui(self.app.session.catalog.revision == self.recovery_revision, ui.ctx());
         craft_bridge::save(self.app.craft_signature(), || self.app.craft_capture(), ui.ctx());
         if !self.first_frame_logged && !self.app.widgets.is_empty() {
             self.first_frame_logged = true;
@@ -729,10 +734,12 @@ pub fn start(chinese_font: Vec<u8>) {
     });
 }
 
-#[wasm_bindgen(inline_js = "export function craft_fresh_library(){globalThis.CraftSession?.startFreshOnNextLoad();}")]
-extern "C" {
-    fn craft_fresh_library();
-}
-
 #[path = "craft_bridge.rs"]
 mod craft_bridge;
+
+#[path = "browser_store.rs"]
+mod browser_store;
+
+#[cfg(feature = "browser-storage-tests")]
+#[path = "browser_storage_checks.rs"]
+mod browser_storage_tests;

@@ -23,9 +23,11 @@ impl Session {
         .to_string()
     }
     pub fn craft_capture(&self, ui: Value) -> std::result::Result<Vec<u8>, String> {
+        let mut blobs = Vec::new();
+        codec::push(&mut blobs, self.catalog.to_snapshot().into_bytes())?;
         codec::pack(
             &json!({"app":"lightcraft","schema":1,"ui":ui,"undo":self.undo,"redo":self.redo,"commits":self.commits,"selection":self.selection,"source":self.source,"filter":self.filter,"sort":self.sort,"mask":self.active_mask,"spot":self.active_spot,"autoSync":self.auto_sync,"clipboard":self.clipboard,"browse":self.browse,"folder":self.library_folder}),
-            &[self.catalog.to_snapshot().into_bytes()],
+            &blobs,
         )
     }
     pub fn craft_restore(&mut self, bytes: &[u8]) -> std::result::Result<Value, String> {
@@ -64,6 +66,9 @@ impl Session {
         self.visible_key = None;
         self.total = None;
         self.interaction = None;
+        if v["app"] != "lightcraft" || v["schema"] != 1 {
+            return Err("Incompatible LightCraft session".into());
+        }
         Ok(v["ui"].clone())
     }
 }
@@ -71,6 +76,9 @@ impl Session {
 impl Session {
     pub fn craft_ui(bytes: &[u8]) -> std::result::Result<Value, String> {
         let (v, _) = crate::craft_codec::unpack(bytes)?;
+        if v["app"] != "lightcraft" || v["schema"] != 1 {
+            return Err("Incompatible LightCraft session".into());
+        }
         Ok(v["ui"].clone())
     }
 }

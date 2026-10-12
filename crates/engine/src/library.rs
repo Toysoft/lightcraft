@@ -720,6 +720,17 @@ fn unlocked_warning(lock: Option<&LibraryLock>) -> Option<String> {
     })
 }
 
+impl Session {
+    pub fn craft_checkpoint_library(&mut self) -> std::result::Result<(), String> {
+        if let Some(lib) = self.library.as_mut() {
+            lib.journal.snapshot(&self.catalog).map_err(|e| e.to_string())?;
+        }
+        self.pending_log.clear();
+        self.media.clear_sources();
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod resolve_tests {
     use super::*;
@@ -777,16 +788,5 @@ mod resolve_tests {
         assert!(s.library.as_ref().is_some_and(|l| l.dir == a));
         drop(s);
         let _ = std::fs::remove_dir_all(&dir);
-    }
-}
-
-impl Session {
-    pub fn craft_checkpoint_library(&mut self) -> std::result::Result<(), String> {
-        if let Some(lib) = self.library.as_mut() {
-            lib.journal.snapshot(&self.catalog).map_err(|e| e.to_string())?;
-        }
-        self.pending_log.clear();
-        self.media.clear_sources();
-        Ok(())
     }
 }

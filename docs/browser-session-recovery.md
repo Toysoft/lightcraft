@@ -1,13 +1,53 @@
-# Browser editing-session recovery and clipboard
+# LightCraft browser recovery
 
-This contribution ports the existing *craft browser fixes. Desktop recovery and native OS clipboard readers are unchanged. The browser checkpoint contains open documents/catalog, tab or photo selection, both history stacks and serializable view/preferences state. GPU resources and unfinished gestures are recreated or excluded.
+Status: Rust implementation under review. No parity score increase is claimed.
 
-Refresh restores the latest committed checkpoint. Returning later asks whether to restore. Start fresh keeps the old recovery slot. Separate tabs use independent writers protected by Web Locks. Without locks a fresh identity is allocated. IndexedDB commits checkpoint bytes and discovery metadata atomically and retains the preceding checkpoint. Quota errors preserve the last committed save and expose Retry. Recovery import/download and persistent-storage requests are user initiated. No document bytes are uploaded. Clearing browser data or eviction removes recovery. Pending writes can still be lost on hard termination.
+Recovery uses Rust futures and web-sys IndexedDB APIs. Controls use egui theme visuals.
+There is no handwritten JavaScript, inline JavaScript, npm dependency or DOM stylesheet.
+Storage loading never blocks the editor. Every load uses a fresh random writer id so
+reloads and duplicated tabs cannot overwrite another page's checkpoint. A reload reads
+its previous committed id and a later visit offers the latest checkpoint. Snapshot,
+previous checkpoint and discovery pointer commit atomically. Failed saves show Retry.
+Restore/import require closing current documents in PhotoCraft and VectorCraft.
+LightCraft replaces its loaded catalog on explicit restore. Its original photos remain
+in existing content-addressed storage and recovery copies contain references to them.
 
-Checkpoints are bounded to 512 MiB without truncating undo/redo. Full-history serialization may be expensive for large projects. PDF checkpoints can include passwords necessary to reopen encrypted files. LightCraft recovery contains original-photo references rather than bundling original photos; its explicit library backup remains available.
+Checkpoints preserve serializable workspace state and undo/redo history. Capture waits
+for inactivity and pointer release. They are bounded to 512 MiB without history truncation.
+Hard termination may lose changes since the last completed write. Storage eviction and
+clearing site data remove recovery. Full-history capture can be expensive.
+The legacy draft's JavaScript database is retained without migration or deletion.
+Recovery import/export and persistent-storage requests are explicit user actions.
+No fonts, images, external assets, brand changes or launcher code are included.
 
-The browser coordinator and minimal storage controls use JavaScript for IndexedDB, lifecycle and locks. Engine serialization and clipboard ownership stay in Rust. This is an explicit architecture proposal for maintainer review against the project's Rust-only preference.
+Validation and outstanding browser/platform checks are recorded in the PR description.
+Revision history: 2026-10-12 — replace the noncompliant JavaScript coordinator with Rust.
 
-Clipboard reads are explicit paste actions. Browser image/text routes reject changed destinations and report unsupported APIs or denied permissions. PhotoCraft and VectorCraft publish PNG with alpha; VectorCraft also publishes editable SVG text. PDF pages and LightCraft edit settings retain their internal clipboard semantics. Focused text fields retain their own events.
+Recovery operations are exposed through the existing engine command registry as
+`session.recovery.capture {ui?}`, `session.recovery.inspect {bytes}` and `session.recovery.restore {bytes}`.
+They are available to existing CLI/control/MCP dispatchers. JSON byte-array transport
+is capped at 8 MiB. Browser storage uses the same engine serializer through the binary
+adapter with a 512 MiB bound. Command restore requires an empty engine session and
+returns UI metadata for the calling shell to apply.
 
-Validation: `npm install --ignore-scripts && npm run test:sessions` in the web app directory checks storage with fake IndexedDB/DOM. `cargo test -p lightcraft-engine --test craft_session` exercises native history round trips. `cargo check --target wasm32-unknown-unknown -p lightcraft-web` checks the actual browser host. Real Chromium, Firefox and WebKit clipboard permissions, paired/split-frame gestures, text focus, stale asynchronous destinations, refresh/return, tab duplication, quota failures and large-history performance require separate browser review.
+## Contribution review and validation
+
+Reviewed the published AGENTS.md rules for Rust-only product code, checked inputs,
+command dispatch, layering, clean-room provenance, asset ownership and fonts.
+Formatting, WebAssembly compilation, three native engine integration regressions and
+all 23 native web-host tests passed. Layering and asset checks passed. Scoped native
+Clippy passed for engine/UI/web with --no-deps --all-targets -- -D warnings. The
+contribution's test-module ordering and unused helper issues were corrected without
+suppressing lints. Contributor credit remains @mmmbeer as requested. No new fonts,
+external assets, branding changes, handwritten JavaScript, CSS coordinator or npm test
+dependency are included.
+
+Full upstream quality gates remain unverified. Native Clippy with dependencies fails
+on unchanged pipeline/src/spots.rs:250 (Rust 1.99 chunks_exact_to_as_chunks lint).
+Strict wasm Clippy fails on unchanged codecs/src/jxl_encode.rs imports and preview/src/pool.rs
+DROP_WAIT; other existing wasm warnings are in engine/src/devices.rs and UI Lightroom
+import code. These files were not changed by this contribution. The full workspace
+cargo xtask ci and parity generation were not certified locally. The Rust IndexedDB
+probe was compiled but not executed in a real browser. Cross-browser clipboard/storage,
+visual UI and large-history performance QA remain required. Private craftrules was
+inaccessible (404), so unpublished standards need maintainer review.
