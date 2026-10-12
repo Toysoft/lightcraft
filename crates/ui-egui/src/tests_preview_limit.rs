@@ -893,6 +893,22 @@ mod in_the_loupe {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // Given no monitor profile chosen and a screen with one (macOS: previews follow the screen's
+    // profile, #787), the 1:1 window is drawn too (#1365): every Mac renders for a display.
+    #[test]
+    fn with_the_screen_profile_the_window_is_drawn() {
+        let (mut h, _) = detail();
+        h.app.services.screen_profile = Some(Box::new(|| Some(lightcraft_codecs::icc::write_named(lightcraft_codecs::NamedSpace::DisplayP3))));
+        h.step();
+        assert!(h.app.ui.settings.display_profile.is_empty(), "no profile chosen");
+        assert!(h.app.renderer.display_id().is_some(), "the screen's profile is in use");
+        h.request("engine.execute", json!({"command": "view.zoom100"}), T);
+        h.settle(SETTLE);
+        h.step();
+        assert!(h.app.renderer.textures.contains_key(&Slot::Region), "the window rendered");
+        assert!(!drawn(&h, Slot::Region).is_empty(), "and it is painted over the loupe");
+    }
+
     // Given Reference view at 1:1, the reference and the active photo both get windows; a slider
     // drag on the active photo asks for no new window until it ends
     #[test]
