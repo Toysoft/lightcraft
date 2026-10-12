@@ -6,6 +6,7 @@
 //! (applied like a DNG `ProfileHueSatMap`) corrects that when it also improves the held-out pixels.
 use lightcraft_color::{D50, D65, Mat3, PROPHOTO, REC2020, Xy, bradford, luminance_2020};
 use lightcraft_pipeline::tone::{CameraTone, ToneMap};
+use lightcraft_pipeline::{ColourBasis, ColourSource};
 use lightcraft_raster::{
     Rgb32f,
     resample::{Filter, fit, resize},
@@ -29,10 +30,18 @@ pub const LOOK_VERSION: u32 = 4;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CameraLook {
+    provenance: LookProvenance,
     pub matrix: Mat3,
     pub tone: CameraTone,
     /// Hue/saturation correction after `matrix`, in linear ProPhoto RGB (DNG `ProfileHueSatMap`).
     pub hue_sat: Option<HsvTable>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct LookProvenance {
+    profile: bool,
+    partial: bool,
+    dro_tone_removed: bool,
 }
 
 /// Long edge of the sensor/JPEG proxy a single photo's look is fitted on (the acceptance gates
@@ -69,7 +78,7 @@ pub(crate) fn file_local_look(format: RawFormat) -> bool {
 /// white (a monochrome picture style) has no colour to fit, but still gives its tone curve: with the camera profile's
 /// colour in [`fit_preview`], else on top of the spectral matrices or the fallback ([`monochrome_look`]). Returns the
 /// as-shot white, the camera transform at it and the fitted look.
-pub(crate) fn starting_colour(raw: &mut RawImage, bytes: &[u8]) -> (Xy, CameraTransform, Option<CameraLook>) {
+pub(crate) fn starting_colour(raw: &mut RawImage, bytes: &[u8]) -> (Xy, CameraTransform, Option<CameraLook>, ColourSource) {
     starting_colour_with(raw, |raw, t| fit_preview(raw, bytes, t), |raw, t| monochrome_look(raw, bytes, t))
 }
 
@@ -79,18 +88,31 @@ fn starting_colour_with(
     raw: &mut RawImage,
     fit: impl FnOnce(&RawImage, &CameraTransform) -> (Option<CameraLook>, bool),
     monochrome: impl FnOnce(&RawImage, &CameraTransform) -> Option<CameraLook>,
-) -> (Xy, CameraTransform, Option<CameraLook>) {
+) -> (Xy, CameraTransform, Option<CameraLook>, ColourSource) {
     let start = |raw: &RawImage| {
         let xy = lightcraft_raw::color::as_shot_white_xy(raw);
         (xy, lightcraft_raw::color::camera_transform(raw, xy))
     };
     let (xy, t) = start(raw);
     if !t.matrix_is_fallback {
-        return (xy, t, None);
+        return (xy, t, None, ColourSource { basis: ColourBasis::FileMatrices, monochrome_tone: false, dro_tone_removed: false });
     }
     let (look, black_and_white) = fit(raw, &t);
     if let Some(look) = look {
-        return (xy, t, Some(look));
+        let basis = if look.provenance.profile {
+            raw.metadata
+                .model
+                .as_deref()
+                .and_then(crate::camera_profiles::resolved)
+                .map(|p| ColourBasis::CameraProfile { model: p.profile.model.clone(), local: p.local })
+                .unwrap_or(ColourBasis::CameraJpeg)
+        } else if look.provenance.partial {
+            ColourBasis::PartialCameraJpeg
+        } else {
+            ColourBasis::CameraJpeg
+        };
+        let source = ColourSource { basis, monochrome_tone: black_and_white, dro_tone_removed: look.provenance.dro_tone_removed };
+        return (xy, t, Some(look), source);
     }
     let (xy, t) = match raw.metadata.model.as_deref().and_then(|model| lightcraft_raw::spectral::find(raw.metadata.make.as_deref(), model)) {
         Some(camera) => {
@@ -104,7 +126,12 @@ fn starting_colour_with(
     };
     // only a black-and-white JPEG: a colour one that gave no look pays nothing more
     let look = if black_and_white { monochrome(raw, &t) } else { None };
-    (xy, t, look)
+    let source = ColourSource {
+        basis: if t.matrix_is_fallback { ColourBasis::Neutral } else { ColourBasis::Spectral },
+        monochrome_tone: look.is_some(),
+        dro_tone_removed: look.as_ref().is_some_and(|look| look.provenance.dro_tone_removed),
+    };
+    (xy, t, look, source)
 }
 
 /// The look fitted to the file's camera JPEG, and whether that JPEG is black and white ([`monochrome`]).
@@ -252,7 +279,7 @@ fn with_dro_off_tone(look: CameraLook) -> CameraLook {
     if !at_most(&tone, &look.tone) {
         return look;
     }
-    CameraLook { tone, ..look }
+    CameraLook { tone, provenance: LookProvenance { dro_tone_removed: tone != look.tone, ..look.provenance }, ..look }
 }
 
 /// Whether curve `a` is nowhere brighter than `b` over the scene luminances the finish stage's tone
@@ -688,6 +715,7 @@ fn fit_pairs_on(
     // A known colour model needs enough signal for tone fitting, not a scene rich enough to
     // learn a new colour matrix. Still reject monochrome references.
     let (pairs, bright) = collect_pairs(sensor, reference, if colour.is_some() { 0.005 } else { 0.05 }, edge_limit)?;
+    let uses_profile = colour.is_some();
     let candidates = match colour {
         Some(given) => vec![given],
         None => {
@@ -708,7 +736,8 @@ fn fit_pairs_on(
         let tone_pairs: Vec<_> =
             pairs.iter().enumerate().filter(|(i, _)| i % 3 != 0).map(|(_, (x, y))| (luma(colour(*x).map(|v| v.max(0.0))), luma(*y))).collect();
         let Some(curve) = tone_fit.fit(tone_pairs) else { continue };
-        let mut look = CameraLook { matrix, tone: curve, hue_sat: hue_sat.clone() };
+        let mut look =
+            CameraLook { matrix, tone: curve, hue_sat: hue_sat.clone(), provenance: LookProvenance { profile: uses_profile, ..Default::default() } };
         if let Some(tone) = fit_chroma(&bright, &look) {
             look.tone = tone;
         }
@@ -851,7 +880,8 @@ fn fit_partial_on(sensor: &Rgb32f, reference: &Rgb32f, edge_limit: Option<f32>) 
     };
     let tone_pairs: Vec<_> =
         pairs.iter().enumerate().filter(|(i, _)| i % 3 != 0).map(|(_, (x, y))| (luma(matrix.apply(*x).map(|v| v.max(0.0))), luma(*y))).collect();
-    let mut look = CameraLook { matrix, tone: fit_tone(tone_pairs)?, hue_sat: None };
+    let mut look =
+        CameraLook { matrix, tone: fit_tone(tone_pairs)?, hue_sat: None, provenance: LookProvenance { partial: true, ..Default::default() } };
     if let Some(tone) = fit_chroma(&bright, &look) {
         look.tone = tone;
     }
@@ -959,7 +989,12 @@ fn fit_tone_only_on(sensor: &Rgb32f, reference: &Rgb32f, colour: &Option<(Mat3, 
     };
     let tone_pairs: Vec<_> =
         pairs.iter().enumerate().filter(|(i, _)| i % 3 != 0).map(|(_, (x, y))| (luma(coloured(*x).map(|v| v.max(0.0))), luma(*y))).collect();
-    let look = CameraLook { matrix, tone: fit_tone(tone_pairs)?, hue_sat: hue_sat.clone() };
+    let look = CameraLook {
+        matrix,
+        tone: fit_tone(tone_pairs)?,
+        hue_sat: hue_sat.clone(),
+        provenance: LookProvenance { profile: colour.is_some(), ..Default::default() },
+    };
     let (tone, neutral) = (ToneMap::camera(&look.tone, 0.0, 0.0, 0.0), ToneMap::new(0.0, 0.0, 0.0));
     let encoded = |v: f64| v.max(0.0).powf(1.0 / 2.2);
     let (mut before, mut after, mut before_encoded, mut after_encoded, mut samples) = (0.0, 0.0, 0.0, 0.0, 0);
@@ -1701,18 +1736,34 @@ mod tests {
         }
     }
 
-    /// Step 1: a file's own colour matrices win over everything, including a spectral row for its model; no JPEG fit
-    /// is tried.
+    /// An available profile is not necessarily the source of an accepted fit.
+    #[test]
+    fn provenance_reports_accepted_path_even_when_profile_is_available() {
+        for (profile, partial, expected) in [
+            (true, false, ColourBasis::CameraProfile { model: "ILCE-7M4".into(), local: false }),
+            (false, false, ColourBasis::CameraJpeg),
+            (false, true, ColourBasis::PartialCameraJpeg),
+        ] {
+            let mut raw = raw_of(RawFormat::Arw, "SONY", "ILCE-7M4", Default::default());
+            let mut look = dro_test_look(&std::array::from_fn(|i| 0.006 * 1.13f32.powi(i as i32)), &|x| x.sqrt());
+            look.provenance = LookProvenance { profile, partial, dro_tone_removed: true };
+            let (_, _, _, source) = starting_colour_with(&mut raw, |_, _| (Some(look), true), |_, _| None);
+            assert_eq!(source.basis, expected);
+            assert!(source.monochrome_tone && source.dro_tone_removed);
+        }
+    }
+
     #[test]
     fn a_files_own_matrices_come_first() {
         let own = Mat3([[0.6, -0.1, -0.05], [-0.4, 1.3, 0.1], [-0.1, 0.2, 0.7]]);
         let color = lightcraft_raw::ColorData { illuminant: [21, 0], color_matrix: [Some(own), None], ..Default::default() };
         let mut raw = raw_of(RawFormat::Cr2, "Canon", "Canon EOS 600D", color.clone());
-        let (_, t, look) = starting_colour_with(
+        let (_, t, look, source) = starting_colour_with(
             &mut raw,
             |_, _| panic!("no JPEG fit for a raw with its own matrices"),
             |_, _| panic!("no black-and-white JPEG fit for a raw with its own matrices"),
         );
+        assert_eq!(source.basis, ColourBasis::FileMatrices);
         assert_eq!(raw.color, color);
         assert!(!t.matrix_is_fallback && look.is_none());
     }
@@ -1726,7 +1777,7 @@ mod tests {
             assert!(lightcraft_raw::spectral::find(Some(make), model).is_some(), "{model}");
             let mut raw = raw_of(RawFormat::Cr2, make, model, Default::default());
             let fitted = dro_test_look(&std::array::from_fn(|i| 0.006 * 1.13f32.powi(i as i32)), &|x| x.sqrt());
-            let (xy, t, look) = starting_colour_with(
+            let (xy, t, look, _) = starting_colour_with(
                 &mut raw,
                 |raw, t| {
                     assert!(t.matrix_is_fallback && !lightcraft_raw::color::has_matrix(&raw.color), "the fit sees the raw without spectral matrices");
@@ -1748,14 +1799,16 @@ mod tests {
         assert!(crate::camera_profiles::get("ILCE-7M4").is_some());
         let camera = lightcraft_raw::spectral::find(Some("SONY"), "ILCE-7M4").unwrap();
         let mut raw = raw_of(RawFormat::Arw, "SONY", "ILCE-7M4", Default::default());
-        let (_, t, look) = starting_colour(&mut raw, &[]);
+        let (_, t, look, source) = starting_colour(&mut raw, &[]);
+        assert_eq!(source.basis, ColourBasis::Spectral);
         assert!(look.is_none());
         assert_eq!(raw.color.color_matrix, camera.color_matrix.map(Some));
         assert!(!t.matrix_is_fallback);
 
         let camera = lightcraft_raw::spectral::find(Some("Canon"), "Canon EOS 600D").unwrap();
         let mut raw = raw_of(RawFormat::Cr2, "Canon", "Canon EOS 600D", Default::default());
-        let (xy, t, look) = starting_colour_with(&mut raw, |_, _| (None, false), |_, _| panic!("a colour JPEG never takes the black-and-white step"));
+        let (xy, t, look, _) =
+            starting_colour_with(&mut raw, |_, _| (None, false), |_, _| panic!("a colour JPEG never takes the black-and-white step"));
         assert!(look.is_none());
         assert_eq!(raw.color.illuminant, [17, 21]);
         assert_eq!(raw.color.forward_matrix, camera.forward_matrix.map(Some));
@@ -1772,13 +1825,14 @@ mod tests {
     #[test]
     fn a_black_and_white_jpeg_adds_its_tone_on_top_of_the_colour_it_gets_otherwise() {
         let toned = CameraLook {
+            provenance: Default::default(),
             matrix: Mat3::IDENTITY,
             tone: dro_test_look(&std::array::from_fn(|i| 0.006 * 1.13f32.powi(i as i32)), &|x| x.sqrt()).tone,
             hue_sat: None,
         };
         let camera = lightcraft_raw::spectral::find(Some("Canon"), "Canon EOS 600D").unwrap();
         let mut raw = raw_of(RawFormat::Cr2, "Canon", "Canon EOS 600D", Default::default());
-        let (xy, t, look) = starting_colour_with(
+        let (xy, t, look, _) = starting_colour_with(
             &mut raw,
             |_, _| (None, true),
             |raw, t| {
@@ -1791,7 +1845,7 @@ mod tests {
         assert_eq!(xy, lightcraft_raw::color::as_shot_white_xy(&raw));
 
         let mut raw = raw_of(RawFormat::Cr2, "Canon", "Canon EOS 7D", Default::default());
-        let (_, t, look) = starting_colour_with(
+        let (_, t, look, _) = starting_colour_with(
             &mut raw,
             |_, _| (None, true),
             |_, t| {
@@ -1807,7 +1861,8 @@ mod tests {
     #[test]
     fn a_camera_outside_the_table_keeps_the_fallback() {
         let mut raw = raw_of(RawFormat::Cr2, "Canon", "Canon EOS 7D", Default::default());
-        let (_, t, look) = starting_colour(&mut raw, &[]);
+        let (_, t, look, source) = starting_colour(&mut raw, &[]);
+        assert_eq!(source.basis, ColourBasis::Neutral);
         assert!(look.is_none() && t.matrix_is_fallback);
         assert_eq!(raw.color, lightcraft_raw::ColorData::default());
         // without a model there is no table row
@@ -1836,7 +1891,7 @@ mod tests {
             let own = lightcraft_raw::color::has_matrix(&raw.color);
             let covered = raw.metadata.model.as_deref().and_then(|m| lightcraft_raw::spectral::find(raw.metadata.make.as_deref(), m)).is_some();
             let before = raw.color.clone();
-            let (_, t, fitted) = starting_colour(&mut raw, &bytes);
+            let (_, t, fitted, _) = starting_colour(&mut raw, &bytes);
             let spectral = !own && fitted.is_none() && covered;
             eprintln!("{name}: own matrices {own}, JPEG fit {}, spectral {spectral}", fitted.is_some());
             assert_eq!(raw.color != before, spectral, "{name}");
@@ -1984,6 +2039,7 @@ mod tests {
             }
         }
         assert_eq!(look.hue_sat, bundled.hue_sat, "the look's table is not the profile's");
+        assert!(look.provenance.profile);
     }
 
     /// A public D7500 NEF (skipped without the corpus): its look is fitted to its own JPEG and white
@@ -2065,6 +2121,7 @@ mod tests {
     /// A look with tone curve `f` at knots `xs` and a colour model and chroma curve to keep.
     fn dro_test_look(xs: &[f32; 32], f: &dyn Fn(f32) -> f32) -> CameraLook {
         CameraLook {
+            provenance: Default::default(),
             matrix: Mat3([[1.6, -0.4, -0.2], [-0.2, 1.4, -0.2], [0.0, -0.3, 1.3]]),
             tone: CameraTone::new(xs.map(|x| [x, f(x)])).unwrap().with_chroma([1.3, 1.2, 1.1, 1.0, 1.0, 0.9, 0.6, 0.3]).unwrap(),
             hue_sat: Some(HsvTable { hue_divisions: 4, sat_divisions: 2, val_divisions: 1, data: vec![[5.0, 1.1, 1.0]; 8], srgb_value: false }),
@@ -2114,10 +2171,12 @@ mod tests {
         let lifted = dro_test_look(&xs, &|x| dro_off.apply(x).powf(0.8));
         let fixed = with_dro_off_tone(lifted.clone());
         assert_lowered(&lifted, &fixed, "lifted");
+        assert!(fixed.provenance.dro_tone_removed);
         assert!(fixed.tone.apply(0.02) < 0.85 * lifted.tone.apply(0.02));
         // a camera that maps raw values darker than Sony's curve keeps its own curve exactly
         let darker = dro_test_look(&xs, &|x| 0.7 * dro_off.apply(x));
         assert_eq!(with_dro_off_tone(darker.clone()).tone, darker.tone);
+        assert!(!with_dro_off_tone(darker.clone()).provenance.dro_tone_removed);
         // crossing curves: the lower of the two at the knots, still a valid increasing curve
         let crossing = dro_test_look(&xs, &|x| (dro_off.apply(x) * (0.6 + x)).min(0.95));
         assert_lowered(&crossing, &with_dro_off_tone(crossing.clone()), "crossing");
@@ -2718,7 +2777,7 @@ mod tests {
         // and the step runs for a model with a bundled profile (the ILCE-7M4 also has spectral matrices)
         assert!(crate::camera_profiles::get("ILCE-7M4").is_some());
         let mut raw = raw_of(RawFormat::Arw, "SONY", "ILCE-7M4", Default::default());
-        let (_, t, look) = starting_colour_with(
+        let (_, t, look, _) = starting_colour_with(
             &mut raw,
             |_, _| (None, true),
             |_, t| {

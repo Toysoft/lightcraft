@@ -42,6 +42,9 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         t.font(14.0),
         t.text_label,
     );
+    egui::Frame::NONE.inner_margin(egui::Margin { left: 24, right: 22, top: 0, bottom: 10 }).show(ui, |ui| {
+        colour_source(app, ui, id);
+    });
     if d.profile.id != "lc.color" {
         super::edit::control(app, ui, &d, "profile.amount", true);
         ui.add_space(6.0);
@@ -207,5 +210,100 @@ fn cell_ui(
             let _ = app.run("develop.profile", json!({"id": p_id, "amount": 100}));
             ui.data_mut(|m| m.remove::<(PhotoId, String)>(egui::Id::new("last-profile-hover")));
         }
+    }
+}
+
+/// Read from the selected photo's decoded source, never from the previously displayed preview.
+pub(super) fn colour_source(app: &LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
+    if !app.session.catalog.photo(id).is_some_and(|p| p.develops_raw()) {
+        return;
+    }
+    let info = app.session.source_info(id);
+    let text = colour_source_text(info.colour_source.as_ref());
+    let t = Tokens::get(ui.ctx());
+    let response = ui.add(egui::Label::new(egui::RichText::new(text).font(t.font(12.0)).color(t.text_dim)).wrap());
+    register(ui.ctx(), "label:cameraColourSource", response.rect);
+}
+
+fn colour_source_text(source: Option<&lightcraft_pipeline::ColourSource>) -> String {
+    use lightcraft_pipeline::ColourBasis;
+    let Some(source) = source else { return crate::i18n::tr("Camera colour: not available until the original is decoded").to_string() };
+    let mut label = match &source.basis {
+        ColourBasis::FileMatrices => crate::i18n::tr("Camera colour: raw's own matrices").to_string(),
+        ColourBasis::CameraProfile { model, local } => {
+            if *local {
+                crate::i18n::tr_format!("Camera colour: {model} profile (local)", model = model)
+            } else {
+                crate::i18n::tr_format!("Camera colour: {model} profile (built in)", model = model)
+            }
+        }
+        ColourBasis::CameraJpeg => crate::i18n::tr("Camera colour: fitted to the camera JPEG").to_string(),
+        ColourBasis::PartialCameraJpeg => crate::i18n::tr("Camera colour: partial camera JPEG fit").to_string(),
+        ColourBasis::Spectral => crate::i18n::tr("Camera colour: spectral sensitivities (no accepted colour fit)").to_string(),
+        ColourBasis::Neutral => crate::i18n::tr("Camera colour: neutral (no accepted colour fit)").to_string(),
+    };
+    if source.monochrome_tone {
+        label.push_str(" · ");
+        label.push_str(crate::i18n::tr("Tone from black-and-white camera JPEG"));
+    }
+    if source.dro_tone_removed {
+        label.push_str(" · ");
+        label.push_str(crate::i18n::tr("DRO tone removed"));
+    }
+    label
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lightcraft_catalog::{MediaKind, Op, Photo, Source};
+    use lightcraft_engine::media::SourceLevel;
+    use lightcraft_pipeline::{ColourBasis, ColourSource, SourceInfo};
+    use std::{sync::Arc, time::Duration};
+
+    #[test]
+    fn colour_readout_follows_selection_in_both_panels() {
+        let mut session = lightcraft_engine::Session::new();
+        let mut ids = Vec::new();
+        for (name, format, kind) in
+            [("first.ARW", "ARW", MediaKind::Raw), ("second.ARW", "ARW", MediaKind::Raw), ("rendered.jpg", "JPEG", MediaKind::Image)]
+        {
+            let id = session.catalog.alloc_photo_id();
+            let mut photo = Photo::new(id, Source::File { path: name.into() }, name, format, 32, 32, "2026-10-12T00:00:00");
+            photo.kind = kind;
+            session.catalog.apply(Op::AddPhoto { photo: Box::new(photo) }).unwrap();
+            ids.push(id);
+        }
+        session.media.file_loader = Some(Arc::new(|path, _| {
+            let basis =
+                if path == "first.ARW" { ColourBasis::CameraProfile { model: "Test Camera".into(), local: true } } else { ColourBasis::Spectral };
+            Ok((
+                lightcraft_raster::Rgb32f::new(32, 32),
+                SourceInfo {
+                    raw: true,
+                    colour_source: Some(ColourSource { basis, monochrome_tone: false, dro_tone_removed: false }),
+                    ..Default::default()
+                },
+            ))
+        }));
+        for id in &ids {
+            session.source_now(*id, SourceLevel::Preview).unwrap();
+        }
+        let app = LightcraftApp::new(session, crate::Services { png: None, ..Default::default() });
+        let mut h = crate::headless::Headless::new(app, [1400.0, 900.0], 1.0);
+        let timeout = Duration::from_secs(30);
+        for panel in ["edit", "profiles"] {
+            for (i, id) in ids.iter().enumerate() {
+                h.request("engine.execute", json!({"command":"library.select", "params":{"ids":[id.0], "active":id.0}}), timeout);
+                h.request("ui.set", json!({"view":"detail", "right":panel}), timeout);
+                h.step();
+                assert_eq!(h.app.widgets.iter().any(|(name, _)| name == "label:cameraColourSource"), i < 2, "{panel}: {i}");
+                if i < 2 {
+                    let text = h.painted_text().join("\n");
+                    assert_eq!(text.contains("Test Camera"), i == 0, "{text}");
+                }
+            }
+        }
+        assert!(!colour_source_text(None).contains("Test Camera"));
     }
 }

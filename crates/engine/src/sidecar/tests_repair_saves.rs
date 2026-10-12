@@ -19,14 +19,14 @@ impl MoveFs for PartialRename {
         RealFs.same_file(a, b)
     }
     fn rename_no_replace(&self, a: &Path, b: &Path) -> std::io::Result<()> {
-        if a == self.sidecar || a == self.photo {
+        if a == self.sidecar || a == self.photo || RealFs.same_file(a, &self.sidecar) || RealFs.same_file(a, &self.photo) {
             Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "transient rename fault"))
         } else {
             RealFs.rename_no_replace(a, b)
         }
     }
     fn copy_no_replace(&self, a: &Path, b: &Path) -> std::io::Result<()> {
-        if a == self.sidecar {
+        if a == self.sidecar || RealFs.same_file(a, &self.sidecar) {
             Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "transient copy fault"))
         } else {
             RealFs.copy_no_replace(a, b)
@@ -151,7 +151,12 @@ fn autowrite_repairs_partial_rename_before_merging_foreign_xmp_across_library_sw
                     assert_eq!(parsed.title.as_deref(), Some("Final title"));
                     assert!(parsed.keywords.as_ref().unwrap().contains(&"café".to_string()));
                     if upper {
-                        assert!(!preferred.exists(), "merge uses the repaired uppercase packet");
+                        // On a case-insensitive filesystem exists() also finds the uppercase
+                        // packet. Check its directory entry to detect an extra lowercase file.
+                        let lower_entry = std::fs::read_dir(preferred.parent().unwrap())
+                            .unwrap()
+                            .any(|entry| entry.unwrap().file_name() == preferred.file_name().unwrap());
+                        assert!(!lower_entry, "merge uses the repaired uppercase packet");
                     }
                     for (step, title) in [("edit.undo", "Fresh title"), ("edit.redo", "Final title")] {
                         s.execute(step, &json!({})).unwrap();

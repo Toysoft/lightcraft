@@ -180,3 +180,20 @@ the neutral fallback): E-1 0.126 → 0.014, E-400 0.087 → 0.022, XZ-2 0.061 �
 still open from their embedded JPEG. Against Lightroom Classic's render of a CC0 E-1 photo (2000 px, ΔE00 of the
 unedited render) the starting look moved from 11.25 to 8.30. Lightroom frames that E-1 file about 4 × 11 sensor pixels
 differently from the crop the file records (`CropLeft`/`CropTop` 36, 34); the file's own crop is kept.
+
+## Starting-colour readout (#1310)
+
+The Edit panel and profile browser show the decoded original's starting-colour source below
+its creative profile: the file's matrices, an accepted built-in/local camera profile, its own
+camera-JPEG fit, a partial fit, spectral sensitivities, or neutral fallback. A profile's presence
+alone never implies it was accepted. Black-and-white JPEG tone and an actual DRO tone change
+are noted separately. This is diagnostic metadata; pixel calculations, `LOOK_VERSION`, and
+render-cache versions do not change.
+
+The readout follows the selected photo's decoded source cache. Before decoding (including an
+old/offline smart preview without these facts), it says the source is unavailable rather than
+inferring it from the model or reusing the previous photo's label.
+
+Browser render workers return the same provenance without transferring decoded pixels. The
+main thread keeps a bounded diagnostic cache keyed by photo and original identity; replacing
+the file or clearing sources discards it. Cached JPEG thumbnails alone cannot establish provenance.
