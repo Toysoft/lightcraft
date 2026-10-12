@@ -1589,6 +1589,27 @@ fn folders_app_with_services(paths: &[&str], size: [f32; 2], services: Services)
     h
 }
 
+/// A library whose folders nest as deep as `deep` (`/a/b/…/m`) with `x` and `y` at the end, every
+/// level opened. Each level holds a photo, so each is a row: folders that only lead from the disk
+/// to the first one that does would have none. (Tall enough for the whole chain.)
+fn deep_folders_app(deep: &str) -> Headless {
+    let mut paths = vec![format!("{deep}/x/1.jpg"), format!("{deep}/y/2.jpg")];
+    let mut levels = Vec::new();
+    let mut level = String::new();
+    for name in deep.split('/').filter(|n| !n.is_empty()) {
+        level.push('/');
+        level.push_str(name);
+        paths.push(format!("{level}/0.jpg"));
+        levels.push(level.clone());
+    }
+    let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
+    let mut h = folders_app_sized(&paths, [1400.0, 1000.0]);
+    for level in &levels[..levels.len() - 1] {
+        click(&mut h, &format!("libraryFolderToggle:{level}"));
+    }
+    h
+}
+
 fn has(h: &Headless, id: &str) -> bool {
     h.app.widgets.iter().any(|(w, _)| w == id)
 }
@@ -1670,13 +1691,150 @@ fn the_grid_is_titled_after_the_folder() {
     assert_eq!(crate::i18n::source_title(&h.app.session), "All Photos");
 }
 
-/// A folder that holds nothing itself and leads to one folder starts open: the tree opens down to
-/// where the library branches.
+/// Given photos two folders below the home folder, when the Folders section is shown, then the
+/// disk opens at the first folder that holds photos or branches: the folders that only lead
+/// there (`Users`, `me`) have no row, and that folder sits one step inside its disk.
 #[test]
-fn a_chain_of_single_folders_starts_open() {
+fn a_disk_opens_at_the_first_folder_that_holds_photos_or_branches() {
     let h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
-    assert!(has(&h, "source:libfolder:/Users/me/Pictures"), "Users and me opened by themselves");
+    assert!(has(&h, "source:libfolder:/Users/me/Pictures"), "the first folder that branches is listed");
+    assert!(!has(&h, "source:libfolder:/Users") && !has(&h, "source:libfolder:/Users/me"), "the folders leading to it are passed over");
     assert!(!has(&h, "source:libfolder:/Users/me/Pictures/2024"), "the branching folder waits to be opened");
+    let step = widget(&h, "libraryFolderToggle:/Users/me/Pictures").center().x - widget(&h, "libraryFolderToggle:/").center().x;
+    assert!((step - 16.0).abs() < 0.5, "one step inside its disk, not three: {step}");
+    let counts = h.app.widgets.iter().filter(|(w, _)| w.starts_with("count:libfolder:")).count();
+    assert_eq!(counts, 2, "the disk and the folder: no count is repeated down a staircase");
+}
+
+/// A folder that only leads on further down the tree keeps its row, and starts open: only the
+/// way from a disk to the library's first folder is passed over.
+#[test]
+fn a_single_folder_inside_the_library_keeps_its_row() {
+    let mut h = folders_app(&["/pics/trip/2026/may/a.jpg", "/pics/home/b.jpg"]);
+    click(&mut h, "libraryFolderToggle:/pics");
+    assert!(has(&h, "source:libfolder:/pics/trip/2026"), "a folder the person made is a row");
+    assert!(has(&h, "source:libfolder:/pics/trip/2026/may"), "and it starts open, as before");
+}
+
+/// Given a disk that opens at `Pictures`, when Show Parent Folder is chosen from its menu, then
+/// the folder above it gets a row (and only that one); Hide This Parent on that row takes it
+/// away again.
+#[test]
+fn show_parent_folder_lists_the_folder_above_and_hide_this_parent_takes_it_away() {
+    let mut h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
+    right_click(&mut h, "source:libfolder:/Users/me/Pictures");
+    assert!(!has(&h, "folderHideParent"), "Pictures is no parent that was asked for");
+    click(&mut h, "folderShowParent");
+    assert!(!popup_open(&h), "choosing closes the menu");
+    assert!(has(&h, "source:libfolder:/Users/me") && !has(&h, "source:libfolder:/Users"), "one folder up");
+    assert!(has(&h, "source:libfolder:/Users/me/Pictures"), "what it leads to stays in view");
+    right_click(&mut h, "source:libfolder:/Users/me/Pictures");
+    assert!(!has(&h, "folderShowParent"), "its parent is listed now");
+    h.request("ui.key", json!({"key": "escape"}), T);
+    h.step();
+    h.step();
+    // the parent shown offers the one above it, and going away again
+    right_click(&mut h, "source:libfolder:/Users/me");
+    assert!(has(&h, "folderShowParent") && has(&h, "folderHideParent"));
+    click(&mut h, "folderHideParent");
+    assert!(!has(&h, "source:libfolder:/Users/me") && has(&h, "source:libfolder:/Users/me/Pictures"));
+}
+
+/// `view.folderParent` is the command behind both items: it shows, hides or flips a folder that
+/// only leads to the library's folders, and refuses any other folder, saying why.
+#[test]
+fn view_folder_parent_shows_and_hides_for_agents_and_refuses_other_folders() {
+    let mut h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
+    let r = exec(&mut h, "view.folderParent", json!({"path": "/Users/"}));
+    assert_eq!(r, json!({"path": "/Users", "show": true}), "spelled another way, it is the same folder");
+    assert!(has(&h, "source:libfolder:/Users") && !has(&h, "source:libfolder:/Users/me"));
+    let r = exec(&mut h, "view.folderParent", json!({"path": "/Users"}));
+    assert_eq!(r["show"], false, "with no `show` it flips");
+    assert!(!has(&h, "source:libfolder:/Users"));
+    let r = exec(&mut h, "view.folderParent", json!({"path": "/Users", "show": false}));
+    assert_eq!(r["show"], false, "hiding what is hidden is no error");
+    for (params, why) in [
+        (json!({"path": "/Users/me/Pictures"}), "always listed"),
+        (json!({"path": "/Users/me/Pictures/2024"}), "always listed"),
+        (json!({"path": "/"}), "always listed"),
+        (json!({"path": "/nowhere"}), "holds no photo"),
+        (json!({}), "`path` is needed"),
+        (json!({"path": "/Users", "show": "yes"}), "true or false"),
+    ] {
+        let r = h.request("engine.execute", json!({"command": "view.folderParent", "params": params}), T);
+        assert_eq!(r["ok"], false, "{params}: {r}");
+        assert!(r["error"].as_str().is_some_and(|e| e.contains(why)), "{params}: {r}");
+    }
+    assert!(h.app.ui.folder_parents.is_empty(), "a refusal changes nothing");
+}
+
+/// Whatever is chosen is in view: a folder that would be passed over has its row while it is
+/// what the grid shows (an agent chose it, or its row was there when it was clicked).
+#[test]
+fn a_passed_over_folder_that_is_shown_in_the_grid_has_its_row() {
+    let mut h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
+    exec(&mut h, "library.source", json!({"kind": "libraryFolder", "path": "/Users/me"}));
+    assert!(has(&h, "source:libfolder:/Users/me") && has(&h, "highlight:libfolder:/Users/me"), "the chosen folder is listed and marked");
+    assert!(!has(&h, "source:libfolder:/Users"), "the one above it is still passed over");
+    click(&mut h, "source:all");
+    assert!(!has(&h, "source:libfolder:/Users/me"), "no longer chosen, it is passed over again");
+}
+
+/// A folder that carries a colour label says something of its own: it keeps its row.
+#[test]
+fn a_labelled_folder_is_never_passed_over() {
+    let mut h = folders_app(&["/Users/me/Pictures/2024/a.jpg", "/Users/me/Pictures/2025/b.jpg"]);
+    exec(&mut h, "folder.label", json!({"path": "/Users/me", "label": "red"}));
+    assert!(has(&h, "source:libfolder:/Users/me") && has(&h, "labelMark:libfolder:/Users/me"));
+    right_click(&mut h, "source:libfolder:/Users/me");
+    assert!(!has(&h, "folderHideParent"), "it is not listed because it was asked for");
+}
+
+/// The folders asked for are kept with the UI state, and a settings file can't make the list
+/// grow without bound.
+#[test]
+fn shown_parents_are_kept_with_the_ui_state() {
+    let mut u = crate::UiState::default();
+    u.folder_parents.insert("/Users/me".into());
+    let saved = serde_json::to_value(&u).unwrap();
+    assert_eq!(saved["folderParents"], json!(["/Users/me"]));
+    let back: crate::UiState = serde_json::from_value(saved).unwrap();
+    assert!(back.sanitized().folder_parents.contains("/Users/me"));
+    let many: Vec<String> = (0..5000).map(|i| format!("/p{i}")).collect();
+    let back: crate::UiState = serde_json::from_value(json!({"folderParents": many})).unwrap();
+    assert_eq!(back.sanitized().folder_parents.len(), crate::state::MAX_FOLDER_PARENTS);
+}
+
+/// In a panel too narrow for a deep row, the count gives way: it is drawn after the name, never
+/// over it or over the folder's icon.
+#[test]
+fn a_count_never_covers_the_name_of_a_deep_row() {
+    let mut paths = Vec::new();
+    let mut dir = String::new();
+    for name in ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"] {
+        dir.push('/');
+        dir.push_str(name);
+        paths.push(format!("{dir}/1.jpg"));
+    }
+    let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+    let mut h = folders_app_sized(&refs, [1400.0, 1000.0]);
+    let left = widget(&h, "panel:left_panel");
+    drag(&mut h, left.right() - 2.0, -1400.0);
+    assert_eq!(h.app.ui.left_width, crate::state::LEFT_WIDTH.min, "the panel at its narrowest");
+    let mut path = String::new();
+    for name in ["a", "b", "c", "d", "e", "f", "g", "h", "i"] {
+        path.push('/');
+        path.push_str(name);
+        click(&mut h, &format!("libraryFolderToggle:{path}"));
+    }
+    h.settle(SETTLE);
+    let deep = "/a/b/c/d/e/f/g/h/i/j";
+    let (label, count) = (widget(&h, &format!("label:libfolder:{deep}")), widget(&h, &format!("count:libfolder:{deep}")));
+    assert!(label.width() > 0.0, "the name is shown: {label:?}");
+    assert!(count.left() >= label.right(), "the count comes after the name: {label:?} {count:?}");
+    // a row with room keeps its count at the panel's visible edge
+    let panel = widget(&h, "panel:left_panel");
+    assert!(widget(&h, "count:all").right() <= panel.right());
 }
 
 /// Removing a folder from the library asks first, then moves its photos to Recently Deleted.
@@ -1879,8 +2037,7 @@ fn removing_a_disk_from_the_library_asks_first() {
 #[test]
 fn a_deep_chain_keeps_its_nesting_and_the_sidebar_scrolls_sideways() {
     let deep = "/a/b/c/d/e/f/g/h/i/j/k/l/m";
-    // (tall enough for the whole chain: Recently Deleted is above it now)
-    let mut h = folders_app_sized(&[&format!("{deep}/x/1.jpg"), &format!("{deep}/y/2.jpg")], [1400.0, 1000.0]);
+    let mut h = deep_folders_app(deep);
     let mut xs: Vec<f32> = Vec::new();
     let mut path = String::new();
     for name in deep.split('/').filter(|n| !n.is_empty()) {
@@ -1975,8 +2132,7 @@ fn a_long_name_alone_does_not_make_the_sidebar_scroll() {
 #[test]
 fn the_selection_bar_stays_inside_the_panel() {
     let deep = "/a/b/c/d/e/f/g/h/i/j/k/l/m";
-    // (tall enough for the whole chain: Recently Deleted is above it now)
-    let mut h = folders_app_sized(&[&format!("{deep}/x/1.jpg"), &format!("{deep}/y/2.jpg")], [1400.0, 1000.0]);
+    let mut h = deep_folders_app(deep);
     click(&mut h, "source:libfolder:/a/b/c/d/e/f/g/h/i/j/k/l");
     let panel = widget(&h, "panel:left_panel");
     let bar = widget(&h, "highlight:libfolder:/a/b/c/d/e/f/g/h/i/j/k/l");

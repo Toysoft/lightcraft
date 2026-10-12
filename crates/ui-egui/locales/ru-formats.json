@@ -314,5 +314,6 @@
   "…and {n} more": "…и ещё {n}",
   "{n} keywords": "Ключевые слова: {n}",
   "{n} albums": "Альбомы: {n}",
-  "{n} folders": "Папки: {n}"
+  "{n} folders": "Папки: {n}",
+  "Lists “{name}”, the folder this one is in": "Показывает «{name}» — папку, в которой лежит эта"
 }

@@ -2370,5 +2370,10 @@
   "Checking the GPU…": "GPU wird geprüft …",
   "CPU": "CPU",
   "A face model uses the GPU only when a check shows it gives the same results faster.": "Ein Gesichtsmodell nutzt die GPU nur, wenn eine Prüfung zeigt, dass sie dieselben Ergebnisse schneller liefert.",
-  "Checking the GPU for faces": "GPU für Gesichter wird geprüft"
+  "Checking the GPU for faces": "GPU für Gesichter wird geprüft",
+  "Show Parent Folder": "Übergeordneten Ordner anzeigen",
+  "Hide This Parent": "Diesen übergeordneten Ordner ausblenden",
+  "Takes this row off the list; the folder inside it and every photo stay as they are": "Nimmt diese Zeile aus der Liste; der enthaltene Ordner und alle Fotos bleiben, wie sie sind",
+  "List Deeper Folders": "Tiefere Ordner auflisten",
+  "Folders this deep are not listed here. Click to add this folder to Local, where it opens further": "So tief liegende Ordner werden hier nicht aufgelistet. Klicken, um diesen Ordner zu „Lokal“ hinzuzufügen, wo er sich weiter öffnen lässt"
 }

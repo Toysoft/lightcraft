@@ -375,6 +375,19 @@
   JPEG get faster too.
 ## 2026-10-12
 
+### Folders opens at your photo folders
+- In the left panel's Folders, a disk now opens at the first folder that holds photos or branches. The folders
+  that only lead there (`Users` ▸ `me` ▸ …) no longer get a row each, so the folder you look for is at the top
+  and the same count is not repeated down a staircase. A row's tooltip still gives its whole path.
+- Right-click a folder ▸ **Show Parent Folder** lists the folder above it, one level each time; **Hide This
+  Parent** on such a row takes it away again. Nothing on disk or in the library changes. A folder you gave a
+  colour label always keeps its row.
+- In a narrow panel, the count of a deeply nested row no longer prints over the folder's name: it follows the
+  name, and scrolling sideways reaches it.
+- In Local, a folder eight levels below its place used to open onto nothing. It now says **List Deeper Folders**:
+  click it to add that folder to Local, where it opens further.
+- For agents: `view.folderParent` `{path, show?}`.
+
 ### Canon CR2 highlights
 - Blown highlights in CR2 files from the Canon EOS 50D, 60D, 450D (Rebel XSi), 500D (Rebel T1i), 550D (Rebel T2i),
   1200D (Rebel T5) and 100D (Rebel SL1) now count as clipped (issue #1272). They used to stop at 81–98% of white, so

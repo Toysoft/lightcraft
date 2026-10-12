@@ -2209,5 +2209,10 @@
   "Checking the GPU…": "Verificando a GPU…",
   "CPU": "CPU",
   "A face model uses the GPU only when a check shows it gives the same results faster.": "Um modelo de rostos só usa a GPU quando uma verificação mostra que ela dá os mesmos resultados mais rápido.",
-  "Checking the GPU for faces": "Verificando a GPU para rostos"
+  "Checking the GPU for faces": "Verificando a GPU para rostos",
+  "Show Parent Folder": "Mostrar pasta superior",
+  "Hide This Parent": "Ocultar esta pasta superior",
+  "Takes this row off the list; the folder inside it and every photo stay as they are": "Tira esta linha da lista; a pasta dentro dela e todas as fotos ficam como estão",
+  "List Deeper Folders": "Listar pastas mais profundas",
+  "Folders this deep are not listed here. Click to add this folder to Local, where it opens further": "Pastas tão profundas não são listadas aqui. Clique para adicionar esta pasta a Local, onde ela abre mais níveis"
 }

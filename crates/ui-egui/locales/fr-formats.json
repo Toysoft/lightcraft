@@ -314,5 +314,6 @@
   "…and {n} more": "…et {n} de plus",
   "{n} keywords": "{n} mots-clés",
   "{n} albums": "{n} albums",
-  "{n} folders": "{n} dossiers"
+  "{n} folders": "{n} dossiers",
+  "Lists “{name}”, the folder this one is in": "Affiche « {name} », le dossier qui contient celui-ci"
 }

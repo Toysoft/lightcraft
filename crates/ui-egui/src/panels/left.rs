@@ -28,6 +28,10 @@ const ROW_HEIGHT: f32 = 29.0;
 /// this frame: set before the sections are drawn, cleared after.
 const SCROLL_TO_ROW: &str = "left-scroll-to-row";
 
+/// The least of its name a row shows before its count gives way (about three letters and an
+/// ellipsis).
+const MIN_NAME_ROOM: f32 = 36.0;
+
 /// A row says how wide it needs to be.
 fn note_width(ui: &egui::Ui, w: f32) {
     ui.data_mut(|d| {
@@ -117,8 +121,12 @@ fn row_sensed(
     let count_color = |n: usize| if n == 0 { t.text_dim.gamma_multiply(0.55) } else { t.text_dim };
     let count_galley = count.filter(|_| app.ui.show_counts).map(|n| ui.painter().layout_no_wrap(n.to_string(), t.font(12.5), count_color(n)));
     let label_left = r.left() + 42.0 + indent;
-    let count_left = count_galley.as_ref().map_or(edge - 18.0, |g| edge - 18.0 - g.size().x);
     // a label's dot sits just before the count
+    // a count stays at the visible edge while that leaves room for some of the name; a row
+    // indented too far for that keeps its count after its name, reached by scrolling sideways
+    let count_w = count_galley.as_ref().map_or(0.0, |g| g.size().x);
+    let edge = edge.max((label_left + MIN_NAME_ROOM + 8.0 + mark_w + count_w + 18.0).min(r.right()));
+    let count_left = edge - 18.0 - count_w;
     if let Some(c) = mark {
         let dot = Rect::from_center_size(pos2(count_left - MARK_W / 2.0, r.center().y), vec2(8.0, 8.0));
         ui.painter().circle_filled(dot.center(), 4.0, c);
@@ -695,7 +703,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                         let tree = app.caches.folder_tree(&app.session.catalog);
                         section(app, ui, s, tree.len(), |app, ui| {
                             reveal_chosen(app, ui, &tree);
-                            folder_rows(app, ui, &tree, 0.0);
+                            folder_rows(app, ui, &tree, 0.0, false, None);
                         })
                     }
                     SidebarSection::Keywords => {
@@ -1021,6 +1029,10 @@ pub(crate) fn fs_cached<T: Clone + Send + 'static>(ui: &egui::Ui, kind: &'static
     lock(&cell)
 }
 
+/// How far a Local place is listed below its row: eight levels (each indents 16 pt), which also
+/// bounds [`folder_tree`]'s recursion whatever is on disk.
+const LOCAL_DEPTH: f32 = 16.0 * 8.0;
+
 /// A folder on disk with a disclosure triangle: click browses it, the triangle lists its
 /// subfolders. In the tree that holds the folder being browsed (`reveal`), the folders on the
 /// way down to it open whenever the browsed folder changes, so it shows highlighted in place.
@@ -1115,9 +1127,17 @@ fn folder_tree(
             synchronize_item(app, ui, &held.0, &held.1);
         }
     });
-    if open && indent < 16.0 * 8.0 {
+    if open && indent < LOCAL_DEPTH {
         for (n, p) in subfolders(ui, path) {
             folder_tree(app, ui, place, &n, &p, indent + 16.0, current, reveal, false);
+        }
+    } else if open && !subfolders(ui, path).is_empty() {
+        // as deep as one place is listed: say so, and offer the way on, instead of an open
+        // folder that seems to hold nothing
+        let more = row(app, ui, &format!("localDeeper:{path}"), Icon::Plus, crate::i18n::tr("List Deeper Folders"), None, false, indent + 24.0)
+            .on_hover_text(crate::i18n::tr("Folders this deep are not listed here. Click to add this folder to Local, where it opens further"));
+        if more.clicked() {
+            app.act("local.addRoot", json!({"path": path}));
         }
     }
 }
@@ -1778,13 +1798,60 @@ fn reveal_chosen(app: &LightcraftApp, ui: &egui::Ui, tree: &[FolderNode]) {
     open_above(ui, tree, &chosen);
 }
 
-fn folder_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[FolderNode], indent: f32) {
+/// A folder that only leads on: it holds none of the library's photos itself, says nothing of
+/// its own (no colour label) and has one folder inside it (`Users` → `me`).
+fn only_leads_on(n: &FolderNode) -> bool {
+    !n.volume && n.own == 0 && n.children.len() == 1 && n.label.is_none()
+}
+
+/// Where a folder stands in the Folders tree, for Show Parent Folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FolderPlace {
+    /// On the way from its disk to the library's first folder there: passed over unless asked for.
+    Leading,
+    /// A disk, or a folder that holds photos, branches, carries a label or lies below one that does.
+    Listed,
+}
+
+/// The node of the folder spelled `key` ([`lightcraft_catalog::query::folder_key`]) and where it
+/// stands; `None` when the library has no photo in or below such a folder.
+pub(crate) fn folder_place<'a>(tree: &'a [FolderNode], key: &str) -> Option<(&'a FolderNode, FolderPlace)> {
+    fn find<'a>(nodes: &'a [FolderNode], key: &str, leading: bool) -> Option<(&'a FolderNode, FolderPlace)> {
+        for n in nodes {
+            let leads = leading && only_leads_on(n);
+            let own = lightcraft_catalog::query::folder_key(&n.path);
+            if own == key {
+                return Some((n, if leads { FolderPlace::Leading } else { FolderPlace::Listed }));
+            }
+            // (the tree is at most `folders::MAX_DEPTH` deep)
+            if lightcraft_catalog::query::folder_within(key, &n.path)
+                && let Some(found) = find(&n.children, key, n.volume || leads)
+            {
+                return Some(found);
+            }
+        }
+        None
+    }
+    find(tree, key, false)
+}
+
+/// The rows of the Folders tree. `leading`: these folders are reached from their disk through
+/// folders that only lead on, so one that only leads on itself is passed over — its row is left
+/// out and what it leads to takes its place — unless it was asked for (Show Parent Folder) or is
+/// what the grid shows. `above`: the folder passed over just above these rows, if any.
+fn folder_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[FolderNode], indent: f32, leading: bool, above: Option<&FolderNode>) {
     for n in nodes {
         let key = lightcraft_catalog::query::folder_key(&n.path);
+        let leads_on = n.own == 0 && n.children.len() == 1;
+        let on_the_way = leading && only_leads_on(n);
+        let asked_for = on_the_way && app.ui.folder_parents.contains(&key);
+        if on_the_way && !asked_for && !super::side_select::folder_shown(app, &n.path) {
+            folder_rows(app, ui, &n.children, indent, true, Some(n));
+            continue;
+        }
         let open_id = egui::Id::new(("libfolder-open", key.clone()));
         // a disk starts open, and so does a folder that holds nothing itself and leads to one
-        // folder (`Users` → `me`): the first row where the library branches is what you look for
-        let leads_on = n.own == 0 && n.children.len() == 1;
+        // folder (`2026` → `05`): the first row where the library branches is what you look for
         let mut open = tree_open(ui, open_id, n.volume || leads_on);
         // a row whose path would cover other disks' photos too only opens and closes
         let sel = n.selectable && super::side_select::folder_shown(app, &n.path);
@@ -1794,10 +1861,10 @@ fn folder_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[FolderNode],
         let name = if n.selectable { n.name.clone() } else { crate::i18n::tr("This Computer").to_string() };
         let id = format!("libfolder:{}", n.path);
         if !out_of_sight(app, ui, &id, &name, Some(n.count), indent, n.label.is_some()) {
-            folder_row(app, ui, n, &id, &name, indent, open_id, &mut open, sel);
+            folder_row(app, ui, n, &id, &name, indent, open_id, &mut open, sel, FolderParents { above, asked_for });
         }
         if open && !n.children.is_empty() {
-            folder_rows(app, ui, &n.children, indent + 16.0);
+            folder_rows(app, ui, &n.children, indent + 16.0, n.volume || on_the_way, None);
         }
     }
 }
@@ -1814,6 +1881,7 @@ fn folder_row(
     open_id: egui::Id,
     open: &mut bool,
     sel: bool,
+    parents: FolderParents,
 ) {
     // the label is said with the name, as it is shown beside it
     let spoken = match n.label {
@@ -1829,7 +1897,7 @@ fn folder_row(
         let tr = tree_toggle(ui, &resp, indent, open_id, open, format!("libraryFolderToggle:{}", n.path));
         toggled = tr.clicked();
         // the triangle sits on the row and takes its clicks: the menu opens from it too
-        row_menu(app, &tr, n);
+        row_menu(app, &tr, n, parents);
     }
     let tip = if n.children.is_empty() { n.path.clone() } else { format!("{} ({})", n.path, crate::i18n::tr("includes the folders inside it")) };
     let resp = resp.on_hover_text(tip);
@@ -1841,7 +1909,46 @@ fn folder_row(
             set_tree_open(ui, open_id, *open);
         }
     }
-    row_menu(app, &resp, n);
+    row_menu(app, &resp, n, parents);
+}
+
+/// What a Folders row's menu offers about the folders that only lead to it.
+#[derive(Clone, Copy)]
+struct FolderParents<'a> {
+    /// The folder passed over just above the row: Show Parent Folder lists it.
+    above: Option<&'a FolderNode>,
+    /// The row is itself such a folder, listed because it was asked for: Hide This Parent.
+    asked_for: bool,
+}
+
+/// Show Parent Folder / Hide This Parent of a Folders row (`view.folderParent`; widgets
+/// `folderShowParent`, `folderHideParent`): neither when the row has no folder passed over above
+/// it and was not asked for itself. Returns whether an item was drawn.
+fn folder_parent_items(app: &mut LightcraftApp, ui: &mut egui::Ui, n: &FolderNode, parents: FolderParents) -> bool {
+    let mut run = None;
+    if let Some(above) = parents.above {
+        let show = ui
+            .button(crate::i18n::tr("Show Parent Folder"))
+            .on_hover_text(crate::i18n::tr_format!("Lists “{name}”, the folder this one is in", name = above.name));
+        register(ui.ctx(), "folderShowParent", show.rect);
+        if show.clicked() {
+            run = Some(json!({"path": above.path, "show": true}));
+        }
+    }
+    if parents.asked_for {
+        let hide = ui
+            .button(crate::i18n::tr("Hide This Parent"))
+            .on_hover_text(crate::i18n::tr("Takes this row off the list; the folder inside it and every photo stay as they are"));
+        register(ui.ctx(), "folderHideParent", hide.rect);
+        if hide.clicked() {
+            run = Some(json!({"path": n.path, "show": false}));
+        }
+    }
+    if let Some(params) = run {
+        app.act("view.folderParent", params);
+        ui.close();
+    }
+    parents.above.is_some() || parents.asked_for
 }
 
 /// How long photos dragged over a closed Folders row wait before it opens, so a folder inside it
@@ -1974,7 +2081,7 @@ fn move_photos_here(app: &mut LightcraftApp, ctx: &egui::Context, ids: Option<&[
 
 /// The context menu of a Folders row: a folder's own, a disk's (remove it), none for the
 /// startup disk.
-fn row_menu(app: &mut LightcraftApp, resp: &egui::Response, n: &FolderNode) {
+fn row_menu(app: &mut LightcraftApp, resp: &egui::Response, n: &FolderNode, parents: FolderParents) {
     // one of several folders chosen: what can be done to them all
     let several = super::side_select::folder_targets(app, &n.path);
     if several.len() > 1 {
@@ -1982,7 +2089,7 @@ fn row_menu(app: &mut LightcraftApp, resp: &egui::Response, n: &FolderNode) {
         return;
     }
     if !n.volume {
-        folder_menu_for_library(app, resp, n);
+        folder_menu_for_library(app, resp, n, parents);
     } else if n.path != "/" {
         resp.context_menu(|ui| {
             folder_label_menu(app, ui, n);
@@ -2078,7 +2185,7 @@ fn folder_label_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, n: &FolderNode)
 
 /// The context menu of a folder row: the folder's disk actions (the same as Local's, photos
 /// follow) and taking its photos out of the library.
-fn folder_menu_for_library(app: &mut LightcraftApp, resp: &egui::Response, n: &FolderNode) {
+fn folder_menu_for_library(app: &mut LightcraftApp, resp: &egui::Response, n: &FolderNode, parents: FolderParents) {
     let path = n.path.as_str();
     let name = std::path::Path::new(path).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
     // what dialogs call it: the last two names, so same-named folders are told apart
@@ -2137,6 +2244,9 @@ fn folder_menu_for_library(app: &mut LightcraftApp, resp: &egui::Response, n: &F
         locate_missing_item(app, ui, n);
         synchronize_item(app, ui, n, &label);
         ui.separator();
+        if folder_parent_items(app, ui, n, parents) {
+            ui.separator();
+        }
         if ui
             .button(crate::i18n::tr("Remove from Library…"))
             .on_hover_text(crate::i18n::tr("Moves the photos imported from this folder to Recently Deleted; no file is touched"))

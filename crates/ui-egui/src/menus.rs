@@ -172,6 +172,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("view.sidebarSection", "Show Sidebar Section", None, ""),
     ("view.sidebarMoveSection", "Move Sidebar Section", None, ""),
     ("view.sidebarReset", "Reset Sidebar Sections", None, ""),
+    ("view.folderParent", "Show Parent Folder", None, ""),
     ("view.slideshow", "Slideshow", Some("Cmd+Alt+Enter"), "View"),
     ("view.slideshowOptions", "Slideshow Options…", None, "View"),
     ("dialog.slideshowExport", "Export Slideshow…", None, "View"),
@@ -527,6 +528,38 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             // every section shown and open, in the usual order
             app.ui.sidebar = Default::default();
             Ok(json!({"sidebar": app.ui.sidebar}))
+        }
+        "view.folderParent" => {
+            // {path, show?}: list (or pass over again) a folder that only leads from its disk to
+            // the library's first folder there; with no `show`, the one or the other
+            let Some(path) = p.get("path").and_then(Value::as_str) else {
+                return Some(Err(format!("{id}: `path` is needed (a folder above the library's folders, see library.folders)")));
+            };
+            let show = match bool_param(id, p, "show") {
+                Ok(show) => show,
+                Err(e) => return Some(Err(e)),
+            };
+            let key = lightcraft_catalog::query::folder_key(path);
+            let tree = app.caches.folder_tree(&app.session.catalog);
+            let node = match crate::panels::left::folder_place(&tree, &key) {
+                Some((node, crate::panels::left::FolderPlace::Leading)) => node,
+                Some(_) => {
+                    return Some(Err(format!(
+                        "{id}: `{path}` is always listed in Folders: only a folder that holds no photo itself and leads from its disk to one folder can be shown or hidden"
+                    )));
+                }
+                None => return Some(Err(format!("{id}: `{path}` holds no photo of the library, so Folders has no place for it"))),
+            };
+            let parents = &mut app.ui.folder_parents;
+            let show = show.unwrap_or(!parents.contains(&key));
+            if !show {
+                parents.remove(&key);
+            } else if parents.len() >= crate::state::MAX_FOLDER_PARENTS && !parents.contains(&key) {
+                return Some(Err(format!("{id}: {} parent folders are shown already; hide one first", crate::state::MAX_FOLDER_PARENTS)));
+            } else {
+                parents.insert(key);
+            }
+            Ok(json!({"path": node.path, "show": show}))
         }
         "view.appearance" => appearance_command(app, p),
         "view.theme" => theme_command(app, p),
