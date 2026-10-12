@@ -995,6 +995,27 @@ fn section_chevrons_line_up_with_row_triangles() {
     }
 }
 
+/// Local's folder rows line up with the other trees: a top-level Local folder's triangle, icon
+/// and name sit where a By Date year's do. (Local used to draw its rows 12 pt further right than
+/// their triangles, so its names and icons were out of step with By Date and Folders.)
+#[test]
+fn local_folder_rows_line_up_with_date_rows() {
+    let mut h = demo([1400.0, 1400.0], json!({"view": "photoGrid", "leftPanel": true}));
+    let dir = std::env::temp_dir().join("lightcraft-local-indent-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.to_string_lossy().to_string();
+    h.app.ui.local_roots.push(path.clone());
+    h.step();
+    h.step();
+    let find =
+        |prefix: &str| h.app.widgets.iter().find(|(w, _)| w.starts_with(prefix)).map(|(_, r)| *r).unwrap_or_else(|| panic!("no widget {prefix}*"));
+    let (date_triangle, date_label) = (find("dateToggle:"), find("label:date:"));
+    let (local_triangle, local_label) = (widget(&h, &format!("folderToggle:{path}")), widget(&h, &format!("label:local:{path}")));
+    assert_eq!(local_triangle.center().x, date_triangle.center().x, "triangles share a column");
+    assert_eq!(local_label.left(), date_label.left(), "names start at the same x: Local {local_label:?} vs By Date {date_label:?}");
+    assert_eq!(widget(&h, &format!("source:local:{path}")).left(), find("source:date:").left(), "rows start at the same x");
+}
+
 /// Albums nest in folders like the other sidebar trees: a folder row has a disclosure triangle
 /// (`albumToggle:<id>`), plain albums have none, and folding a folder hides what is inside it.
 #[test]

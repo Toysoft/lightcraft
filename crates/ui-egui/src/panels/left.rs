@@ -1015,7 +1015,7 @@ fn folder_tree(
             ui.data_mut(|d| d.insert_temp(revealed_id, target));
         }
     }
-    let resp = row(app, ui, &format!("local:{path}"), Icon::Folder, name, None, sel, indent + 12.0).on_hover_text(path);
+    let resp = row(app, ui, &format!("local:{path}"), Icon::Folder, name, None, sel, indent).on_hover_text(path);
     let tr = tree_toggle(ui, &resp, indent, open_id, &mut open, format!("folderToggle:{path}"));
     if !tr.clicked()
         && resp.clicked()
