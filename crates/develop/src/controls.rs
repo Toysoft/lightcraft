@@ -259,6 +259,7 @@ controls! {
     "relight.softness" => relight.softness, "Softness", Relight, 0, 100, 40, 1, 0, Plain;
     "relight.shine" => relight.shine, "Shine", Relight, 0, 100, 0, 1, 0, Plain;
     "relight.shadowSoftness" => relight.shadow_softness, "Shadow Softness", Relight, 0, 100, 50, 1, 0, Plain;
+    "relight.shadowOpacity" => relight.shadow_opacity, "Shadow Opacity", Relight, 0, 100, 100, 1, 0, Plain;
 }
 
 /// Template specs of the indexed controls (`<family>.<field>`; addressed as `<family>.<i>.<field>`).
@@ -385,26 +386,16 @@ pub static INDEXED: &[ControlSpec] = &[
         track: Plain,
     },
     ControlSpec {
-        id: "relightLight.hue",
-        label: "Hue",
+        id: "relightLight.temp",
+        label: "Temperature",
         section: Section::Relight,
-        min: 0.0,
-        max: 360.0,
-        default: 40.0,
-        step: 1.0,
+        min: 2000.0,
+        max: 12000.0,
+        default: 6500.0,
+        step: 50.0,
         decimals: 0,
-        track: Rainbow,
-    },
-    ControlSpec {
-        id: "relightLight.sat",
-        label: "Saturation",
-        section: Section::Relight,
-        min: 0.0,
-        max: 100.0,
-        default: 0.0,
-        step: 1.0,
-        decimals: 0,
-        track: Plain,
+        // (the light's own colour: warm at low Kelvin, unlike white balance, which corrects it)
+        track: Gradient { from: "#ff9838", to: "#b8d0ff" },
     },
     ControlSpec {
         id: "relightLight.angle",
@@ -499,8 +490,7 @@ fn indexed_field<'a>(s: &'a mut DevelopSettings, id: &str) -> Option<&'a mut f64
             let l = s.relight.lights.get_mut(i)?;
             Some(match field {
                 "intensity" => &mut l.intensity,
-                "hue" => &mut l.hue,
-                "sat" => &mut l.sat,
+                "temp" => &mut l.temp,
                 "angle" => &mut l.angle,
                 "elevation" => &mut l.elevation,
                 "depth" => &mut l.depth,
@@ -528,6 +518,12 @@ fn indexed_set(s: &mut DevelopSettings, id: &str, v: f64) -> bool {
     match indexed_field(s, id) {
         Some(f) => {
             *f = v;
+            // a light whose temperature is set takes its colour from it again, not from its own colour
+            if let Some(("relightLight", i, "temp")) = split_indexed(id)
+                && let Some(light) = s.relight.lights.get_mut(i)
+            {
+                light.use_color = false;
+            }
             true
         }
         None => false,
@@ -626,6 +622,12 @@ mod tests {
         assert!(set(&mut s, "relightLight.0.elevation", f64::NAN));
         assert_eq!(s.relight.lights[0].elevation, 45.0, "not a number: the default");
         assert_eq!(find("relightLight.3.cone").map(|c| c.id), Some("relightLight.cone"));
+        // setting the temperature puts it in use in place of the light's own colour; other sliders don't
+        s.relight.lights[0].use_color = true;
+        assert!(set(&mut s, "relightLight.0.intensity", 80.0) && s.relight.lights[0].use_color);
+        assert!(set(&mut s, "relightLight.0.temp", 3200.0));
+        assert_eq!((s.relight.lights[0].temp, s.relight.lights[0].use_color), (3200.0, false));
+        set(&mut s, "relightLight.0.temp", 6500.0);
         assert!(find("relightLight.0.ambient").is_none() && find("relight.0.softness").is_none());
         // every template reads the default of a new light
         for (id, spec) in indexed_instances(&s) {

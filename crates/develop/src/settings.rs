@@ -1129,6 +1129,8 @@ pub struct Relight {
     pub shadows: bool,
     /// 0..100: width of the shadows' penumbra.
     pub shadow_softness: f64,
+    /// 0..100: how dark the cast shadows are (100 = no light from the shadowed light, 0 = none cast).
+    pub shadow_opacity: f64,
     /// Up to [`MAX_RELIGHT_LIGHTS`] lights.
     pub lights: Vec<RelightLight>,
     /// The scene's geometry (surface normals and depth) as a model saw it, when the photo was
@@ -1140,7 +1142,17 @@ pub struct Relight {
 
 impl Default for Relight {
     fn default() -> Self {
-        Self { enabled: false, ambient: 0.0, softness: 40.0, shine: 0.0, shadows: false, shadow_softness: 50.0, lights: Vec::new(), geometry: None }
+        Self {
+            enabled: false,
+            ambient: 0.0,
+            softness: 40.0,
+            shine: 0.0,
+            shadows: false,
+            shadow_softness: 50.0,
+            shadow_opacity: 100.0,
+            lights: Vec::new(),
+            geometry: None,
+        }
     }
 }
 
@@ -1190,6 +1202,58 @@ impl RelightKind {
     }
 }
 
+/// Lowest and highest colour temperature of a light, in Kelvin.
+pub const RELIGHT_TEMP: (f64, f64) = (2000.0, 12000.0);
+/// The colour temperature that leaves a light white.
+pub const RELIGHT_TEMP_NEUTRAL: f64 = 6500.0;
+
+/// A colour as text: `#rrggbb`.
+pub fn hex_color(c: [u8; 3]) -> String {
+    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
+}
+
+/// A colour written as `#rrggbb` or `#rgb` (the `#` may be left out, case and surrounding spaces
+/// don't matter). `None` for anything else.
+pub fn parse_hex_color(text: &str) -> Option<[u8; 3]> {
+    let digits = text.trim().trim_start_matches('#');
+    if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let value = |s: &str| u8::from_str_radix(s, 16).ok();
+    match digits.len() {
+        6 => Some([value(digits.get(0..2)?)?, value(digits.get(2..4)?)?, value(digits.get(4..6)?)?]),
+        // (each digit doubled: #f80 is #ff8800)
+        3 => {
+            let d: Vec<u8> = digits.chars().filter_map(|c| c.to_digit(16)).map(|v| (v * 17) as u8).collect();
+            Some([*d.first()?, *d.get(1)?, *d.get(2)?])
+        }
+        _ => None,
+    }
+}
+
+/// A light's colour in the settings JSON: `#rrggbb`. Anything unreadable is white, like a missing
+/// field: a damaged colour never costs the rest of the settings.
+mod relight_hex {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(c: &[u8; 3], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&super::hex_color(*c))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 3], D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Text(String),
+            Other(serde::de::IgnoredAny),
+        }
+        Ok(match Wire::deserialize(d)? {
+            Wire::Text(text) => super::parse_hex_color(&text).unwrap_or([255; 3]),
+            Wire::Other(_) => [255; 3],
+        })
+    }
+}
+
 /// One light of a [`Relight`].
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -1199,9 +1263,16 @@ pub struct RelightLight {
     pub position: Point,
     /// 0..200 (%).
     pub intensity: f64,
-    /// Light colour: hue in degrees 0..360 and saturation 0..100 (0 = white).
-    pub hue: f64,
-    pub sat: f64,
+    /// Colour temperature of the light in Kelvin ([`RELIGHT_TEMP`]): 6500 is neutral, lower is
+    /// warmer (a candle, a bulb), higher cooler (shade, a screen). Not used while `use_color` is set.
+    pub temp: f64,
+    /// A colour of the user's own for the light (sRGB), written as `#rrggbb`.
+    #[serde(with = "relight_hex")]
+    pub color: [u8; 3],
+    /// Which of the two colours the light has: its own `color` (true) or that of its `temp`
+    /// (false). The other is kept but not used; whichever was set last is the one in use.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub use_color: bool,
     /// Degrees clockwise from the top of the photo: where a Directional light comes from, or which
     /// way a Spot points.
     pub angle: f64,
@@ -1224,8 +1295,9 @@ impl Default for RelightLight {
             kind: RelightKind::Point,
             position: Point::new(0.5, 0.5),
             intensity: 100.0,
-            hue: 40.0,
-            sat: 0.0,
+            temp: RELIGHT_TEMP_NEUTRAL,
+            color: [255, 255, 255],
+            use_color: false,
             angle: 315.0,
             elevation: 45.0,
             depth: 30.0,

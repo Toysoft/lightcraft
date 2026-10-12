@@ -36,6 +36,23 @@ fn position_param(p: &Value, c: &str) -> Result<Option<Point>> {
     Ok(Some(Point::new(at.x.clamp(PLACE.0, PLACE.1), at.y.clamp(PLACE.0, PLACE.1))))
 }
 
+/// `color` from the params: `"#rrggbb"` (or `"#rgb"`), or `[r, g, b]` with each 0..255.
+fn color_param(p: &Value, c: &str) -> Result<Option<[u8; 3]>> {
+    let wrong = || bad(c, "`color` must be \"#rrggbb\" or [r, g, b] with each 0..255");
+    match p.get("color") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => lightcraft_develop::parse_hex_color(text).map(Some).ok_or_else(wrong),
+        Some(Value::Array(parts)) if parts.len() == 3 => {
+            let channel = |v: &Value| v.as_f64().filter(|x| (0.0..=255.0).contains(x)).map(|x| x.round() as u8);
+            match (parts.first().and_then(channel), parts.get(1).and_then(channel), parts.get(2).and_then(channel)) {
+                (Some(r), Some(g), Some(b)) => Ok(Some([r, g, b])),
+                _ => Err(wrong()),
+            }
+        }
+        Some(_) => Err(wrong()),
+    }
+}
+
 /// Change the active photo's Relight settings as one history step.
 fn edit(s: &mut Session, c: &str, label: &str, f: impl FnOnce(&mut Relight) -> Result<Value>) -> Result<Value> {
     let id = s.active().ok_or_else(|| bad(c, "no active photo"))?;
@@ -63,7 +80,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add Light",
             [],
             None,
-            "{kind?: point|directional|spot (default point), position?: [x,y] normalized to the uncropped photo (default the centre), intensity?: 0..200, hue?: 0..360, sat?: 0..100, angle?: 0..360 (clockwise from the top), elevation?: -180..180, depth?, falloff?, cone?: 0..100} — switches Relight on; returns {index}",
+            "{kind?: point|directional|spot (default point), position?: [x,y] normalized to the uncropped photo (default the centre), intensity?: 0..200, temp?: 2000..12000 (Kelvin, 6500 = neutral), color?: \"#rrggbb\" or [r, g, b] (the light's own colour: given, it is used instead of the temperature), angle?: 0..360 (clockwise from the top), elevation?: -180..180, depth?, falloff?, cone?: 0..100} — switches Relight on; returns {index}",
             has_active,
             |s, p| {
                 let c = "relight.addLight";
@@ -76,8 +93,11 @@ pub fn specs() -> Vec<CommandSpec> {
                     kind: kind_param(p, c)?.unwrap_or(d.kind),
                     position: position_param(p, c)?.unwrap_or(d.position),
                     intensity: number("intensity", d.intensity, 200.0),
-                    hue: number("hue", d.hue, 360.0),
-                    sat: number("sat", d.sat, 100.0),
+                    temp: Some(f64_or(p, "temp", d.temp))
+                        .filter(|v| v.is_finite())
+                        .map_or(d.temp, |v| v.clamp(lightcraft_develop::RELIGHT_TEMP.0, lightcraft_develop::RELIGHT_TEMP.1)),
+                    color: color_param(p, c)?.unwrap_or(d.color),
+                    use_color: color_param(p, c)?.is_some(),
                     angle: number("angle", d.angle, 360.0),
                     elevation: Some(f64_or(p, "elevation", d.elevation)).filter(|v| v.is_finite()).map_or(d.elevation, |v| v.clamp(-180.0, 180.0)),
                     depth: number("depth", d.depth, 100.0),
@@ -99,20 +119,31 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Light",
             [],
             None,
-            "{index, kind?: point|directional|spot, position?: [x,y] normalized} — what the sliders don't cover; the sliders are `relightLight.<index>.*` controls",
+            "{index, kind?: point|directional|spot, position?: [x,y] normalized, color?: \"#rrggbb\" or [r, g, b] (used from then on instead of the temperature, until `relightLight.<index>.temp` is set)} — what the sliders don't cover; the sliders are `relightLight.<index>.*` controls",
             has_active,
             |s, p| {
                 let c = "relight.updateLight";
-                let (kind, position) = (kind_param(p, c)?, position_param(p, c)?);
-                if kind.is_none() && position.is_none() {
-                    return Err(bad(c, "nothing to change (give `kind` or `position`)"));
+                let (kind, position, color) = (kind_param(p, c)?, position_param(p, c)?, color_param(p, c)?);
+                if kind.is_none() && position.is_none() && color.is_none() {
+                    return Err(bad(c, "nothing to change (give `kind`, `position` or `color`)"));
                 }
-                let label = if kind.is_some() { "Light Type" } else { "Move Light" };
+                let label = if kind.is_some() {
+                    "Light Type"
+                } else if position.is_some() {
+                    "Move Light"
+                } else {
+                    "Light Color"
+                };
                 edit(s, c, label, |r| {
                     let i = light_index(r, p, c)?;
                     if let Some(light) = r.lights.get_mut(i) {
                         light.kind = kind.unwrap_or(light.kind);
                         light.position = position.unwrap_or(light.position);
+                        if let Some(color) = color {
+                            // the light's own colour is in use from now on, in place of its temperature
+                            light.color = color;
+                            light.use_color = true;
+                        }
                     }
                     Ok(Value::Null)
                 })

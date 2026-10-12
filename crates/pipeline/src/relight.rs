@@ -20,7 +20,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use lightcraft_color::perceptual::hsv_to_rgb;
+use lightcraft_color::cct::temp_tint_to_xy;
 use lightcraft_color::transfer::srgb_to_linear;
 use lightcraft_color::{REC2020, SRGB, luminance_2020};
 use lightcraft_develop::{DevelopSettings, MAX_RELIGHT_LIGHTS, Relight, RelightGeometry, RelightKind, RelightLight};
@@ -125,7 +125,7 @@ fn remember<T>(pick: impl FnOnce(&mut Memo) -> &mut Vec<(u64, T)>, key: u64, val
 /// What the lighting of `s` depends on besides the relief: every Relight setting but the geometry.
 fn lights_key(s: &DevelopSettings) -> String {
     let r = &s.relight;
-    format!("{:?}", (r.enabled, r.ambient, r.softness, r.shine, r.shadows, r.shadow_softness, &r.lights))
+    format!("{:?}", (r.enabled, r.ambient, r.softness, r.shine, r.shadows, r.shadow_softness, r.shadow_opacity, &r.lights))
 }
 
 /// What a render's Relight depends on (`None`: nothing, it is off), for stage-cache keys.
@@ -406,8 +406,21 @@ impl LightK {
             // along the beam: down into the photo by its elevation
             RelightKind::Spot | RelightKind::Point => [dx * elevation.cos(), dy * elevation.cos(), -elevation.sin()],
         };
-        let rgb = hsv_to_rgb(finite(l.hue, d.hue), unit(l.sat, d.sat), 1.0).map(srgb_to_linear);
-        let tint = SRGB.to_space(&REC2020).apply_f32(rgb);
+        // one colour or the other: the light's own, or that of a black body at its temperature against
+        // the neutral one, as bright as it can be without clipping
+        let kelvin = f64::from(finite(l.temp, d.temp)).clamp(lightcraft_develop::RELIGHT_TEMP.0, lightcraft_develop::RELIGHT_TEMP.1);
+        let white = |t: f64| REC2020.from_xyz().apply(temp_tint_to_xy(t, 0.0).to_xyz());
+        let (glow, neutral) = (white(kelvin), white(lightcraft_develop::RELIGHT_TEMP_NEUTRAL));
+        let warmth: [f32; 3] = std::array::from_fn(|i| {
+            let k = (glow[i] / neutral[i].max(1e-9)) as f32;
+            if k.is_finite() { k.max(0.0) } else { 1.0 }
+        });
+        let brightest = warmth.iter().copied().fold(1e-6, f32::max);
+        let tint: [f32; 3] = if l.use_color {
+            SRGB.to_space(&REC2020).apply_f32(l.color.map(|c| srgb_to_linear(f32::from(c) / 255.0)))
+        } else {
+            warmth.map(|k| k / brightest)
+        };
         let intensity = (finite(l.intensity, d.intensity) / 100.0).clamp(0.0, 2.0);
         let outer = (6.0 + 64.0 * unit(l.cone, d.cone)).to_radians();
         LightK {
@@ -441,6 +454,7 @@ fn shade(surface: &Surface, r: &Relight) -> Rgb32f {
     let ambient = (1.0 + finite(r.ambient, d.ambient) / 100.0).clamp(0.0, 2.0);
     let shine = unit(r.shine, d.shine);
     let penumbra = 0.02 + 0.25 * unit(r.shadow_softness, d.shadow_softness);
+    let shadow_opacity = unit(r.shadow_opacity, d.shadow_opacity);
     let mut gain = Rgb32f::new(w, h);
     for_rows(&mut gain.data, w, |y, row| {
         for (x, out) in row.iter_mut().enumerate() {
@@ -475,7 +489,8 @@ fn shade(surface: &Surface, r: &Relight) -> Rgb32f {
                     lit += shine * (dot(n, half) / len).max(0.0).powi(32);
                 }
                 if r.shadows {
-                    lit *= shadow(surface, at, to_light, distance, penumbra);
+                    // (an opacity below 100 lets some of the light through what is in its way)
+                    lit *= 1.0 - shadow_opacity * (1.0 - shadow(surface, at, to_light, distance, penumbra));
                 }
                 for (c, k) in g.iter_mut().zip(light.color) {
                     *c += k * lit * arrives;
@@ -667,7 +682,11 @@ mod tests {
         changed("kind", &|s| s.relight.lights[0].kind = RelightKind::Directional);
         changed("point", &|s| s.relight.lights[0].kind = RelightKind::Point);
         changed("intensity", &|s| s.relight.lights[0].intensity = 180.0);
-        changed("colour", &|s| s.relight.lights[0].sat = 90.0);
+        changed("colour", &|s| {
+            s.relight.lights[0].color = [255, 60, 20];
+            s.relight.lights[0].use_color = true;
+        });
+        changed("temperature", &|s| s.relight.lights[0].temp = 2800.0);
         changed("angle", &|s| s.relight.lights[0].angle = 120.0);
         changed("elevation", &|s| s.relight.lights[0].elevation = 85.0);
         changed("depth", &|s| s.relight.lights[0].depth = 90.0);
@@ -698,7 +717,7 @@ mod tests {
     // Given a small preview and a large render, they are lit alike (the lighting does not depend on the output size)
     #[test]
     fn a_preview_is_lit_like_a_large_render() {
-        let s = lit(vec![point_at(0.3, 0.35), RelightLight { kind: RelightKind::Directional, sat: 60.0, ..Default::default() }]);
+        let s = lit(vec![point_at(0.3, 0.35), RelightLight { kind: RelightKind::Directional, temp: 3200.0, ..Default::default() }]);
         let (small, large) = (shot(&s, 240, 160), shot(&s, 960, 640));
         for (fx, fy) in [(0.2, 0.3), (0.5, 0.5), (0.8, 0.7), (0.3, 0.8)] {
             let a = mean_around(&small, (240.0 * fx) as usize, (160.0 * fy) as usize, 8);
@@ -830,6 +849,33 @@ mod tests {
         assert!(lit_side > shadowed + 0.1, "lit side {lit_side:.2}, shadow {shadowed:.2}");
     }
 
+    // Given cast shadows, their opacity goes from none (0) to all of the light kept out (100)
+    #[test]
+    fn shadow_opacity_lets_light_through() {
+        let mut s = lit(vec![RelightLight { kind: RelightKind::Directional, angle: 270.0, elevation: 20.0, ..Default::default() }]);
+        s.relight.softness = 0.0;
+        s.relight.geometry = Some(dome());
+        let behind = |s: &DevelopSettings| gain_in(s, 0.78, 0.86, 0.42, 0.58);
+        let open = behind(&s);
+        s.relight.shadows = true;
+        s.relight.shadow_softness = 0.0;
+        let full = behind(&s);
+        s.relight.shadow_opacity = 50.0;
+        let half = behind(&s);
+        s.relight.shadow_opacity = 0.0;
+        let none = behind(&s);
+        assert!(full < half - 0.03 && half < open - 0.03, "full {full:.2}, half {half:.2}, open {open:.2}");
+        assert!((half - (full + open) / 2.0).abs() < 0.02, "half way between: {half:.2}");
+        assert!((none - open).abs() < 1e-4, "at 0 no shadow is cast: {none:.3} against {open:.3}");
+        // numbers that aren't: the default (full), never more than full or less than none
+        s.relight.shadow_opacity = f64::NAN;
+        assert!((behind(&s) - full).abs() < 1e-4);
+        s.relight.shadow_opacity = 1e9;
+        assert!((behind(&s) - full).abs() < 1e-4);
+        s.relight.shadow_opacity = -1e9;
+        assert!((behind(&s) - open).abs() < 1e-4);
+    }
+
     // Given a flipped photo, the analyzed scene flips with it
     #[test]
     fn stored_geometry_follows_a_flip() {
@@ -858,6 +904,54 @@ mod tests {
         assert!(mean_difference(&shot(&s, W, H), &estimated) > 0.05, "readable geometry is used");
     }
 
+    // Given a light, it has the colour of its temperature or its own colour, whichever is in use, never a mix
+    #[test]
+    fn a_light_has_the_colour_of_its_temperature_or_its_own() {
+        let light = |temp: f64, color: [u8; 3], use_color: bool| {
+            let s = lit(vec![RelightLight { kind: RelightKind::Directional, elevation: 90.0, temp, color, use_color, ..Default::default() }]);
+            let field = resolve(&grey(), &SourceInfo::default(), &s).unwrap();
+            field.gain.get(field.gain.width / 2, field.gain.height / 2).map(|g| g - 1.0)
+        };
+        // by temperature: the light's own colour, whatever it is, has no say
+        assert_eq!(light(3000.0, [0, 0, 255], false), light(3000.0, [255; 3], false));
+        assert_eq!(light(3000.0, [255, 0, 0], false), light(3000.0, [10, 200, 30], false));
+        // by its own colour: the temperature has no say
+        assert_eq!(light(2000.0, [0, 0, 255], true), light(12000.0, [0, 0, 255], true));
+        assert_eq!(light(2000.0, [255; 3], true), light(6500.0, [255; 3], false), "white is the neutral light");
+        assert_ne!(light(3000.0, [0, 0, 255], true), light(3000.0, [0, 0, 255], false));
+        let gain = |temp: f64, color: [u8; 3]| {
+            // (as the app sets them: a colour that isn't white is the light's own)
+            let s = lit(vec![RelightLight {
+                kind: RelightKind::Directional,
+                elevation: 90.0,
+                temp,
+                color,
+                use_color: color != [255; 3],
+                ..Default::default()
+            }]);
+            let field = resolve(&grey(), &SourceInfo::default(), &s).unwrap();
+            // (what the light adds over the photo's own light)
+            field.gain.get(field.gain.width / 2, field.gain.height / 2).map(|g| g - 1.0)
+        };
+        let white = gain(6500.0, [255; 3]);
+        assert!((white[0] - white[1]).abs() < 1e-3 && (white[1] - white[2]).abs() < 1e-3 && white[1] > 0.5, "neutral: {white:?}");
+        let (candle, shade) = (gain(2200.0, [255; 3]), gain(11000.0, [255; 3]));
+        assert!(candle[0] > candle[1] * 1.2 && candle[1] > candle[2] * 1.5, "warm: {candle:?}");
+        assert!(shade[2] > shade[1] * 1.05 && shade[1] > shade[0] * 1.05, "cool: {shade:?}");
+        assert!(candle.iter().chain(&shade).all(|c| *c <= white[1] + 1e-3), "a temperature tints the light, it never brightens it");
+        // warmer step by step
+        let reds: Vec<f32> = [9000.0, 6500.0, 4500.0, 3000.0].iter().map(|t| gain(*t, [255; 3])).map(|g| g[0] / g[2]).collect();
+        assert!(reds.windows(2).all(|w| w[1] > w[0]), "{reds:?}");
+        // its own colour is the light's colour; black is no light at all
+        let green = gain(6500.0, [0, 255, 0]);
+        assert!(green[1] > 0.3 && green[1] > green[0] * 2.0 && green[1] > green[2] * 3.0, "{green:?}");
+        assert!(gain(6500.0, [0, 0, 0]).iter().all(|c| c.abs() < 1e-3));
+        // out of range, the temperature is brought in; not a number, it is neutral
+        assert_eq!(gain(-40.0, [255; 3]), gain(2000.0, [255; 3]));
+        assert_eq!(gain(1e9, [255; 3]), gain(12000.0, [255; 3]));
+        assert_eq!(gain(f64::NAN, [255; 3]), white);
+    }
+
     // Given settings no slider could produce, the render neither panics nor leaves the picture unusable
     #[test]
     fn hostile_numbers_render_a_finite_picture() {
@@ -865,8 +959,9 @@ mod tests {
             kind: RelightKind::Spot,
             position: Point::new(v, -v),
             intensity: v,
-            hue: v,
-            sat: v,
+            temp: v,
+            color: [0, 0, 0],
+            use_color: v.is_nan(),
             angle: v,
             elevation: v,
             depth: v,
@@ -879,6 +974,7 @@ mod tests {
             s.relight.softness = v;
             s.relight.shine = v;
             s.relight.shadow_softness = v;
+            s.relight.shadow_opacity = v;
             s.relight.shadows = true;
             let image = shot(&s, 120, 80);
             assert_eq!((image.width, image.height), (120, 80), "{v}");

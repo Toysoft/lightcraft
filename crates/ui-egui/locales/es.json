@@ -1992,5 +1992,9 @@
   "Scene Geometry Model": "Modelo de geometría de la escena",
   "Download Scene Geometry Model": "Descargar modelo de geometría de la escena",
   "Cancel Scene Geometry Model Download": "Cancelar la descarga del modelo de geometría de la escena",
-  "Analyzing scene": "Analizando la escena"
+  "Analyzing scene": "Analizando la escena",
+  "A color is written like #ff8800": "Un color se escribe como #ff8800",
+  "In use: the color (the temperature is ignored).": "En uso: el color (se ignora la temperatura).",
+  "In use: the temperature (the color is ignored).": "En uso: la temperatura (se ignora el color).",
+  "Shadow Opacity": "Opacidad de las sombras"
 }

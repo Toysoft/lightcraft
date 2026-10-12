@@ -90,8 +90,15 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             control(app, ui, &d, &format!("relightLight.{sel}.{field}"), true);
         }
         sub_title(ui, "Light Color");
-        control(app, ui, &d, &format!("relightLight.{sel}.hue"), true);
-        control(app, ui, &d, &format!("relightLight.{sel}.sat"), true);
+        control(app, ui, &d, &format!("relightLight.{sel}.temp"), true);
+        padded(ui, |ui| color(app, ui, sel, light.color));
+        // one or the other: whichever was set last is the light's colour
+        padded(ui, |ui| {
+            let which =
+                if light.use_color { "In use: the color (the temperature is ignored)." } else { "In use: the temperature (the color is ignored)." };
+            let note = ui.label(RichText::new(crate::i18n::tr(which)).size(11.5).color(t.text_dim));
+            register(ui.ctx(), if light.use_color { "relightColorSource:color" } else { "relightColorSource:temp" }, note.rect);
+        });
         padded(ui, |ui| {
             if text_button(ui, "relightRemove", "Remove Light", false).clicked() {
                 let _ = app.run("relight.deleteLight", json!({"index": sel}));
@@ -111,6 +118,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             let _ = app.run("relight.shadows", json!({"on": on}));
         }
     });
+    control(app, ui, &d, "relight.shadowOpacity", d.relight.shadows);
     control(app, ui, &d, "relight.shadowSoftness", d.relight.shadows);
     padded(ui, |ui| {
         if !d.relight.is_default() && text_button(ui, "relightReset", "Reset Relight", false).clicked() {
@@ -204,6 +212,52 @@ fn figure(ui: &mut egui::Ui, index: usize, light: &lightcraft_develop::RelightLi
     // a Directional light's figure starts where the light comes from, so it is drawn back from the middle
     let at = if light.kind == RelightKind::Directional { area.center() - travels * 14.0 } else { area.center() - travels * 10.0 };
     gizmo.paint(ui.painter(), at, t.text_label, 1.5);
+}
+
+/// A light's colour: a swatch that opens a colour picker (`relightColorPicker`), and its hex code
+/// to read, type or paste (`field:relightColor`). A drag in the picker is one history step.
+fn color(app: &mut LightcraftApp, ui: &mut egui::Ui, index: usize, current: [u8; 3]) {
+    let t = Tokens::get(ui.ctx());
+    let set =
+        |app: &mut LightcraftApp, c: [u8; 3]| app.run("relight.updateLight", json!({"index": index, "color": lightcraft_develop::hex_color(c)}));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        ui.label(RichText::new(crate::i18n::tr("Color")).font(t.font(13.0)).color(t.text_dim));
+        // the picker: every change while the pointer is down belongs to one step
+        let picking = egui::Id::new("relightColorPicking");
+        let mut picked = current;
+        let swatch = egui::color_picker::color_edit_button_srgb(ui, &mut picked);
+        register(ui.ctx(), "relightColorPicker", swatch.rect);
+        let was_picking = ui.data(|d| d.get_temp::<bool>(picking)).unwrap_or(false);
+        if picked != current {
+            if !was_picking {
+                let _ = app.run("develop.beginInteraction", json!({"label": "Light Color"}));
+                ui.data_mut(|d| d.insert_temp(picking, true));
+            }
+            let _ = set(app, picked);
+        } else if was_picking && !ui.input(|i| i.pointer.any_down()) {
+            let _ = app.run("develop.endInteraction", json!({}));
+            ui.data_mut(|d| d.remove::<bool>(picking));
+        }
+        // the hex code: what is typed is kept while it is being typed, and taken when the edit ends
+        let draft = egui::Id::new(("relightColorDraft", index));
+        let mut text = ui.data(|d| d.get_temp::<String>(draft)).unwrap_or_else(|| lightcraft_develop::hex_color(current));
+        let field = crate::text_field::TextField::singleline("field:relightColor", &mut text).width(86.0).select_on_focus(true).show(ui);
+        if field.committed() {
+            match lightcraft_develop::parse_hex_color(&text) {
+                // (the same code again still puts the colour in use, when the temperature was)
+                Some(c) => {
+                    let _ = set(app, c);
+                }
+                None => app.toast(ui.ctx(), crate::i18n::tr("A color is written like #ff8800")),
+            }
+            ui.data_mut(|d| d.remove::<String>(draft));
+        } else if field.editing {
+            ui.data_mut(|d| d.insert_temp(draft, text));
+        } else {
+            ui.data_mut(|d| d.remove::<String>(draft));
+        }
+    });
 }
 
 /// A light kind as the commands name it.

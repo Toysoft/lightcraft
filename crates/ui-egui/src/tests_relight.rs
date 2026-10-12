@@ -231,3 +231,38 @@ fn the_panel_offers_the_scene_analysis() {
         assert!(relight(&h).geometry.is_none());
     }
 }
+
+// Given a light, its colour is a temperature slider, a colour picker and a hex field: what is typed there is taken
+// when the edit ends, and something that is no colour changes nothing
+#[test]
+fn a_lights_colour_is_typed_as_hex() {
+    let mut h = relight_tool();
+    exec(&mut h, "relight.addLight", json!({}));
+    assert!(has(&h, "slider:relightLight.temp"), "the temperature slider");
+    assert!(has(&h, "relightColorPicker") && has(&h, "field:relightColor"));
+    assert_eq!(relight(&h).lights[0].color, [255, 255, 255]);
+    let type_color = |h: &mut Headless, text: &str| {
+        click(h, "field:relightColor");
+        let r = h.request("ui.text", json!({"text": text}), T);
+        assert_eq!(r["ok"], true, "{r}");
+        let r = h.request("ui.key", json!({"key": "Enter"}), T);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+    };
+    assert!(has(&h, "relightColorSource:temp") && !relight(&h).lights[0].use_color, "a new light takes its colour from its temperature");
+    type_color(&mut h, "#ff8800");
+    assert_eq!(relight(&h).lights[0].color, [255, 136, 0]);
+    assert!(has(&h, "relightColorSource:color") && relight(&h).lights[0].use_color, "a colour that is set is the one in use");
+    type_color(&mut h, "0AF");
+    assert_eq!(relight(&h).lights[0].color, [0, 170, 255]);
+    type_color(&mut h, "sky blue");
+    assert_eq!(relight(&h).lights[0].color, [0, 170, 255], "not a colour: the light keeps its own");
+    // the temperature goes through its slider's control
+    exec(&mut h, "develop.set", json!({"control": "relightLight.0.temp", "value": 3000}));
+    let l = relight(&h).lights[0];
+    assert_eq!((l.temp, l.use_color, l.color), (3000.0, false, [0, 170, 255]), "the temperature takes over; the colour is kept, unused");
+    assert!(has(&h, "relightColorSource:temp"));
+    // typing the same colour again puts it back in use
+    type_color(&mut h, "#00aaff");
+    assert!(relight(&h).lights[0].use_color && relight(&h).lights[0].temp == 3000.0);
+}

@@ -67,7 +67,8 @@ fn lights_are_edited_by_controls_and_commands() {
     let ctl = s.execute("develop.controls", &json!({"section": "relight"})).unwrap();
     let ids: Vec<&str> = ctl.as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
     assert!(ids.contains(&"relight.softness") && ids.contains(&"relightLight.1.cone"), "{ids:?}");
-    assert_eq!(ids.len(), 4 + 2 * 8, "{ids:?}");
+    assert_eq!(ids.len(), 5 + 2 * 7, "{ids:?}");
+    assert!(ids.contains(&"relight.shadowOpacity"));
     s.execute("relight.updateLight", &json!({"index": 0, "kind": "directional"})).unwrap();
     s.execute("relight.updateLight", &json!({"index": 1, "position": [9.0, -9.0]})).unwrap();
     let l = relight(&s);
@@ -87,6 +88,43 @@ fn lights_are_edited_by_controls_and_commands() {
     assert!(relight(&s).is_default());
 }
 
+// Given a light, its colour is a temperature (a develop control) and a colour set by hex or by channels
+#[test]
+fn a_light_takes_a_temperature_and_a_colour() {
+    let mut s = demo();
+    let id = s.active().unwrap();
+    s.execute("relight.addLight", &json!({"kind": "directional", "elevation": 90, "temp": 2500, "color": "#FF8800"})).unwrap();
+    let l = relight(&s).lights[0];
+    assert_eq!((l.temp, l.color, l.use_color), (2500.0, [255, 136, 0], true), "a colour that is given is the one in use");
+    let warm = s.render_now(id, 128, 128).unwrap().image;
+    // the temperature is a slider like the others, in Kelvin
+    s.execute("develop.set", &json!({"control": "relightLight.0.temp", "value": 99999})).unwrap();
+    let l = relight(&s).lights[0];
+    assert_eq!((l.temp, l.use_color, l.color), (12000.0, false, [255, 136, 0]), "setting the temperature puts it in use; the colour is kept");
+    s.execute("develop.set", &json!({"control": "relightLight.0.temp", "value": 100})).unwrap();
+    assert_eq!(relight(&s).lights[0].temp, 2000.0);
+    // the colour by channels, or by short hex; it is its own history step
+    s.execute("relight.updateLight", &json!({"index": 0, "color": [0, 64, 255]})).unwrap();
+    let l = relight(&s).lights[0];
+    assert_eq!((l.color, l.use_color, l.temp), ([0, 64, 255], true, 2000.0), "setting the colour puts it in use; the temperature is kept");
+    // while the colour is in use, the temperature changes nothing in the picture (set behind the control's back)
+    let blue = s.render_now(id, 128, 128).unwrap().image;
+    s.execute("develop.merge", &json!({"settings": {"relight": {"lights": [{"kind": "directional", "elevation": 90, "temp": 9000, "color": "#0040ff", "use_color": true}]}}})).unwrap();
+    assert_eq!(s.render_now(id, 128, 128).unwrap().image.data, blue.data);
+    s.execute("relight.updateLight", &json!({"index": 0, "color": "0af"})).unwrap();
+    assert_eq!(relight(&s).lights[0].color, [0, 170, 255]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(relight(&s).lights[0].color, [0, 64, 255]);
+    // a warm orange light and a cold blue one colour the photo differently
+    s.execute("develop.set", &json!({"control": "relightLight.0.temp", "value": 11000})).unwrap();
+    let cold = s.render_now(id, 128, 128).unwrap().image;
+    let balance = |img: &lightcraft_raster::Rgba8| img.data.iter().map(|p| i64::from(p[0]) - i64::from(p[2])).sum::<i64>();
+    assert!(balance(&warm) > balance(&cold) + 128 * 128 * 10, "warm {} against cold {}", balance(&warm), balance(&cold));
+    let light = s.develop_of(id).unwrap().to_json()["relight"]["lights"][0].clone();
+    assert_eq!(light["color"], json!("#0040ff"));
+    assert!(light.get("use_color").is_none(), "by temperature: the flag is left out");
+}
+
 // Given a wrong argument, the command says what is wrong and changes nothing
 #[test]
 fn wrong_arguments_are_refused() {
@@ -98,6 +136,10 @@ fn wrong_arguments_are_refused() {
         ("relight.addLight", json!({"position": "middle"}), "`position` must be"),
         ("relight.addLight", json!({"position": [0.5]}), "`position` must be"),
         ("relight.updateLight", json!({"index": 0}), "nothing to change"),
+        ("relight.updateLight", json!({"index": 0, "color": "orange"}), "`color` must be"),
+        ("relight.updateLight", json!({"index": 0, "color": [255, 0]}), "`color` must be"),
+        ("relight.updateLight", json!({"index": 0, "color": [255, 0, 300]}), "`color` must be"),
+        ("relight.addLight", json!({"color": 16711680}), "`color` must be"),
         ("relight.updateLight", json!({"index": 7, "kind": "spot"}), "no such light"),
         ("relight.updateLight", json!({"kind": "spot"}), "missing `index`"),
         ("relight.updateLight", json!({"index": -1, "kind": "spot"}), "missing `index`"),
@@ -110,8 +152,8 @@ fn wrong_arguments_are_refused() {
         assert_eq!(relight(&s), was, "{command} {params}");
     }
     // numbers that are not numbers take the defaults instead of poisoning the settings
-    s.execute("relight.addLight", &json!({"intensity": "bright", "hue": null})).unwrap();
-    assert_eq!(relight(&s).lights[1].intensity, 100.0);
+    s.execute("relight.addLight", &json!({"intensity": "bright", "temp": null, "color": null})).unwrap();
+    assert_eq!((relight(&s).lights[1].intensity, relight(&s).lights[1].use_color), (100.0, false));
     // at most MAX_RELIGHT_LIGHTS lights
     while relight(&s).lights.len() < MAX_RELIGHT_LIGHTS {
         s.execute("relight.addLight", &json!({})).unwrap();

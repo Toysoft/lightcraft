@@ -23,11 +23,17 @@ It is not a Lightroom feature.
 - **Elevation** is a full turn, −180° to 180°: 0 grazes the photo, 90 is head-on, beyond 90 the light
   comes over from the other side, and below 0 it shines from behind the photo (only on what faces
   away: a rim light) or, for a Spot, points out of it.
-- Per light: Intensity, colour (Hue, Saturation), Angle and Elevation (Directional, Spot), Depth
+- **Light Color** is one of two things, whichever was set last: a **Temperature** in Kelvin
+  (2000–12000: 6500 is white, lower is warmer like a bulb or a candle, higher cooler like shade),
+  or a **Color** of your own, picked from the swatch's colour picker or typed as a hex code
+  (`#ff8800`, `#f80`). They don't mix: setting a colour ignores the temperature, moving the
+  temperature ignores the colour, and the panel says which is in use. The other value is kept.
+- Per light: Intensity, colour, Angle and Elevation (Directional, Spot), Depth
   (how far above the photo the light is) and Falloff (Point, Spot), Cone (Spot). Up to 8 lights.
 - For the scene: **Ambient** (the light the photo already had: −100 leaves only the added lights),
   **Softness** (how smooth the shapes are), **Shine** (specular highlights) and **Cast Shadows**
-  with their softness.
+  with their opacity (100 keeps all of a light out of its shadows, lower lets some through) and
+  softness.
 
 The lights and sliders are commands and develop controls (`relight.*`, `relightLight.<i>.*`), so
 the CLI, the control channel and MCP drive them like the panel does.

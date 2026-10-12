@@ -253,6 +253,20 @@ mod tests {
         let partial = DevelopSettings::from_json(&json!({"relight": {"enabled": true, "lights": [{"position": {"x": 0.1, "y": 0.2}}]}})).unwrap();
         assert_eq!(partial.relight.lights[0], RelightLight { position: lightcraft_geom::Point::new(0.1, 0.2), ..Default::default() });
         assert!(DevelopSettings::from_json(&json!({"relight": {"lights": [{"kind": "laser"}]}})).is_err());
+        // a light's colour is written as hex; one that can't be read is white, not an error
+        assert_eq!(on.to_json()["relight"]["lights"][0]["color"], json!("#ffffff"));
+        let tinted = DevelopSettings::from_json(
+            &json!({"relight": {"lights": [{"color": "#FF8000", "temp": 3200}, {"color": "F80"}, {"color": 7}, {"color": "blue"}]}}),
+        )
+        .unwrap();
+        let colors: Vec<[u8; 3]> = tinted.relight.lights.iter().map(|l| l.color).collect();
+        assert_eq!(colors, [[255, 128, 0], [255, 136, 0], [255; 3], [255; 3]]);
+        assert_eq!((tinted.relight.lights[0].temp, tinted.relight.lights[1].temp), (3200.0, RELIGHT_TEMP_NEUTRAL));
+        assert_eq!(hex_color([255, 128, 0]), "#ff8000");
+        for bad in ["", "#", "#ff80", "#ff80000", "#gg0000", "ff 80 00", "#ff８000"] {
+            assert_eq!(parse_hex_color(bad), None, "{bad:?}");
+        }
+        assert_eq!(parse_hex_color("  #0a0B0c "), Some([10, 11, 12]));
         // it is its own section: a reset clears the lights and switches it off
         on.reset_section(Section::Relight);
         assert_eq!(on, s);
