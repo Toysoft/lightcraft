@@ -218,6 +218,14 @@
 - Compare and Reference View panes say "Rendering…" (or that the photo can't be opened) the same way, so a
   magnified preview isn't taken for the photo when checking focus at 1:1.
 
+### Reference view reliability
+- Escape now leaves Reference for Detail without changing the active photo or its edits; the next
+  Escape returns to the grid. A dialog, tool or Lights Out still handles Escape first.
+- Opening or creating a different library clears the pinned reference. Photo IDs belong to one
+  catalog; a pin no longer silently becomes another library's photo with the same numeric ID.
+- Missing or Recently Deleted photos cannot be pinned. Deleting the pinned reference stops drawing
+  it; re-entering Reference chooses a live photo, and restoring the deleted photo makes it pinnable again.
+
 ### JPEG XL export
 - Export as JPEG XL (issue #247): Format ▸ JPEG XL in the Export dialog, `format: "jxl"` for agents and the CLI
   (`render in.raw -o out.jxl`). Quality as for JPEG, or Lossless; Effort (Fast / Normal) trades time for a
