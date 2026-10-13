@@ -17,6 +17,7 @@
 
 pub mod align;
 pub mod features;
+pub mod focus;
 pub mod frame;
 pub mod fuse;
 pub mod hdr;
@@ -27,6 +28,7 @@ pub mod ransac;
 pub mod stack;
 pub mod synth;
 
+pub use focus::{FocusOptions, FocusResult, stack_focus};
 pub use frame::{Frame, FrameColor, load_frame};
 pub use fuse::{FuseOptions, FuseResult, fuse_exposures};
 pub use hdr::{Deghost, HdrOptions, HdrResult, merge_hdr};
