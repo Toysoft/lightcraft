@@ -119,6 +119,13 @@ impl ThemeKind {
 
 impl Default for Tokens {
     fn default() -> Self {
+        Self::for_kind(ThemeKind::Charcoal)
+    }
+}
+
+impl Tokens {
+    // Keep the original palette as the inheritance base for Midnight, Silver and Paper.
+    fn legacy_base() -> Self {
         Tokens {
             chrome: Color32::from_rgb(0x2d, 0x2d, 0x2d),
             canvas: Color32::from_rgb(0x1c, 0x1c, 0x1c),
@@ -160,12 +167,36 @@ impl Default for Tokens {
 }
 
 impl Tokens {
+    /// Foreground for a filled accent control in the standard Charcoal palette.
+    pub fn on_accent(&self) -> Color32 {
+        if self.chrome == Color32::from_rgb(0x0a, 0x0a, 0x0c) { Color32::from_rgb(0x06, 0x06, 0x07) } else { Color32::WHITE }
+    }
+
     /// The tokens of `kind`. Metrics are shared; only colours change.
     pub fn for_kind(kind: ThemeKind) -> Tokens {
         let rgb = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
-        let base = Tokens::default();
+        let base = Tokens::legacy_base();
         match kind {
-            ThemeKind::Charcoal => base,
+            ThemeKind::Charcoal => Tokens {
+                // ArtCraft standard dark UI; photo, grid and label roles stay local.
+                chrome: rgb(0x0a0a0c),
+                divider: rgb(0x36373a),
+                inset: rgb(0x101014),
+                field: rgb(0x060607),
+                field_border: rgb(0x36373a),
+                button: rgb(0x1e1f22),
+                button_border: rgb(0x36373a),
+                hover: rgb(0x323337),
+                pressed: rgb(0x414246),
+                tool_active: rgb(0x203b65),
+                text: rgb(0xf2f1ee),
+                text_label: rgb(0xf2f1ee),
+                text_dim: rgb(0xa6a6a8),
+                text_disabled: rgb(0x717176),
+                icon: rgb(0xa6a6a8),
+                accent: rgb(0x2d81ff),
+                ..base
+            },
             ThemeKind::Midnight => Tokens {
                 chrome: rgb(0x1e1e1e),
                 canvas: rgb(0x121212),
@@ -408,15 +439,15 @@ pub fn apply_kind(ctx: &egui::Context, kind: ThemeKind) {
     });
     let dark = kind.is_dark();
     let mut v = if dark { Visuals::dark() } else { Visuals::light() };
-    v.panel_fill = t.chrome;
-    v.window_fill = t.chrome;
+    v.panel_fill = if kind == ThemeKind::Charcoal { t.inset } else { t.chrome };
+    v.window_fill = if kind == ThemeKind::Charcoal { t.inset } else { t.chrome };
     v.extreme_bg_color = t.field;
     v.faint_bg_color = t.inset;
     v.window_stroke = Stroke::new(1.0, t.button_border);
     v.window_corner_radius = CornerRadius::same(6);
     v.menu_corner_radius = CornerRadius::same(6);
-    v.selection.bg_fill = t.accent.gamma_multiply(0.6);
-    v.selection.stroke = Stroke::new(1.0, t.accent);
+    v.selection.bg_fill = if kind == ThemeKind::Charcoal { Color32::from_rgb(0x20, 0x3b, 0x65) } else { t.accent.gamma_multiply(0.6) };
+    v.selection.stroke = Stroke::new(1.0, if kind == ThemeKind::Charcoal { Color32::from_rgb(0xf2, 0xf1, 0xee) } else { t.accent });
     v.override_text_color = Some(t.text_label);
     let (popup, window) = if dark { (140, 160) } else { (50, 60) };
     v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(popup) };
@@ -448,6 +479,24 @@ pub fn apply_kind(ctx: &egui::Context, kind: ThemeKind) {
 mod tests {
     use super::*;
     use crate::i18n::{Locale, set_language};
+
+    #[test]
+    fn charcoal_uses_standard_roles_without_recoloring_other_presets() {
+        let charcoal = Tokens::for_kind(ThemeKind::Charcoal);
+        let midnight = Tokens::for_kind(ThemeKind::Midnight);
+        let silver = Tokens::for_kind(ThemeKind::Silver);
+        assert_eq!(Tokens::default().chrome, charcoal.chrome);
+        assert_eq!(charcoal.chrome, Color32::from_rgb(0x0a, 0x0a, 0x0c));
+        assert_eq!(charcoal.button, Color32::from_rgb(0x1e, 0x1f, 0x22));
+        assert_eq!(charcoal.accent, Color32::from_rgb(0x2d, 0x81, 0xff));
+        assert_eq!(charcoal.on_accent(), Color32::from_rgb(0x06, 0x06, 0x07));
+        assert_eq!(midnight.chrome, Color32::from_rgb(0x1e, 0x1e, 0x1e));
+        assert_eq!(midnight.accent, Color32::from_rgb(0x01, 0x65, 0xdd));
+        assert_eq!(midnight.on_accent(), Color32::WHITE);
+        assert_eq!(silver.chrome, Color32::from_rgb(0xe6, 0xe6, 0xe6));
+        assert_eq!(charcoal.canvas, Color32::from_rgb(0x1c, 0x1c, 0x1c));
+        assert_eq!(charcoal.caution, midnight.caution);
+    }
 
     /// Every theme scrolls 100 points a wheel notch, and a zoom notch stays egui's stock ~1.22x
     /// (`exp(40 / 200)`) instead of growing with the longer scroll.

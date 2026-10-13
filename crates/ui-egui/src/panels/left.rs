@@ -392,7 +392,7 @@ pub fn section_drag_feedback(app: &mut LightcraftApp, ctx: &egui::Context) {
         ctx,
         |ui| {
             egui::Frame::NONE.fill(t.accent).corner_radius(10.0).inner_margin(egui::Margin::symmetric(9, 3)).show(ui, |ui| {
-                ui.label(egui::RichText::new(crate::i18n::tr(section.title())).color(egui::Color32::WHITE).font(t.semibold(12.0)));
+                ui.label(egui::RichText::new(crate::i18n::tr(section.title())).color(t.on_accent()).font(t.semibold(12.0)));
             });
         },
     );
@@ -1485,7 +1485,7 @@ pub fn album_drag_feedback(app: &mut LightcraftApp, ctx: &egui::Context) {
     ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
     egui::Area::new(egui::Id::new("drag-album")).order(egui::Order::Tooltip).interactable(false).fixed_pos(pos + vec2(14.0, 10.0)).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.accent).corner_radius(10.0).inner_margin(egui::Margin::symmetric(9, 3)).show(ui, |ui| {
-            ui.label(egui::RichText::new(name).color(egui::Color32::WHITE).font(t.semibold(12.0)));
+            ui.label(egui::RichText::new(name).color(t.on_accent()).font(t.semibold(12.0)));
         });
     });
 }

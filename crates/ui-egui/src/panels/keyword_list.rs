@@ -127,7 +127,7 @@ pub fn drag_feedback(app: &mut LightcraftApp, ctx: &egui::Context) {
     let name = keyword.rsplit('|').next().unwrap_or(&keyword).to_string();
     egui::Area::new(egui::Id::new("drag-keyword")).order(egui::Order::Tooltip).interactable(false).fixed_pos(at + vec2(14.0, 10.0)).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.accent).corner_radius(10.0).inner_margin(egui::Margin::symmetric(9, 3)).show(ui, |ui| {
-            ui.label(egui::RichText::new(name).color(Color32::WHITE).font(t.semibold(12.0)));
+            ui.label(egui::RichText::new(name).color(t.on_accent()).font(t.semibold(12.0)));
         });
     });
 }

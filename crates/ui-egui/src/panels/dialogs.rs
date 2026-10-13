@@ -1169,7 +1169,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                                 crate::theme::font_credits(app.chinese_font.is_some())
                             ));
                             ui.add_space(10.0);
-                            let discord = egui::Button::new(egui::RichText::new(crate::i18n::tr("Join the ArtCraft Discord")).font(t.semibold(15.0)).color(egui::Color32::WHITE))
+                            let discord = egui::Button::new(egui::RichText::new(crate::i18n::tr("Join the ArtCraft Discord")).font(t.semibold(15.0)).color(t.on_accent()))
                                 .fill(t.accent)
                                 .min_size(egui::vec2(260.0, 34.0));
                             let r = ui.add(discord).on_hover_text(crate::links::DISCORD);
