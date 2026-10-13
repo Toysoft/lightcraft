@@ -168,6 +168,14 @@
   preset pickers in Import and Settings ▸ Import scroll the same way.
 - Importing a large collection and opening its library no longer compare every preset with every other.
 
+### Vignette styles
+- The Highlight, Color and Paint styles of Effects ▸ Vignette now look different (issue #905). Paint darkens the
+  corners like a flat black overlay that also takes their colour out, where it used to match Color. A lightening
+  vignette now follows the style too: Color brightens like exposure and keeps the colours, Highlight lets bright
+  colours run towards white, and Paint washes the corners out towards white as before.
+- This is part of rendering process 2, with the Highlights and Shadows change. Photos you have already edited stay
+  on process 1 and keep their look until you run Photo ▸ Update to Current Process; new photos and Reset get process 2.
+
 ## 2026-10-10
 
 ### Dialogs fit the window

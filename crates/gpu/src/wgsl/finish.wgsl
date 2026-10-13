@@ -449,20 +449,29 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let start = pf(F_VIG_START);
         let t = sstep(start, start + pf(F_VIG_WIDTH), dist);
         if (t > 0.0) {
-            let lum = clamp(lum2020(d), 0.0, 1.0);
+            // styles as in finish.rs `vignette_px`
+            let y = lum2020(d);
+            let style = pu(F_VIG_STYLE);
             if (amount < 0.0) {
-                var f = 1.0 + amount * t;
-                let style = pu(F_VIG_STYLE);
-                if (style == 1u) {
-                    f += (1.0 - f) * pf(F_VIG_HL) * sstep(0.4, 1.0, lum);
-                }
+                let k = -amount * t;
                 if (style == 2u) {
-                    d = d * (1.0 - (-amount) * t) + 0.0;
+                    d = (d + (vec3<f32>(y) - d) * k) * (1.0 - k);
                 } else {
+                    var f = 1.0 - k;
+                    if (style == 1u) {
+                        f += (1.0 - f) * pf(F_VIG_HL) * sstep(0.4, 1.0, clamp(y, 0.0, 1.0));
+                    }
                     d = d * f;
                 }
-            } else {
+            } else if (style == 2u) {
                 d = d + (1.0 - d) * amount * t * 0.85;
+            } else {
+                let g = exp2(2.0 * amount * t);
+                if (style == 0u) {
+                    d = d * (g / (1.0 + (g - 1.0) * clamp(y, 0.0, 1.0)));
+                } else {
+                    d = d * (g / (1.0 + (g - 1.0) * clamp(d, vec3<f32>(0.0), vec3<f32>(1.0))));
+                }
             }
         }
     }

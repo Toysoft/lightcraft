@@ -82,7 +82,9 @@ pub enum Process {
     /// The rendering of LightCraft before process versions existed (2026-10).
     V1,
     /// Highlights and Shadows keep the local contrast of the tones they move: their edge-aware base
-    /// is taken of a fine median of log luminance (issue #632).
+    /// is taken of a fine median of log luminance (issue #632). The vignette styles render differently
+    /// (issue #905): Paint also takes the colour out of the corners when darkening, and a lightening
+    /// vignette follows the style.
     V2,
 }
 
