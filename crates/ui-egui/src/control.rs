@@ -505,6 +505,7 @@ pub fn export_active(app: &mut LightcraftApp, p: &Value) -> Result<Value, String
     // field cleared) is an error, like Lightroom refusing to export to an unspecified folder, rather
     // than a silent write into the working directory. No folder at all (e.g. File → Export with
     // Preset): the last export's, else the default.
+    // Exception: "same folder as original" means dir is empty and we use each photo's original folder.
     let exact = p.get("path").and_then(Value::as_str).filter(|s| !s.trim().is_empty()).map(str::to_string);
     let dir = match p.get("dir").and_then(Value::as_str) {
         Some(d) => d.trim().to_string(),
@@ -514,7 +515,8 @@ pub fn export_active(app: &mut LightcraftApp, p: &Value) -> Result<Value, String
             last_dir.map(str::to_string).unwrap_or_else(default_export_dir)
         }
     };
-    if dir.is_empty() && exact.is_none() {
+    let same_folder_as_original = dir.is_empty() && exact.is_none();
+    if !same_folder_as_original && dir.is_empty() && exact.is_none() {
         return Err(NO_EXPORT_FOLDER.into());
     }
     let to = Destination { dir: dir.clone(), exact };

@@ -924,16 +924,29 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         }
                     }
                     field(ui, "Folder", |ui| {
-                        trailing_button_row(ui, |ui| {
-                            if app.services.pick_folder.is_some()
-                                && crate::widgets::text_button(ui, "exportChooseFolder", crate::i18n::tr("Choose…"), false).clicked()
-                                && let Some(pick) = app.services.pick_folder.as_mut()
-                                && let Some(d) = pick()
-                            {
-                                *dir = d;
+                        ui.horizontal(|ui| {
+                            let mut use_original = dir.is_empty();
+                            if ui.radio_value(&mut use_original, true, crate::i18n::tr("Same folder as original photo")).changed() {
+                                dir.clear();
                             }
-                            crate::widgets::named(ui.add(egui::TextEdit::singleline(dir).desired_width(ui.available_width())), crate::i18n::tr("Folder"));
+                            if ui.radio_value(&mut use_original, false, crate::i18n::tr("Custom folder")).changed() {
+                                *dir = crate::control::default_export_dir();
+                            }
                         });
+                        if dir.is_empty() {
+                            ui.label(egui::RichText::new(crate::i18n::tr("Exports go to each photo's own folder")).color(crate::theme::Tokens::get(ui.ctx()).text_dim).size(11.0));
+                        } else {
+                            trailing_button_row(ui, |ui| {
+                                if app.services.pick_folder.is_some()
+                                    && crate::widgets::text_button(ui, "exportChooseFolder", crate::i18n::tr("Choose…"), false).clicked()
+                                    && let Some(pick) = app.services.pick_folder.as_mut()
+                                    && let Some(d) = pick()
+                                {
+                                    *dir = d;
+                                }
+                                ui.add(egui::TextEdit::singleline(dir).desired_width(ui.available_width()));
+                            });
+                        }
                     });
                     field(ui, "Subfolder", |ui| {
                         crate::widgets::named(ui.add(egui::TextEdit::singleline(&mut opts.subfolder).hint_text(crate::i18n::tr("none")).desired_width(f32::INFINITY)), crate::i18n::tr("Subfolder"))

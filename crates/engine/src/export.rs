@@ -1600,6 +1600,9 @@ pub fn export_photo(session: &mut crate::Session, id: lightcraft_catalog::PhotoI
 pub struct PreparedExport {
     pub photo: lightcraft_catalog::PhotoId,
     pub file_name: String,
+    /// When the destination names no folder ("Same folder as original photo"), the folder this
+    /// photo's own file sits in, so a batch can scatter its exports back beside the originals.
+    pub(crate) original_folder: Option<String>,
     work: Work,
     /// The library's originals, which [`run_batch`] never writes over (shared by a batch).
     guard: std::sync::Arc<crate::originals::OriginalGuard>,
@@ -1659,6 +1662,8 @@ fn prepare_guarded(
 ) -> Result<PreparedExport, String> {
     let p = session.catalog.photo(id).ok_or("no such photo")?;
     let file_name = o.file_name_for(p, seq);
+    // The photo's own folder, kept before the mutable borrows below.
+    let original_folder = destination_folder_of(p);
     // HDR output only for photos edited in HDR; the rest of the batch exports as usual
     let sdr_opts;
     let o = if o.hdr && !p.develop.hdr.enabled {
@@ -1694,7 +1699,13 @@ fn prepare_guarded(
         };
         (work, weight)
     };
-    Ok(PreparedExport { photo: id, file_name, work, guard, weight })
+    Ok(PreparedExport { photo: id, file_name, original_folder, work, guard, weight })
+}
+
+/// The folder holding photo `p`'s file, or `None` when it has none (a generated demo photo).
+fn destination_folder_of(p: &lightcraft_catalog::Photo) -> Option<String> {
+    let lightcraft_catalog::Source::File { path } = &p.source else { return None };
+    std::path::Path::new(path).parent().map(|d| d.to_string_lossy().into_owned())
 }
 
 /// Working memory of rendering a photo of `full_px` pixels (long edge `long`) from source level
@@ -1977,12 +1988,12 @@ fn run_batch_with(
             if !progress(i, &item.file_name) {
                 break;
             }
-            let (photo, name, guard) = (item.photo, item.file_name.clone(), item.guard.clone());
-            placer.place(photo, name, &guard, run_gated(item))?;
+            let (photo, name, folder, guard) = (item.photo, item.file_name.clone(), item.original_folder.clone(), item.guard.clone());
+            placer.place(photo, name, folder.as_deref(), &guard, run_gated(item))?;
         }
         return Ok(std::mem::take(&mut placer.out));
     }
-    let heads: Vec<_> = items.iter().map(|i| (i.photo, i.file_name.clone(), i.guard.clone())).collect();
+    let heads: Vec<_> = items.iter().map(|i| (i.photo, i.file_name.clone(), i.original_folder.clone(), i.guard.clone())).collect();
     let queue = Queue {
         lane: std::sync::Mutex::new(Lane { items: items.into_iter().map(Some).collect(), next: 0, placed: 0, stop: false, done: Default::default() }),
         cv: std::sync::Condvar::new(),
@@ -1997,12 +2008,12 @@ fn run_batch_with(
             }
         }
         let placed = || {
-            for (i, (photo, name, guard)) in heads.into_iter().enumerate() {
+            for (i, (photo, name, folder, guard)) in heads.into_iter().enumerate() {
                 if !progress(i, &name) {
                     break;
                 }
                 let e = queue.result(i);
-                placer.place(photo, name, &guard, e)?;
+                placer.place(photo, name, folder.as_deref(), &guard, e)?;
             }
             Ok::<_, String>(())
         };
@@ -2149,11 +2160,15 @@ impl<'a> Placer<'a> {
         &mut self,
         photo: lightcraft_catalog::PhotoId,
         name: String,
+        folder: Option<&str>,
         guard: &crate::originals::OriginalGuard,
         e: Result<Exported, String>,
     ) -> Result<(), String> {
         use serde_json::json;
-        let (o, dir, exists) = (self.o, &self.dir, self.exists);
+        // "Same folder as original photo": the destination names no folder, so each export goes beside
+        // its own file. A folder that was chosen (with or without a subfolder) always wins.
+        let (o, exists) = (self.o, self.exists);
+        let dir = if self.to.dir.is_empty() { folder.unwrap_or(&self.dir) } else { &self.dir };
         let e = match e {
             Ok(e) => e,
             Err(err) if self.stop_on_error => return Err(err),
