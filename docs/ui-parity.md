@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (accessibility audit: test over the AccessKit tree; fields, sliders and dialogs named) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (accessibility audit: test over the AccessKit tree; fields, sliders and dialogs named; Alt/Option-drag slider previews) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 How LightCraft's interaction compares with Lightroom's: views, panels, tools and handles, modifier
 keys, shortcuts, zoom, context menus and feel. Rows for individual menu items and shortcuts live in
@@ -67,6 +67,15 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 
 **Library culling (KEYC-RATING):** `0–5`, `6–9` and `P/X/U` reach egui on macOS even when displayed in the native menu (adapted from PR #261; issue #283). `Shift+0–9` applies and advances once; `Shift+P` picks and advances in Photo Grid / Square Grid and retains Presets elsewhere. See [library shortcuts](library-shortcuts.md) for the verified Classic mapping and regression coverage. Remaining Classic gaps: rating `[` / `]`, flag cycling and filter-bar keys.
 
+**Alt/Option-drag previews (issue #937):** hold Alt (Option on macOS) while dragging an Edit slider, before or during
+the drag. Exposure, Highlights and Whites show highlight clipping (black, clipped channels in their colour, white where
+all three clip); Shadows and Blacks show shadow clipping (white, black where all three clip). Sharpening Amount shows
+greyscale, Radius and Detail the detail band sharpening amplifies, Masking the mask (white = sharpened); luminance Noise
+Reduction (Luminance, Detail, Contrast) shows greyscale. Releasing the key or the slider brings the photo back; the
+edit, its history and the histogram are unchanged (on a profiled display too). Not yet: mask range sliders and the
+Masking panel's local sliders. On Linux desktops that move windows with Alt+drag (KDE Plasma's
+default, also some GNOME / Xfce setups) the window manager takes the drag first: set its window-move modifier to Meta.
+
 **Still missing / broken:**
 - No command yet: F1 help (verify the rest of the old list: full screen, settings, stacks,
   visualize spots and merges have commands now).
@@ -106,5 +115,6 @@ left panel, canvas, right panel, which is sensible but not tuned).
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-12 | minor | Accessibility: an AccessKit tree audit test over every view, Develop tool and 13 dialogs; unnamed fields, slider ranges and the Auto Stack slider fixed; 30% → 55%; UI remaining 40–70 h → 34–58 h |
+| 2026-10-11 | minor | Alt/Option-drag slider previews (clipping, sharpening) and the Linux window-manager note |
 | 2026-10-11 | minor | Zoom row: Compare and Reference get zoom windows; what remains of LR-VIEW-ZOOM is overlays and soft proofing |
 | 2026-10-10 | major | Created: measured command and shortcut counts, assessment by area, estimates; moved the shortcut conflicts section here from the checklist |
