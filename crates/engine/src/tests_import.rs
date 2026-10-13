@@ -1572,3 +1572,35 @@ fn upper_and_mixed_case_extensions_are_found_by_import_browse_and_sidecar_lookup
     }
     let _ = std::fs::remove_dir_all(&src);
 }
+
+/// A long list (a Lightroom catalog's originals, issue #1396) counts its files while they are being
+/// probed, not only once every one is: the progress row stayed on the catalog's 14 steps meanwhile.
+#[test]
+fn import_job_counts_files_while_a_long_list_is_probed() {
+    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+    use std::sync::{Arc, OnceLock};
+    let src = temp_dir("progress");
+    let paths: Vec<String> = (0..40)
+        .map(|i| {
+            let p = src.join(format!("p{i}.jpg"));
+            std::fs::write(&p, [i as u8]).unwrap();
+            p.to_string_lossy().to_string()
+        })
+        .collect();
+    let done: Arc<OnceLock<Arc<AtomicUsize>>> = Arc::default();
+    let seen = Arc::new(AtomicUsize::new(0));
+    let mut s = Session::new().with_fs();
+    let (d, m) = (done.clone(), seen.clone());
+    s.media.file_probe = Some(Arc::new(move |_: &str| {
+        m.fetch_max(d.get().map_or(0, |d| d.load(Relaxed)), Relaxed);
+        Ok(crate::media::ProbeInfo { format: "JPEG".into(), ..Default::default() })
+    }));
+    let mut job = crate::import::ImportJob::new(&mut s, crate::import::ImportOptions::default()).unwrap();
+    done.set(job.done.clone()).unwrap();
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let prepared = job.prepare(&paths, &cancel);
+    assert_eq!(prepared.len(), 40);
+    assert_eq!(job.done.load(Relaxed), 40);
+    assert!(seen.load(Relaxed) >= crate::import::batch_size(), "no file counted while the others were probed: {}", seen.load(Relaxed));
+    let _ = std::fs::remove_dir_all(&src);
+}

@@ -905,129 +905,135 @@ impl ImportJob {
             }
         }
 
-        // files a preceding scan already probed are not read again (a network share is slow to read),
-        // as long as they are still there, as they were: a file gone or changed since is probed again
-        let cached: Vec<Option<ProbeInfo>> = todo
-            .iter()
-            .map(|f| {
-                // (the web's files are not std::fs files: kept as probed)
-                self.cache
-                    .remove(f)
-                    .filter(|info| cfg!(target_arch = "wasm32") || std::fs::metadata(f).is_ok_and(|m| m.is_file() && m.len() == info.file_size))
-            })
-            .collect();
-        let missing: Vec<String> = todo.iter().zip(&cached).filter(|(_, c)| c.is_none()).map(|(f, _)| f.clone()).collect();
-        let progress = ScanProgress::default();
-        let mut fresh = probe_all(self.probe.as_ref(), &missing, &progress).into_iter();
-        let probed: Vec<Result<ProbeInfo, String>> =
-            cached.into_iter().map(|c| c.map(Ok).unwrap_or_else(|| fresh.next().unwrap_or_else(|| Err("not probed".into())))).collect();
-        crate::memory::release();
         // Files are planned one by one, in order (duplicates, sidecars, names, folders); their
         // copies or moves — the slow part, reading and writing every byte and verifying it — are
         // collected and run on several threads (issue #367), then their outcomes take their places.
         let mut plan = Plan::default();
-        for (path, info) in todo.into_iter().zip(probed) {
-            if cancel.load(Relaxed) {
-                break;
-            }
-            let mut info = match info {
-                Ok(i) => i,
-                Err(e) => {
-                    log::warn!("import {path}: {e}");
-                    self.done.fetch_add(1, Relaxed);
-                    plan.slots.push(Slot::Item(PreparedItem::Failed(path, e)));
-                    continue;
-                }
-            };
-            // a copy of a file whose transfer is still pending: a duplicate only if that one succeeds
-            if !opts.local
-                && let Some(h) = &info.content_hash
-                && plan.transfers.iter().any(|t| t.info.content_hash.as_ref() == Some(h))
-            {
-                self.run_plan(&mut plan, &mut out, cancel);
+        // Probed and planned a batch at a time, the size the import window hands over: a long list
+        // (a Lightroom catalog's originals) counts its files as it goes, not only once all are probed.
+        let mut todo = todo.into_iter().peekable();
+        while todo.peek().is_some() && !cancel.load(Relaxed) {
+            let batch: Vec<String> = todo.by_ref().take(batch_size()).collect();
+            // files a preceding scan already probed are not read again (a network share is slow to read),
+            // as long as they are still there, as they were: a file gone or changed since is probed again
+            let cached: Vec<Option<ProbeInfo>> = batch
+                .iter()
+                .map(|f| {
+                    // (the web's files are not std::fs files: kept as probed)
+                    self.cache
+                        .remove(f)
+                        .filter(|info| cfg!(target_arch = "wasm32") || std::fs::metadata(f).is_ok_and(|m| m.is_file() && m.len() == info.file_size))
+                })
+                .collect();
+            let missing: Vec<String> = batch.iter().zip(&cached).filter(|(_, c)| c.is_none()).map(|(f, _)| f.clone()).collect();
+            let progress = ScanProgress::default();
+            let mut fresh = probe_all(self.probe.as_ref(), &missing, &progress).into_iter();
+            let probed: Vec<Result<ProbeInfo, String>> =
+                cached.into_iter().map(|c| c.map(Ok).unwrap_or_else(|| fresh.next().unwrap_or_else(|| Err("not probed".into())))).collect();
+            crate::memory::release();
+            for (path, info) in batch.into_iter().zip(probed) {
                 if cancel.load(Relaxed) {
                     break;
                 }
-            }
-            if let Some(h) = &info.content_hash
-                && !opts.local
-                && let Some(existing) = self.by_hash.get(h)
-            {
-                self.done.fetch_add(1, Relaxed);
-                plan.slots.push(Slot::Item(PreparedItem::Duplicate { path, existing: *existing, reason: "content", hash: Some(h.clone()) }));
-                continue;
-            }
-            // the XMP sidecar (or a raw's embedded XMP), read before copying: its capture time files
-            // and names the copy when the file itself has none
-            let raw = info.kind == MediaKind::Raw;
-            let packet = crate::sidecar::find_sidecar(&path, self.naming)
-                .and_then(|f| std::fs::read_to_string(f).ok())
-                .or_else(|| info.xmp.clone().filter(|_| raw));
-            let target = crate::crs::Target::for_file(info.kind, &info.format, info.preview_only.is_some(), &info.meta.camera);
-            let sidecar = packet.and_then(|x| match crate::sidecar::parse_sidecar(&x, target) {
-                Ok(sc) => Some(sc),
-                Err(e) => {
-                    log::warn!("import {path}: XMP: {e}");
-                    None
-                }
-            });
-            if info.captured.is_none() {
-                info.captured = sidecar.as_ref().and_then(|sc| sc.captured.clone());
-            }
-            let stored = match (mode, &self.copy_root) {
-                (ImportMode::Copy | ImportMode::Move, Some(root))
-                    if !crate::import_move::inside(Path::new(&path), root)
-                        && !self.lib_dir.as_ref().is_some_and(|l| crate::import_move::inside(Path::new(&path), l)) =>
-                {
-                    // the templates see the photo as it will be catalogued (undated: the import time)
-                    let own = Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                    let mut q = Photo::new(PhotoId(0), Source::File { path: path.clone() }, &own, &info.format, 0, 0, &self.now);
-                    q.captured = info.captured.clone();
-                    q.meta = info.meta.clone();
-                    let name = opts.rename.as_deref().filter(|t| !t.trim().is_empty()).map(|t| {
-                        let n = crate::rename::expand(t, &q, self.seq);
-                        self.seq += 1;
-                        n
-                    });
-                    let folders = opts.organize.folders(&q);
-                    let dir = folders.iter().fold(root.to_path_buf(), |d, f| d.join(f));
-                    // the name this file gets depends on what a pending transfer of a like-named file
-                    // into the same folder ends up with: that one goes first
-                    let as_named = name.as_deref().unwrap_or(if own.is_empty() { "photo" } else { own.as_str() });
-                    let family = (dir.to_string_lossy().to_lowercase(), name_family(as_named));
-                    if plan.transfers.iter().any(|t| t.family == family) {
-                        self.run_plan(&mut plan, &mut out, cancel);
-                        if cancel.load(Relaxed) {
-                            break;
-                        }
+                let mut info = match info {
+                    Ok(i) => i,
+                    Err(e) => {
+                        log::warn!("import {path}: {e}");
+                        self.done.fetch_add(1, Relaxed);
+                        plan.slots.push(Slot::Item(PreparedItem::Failed(path, e)));
+                        continue;
                     }
-                    let how = if mode == ImportMode::Move && !crate::import_move::is_symlink(Path::new(&path)) {
-                        How::Place { name: name.unwrap_or(own) }
-                    } else {
-                        if mode == ImportMode::Move {
-                            let reason = "a symbolic link: the file it points to was copied, the link and its target stay";
-                            plan.slots.push(Slot::Item(PreparedItem::Kept(Kept { path: path.clone(), reason: reason.into() })));
-                        }
-                        How::Copy { name }
-                    };
-                    // Copy as DNG: the copied raw becomes a DNG (the copy is ours to replace)
-                    let dng = opts.convert_dng && mode == ImportMode::Copy && raw && !info.format.eq_ignore_ascii_case("DNG");
-                    plan.slots.push(Slot::Transfer);
-                    plan.transfers.push(Transfer { path, info, sidecar, dir, how, dng, family });
+                };
+                // a copy of a file whose transfer is still pending: a duplicate only if that one succeeds
+                if !opts.local
+                    && let Some(h) = &info.content_hash
+                    && plan.transfers.iter().any(|t| t.info.content_hash.as_ref() == Some(h))
+                {
+                    self.run_plan(&mut plan, &mut out, cancel);
+                    if cancel.load(Relaxed) {
+                        break;
+                    }
+                }
+                if let Some(h) = &info.content_hash
+                    && !opts.local
+                    && let Some(existing) = self.by_hash.get(h)
+                {
+                    self.done.fetch_add(1, Relaxed);
+                    plan.slots.push(Slot::Item(PreparedItem::Duplicate { path, existing: *existing, reason: "content", hash: Some(h.clone()) }));
                     continue;
                 }
-                (ImportMode::Move, _) => {
-                    let reason = "already inside the destination or the library: added where it is";
-                    plan.slots.push(Slot::Item(PreparedItem::Kept(Kept { path: path.clone(), reason: reason.into() })));
-                    path.clone()
+                // the XMP sidecar (or a raw's embedded XMP), read before copying: its capture time files
+                // and names the copy when the file itself has none
+                let raw = info.kind == MediaKind::Raw;
+                let packet = crate::sidecar::find_sidecar(&path, self.naming)
+                    .and_then(|f| std::fs::read_to_string(f).ok())
+                    .or_else(|| info.xmp.clone().filter(|_| raw));
+                let target = crate::crs::Target::for_file(info.kind, &info.format, info.preview_only.is_some(), &info.meta.camera);
+                let sidecar = packet.and_then(|x| match crate::sidecar::parse_sidecar(&x, target) {
+                    Ok(sc) => Some(sc),
+                    Err(e) => {
+                        log::warn!("import {path}: XMP: {e}");
+                        None
+                    }
+                });
+                if info.captured.is_none() {
+                    info.captured = sidecar.as_ref().and_then(|sc| sc.captured.clone());
                 }
-                _ => path.clone(),
-            };
-            if let Some(h) = &info.content_hash {
-                self.by_hash.insert(h.clone(), None);
+                let stored = match (mode, &self.copy_root) {
+                    (ImportMode::Copy | ImportMode::Move, Some(root))
+                        if !crate::import_move::inside(Path::new(&path), root)
+                            && !self.lib_dir.as_ref().is_some_and(|l| crate::import_move::inside(Path::new(&path), l)) =>
+                    {
+                        // the templates see the photo as it will be catalogued (undated: the import time)
+                        let own = Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                        let mut q = Photo::new(PhotoId(0), Source::File { path: path.clone() }, &own, &info.format, 0, 0, &self.now);
+                        q.captured = info.captured.clone();
+                        q.meta = info.meta.clone();
+                        let name = opts.rename.as_deref().filter(|t| !t.trim().is_empty()).map(|t| {
+                            let n = crate::rename::expand(t, &q, self.seq);
+                            self.seq += 1;
+                            n
+                        });
+                        let folders = opts.organize.folders(&q);
+                        let dir = folders.iter().fold(root.to_path_buf(), |d, f| d.join(f));
+                        // the name this file gets depends on what a pending transfer of a like-named file
+                        // into the same folder ends up with: that one goes first
+                        let as_named = name.as_deref().unwrap_or(if own.is_empty() { "photo" } else { own.as_str() });
+                        let family = (dir.to_string_lossy().to_lowercase(), name_family(as_named));
+                        if plan.transfers.iter().any(|t| t.family == family) {
+                            self.run_plan(&mut plan, &mut out, cancel);
+                            if cancel.load(Relaxed) {
+                                break;
+                            }
+                        }
+                        let how = if mode == ImportMode::Move && !crate::import_move::is_symlink(Path::new(&path)) {
+                            How::Place { name: name.unwrap_or(own) }
+                        } else {
+                            if mode == ImportMode::Move {
+                                let reason = "a symbolic link: the file it points to was copied, the link and its target stay";
+                                plan.slots.push(Slot::Item(PreparedItem::Kept(Kept { path: path.clone(), reason: reason.into() })));
+                            }
+                            How::Copy { name }
+                        };
+                        // Copy as DNG: the copied raw becomes a DNG (the copy is ours to replace)
+                        let dng = opts.convert_dng && mode == ImportMode::Copy && raw && !info.format.eq_ignore_ascii_case("DNG");
+                        plan.slots.push(Slot::Transfer);
+                        plan.transfers.push(Transfer { path, info, sidecar, dir, how, dng, family });
+                        continue;
+                    }
+                    (ImportMode::Move, _) => {
+                        let reason = "already inside the destination or the library: added where it is";
+                        plan.slots.push(Slot::Item(PreparedItem::Kept(Kept { path: path.clone(), reason: reason.into() })));
+                        path.clone()
+                    }
+                    _ => path.clone(),
+                };
+                if let Some(h) = &info.content_hash {
+                    self.by_hash.insert(h.clone(), None);
+                }
+                self.done.fetch_add(1, Relaxed);
+                plan.slots.push(Slot::Item(PreparedItem::Ready(Box::new(ReadyFile { path, stored, info, sidecar, placed: None }))));
             }
-            self.done.fetch_add(1, Relaxed);
-            plan.slots.push(Slot::Item(PreparedItem::Ready(Box::new(ReadyFile { path, stored, info, sidecar, placed: None }))));
         }
         self.run_plan(&mut plan, &mut out, cancel);
         out
