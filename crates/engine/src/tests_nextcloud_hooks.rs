@@ -400,7 +400,8 @@ fn stale_copy_is_used_when_the_server_is_down() {
     drop(fake);
     let (img, _) = load(&y, 512).unwrap();
     assert_eq!((img.width, img.height), (96, 64), "the copy on disk, though it may be out of date");
-    assert!(crate::memory::in_background(|| load(&y, 512)).is_err(), "background work doesn't wait for the server");
+    // (and the server isn't asked again for 30 s: background work uses the copy at once too)
+    assert!(crate::memory::in_background(|| load(&y, 512)).is_ok());
 }
 
 #[test]
@@ -577,4 +578,40 @@ fn all_metadata_reads_the_header_of_a_photo_not_here() {
     let before = fake.requests();
     assert!(tags(&mut s).contains("Canon"));
     assert_eq!(fake.requests(), before, "the copy on this computer");
+}
+
+/// R30/R33: while the server can't be reached nothing waits for it, after a restart too: a photo
+/// downloaded before opens from its copy (no request) and counts as there (edits render from the
+/// original, not the smart preview); one never downloaded fails at once. A corrupt etags file only
+/// loses the copies.
+#[test]
+fn offline_copies_open_at_once_after_a_restart() {
+    let (s, fake, d) = signed_in("offline-restart");
+    fake.add_file("/Photos/y.jpg", jpeg(96, 64, None));
+    fake.add_file("/Photos/z.jpg", jpeg(96, 64, None));
+    let (y, z) = (remote(&fake, "Photos/y.jpg"), remote(&fake, "Photos/z.jpg"));
+    (s.media.file_loader.clone().unwrap())(&y, 512).unwrap();
+    drop(s);
+    // a restart, and the server stops answering
+    let offline = || {
+        let s = session_for(&d, &fake.account(), FakeServer::PASSWORD);
+        s.remote.note_error(&fake.account().key(), &craft_nextcloud::Error::Unreachable("timed out".into()));
+        s
+    };
+    let s = offline();
+    let (load, before, t) = (s.media.file_loader.clone().unwrap(), fake.requests(), Instant::now());
+    let (img, _) = load(&y, 512).unwrap();
+    assert_eq!((img.width, img.height), (96, 64), "the copy on disk");
+    assert!(s.remote.exists(&y), "a photo with its original here is there");
+    let e = load(&z, 512).unwrap_err();
+    assert!(e.contains("Can't reach the Nextcloud server"), "{e}");
+    assert!(!s.remote.exists(&z));
+    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    assert_eq!(fake.requests(), before, "nothing asked the server");
+    // a corrupt etags file: the copy isn't found without the server (and nothing breaks)
+    std::fs::write(d.join("cache").join("etags.json"), b"{not json").unwrap();
+    let s = offline();
+    assert!((s.media.file_loader.clone().unwrap())(&y, 512).is_err());
+    assert!(!s.remote.exists(&y));
+    assert_eq!(fake.requests(), before);
 }

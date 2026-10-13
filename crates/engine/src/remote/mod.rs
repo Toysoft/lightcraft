@@ -291,6 +291,9 @@ pub struct Remote {
     held: Mutex<Option<(String, Hold, Option<Arc<AtomicBool>>)>>,
     /// The path last prefetched (or found on disk) and what cancels its prefetch ([`Remote::prefetch`]).
     prefetching: Mutex<Option<(String, Arc<AtomicBool>)>>,
+    /// The etag of each original on this computer, by path (as in the cache folder's `etags.json`,
+    /// loaded by [`Remote::configure`]): copies are found without asking the server, after a restart too.
+    copies: Mutex<HashMap<String, String>>,
     /// The last [`MAX_SIGN_INS`] sign-ins, oldest first. Kept across [`Remote::configure`]: they are
     /// this session's.
     sign_ins: Mutex<VecDeque<SignInOutcome>>,
@@ -320,6 +323,7 @@ impl Remote {
             loads_waiting: AtomicUsize::new(0),
             held: Mutex::default(),
             prefetching: Mutex::default(),
+            copies: Mutex::default(),
             sign_ins: Mutex::default(),
             events: Mutex::default(),
             imports: Mutex::default(),
@@ -346,9 +350,10 @@ impl Remote {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Use `config` from now on: reads its settings file and forgets clients, account states and what
-    /// it knew about remote files.
+    /// Use `config` from now on: reads its settings file and the etags of the originals in its cache
+    /// folder, and forgets clients, account states and what it knew about remote files.
     pub fn configure(&self, config: RemoteConfig) {
+        *self.copies.lock().unwrap_or_else(PoisonError::into_inner) = config.cache_dir.as_deref().map(originals::load_copies).unwrap_or_default();
         let mut settings: Settings = config
             .settings_file
             .as_deref()

@@ -82,6 +82,9 @@ the Info panel open doesn't.
   Above it, the least recently used originals are deleted, except offline copies (pinned) and the photo open in
   Develop (held).
 - **A file changed on the server** (new etag) is downloaded again when next needed; the old copy goes.
+- **`etags.json`** in the same folder remembers which version of each file a copy is, so copies are found while the
+  server can't be asked, after a restart too. A damaged or deleted one only means that copies are found once the
+  server answers again.
 - **Thumbnails** made from server previews go to the usual thumbnail disk cache, keyed by path and size (Nextcloud
   photos have no content hash).
 - **Accounts** are in `<settings folder>/nextcloud.json` (`{accounts: [{server, user, trust}], cacheBudgetMb}`); no
@@ -96,11 +99,16 @@ the Info panel open doesn't.
 ## When the server can't be reached
 
 - **One failed connection marks the account unreachable for 30 s.** Meanwhile background work (thumbnails, prefetch,
-  offline copies, metadata reads) gives up at once instead of each waiting for a timeout, and photos count as offline.
+  offline copies, metadata reads) gives up at once instead of each waiting for a timeout, and photos count as offline
+  unless their original is on this computer.
 - **Editing goes on:** an edited photo renders from its cached original, even an older version of it, or from its
   smart preview ("Original offline · editing the smart preview"). The grid keeps its cached thumbnails.
-- **Opening a photo in Develop** still asks the server (up to the 30 s stall limit when it doesn't answer at all), then
-  uses a copy on disk if there is one.
+- **Opening a photo in Develop** doesn't wait for it either: it opens the copy of the original on this computer
+  (downloaded or made available offline, before a restart too; it may be out of date), else says at once that the
+  server can't be reached. Only the request that found the server gone waits (up to the 10 s connect timeout, or the
+  30 s stall limit for a server that accepts but doesn't answer).
+- **A photo whose original is on this computer counts as there,** so it is edited from the original, not from its
+  smart preview.
 - **A photo deleted on the server** shows as missing. One that was **moved** shows as missing too: LightCraft doesn't
   follow it (see [Limits](#limits)).
 - **A revoked app password** (or a deleted device in Nextcloud's security settings) turns the account Signed Out:
@@ -149,6 +157,10 @@ Trust on first use, with no silent changes:
 - **Without the Memories app**, a photo's dimensions are unknown until its original is first downloaded (reading them
   needs nearly the whole file), so its grid tile may have the wrong shape until then. Camera, lens, exposure and
   capture time are read from the start of the file. With Memories, everything comes from the server's index.
+- **Offline, LightCraft can't tell whether a copy on disk is the latest version:** it is used as it is, and a newer
+  version is downloaded once the server answers again (a copy older than a version a listing showed this session isn't
+  used). An original downloaded by an older LightCraft (before `etags.json`) is found offline only after the server
+  has answered once.
 - **Labels in the Nextcloud dialogs and Settings tab are English only** so far.
 - One account per import; a login name that differs from the user id (e-mail or LDAP logins) isn't supported by the
   client.
@@ -225,8 +237,9 @@ lightcraft-cli run --library ~/lc-lib library.importNextcloud 'dirs=["nextcloud:
    smart preview as the fallback when the server is unreachable.
 7. **Folders are full paths.** `library.importNextcloud {dirs}` and `nextcloud.browse {dir}` take `nextcloud://` paths
    and the account comes from the path, so there is no separate `account` param to get out of step.
-8. **The cache is keyed by etag.** LightCraft remembers etags from listings and downloads; a background lookup with no
-   known etag costs one `stat` (skipped while the account is unreachable).
+8. **The cache is keyed by etag.** LightCraft remembers etags from listings and downloads, and each copy's in
+   `etags.json` (so copies are found offline); a lookup with no known etag costs one `stat` (skipped while the
+   account is unreachable).
 9. **One download at a time,** behind one lock, interactive loads first. Per-path downloads can come if measurements
    show a waiting loupe.
 10. **Local-only actions refuse.** Merge, Convert to DNG, Duplicate, Edit In, file renames and moves, folder

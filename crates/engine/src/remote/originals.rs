@@ -1,7 +1,8 @@
 //! Remote originals on this computer: the [`OriginalsCache`] (one per folder in the process), the
-//! etags and sizes listings and `stat`s told us, which files the server no longer has, and whether
-//! a remote photo counts as there ([`Remote::exists`]). Downloads (interactive, prefetched, made
-//! available offline) and what a finished one tells the catalog ([`complete`]).
+//! etags and sizes listings and `stat`s told us, the etag of each copy downloaded (kept in the cache
+//! folder, so copies are found while the server can't be asked), which files the server no longer
+//! has, and whether a remote photo counts as there ([`Remote::exists`]). Downloads (interactive,
+//! prefetched, made available offline) and what a finished one tells the catalog ([`complete`]).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -28,6 +29,17 @@ pub(crate) const MIN_CACHE_BUDGET_MB: u64 = 1000;
 /// `mb` (at least [`MIN_CACHE_BUDGET_MB`]) in bytes.
 pub(crate) fn budget_bytes(mb: u64) -> u64 {
     mb.max(MIN_CACHE_BUDGET_MB).saturating_mul(1_000_000)
+}
+
+/// In the cache folder: the etag of each original downloaded, by path ([`Remote::note_copy`]).
+const ETAGS: &str = "etags.json";
+/// Largest [`ETAGS`] file read; a bigger one is ignored.
+const MAX_ETAGS: usize = 16 << 20;
+
+/// The etags of the originals in cache folder `dir` ([`ETAGS`]). Hostile input: a missing, corrupt or
+/// oversized file means none.
+pub(super) fn load_copies(dir: &Path) -> HashMap<String, String> {
+    crate::denoise::read_capped(&dir.join(ETAGS), MAX_ETAGS).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
 /// Why the originals cache can't be used: another process has it ([`open_cache`]).
@@ -98,8 +110,10 @@ impl Remote {
 
     /// A local copy of the original at `path`: a cached one, else (interactive work only, see
     /// [`crate::memory::may_download`]) downloaded, one at a time, with a cancellable `download`
-    /// activity row (cancelled too by the [`crate::memory::cancellable`] flag of the work asking). Background work gets [`NOT_DOWNLOADED`] instead. While the server doesn't answer, an
-    /// interactive load gets the newest copy on disk (it may be out of date).
+    /// activity row (cancelled too by the [`crate::memory::cancellable`] flag of the work asking).
+    /// Background work gets [`NOT_DOWNLOADED`] instead. While the server doesn't answer (since a
+    /// moment ago), nothing waits for it: the copy on disk, which may be out of date, else the offline
+    /// error at once.
     pub fn local_original(&self, path: &str) -> Result<PathBuf, String> {
         self.original(path, Want::Load)
     }
@@ -118,10 +132,11 @@ impl Remote {
         if let Some((etag, _)) = &known
             && let Some(local) = cache.cached(&rp, etag)
         {
+            self.note_copy(&rp, etag);
             return Ok(local);
         }
-        if !matches!(want, Want::Load) && state == AccountState::Unreachable {
-            return Err(offline());
+        if state == AccountState::Unreachable {
+            return self.cached_copy(&rp).ok_or_else(offline);
         }
         let cancel = match want {
             // (a render that moved on to another photo stops its download)
@@ -140,6 +155,7 @@ impl Remote {
             match self.stat(&client, &rp) {
                 Ok(entry) => {
                     if let Some(local) = cache.cached(&rp, &entry.etag) {
+                        self.note_copy(&rp, &entry.etag);
                         return Ok(local);
                     }
                     size = Some(entry.size);
@@ -149,8 +165,12 @@ impl Remote {
                 Err(e) => return Err(e.to_string()),
             }
         }
+        // (that `stat`, or another request meanwhile, found the server not answering: not asked again)
+        if self.lock().state(&key) == AccountState::Unreachable {
+            return self.cached_copy(&rp).ok_or_else(offline);
+        }
         if !may_download {
-            return Err(if state == AccountState::Unreachable { offline() } else { NOT_DOWNLOADED.into() });
+            return Err(NOT_DOWNLOADED.into());
         }
         // (the lock goes once the bytes are here; the row once the copy is described too)
         let (fetched, downloaded, _task) = {
@@ -184,6 +204,13 @@ impl Remote {
         };
         match fetched {
             Ok(fetched) => {
+                // (the copy's etag, when it is the one last seen: kept for when the server can't be asked)
+                let etag = self.lock().known.get(&rp).map(|(etag, _)| etag.clone());
+                if let Some(etag) = etag
+                    && cache.cached(&rp, &etag).is_some_and(|p| p == fetched.path)
+                {
+                    self.note_copy(&rp, &etag);
+                }
                 if downloaded {
                     // (the next download needn't wait for this)
                     let info = describe_copy(&cache, &rp, &fetched.path, want).map_err(|e| log::warn!("Nextcloud: {path}: {e}")).ok();
@@ -230,10 +257,28 @@ impl Remote {
         }
     }
 
-    /// The copy of `path` on this computer at the etag last seen; no request.
+    /// The copy of `path` on this computer: at the etag last seen, else (none seen yet) at the one it
+    /// was downloaded at, which may be out of date; no request.
     fn cached_copy(&self, path: &RemotePath) -> Option<PathBuf> {
-        let etag = self.lock().known.get(path)?.0.clone();
+        let known = self.lock().known.get(path).map(|(etag, _)| etag.clone());
+        let etag = known.or_else(|| self.copies.lock().unwrap_or_else(PoisonError::into_inner).get(&path.to_string()).cloned())?;
         self.cache().ok()?.cached(path, &etag)
+    }
+
+    /// Remember that the copy of `path` on this computer is at `etag`, in the cache folder's [`ETAGS`]
+    /// too (rewritten when it changes), so it is found without the server, after a restart too.
+    fn note_copy(&self, path: &RemotePath, etag: &str) {
+        let Some(dir) = self.lock().config.cache_dir.clone() else { return };
+        let mut copies = self.copies.lock().unwrap_or_else(PoisonError::into_inner);
+        if copies.get(&path.to_string()).is_some_and(|e| e == etag) {
+            return;
+        }
+        copies.insert(path.to_string(), etag.to_string());
+        // ponytail: one entry per original ever downloaded, rewritten whole; drop evicted copies' entries if it grows big
+        let written = serde_json::to_vec(&*copies).map_err(|e| e.to_string()).and_then(|b| crate::denoise::write_atomic(&dir.join(ETAGS), &b));
+        if let Err(e) = written {
+            log::warn!("Nextcloud download cache: {e}");
+        }
     }
 
     /// Whether the original of `path` is on this computer ([`Remote::cached_copy`]); no request.
@@ -345,8 +390,9 @@ impl Remote {
     }
 
     /// Whether the photo at `path` counts as there: its account is on this computer and signed in, its
-    /// server answered in the last 30 s (asked again with a `stat` of the root otherwise), the server
-    /// didn't say the file is gone, and a listing of its folder this session (if any) has it.
+    /// server answered in the last 30 s (asked again with a `stat` of the root otherwise) or, while it
+    /// doesn't answer, its original is on this computer, the server didn't say the file is gone, and a
+    /// listing of its folder this session (if any) has it.
     pub fn exists(&self, path: &str) -> bool {
         let Ok(rp) = RemotePath::parse(path) else { return false };
         let key = rp.account_key();
@@ -359,10 +405,13 @@ impl Remote {
             }
             match inner.states.get(&key) {
                 Some((AccountState::SignedIn, at)) if at.elapsed() < REACHABLE_FOR => return true,
+                _ if inner.state(&key) == AccountState::Unreachable => None,
                 _ if inner.state(&key) != AccountState::SignedIn => return false,
-                _ => account.root(),
+                _ => Some(account.root()),
             }
         };
+        // (offline editing goes on with the original, not the smart preview)
+        let Some(root) = root else { return self.has_local_copy(path) };
         let Ok(client) = self.client(&key) else { return false };
         match client.stat(&root) {
             Ok(_) => {
@@ -371,7 +420,8 @@ impl Remote {
             }
             Err(e) => {
                 self.note_error(&key, &e);
-                false
+                let unreachable = self.lock().state(&key) == AccountState::Unreachable;
+                unreachable && self.has_local_copy(path)
             }
         }
     }
