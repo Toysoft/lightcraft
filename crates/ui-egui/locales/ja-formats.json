@@ -247,5 +247,8 @@
   "{n} photos opened for editing; each is stacked with its original": "{n}枚の写真を編集用に開きました。それぞれ元の写真とスタックされています",
   "{name} opened in the other editor": "{name}を別のエディタで開きました",
   "{n} originals opened in the other editor": "{n}個の元ファイルを別のエディタで開きました",
-  "· {in_source} identical copies": "・同一のコピー {in_source} 件"
+  "· {in_source} identical copies": "・同一のコピー {in_source} 件",
+  "LightCraft {latest} is available.": "LightCraft {latest} が利用できます。",
+  "You have version {}.": "現在のバージョンは {} です。",
+  "LightCraft {} is the latest version.": "LightCraft {} は最新バージョンです。"
 }

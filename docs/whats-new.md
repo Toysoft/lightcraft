@@ -2,6 +2,14 @@
 
 ## 2026-10-13
 
+### Check for Updates
+- Help ▸ Check for Updates… asks GitHub for the latest LightCraft release (issue #1553). When it is newer than the
+  version you run, a dialog says so; **Download** opens its release page in your browser, **Later** closes it.
+  Otherwise a message says you have the latest version, or why the check couldn't be made.
+- Only when you choose it: nothing is checked at startup, no photo or library data is sent, and nothing is downloaded
+  or installed. The check shows in the activity stack while it runs.
+- Agents: `app.checkForUpdates` starts the check, `app.updateStatus` reports `{current, checking, last}`.
+
 ### Slider drags on large raws
 - Dragging a slider no longer re-renders the edited photo's filmstrip thumbnail on every frame; it follows once you
   let go. On a 64 MP raw the first of those renders decoded the whole file again, which held up the loupe's

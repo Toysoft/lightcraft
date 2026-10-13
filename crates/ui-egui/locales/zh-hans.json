@@ -1997,5 +1997,11 @@
   "Adding to Apple Photos": "正在添加到 Apple 照片",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "未找到图形处理器：LightCraft 改用 CPU 渲染，速度会慢很多。详情见“帮助 → 系统信息”。",
   "On NixOS, start it from `nix develop`.": "在 NixOS 上，请从 `nix develop` 启动。",
-  "Files with the same content as another file in this import: only the first is imported.": "与本次导入中另一个文件内容相同的文件：只导入第一个。"
+  "Files with the same content as another file in this import: only the first is imported.": "与本次导入中另一个文件内容相同的文件：只导入第一个。",
+  "Check for Updates…": "检查更新…",
+  "Update Available": "有可用更新",
+  "Later": "稍后",
+  "Checking for updates": "正在检查更新",
+  "Update Status": "更新状态",
+  "Download opens the release page in your browser; your library and edits stay as they are.": "“下载”会在浏览器中打开发布页面；您的图库和编辑内容保持不变。"
 }

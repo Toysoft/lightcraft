@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (LR-MERGE-HDR: merges of raws without colour matrices keep their colour (#965); rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (MENU-APP-UPDATES: Help ▸ Check for Updates… (#1553); LR-MERGE-HDR: merges of raws without colour matrices keep their colour (#965); rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -36,7 +36,7 @@ cited here still exists. Formerly docs/parity.md.
 | H. Crop & rotate (CROP) | 9 | 0 | 0 | 1 | 6/6 (100%) | 3/3 (100%) |
 | I. Remove / healing (REM) | 8 | 1 | 2 | 2 | 4/4 (100%) | 2/3 (67%) |
 | J. Red eye (EYE) | 2 | 0 | 0 | 0 | — | 1/1 (100%) |
-| K. Masking (MASK) | 13 | 5 | 5 | 0 | 7/8 (88%) | 5/5 (100%) |
+| K. Masking (MASK) | 14 | 5 | 5 | 0 | 7/8 (88%) | 6/6 (100%) |
 | L. Presets (PRE) | 6 | 0 | 1 | 1 | 2/2 (100%) | 2/2 (100%) |
 | M. Versions & history (VER) | 5 | 0 | 0 | 0 | 1/1 (100%) | 3/3 (100%) |
 | N. Copy / paste / sync (SYNC) | 5 | 0 | 0 | 0 | 3/3 (100%) | 1/1 (100%) |
@@ -50,12 +50,12 @@ cited here still exists. Formerly docs/parity.md.
 | V. Preferences (PREF) | 6 | 2 | 2 | 2 | 1/1 (100%) | 4/5 (80%) |
 | W. Cloud & AI infrastructure (CLOUD / AI) | 1 | 0 | 1 | 2 | — | — |
 | X. Cross-cutting behaviours (BEHAV) | 23 | 6 | 1 | 1 | 8/8 (100%) | 7/10 (70%) |
-| Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
+| Y. Menus | 85 | 0 | 3 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 76 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
 | Lightroom Classic extras | 34 | 16 | 35 | 8 | — | 24/26 (92%) |
-| **Total** | 408 | 52 | 72 | 35 | 193/201 (96%) | 145/157 (92%) |
+| **Total** | 410 | 52 | 71 | 35 | 193/201 (96%) | 146/158 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.6%** of 532 in-scope rows — P0 98.0% of 201 · P1 95.2% of 157 · P2 50.0% of 173.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.8%** of 533 in-scope rows — P0 98.0% of 201 · P1 95.3% of 158 · P2 50.6% of 173.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -492,7 +492,7 @@ visible menu bar yet: the menu model is only exposed through the control channel
 | MENU-BAR | Menu bar rendering | P1 | ✅ | `crates/ui-egui/src/menubar.rs`, `apps/lightcraft/src/native_menu.rs` | native macOS menu bar (muda) with live labels/enabled/checked; in-window menus on web/Windows/Linux (with one menu open, the pointer on another title switches to it, as in native menu bars); ⌫ and X stay egui-handled (contextual), so they show no key in the native menu; a scrolled menu draws no scrollbar over its rows: the ▲ / ▼ strips, the wheel and dragging scroll it (issue #691: egui's floating bar hid the shortcut text's last character; `crates/ui-egui/src/tests_menubar.rs`) |
 | MENU-APP-ABOUT | About | P2 | ✅ | `cmd:app.about` | |
 | MENU-APP-SETTINGS | Settings… | P0 | ✅ | `cmd:app.settings` | app menu on macOS, Edit menu elsewhere |
-| MENU-APP-UPDATES | Check for updates | P2 | ⬜ | | |
+| MENU-APP-UPDATES | Check for updates | P2 | ✅ | `cmd:app.checkForUpdates`, `cmd:app.updateStatus`, `crates/engine/src/cmd/updates.rs` | Help ▸ Check for Updates…, on demand only: asks GitHub for the latest release in the background, offers a newer one (Download opens its release page) or says the version is the latest (#1553); no automatic check, no download or install |
 | MENU-APP-SYNC | Sync status / pause | OOS | 🚫 | | |
 | MENU-APP-SIGNOUT | Sign out | OOS | 🚫 | | |
 | MENU-APP-HIDE | Hide / hide others / show all | P1 | ✅ | `apps/lightcraft/src/native_menu.rs` | the system's own items in the app menu (⌘H, ⌥⌘H) |
@@ -789,6 +789,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | MENU-APP-UPDATES: Help ▸ Check for Updates… asks GitHub for the latest release on demand and offers a newer one's page (#1553); ⬜ → ✅ |
 | 2026-10-11 | minor | LR-MERGE-HDR: HDR and panorama merges of raws without colour matrices (CR2, NEF, ARW…) write the colour they open with as DNG tags (issue #965); status unchanged |
 | 2026-10-12 | minor | LR-META-XMP: Read Metadata from File no longer auto-writes the sidecar it has just read, which added `lc:settings` and hid another app's later `crs:` edits (#934); status unchanged (✅) |
 | 2026-10-12 | patch | LR-IMP-CAMERA-COVERAGE: CR2 white level from the active area, not the saturated masked rows above it (issue #1272); status unchanged (🟡) |
