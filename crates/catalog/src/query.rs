@@ -1,5 +1,7 @@
 //! Filtering, search and sorting.
 
+use std::cmp::Ordering::Equal;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{AlbumId, Catalog, ColorLabel, Flag, MediaKind, Photo, PhotoId};
@@ -475,6 +477,11 @@ impl Filter {
     }
 }
 
+/// Case-insensitive file name order without allocating (compares per-character lowercase via `char::to_lowercase`).
+pub fn cmp_name(a: &str, b: &str) -> std::cmp::Ordering {
+    a.chars().flat_map(char::to_lowercase).cmp(b.chars().flat_map(char::to_lowercase))
+}
+
 impl Catalog {
     /// [`Catalog::query`] with `ctx` answering the rules and filters about photo contents (installed for this thread,
     /// where it stays for the album counts and smart albums asked after).
@@ -483,7 +490,7 @@ impl Catalog {
         self.query(filter, sort)
     }
 
-    /// Photos matching `filter`, in `sort` order (ties broken by id for stability).
+    /// Photos matching `filter`, in `sort` order (ties broken by file name, then id).
     pub fn query(&self, filter: &Filter, sort: &Sort) -> Vec<PhotoId> {
         let root = filter.library_root();
         let ranked = filter.ranked.as_ref().map(Ranked::scores);
@@ -494,7 +501,7 @@ impl Catalog {
                 SortKey::CaptureDate => a.captured.cmp(&b.captured).then_with(|| a.imported.cmp(&b.imported)),
                 SortKey::ImportDate => a.imported.cmp(&b.imported),
                 SortKey::EditDate => a.edited.cmp(&b.edited),
-                SortKey::FileName => a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()),
+                SortKey::FileName => cmp_name(&a.file_name, &b.file_name),
                 SortKey::Rating => a.rating.cmp(&b.rating),
                 SortKey::FileSize => a.file_size.cmp(&b.file_size),
                 SortKey::Random => shuffle_rank(sort.seed, a.id).cmp(&shuffle_rank(sort.seed, b.id)),
@@ -502,6 +509,10 @@ impl Catalog {
                 SortKey::Relevance if ranked.is_some() => score(a).total_cmp(&score(b)).then_with(|| a.captured.cmp(&b.captured)),
                 SortKey::Relevance => a.captured.cmp(&b.captured).then_with(|| a.imported.cmp(&b.imported)),
             }
+            // Ties (one import batch, a burst within a second, equal ratings) sort by file name, the
+            // order cameras number frames, so the order doesn't depend on how ids were allocated;
+            // the id only keeps it stable.
+            .then_with(|| if sort.key == SortKey::FileName { Equal } else { cmp_name(&a.file_name, &b.file_name) })
             .then(a.id.cmp(&b.id));
             if sort.ascending { o } else { o.reverse() }
         });
