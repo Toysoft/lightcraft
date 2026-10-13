@@ -549,7 +549,7 @@ pub struct ScanInput {
     probe: Option<crate::media::FileProbe>,
     skip: Option<PathBuf>,
     /// path → (photo, its summary) for files already in the library.
-    by_path: HashMap<PathBuf, (PhotoId, ImportCandidate)>,
+    by_path: HashMap<PathBuf, (PhotoId, ImportCandidate, Option<String>)>,
     by_hash: HashMap<String, PhotoId>,
     cache: HashMap<String, ProbeInfo>,
 }
@@ -585,13 +585,16 @@ impl ScanInput {
                     height: p.height,
                     file_size: p.file_size,
                     captured: p.captured.clone(),
-                    duplicate: Some("path".into()),
+                    duplicate: (!p.local).then(|| "path".into()),
                     existing: Some(p.id.0),
                     ..Default::default()
                 };
-                by_path.insert(PathBuf::from(path), (p.id, c));
+                by_path.insert(PathBuf::from(path), (p.id, c, p.content_hash.clone()));
             }
-            if let Some(h) = &p.content_hash {
+            // Browsing another copy does not add its content to My Photos.
+            if !p.local
+                && let Some(h) = &p.content_hash
+            {
                 by_hash.insert(h.clone(), p.id);
             }
         }
@@ -637,9 +640,22 @@ pub fn scan_with(mut input: ScanInput, paths: &[String], progress: &ScanProgress
     let mut out = Vec::with_capacity(files.len());
     let mut kept = HashMap::new();
     for f in files {
-        if let Some((_, c)) = input.by_path.get(Path::new(&f)) {
+        if let Some((id, c, hash)) = input.by_path.get(Path::new(&f)) {
             let mut c = c.clone();
             c.name = Path::new(&f).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| f.clone());
+            if c.duplicate.is_none()
+                && let Some(h) = hash
+            {
+                match seen_hash.get(h) {
+                    Some(existing) => {
+                        c.duplicate = Some("content".into());
+                        c.existing = *existing;
+                    }
+                    None => {
+                        seen_hash.insert(h.clone(), Some(id.0));
+                    }
+                }
+            }
             out.push(c);
             continue;
         }
@@ -701,8 +717,8 @@ pub struct ImportJob {
     mode: ImportMode,
     lib_dir: Option<PathBuf>,
     copy_root: Option<PathBuf>,
-    /// path → (photo, a Local browse record?)
-    by_path: HashMap<String, (PhotoId, bool)>,
+    /// path → (photo, a Local browse record?, content hash)
+    by_path: HashMap<String, (PhotoId, bool, Option<String>)>,
     /// content hash → the photo that has it (`None`: a file earlier in this import)
     by_hash: HashMap<String, Option<PhotoId>>,
     probe: Option<crate::media::FileProbe>,
@@ -850,9 +866,11 @@ impl ImportJob {
                 continue;
             }
             if let Source::File { path } = &p.source {
-                by_path.insert(path.clone(), (p.id, p.local));
+                by_path.insert(path.clone(), (p.id, p.local, p.content_hash.clone()));
             }
-            if let Some(h) = &p.content_hash {
+            if !p.local
+                && let Some(h) = &p.content_hash
+            {
                 by_hash.insert(h.clone(), Some(p.id));
             }
         }
@@ -906,14 +924,26 @@ impl ImportJob {
         let mut out = Prepared { scanned: files.len(), items: Vec::new() };
         let mut todo = Vec::new();
         for f in files {
-            match self.by_path.get(f.as_str()).copied() {
-                Some((id, true)) if !opts.local => {
+            match self.by_path.get(f.as_str()).cloned() {
+                Some((id, true, hash)) if !opts.local => {
+                    // A library match takes precedence over promoting a browsed copy. Newly
+                    // promoted content counts immediately, including across worker batches.
+                    if let Some(h) = &hash
+                        && let Some(existing) = self.by_hash.get(h)
+                    {
+                        out.items.push(PreparedItem::Duplicate { path: f, existing: *existing, reason: "content", hash });
+                        self.done.fetch_add(1, Relaxed);
+                        continue;
+                    }
+                    if let Some(h) = &hash {
+                        self.by_hash.insert(h.clone(), Some(id));
+                    }
                     // a file that was only browsed (Local) joins the library when it is imported for real
-                    self.by_path.insert(f, (id, false));
+                    self.by_path.insert(f, (id, false, hash));
                     out.items.push(PreparedItem::Promote(id));
                     self.done.fetch_add(1, Relaxed);
                 }
-                Some((id, _)) => {
+                Some((id, _, _)) => {
                     out.items.push(PreparedItem::Duplicate { path: f, existing: Some(id), reason: "path", hash: None });
                     self.done.fetch_add(1, Relaxed);
                 }
@@ -1289,7 +1319,10 @@ pub fn commit_prepared(s: &mut Session, opts: &ImportOptions, now: &str, prepare
             PreparedItem::Duplicate { path, existing, reason, hash } => {
                 let existing = existing.or_else(|| {
                     let h = hash?;
-                    new_hash.get(&h).copied().or_else(|| s.catalog.photos().find(|p| p.content_hash.as_deref() == Some(h.as_str())).map(|p| p.id))
+                    new_hash
+                        .get(&h)
+                        .copied()
+                        .or_else(|| s.catalog.photos().find(|p| !p.local && p.content_hash.as_deref() == Some(h.as_str())).map(|p| p.id))
                 });
                 let trashed = existing.filter(|id| s.catalog.photo(*id).is_some_and(|p| p.deleted));
                 match trashed {
