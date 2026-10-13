@@ -140,9 +140,14 @@ impl<'a> Ctx<'a> {
         }
         entries.sort_by_key(|e| e.tag);
         entries.dedup_by_key(|e| e.tag);
-        let next_pos = table + (n as usize).saturating_mul(entry_size);
-        let next = if n as usize == n_read {
-            match self.read_off(next_pos) {
+        // The next-IFD offset sits after the *advertised* table, so only
+        // locate it when the whole table was actually read. Computing the
+        // position from a truncated, file-controlled count can overflow:
+        // a huge BigTIFF count saturates the multiplication, and the
+        // following addition then panics in overflow-checked builds.
+        let next = if usize::try_from(n).ok() == Some(n_read) {
+            let next_pos = n_read.checked_mul(entry_size).and_then(|span| table.checked_add(span));
+            match next_pos.and_then(|pos| self.read_off(pos)) {
                 Some(0) | None => 0,
                 Some(v) => base.checked_add(v).unwrap_or(0),
             }

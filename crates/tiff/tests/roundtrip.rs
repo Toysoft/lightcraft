@@ -246,6 +246,39 @@ fn ifd_loops_are_detected() {
 }
 
 #[test]
+fn bigtiff_huge_truncated_entry_count_does_not_panic() {
+    // Regression test for the BigTIFF next-IFD overflow: an IFD that
+    // advertises an enormous entry count but holds only one readable
+    // entry used to compute `table + count.saturating_mul(entry_size)`
+    // before noticing the table was truncated, overflowing `usize`
+    // (a panic in overflow-checked builds).
+    for order in ORDERS {
+        let mut b = Vec::new();
+        // BigTIFF header: magic 43, offset size 8, first IFD at 16.
+        match order {
+            ByteOrder::Little => b.extend_from_slice(b"II"),
+            ByteOrder::Big => b.extend_from_slice(b"MM"),
+        }
+        order.put_u16(&mut b, 43);
+        order.put_u16(&mut b, 8);
+        order.put_u16(&mut b, 0);
+        order.put_u64(&mut b, 16);
+        // IFD at 16: advertised count is huge, then a single real entry
+        // (ImageWidth = 42, inline) and nothing else — no next-IFD field.
+        order.put_u64(&mut b, u64::MAX);
+        order.put_u16(&mut b, tags::IMAGE_WIDTH);
+        order.put_u16(&mut b, 4); // Long
+        order.put_u64(&mut b, 1);
+        // Inline value field (8 bytes): the value is left-justified.
+        order.put_u32(&mut b, 42);
+        b.extend_from_slice(&[0; 4]);
+        let t = Tiff::parse(&b).unwrap();
+        assert_eq!(t.ifds.len(), 1);
+        assert_eq!(t.ifds[0].u32(tags::IMAGE_WIDTH), Some(42));
+    }
+}
+
+#[test]
 fn out_of_range_entries_are_skipped() {
     let mut ifd = IfdBuilder::new();
     ifd.set(1, Value::Long(vec![1, 2, 3]));
