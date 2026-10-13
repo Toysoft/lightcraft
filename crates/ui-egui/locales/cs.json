@@ -2003,6 +2003,8 @@
   "A folder is already being located": "Už se hledá jiná složka",
   "A question about locating a folder is waiting for its answer": "Otázka k vyhledání složky čeká na odpověď",
   "Locating the folder failed": "Hledání složky selhalo",
+  "Update Folder Location": "Aktualizovat umístění složky",
+  "Choose the folder in the dialog that is already open": "Vyberte složku v již otevřeném dialogu",
   "Locate Anyway": "Přesto použít",
   "Locate the folder there anyway?": "Přesto použít složku v tomto umístění?",
   "The other photos stay missing there; Synchronize Folder can find them again or remove them from the library. No file is touched.": "Ostatní fotografie tam budou dál chybět; „Synchronizovat složku“ je může znovu najít nebo odebrat z knihovny. Souborů se nedotkne.",

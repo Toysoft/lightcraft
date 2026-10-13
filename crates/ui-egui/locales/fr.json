@@ -2206,6 +2206,8 @@
   "A folder is already being located": "Un dossier est déjà en cours de localisation",
   "A question about locating a folder is waiting for its answer": "Une question sur la localisation d’un dossier attend sa réponse",
   "Locating the folder failed": "La localisation du dossier a échoué",
+  "Update Folder Location": "Mettre à jour l'emplacement du dossier",
+  "Choose the folder in the dialog that is already open": "Choisissez le dossier dans la boîte de dialogue déjà ouverte",
   "Locate Anyway": "Localiser quand même",
   "Locate the folder there anyway?": "Localiser quand même le dossier à cet endroit ?",
   "The other photos stay missing there; Synchronize Folder can find them again or remove them from the library. No file is touched.": "Les autres photos y resteront manquantes ; Synchroniser le dossier peut les retrouver ou les retirer de la bibliothèque. Aucun fichier n'est touché.",

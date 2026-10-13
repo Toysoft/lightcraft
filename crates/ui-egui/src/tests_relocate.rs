@@ -543,3 +543,18 @@ fn an_agents_confirm_that_is_refused_leaves_the_dialog_to_choose_again() {
         h.app.ui.dialog
     );
 }
+
+/// Locating a folder: in the nine languages LightCraft had when this was written, none of the words stay
+/// English. (A string with no entry in a language's catalog is shown as written, so nothing else fails when
+/// one is forgotten. A language added later is not asked for them here: it shows them in English until it
+/// is translated.)
+#[test]
+fn the_words_of_locating_a_folder_are_in_every_language() {
+    let words = ["Update Folder Location", "Choose the folder in the dialog that is already open"];
+    use crate::i18n::Locale::{De, Es, Fr, Ja, PtBr, Ru, Uk, ZhHans, ZhHant};
+    for language in [De, Es, Fr, Ja, PtBr, Ru, Uk, ZhHans, ZhHant] {
+        for word in words {
+            assert_ne!(language.tr(word), word, "{language:?} has no entry for {word:?}");
+        }
+    }
+}

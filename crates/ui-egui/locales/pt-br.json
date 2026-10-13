@@ -2009,6 +2009,8 @@
   "A folder is already being located": "Uma pasta já está sendo localizada",
   "A question about locating a folder is waiting for its answer": "Uma pergunta sobre a localização de uma pasta aguarda resposta",
   "Locating the folder failed": "Não foi possível localizar a pasta",
+  "Update Folder Location": "Atualizar local da pasta",
+  "Choose the folder in the dialog that is already open": "Escolha a pasta na caixa de diálogo que já está aberta",
   "Locate Anyway": "Localizar mesmo assim",
   "Locate the folder there anyway?": "Localizar a pasta ali mesmo assim?",
   "The other photos stay missing there; Synchronize Folder can find them again or remove them from the library. No file is touched.": "As outras fotos continuam ausentes ali; Sincronizar pasta pode encontrá-las de novo ou removê-las da biblioteca. Nenhum arquivo é tocado.",

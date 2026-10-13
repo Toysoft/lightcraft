@@ -2208,6 +2208,8 @@
   "A folder is already being located": "すでにフォルダを確認しています",
   "A question about locating a folder is waiting for its answer": "フォルダーの場所に関する質問が回答を待っています",
   "Locating the folder failed": "フォルダの確認に失敗しました",
+  "Update Folder Location": "フォルダの場所を更新",
+  "Choose the folder in the dialog that is already open": "すでに開いているダイアログでフォルダを選択してください",
   "Locate Anyway": "このまま指定",
   "Locate the folder there anyway?": "このままその場所をフォルダとして指定しますか？",
   "The other photos stay missing there; Synchronize Folder can find them again or remove them from the library. No file is touched.": "残りの写真はその場所で見つからないままになります。「フォルダを同期」で探し直すか、ライブラリから除去できます。ファイルには触れません。",

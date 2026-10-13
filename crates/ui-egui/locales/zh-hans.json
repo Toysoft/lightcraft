@@ -2047,6 +2047,8 @@
   "A folder is already being located": "已在定位一个文件夹",
   "A question about locating a folder is waiting for its answer": "有一个关于定位文件夹的问题正在等待回答",
   "Locating the folder failed": "定位文件夹失败",
+  "Update Folder Location": "更新文件夹位置",
+  "Choose the folder in the dialog that is already open": "请在已打开的对话框中选择文件夹",
   "Locate Anyway": "仍然定位",
   "Locate the folder there anyway?": "仍然将文件夹定位到那里吗？",
   "The other photos stay missing there; Synchronize Folder can find them again or remove them from the library. No file is touched.": "其余照片在那里仍为缺失；“同步文件夹”可以重新找到它们或将它们从图库中移除。不会改动任何文件。",

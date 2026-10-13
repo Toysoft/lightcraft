@@ -2206,6 +2206,8 @@
   "A folder is already being located": "Теку вже шукають",
   "A question about locating a folder is waiting for its answer": "Питання про розташування теки очікує відповіді",
   "Locating the folder failed": "Не вдалося знайти теку",
+  "Update Folder Location": "Оновити розташування теки",
+  "Choose the folder in the dialog that is already open": "Виберіть теку в уже відкритому діалоговому вікні",
   "Locate Anyway": "Усе одно вказати",
   "Locate the folder there anyway?": "Усе одно вказати теку там?",
   "The other photos stay missing there; Synchronize Folder can find them again or remove them from the library. No file is touched.": "Інші фото залишаться там відсутніми; «Синхронізувати теку» може знайти їх знову або вилучити з бібліотеки. Файли не зачіпаються.",
