@@ -51,6 +51,8 @@ rustls-rustcrypto = "0.0.2-alpha"
 sam = ["dep:lightcraft-segment"]
 denoise = ["dep:lightcraft-denoise", "lightcraft-denoise/runtime", "lightcraft-gpu/denoise"]
 rawnind-model = ["denoise", "lightcraft-denoise/rawnind-model", "lightcraft-denoise-core/rawnind-model"]
+# Nextcloud app passwords in the OS keyring (`Session::with_default_nextcloud`); the desktop app and CLI turn it on.
+keyring = ["craft-nextcloud/keyring"]
 
 [dev-dependencies]
 # HDR JPEG XL tests read the file's colour encoding

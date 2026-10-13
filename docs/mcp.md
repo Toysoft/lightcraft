@@ -261,11 +261,33 @@ lightcraft-cli controls [--json]   # develop control ids and ranges
 lightcraft-cli calibrate --max 300 ~/Pictures/2026   # camera colour profiles (docs/camera-preview-colour.md)
 ```
 
+## Nextcloud
+
+Photos on a Nextcloud server ([nextcloud.md](nextcloud.md)) work in both modes. Headless, the server keeps accounts in
+the settings folder and app passwords in the OS keyring, shared with the desktop app, so an account signed in there is
+ready here. Adding one is a browser approval the agent can't do itself:
+
+1. `cmd_nextcloud_addAccount {server}` → `{state: "needsTrust", fingerprint}` for a certificate the OS doesn't trust:
+   show the fingerprint to the user, and once they confirm it call again with `trust: fingerprint`.
+2. The reply is `{state: "waiting", loginUrl, task}`: give the user `loginUrl` to open and approve.
+3. Poll `cmd_nextcloud_preferences` until `signIns[]` with that `task` leaves `waiting` (`signedIn` with `account`, or
+   `failed` / `cancelled` / `timedOut` with `error`).
+
+Pass `wait: false` (the default): `wait: true` blocks the session until the user approves (up to 20 minutes) and its
+reply comes too late to show the URL. Without an OS keyring (a headless Linux box with no Secret Service) the sign-in
+ends `failed`, saying the password can't be stored.
+
+Then `cmd_nextcloud_browse {dir}` lists folders one level at a time, from the account's `root` in
+`cmd_nextcloud_preferences`; `cmd_library_importNextcloud {dirs: [...], wait: true}` imports without downloading;
+and the usual helpers (`set_develop`, `render_photo`, `export`) work on the imported photos, downloading each original
+the first time it is needed (a `download` activity row).
+
 ## Tests
 
 - `crates/mcp/tests/e2e.rs` — M0.9 acceptance: over the stdio framing, set exposure and render;
   checks the decoded PNG gets brighter/darker. Runs headless and through the TCP transport
-  (`Remote`) against a stand-in control server; also import → render → JPEG export of a real file.
+  (`Remote`) against a stand-in control server; also import → render → JPEG export of a real file, and
+  Nextcloud sign-in → import → edit → render → export against a fake server (`nextcloud_add_import_render_export`).
 - `apps/lightcraft-cli/tests/cli.rs` — spawns `lightcraft-cli mcp` with real pipes; `render`;
   `commands`.
 

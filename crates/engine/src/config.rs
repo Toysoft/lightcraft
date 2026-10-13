@@ -110,14 +110,24 @@ impl Session {
         self
     }
 
-    /// Keep Nextcloud accounts in `<config>/nextcloud.json` and downloaded originals in `<cache>/nextcloud`.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Keep Nextcloud accounts in `<config>/nextcloud.json`, downloaded originals in `<cache>/nextcloud`
+    /// and app passwords in the OS keyring (feature `keyring`; without it accounts can't be added).
+    /// Hosts only: tests configure `remote::MemoryCredentials` and never reach the real keyring. A no-op in
+    /// the web build, which has no Nextcloud.
     pub fn with_default_nextcloud(self) -> Self {
-        self.remote.configure(crate::remote::RemoteConfig {
-            settings_file: config_dir().map(|d| d.join("nextcloud.json")),
-            cache_dir: cache_dir().map(|d| d.join("nextcloud")),
-            credentials: None,
-        });
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            #[cfg(feature = "keyring")]
+            let credentials: Option<std::sync::Arc<dyn crate::remote::CredentialStore>> =
+                Some(std::sync::Arc::new(crate::remote::KeyringCredentials));
+            #[cfg(not(feature = "keyring"))]
+            let credentials = None;
+            self.remote.configure(crate::remote::RemoteConfig {
+                settings_file: config_dir().map(|d| d.join("nextcloud.json")),
+                cache_dir: cache_dir().map(|d| d.join("nextcloud")),
+                credentials,
+            });
+        }
         self
     }
 

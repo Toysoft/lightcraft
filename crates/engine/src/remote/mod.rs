@@ -79,6 +79,24 @@ impl CredentialStore for MemoryCredentials {
     }
 }
 
+/// App passwords in the OS keyring (Keychain, Credential Manager, Secret Service), under the service
+/// "LightCraft" and the account's key; the store the apps install ([`crate::Session::with_default_nextcloud`]).
+#[cfg(feature = "keyring")]
+pub struct KeyringCredentials;
+
+#[cfg(feature = "keyring")]
+impl CredentialStore for KeyringCredentials {
+    fn get(&self, a: &Account) -> Result<Option<String>, String> {
+        craft_nextcloud::load_password("LightCraft", a).map_err(|e| e.to_string())
+    }
+    fn set(&self, a: &Account, password: &str) -> Result<(), String> {
+        craft_nextcloud::store_password("LightCraft", a, password).map_err(|e| e.to_string())
+    }
+    fn delete(&self, a: &Account) -> Result<(), String> {
+        craft_nextcloud::delete_password("LightCraft", a).map_err(|e| e.to_string())
+    }
+}
+
 /// Where a host keeps Nextcloud settings, downloaded originals and app passwords; `None` = nowhere.
 #[derive(Clone, Default)]
 pub struct RemoteConfig {

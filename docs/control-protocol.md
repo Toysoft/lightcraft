@@ -140,6 +140,31 @@ opens as one. With no library open (the library problem window) it is an error i
 places (`EngineError::LightroomCatalog`, so `lightcraft-cli --library` and `mcp --library` too). `library.importLightroom
 {status: true}` reports the catalog's `path` after the task ends as well as while it runs.
 
+### Nextcloud
+
+The Nextcloud commands ([nextcloud.md](nextcloud.md#commands)) are ordinary commands through `engine.execute`:
+`nextcloud.addAccount`, `nextcloud.signIn`, `nextcloud.removeAccount`, `nextcloud.preferences`, `nextcloud.browse`,
+`library.importNextcloud`, `photo.makeAvailableOffline` and `photo.removeOfflineCopy`; the dialogs are
+`file.addNextcloudAccount` and `file.importNextcloud`. Adding an account is a sequence:
+
+1. `nextcloud.addAccount {server}` → `{state: "needsTrust", fingerprint}` when the OS doesn't trust the server's
+   certificate. Check the fingerprint with the server's admin, then
+2. `nextcloud.addAccount {server, trust: fingerprint}` → `{state: "waiting", loginUrl, task}`. The user opens
+   `loginUrl` and approves LightCraft there (a sign-in started over this channel doesn't open the browser; the
+   app's dialog and Settings ▸ Nextcloud do).
+3. Poll `nextcloud.preferences` until `signIns[]` with that `task` leaves `waiting`: `signedIn` (with `account`),
+   `failed` (with `error`), `cancelled` or `timedOut`. `activity.cancel {id: task}` stops the wait.
+
+`nextcloud.signIn {account}` signs a signed-out account in again the same way; a certificate other than the pinned
+one answers `{state: "needsTrust", fingerprint, changed: true}`, and only `trust` re-pins it.
+
+In the desktop app, `nextcloud.addAccount`, `nextcloud.signIn` and `nextcloud.browse` (their first request can wait
+for the server) run on a worker thread: the reply is the same, it just comes when the server answered, and the window
+keeps drawing meanwhile. Leave `wait` off (false) in the desktop app: a sign-in waiting for approval would run into
+the 60 s reply timeout, and a waiting import or offline download would hold the UI thread. Without it,
+`library.importNextcloud` and `photo.makeAvailableOffline` return at once with `{started: true, task}` and run behind
+activity rows; how an import ended is in `nextcloud.preferences` → `imports`.
+
 ## Headless rendering (no window, no GPU)
 
 The egui UI can be rasterized on the CPU (`crates/ui-egui/src/softpaint.rs`, driven by

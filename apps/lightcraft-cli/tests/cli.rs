@@ -358,6 +358,26 @@ fn snapshot_starts_without_a_gpu() {
     }
 }
 
+/// The CLI's sessions keep Nextcloud accounts in the settings folder (`nextcloud.json`), as the app does.
+#[test]
+fn nextcloud_accounts_come_from_the_settings_folder() {
+    let config = tmp("nextcloud-config");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("nextcloud.json"), r#"{"accounts": [{"server": "https://cloud.example", "user": "bob"}], "cacheBudgetMb": 5000}"#)
+        .unwrap();
+    let o = Command::new(BIN)
+        .env("LIGHTCRAFT_CONFIG_DIR", &config)
+        .env("LIGHTCRAFT_CACHE_DIR", tmp("nextcloud-cache"))
+        .args(["run", "nextcloud.preferences"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let line: Value = serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().next().unwrap()).unwrap();
+    let prefs = &line["result"];
+    assert_eq!(prefs["accounts"][0]["account"], "bob@cloud.example", "{prefs}");
+    assert_eq!(prefs["cacheBudgetMb"], 5000, "{prefs}");
+}
+
 fn run_cli(args: &[&str], stdin: Option<&str>) -> (bool, Vec<Value>, String) {
     let mut child = Command::new(BIN).arg("run").args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     if let Some(text) = stdin {

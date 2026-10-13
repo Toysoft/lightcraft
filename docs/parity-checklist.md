@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (Nextcloud photo source: LR-IMP-NEXTCLOUD, MENU-FILE-NEXTCLOUD-ACCOUNT, MENU-FILE-NEXTCLOUD-IMPORT, MENU-PHOTO-OFFLINE; rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -26,7 +26,7 @@ cited here still exists. Formerly docs/parity.md.
 <!-- parity:summary -->
 | Section | ✅ | 🟡 | ⬜ | 🚫 | P0 done | P1 done |
 |---|---:|---:|---:|---:|---:|---:|
-| A. Import (IMP) | 12 | 3 | 1 | 1 | 4/6 (67%) | 5/5 (100%) |
+| A. Import (IMP) | 12 | 4 | 1 | 1 | 4/6 (67%) | 5/5 (100%) |
 | B. Library management (LIB) | 22 | 2 | 1 | 2 | 9/9 (100%) | 9/9 (100%) |
 | C. Views & navigation (VIEW) | 15 | 1 | 1 | 0 | 8/9 (89%) | 4/4 (100%) |
 | D. Search & filter (FILT) | 11 | 1 | 1 | 0 | 4/4 (100%) | 4/4 (100%) |
@@ -50,12 +50,12 @@ cited here still exists. Formerly docs/parity.md.
 | V. Preferences (PREF) | 6 | 2 | 2 | 2 | 1/1 (100%) | 4/5 (80%) |
 | W. Cloud & AI infrastructure (CLOUD / AI) | 1 | 0 | 1 | 2 | — | — |
 | X. Cross-cutting behaviours (BEHAV) | 23 | 6 | 1 | 1 | 8/8 (100%) | 7/10 (70%) |
-| Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
+| Y. Menus | 87 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 76 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
 | Lightroom Classic extras | 34 | 16 | 35 | 8 | — | 24/26 (92%) |
-| **Total** | 407 | 50 | 73 | 35 | 192/200 (96%) | 145/157 (92%) |
+| **Total** | 411 | 52 | 72 | 35 | 193/201 (96%) | 145/157 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.5%** of 530 in-scope rows — P0 98.0% of 200 · P1 95.2% of 157 · P2 49.7% of 172.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.7%** of 535 in-scope rows — P0 98.0% of 201 · P1 95.2% of 157 · P2 50.9% of 176.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -86,6 +86,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-IMP-CULL-AT-IMPORT | Culling analysis at import | P2 | 🟡 | `cmd:photo.analyze` | run Assisted Culling on the imported photos (they're selected after an import); not automatic |
 | LR-IMP-MOVE | Move on import [Classic] | P1 | ✅ | `cmd:library.import` (`mode` move), `crates/engine/src/import_move.rs`, `crates/engine/src/tests_import_move.rs`, `crates/ui-egui/src/import.rs` | Transfer ▸ Move with Copy's destination, folders (day / month / one folder / custom template), rename template and example destination; XMP sidecars (both namings) move along; each source is removed only after its destination is written (hard link on the same volume, else copied, synced and compared byte for byte) and its catalog record is saved; failed, duplicate, unchecked files keep their sources, taken names get -1, -2…, never overwritten; files already in the destination/library are added in place; sources that can't be removed (read-only card) are kept and reported (`kept`). Undo removes the photos from the library but leaves the moved files at the destination. No Copy as DNG while moving |
 | LR-IMP-DNG-CONVERT | Convert to DNG on import [Classic] | P2 | ✅ | `cmd:library.import` (`dng`), `crates/ui-egui/src/import.rs` | copy imports: Raw files ▸ Copy as DNG (lossless; the card is untouched); the raw copy is removed only once its DNG is verified and on disk (issue #106) |
+| LR-IMP-NEXTCLOUD | Photos on a Nextcloud server (beyond Lightroom) | P2 | 🟡 | `cmd:library.importNextcloud`, `cmd:nextcloud.addAccount`, `cmd:nextcloud.signIn`, `cmd:nextcloud.browse`, `cmd:nextcloud.preferences`, `cmd:nextcloud.removeAccount`, `crates/engine/src/remote/mod.rs`, `crates/engine/src/remote/import.rs`, `docs/nextcloud.md` | browse a whole archive without mounting it or downloading originals: sign-in by browser approval (app password in the OS keyring, self-signed certificates pinned on first use), import lists folders with the Memories app's metadata when present, else the start of each file; grid and Fit/Fill show the server's previews; Develop downloads the open photo and prefetches the next; offline copies; works degraded when the server is unreachable. Tested against an in-process fake server only (`crates/mcp/tests/e2e.rs`); a run against a real server is pending. No XMP write-back, no relink of moved files, no duplicate detection across folders |
 
 ## B. Library management (LIB)
 
@@ -502,6 +503,8 @@ visible menu bar yet: the menu model is only exposed through the control channel
 | MENU-FILE-NEWFOLDER | New Folder… | P0 | ✅ | `cmd:dialog.newFolder` | ⇧⌘N |
 | MENU-FILE-NEWSMART | New Smart Album… | P1 | ✅ | `cmd:dialog.newSmartAlbum` | saves the current view (source + filter) |
 | MENU-FILE-IMPORTPROFILES | Import Profiles & Presets… | P1 | ✅ | `cmd:file.importPresets` | presets in every common format and .cube LUT profiles (see LR-IMP-PROFILES) |
+| MENU-FILE-NEXTCLOUD-ACCOUNT | Add Nextcloud Account… (beyond Lightroom) | P2 | ✅ | `cmd:file.addNextcloudAccount`, `crates/ui-egui/src/nextcloud.rs` | right after Import Lightroom Catalog…; the dialog shows an untrusted certificate's fingerprint to trust, then waits for the browser approval; Settings ▸ Nextcloud signs accounts in again or removes them (see LR-IMP-NEXTCLOUD) |
+| MENU-FILE-NEXTCLOUD-IMPORT | Import from Nextcloud… (beyond Lightroom) | P2 | ✅ | `cmd:file.importNextcloud`, `cmd:library.importNextcloud` | the account's folders one level at a time, ticked folders imported with their subfolders; runs in the activity stack, problems as messages |
 | MENU-FILE-EXPORT | Export… | P0 | ✅ | `cmd:dialog.export` | |
 | MENU-FILE-EXPORTPREV | Export with Previous | P0 | ✅ | `cmd:app.exportPrevious` | ⌥⇧⌘E |
 | MENU-FILE-EXPORTPRESETS | Export preset submenu | P0 | ✅ | `cmd:app.export` (`preset`), `crates/ui-egui/src/menubar.rs` (Export with Preset) | built-ins, then user presets, then Custom… (the dialog); exports to the last folder |
@@ -565,6 +568,7 @@ visible menu bar yet: the menu model is only exposed through the control channel
 | MENU-PHOTO-COVER | Set as album cover | P2 | ✅ | `cmd:album.setCover` | |
 | MENU-PHOTO-DELETE | Delete N photos… | P0 | ✅ | `cmd:photo.delete` | no confirmation; static label |
 | MENU-PHOTO-MOVETOCLOUD | Move/copy to cloud | OOS | 🚫 | | |
+| MENU-PHOTO-OFFLINE | Make Available Offline / Remove Offline Copy (beyond Lightroom) | P2 | ✅ | `cmd:photo.makeAvailableOffline`, `cmd:photo.removeOfflineCopy` | Nextcloud photos only (off otherwise): downloads and pins their originals so the cache never evicts them; Settings ▸ Nextcloud shows the space they take |
 | MENU-WINDOW-MINIMIZE | Minimize / zoom | P1 | ✅ | `apps/lightcraft/src/native_menu.rs` | the system's Minimize (⌘M) and Zoom items at the top of Window |
 | MENU-WINDOW-PANELS | Panel switches | P0 | ✅ | `cmd:panel.edit`, `cmd:panel.crop`, `cmd:panel.remove`, `cmd:panel.masking`, `cmd:panel.presets`, `cmd:panel.versions` | |
 | MENU-WINDOW-BRINGFRONT | Bring all to front | P2 | ✅ | `apps/lightcraft/src/native_menu.rs` | the system's item at the end of Window |
@@ -787,6 +791,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Nextcloud as a photo source (beyond Lightroom; LR-CLOUD-SYNC stays out of scope): LR-IMP-NEXTCLOUD 🟡 (tested against an in-process fake server; a real-server run is pending), MENU-FILE-NEXTCLOUD-ACCOUNT, MENU-FILE-NEXTCLOUD-IMPORT and MENU-PHOTO-OFFLINE ✅. Summary regenerated (its Total row had drifted from the sections): 81.7% of 535 in-scope rows |
 | 2026-10-11 | minor | KEY-SLIDER-TYPE: honor immediate Return/Escape and keep typed keys in the value editor; add regression references |
 | 2026-10-11 | minor | LR-PROF-CAMERACOLOR: raws with a black-and-white camera JPEG take its tone curve (issue #577) |
 | 2026-10-11 | minor | LR-VIEW-ZOOM and LR-VIEW-COMPARE: Compare and Reference are sharp at 1:1 (zoom windows per pane, two originals kept decoded while they are open); statuses unchanged |

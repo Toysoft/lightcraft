@@ -316,3 +316,83 @@ fn export_without_token_finishes_after_eof() {
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// Nextcloud end to end, as an agent drives it: add the account (the browser approval is the fake
+/// server's), import a folder without downloading it, then edit, render and export a photo, which
+/// downloads its original. The session keeps its password in memory, not in the OS keyring.
+#[test]
+fn nextcloud_add_import_render_export() {
+    use craft_nextcloud::testing::FakeServer;
+    use lightcraft_engine::remote::{MemoryCredentials, RemoteConfig};
+
+    let dir = std::env::temp_dir().join(format!("lightcraft-mcp-nextcloud-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let fake = FakeServer::start();
+    fake.enable_memories();
+    for (name, epoch) in [("a.jpg", 1_700_000_000), ("b.jpg", 1_700_000_100)] {
+        let img = lightcraft_raster::Rgba8::from_fn(96, 64, |x, y| [(x * 2) as u8, (y * 3) as u8, 128, 255]);
+        fake.add_file(&format!("/Photos/{name}"), lightcraft_mcp::encode_image("jpg", &img, 90).unwrap());
+        fake.set_photo(&format!("/Photos/{name}"), 19675, 96, 64, epoch, json!({"Make": "Sony", "Model": "ILCE-7RM6"}));
+    }
+    let headless = Headless::default();
+    headless.session.remote.configure(RemoteConfig {
+        settings_file: Some(dir.join("nextcloud.json")),
+        cache_dir: Some(dir.join("cache")),
+        credentials: Some(Arc::new(MemoryCredentials::default())),
+    });
+    let mut server = Server::new(Box::new(headless));
+
+    // Sign in: the reply carries the login page; the agent's user approves it in a browser.
+    let r = session(&mut server, &[call(1, "cmd_nextcloud_addAccount", json!({"server": fake.url()}))]);
+    let waiting = &r[0]["result"]["structuredContent"];
+    assert_eq!(waiting["state"], "waiting", "{r:?}");
+    assert!(waiting["loginUrl"].as_str().unwrap().starts_with(&fake.url()), "{waiting}");
+    let task = waiting["task"].clone();
+    fake.approve_login();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let account = loop {
+        let r = session(&mut server, &[call(2, "cmd_nextcloud_preferences", json!({}))]);
+        let prefs = &r[0]["result"]["structuredContent"];
+        let outcome = prefs["signIns"].as_array().unwrap().iter().find(|o| o["task"] == task).cloned().unwrap();
+        if outcome["state"] == "signedIn" {
+            break outcome["account"].as_str().unwrap().to_string();
+        }
+        assert_eq!(outcome["state"], "waiting", "{prefs}");
+        assert!(Instant::now() < deadline, "sign-in not approved in time: {prefs}");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(account, format!("{}@{}", FakeServer::USER, fake.url().trim_start_matches("http://")));
+
+    let out = dir.join("out.jpg");
+    let replies = session(
+        &mut server,
+        &[
+            call(3, "cmd_library_importNextcloud", json!({"dirs": [format!("nextcloud://{account}/Photos")], "wait": true})),
+            call(4, "query_photos", json!({"limit": 10})),
+        ],
+    );
+    for r in &replies {
+        assert!(r["result"]["isError"] == false, "{r}");
+    }
+    assert_eq!(replies[0]["result"]["structuredContent"]["added"], 2, "{}", replies[0]);
+    assert_eq!(fake.downloads(), 0, "importing downloads no originals");
+    let id = replies[1]["result"]["structuredContent"]["photos"][0]["id"].as_u64().expect("a photo");
+
+    let replies = session(
+        &mut server,
+        &[
+            call(5, "set_develop", json!({"id": id, "values": {"light.exposure": 0.5}})),
+            call(6, "render_photo", json!({"id": id, "format": "jpeg", "size": 64})),
+            call(7, "export", json!({"id": id, "path": out.to_string_lossy(), "longEdge": 48})),
+        ],
+    );
+    for r in &replies {
+        assert!(r["result"]["isError"] == false, "{r}");
+    }
+    assert_eq!(fake.downloads(), 1, "the edited photo's original, downloaded once");
+    let jpg = std::fs::read(&out).unwrap();
+    let d = lightcraft_codecs::decode(&jpg, Default::default()).unwrap();
+    assert_eq!((d.width, d.height), (48, 32));
+    drop(server);
+    let _ = std::fs::remove_dir_all(&dir);
+}

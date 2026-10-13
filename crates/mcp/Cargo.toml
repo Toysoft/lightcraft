@@ -14,3 +14,7 @@ lightcraft-codecs = { workspace = true }
 lightcraft-raster = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# `FakeServer`, a scripted in-process Nextcloud (the Nextcloud end-to-end test)
+craft-nextcloud = { workspace = true, features = ["testing"] }
