@@ -329,10 +329,10 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
             lucide!(pen, ["M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"]);
         }
         Sliders => {
-            for (y, x) in [(5.0, 12.0), (10.0, 7.0), (15.0, 13.0)] {
-                pen.line(&[(3.0, y), (x - 2.0, y)]);
-                pen.line(&[(x + 2.0, y), (17.0, y)]);
-                pen.circle(x, y, 2.0);
+            // two tracks with small solid knobs: rings and a third track crowd it at 10–14 px
+            for (y, x) in [(6.5, 12.5), (13.5, 7.5)] {
+                pen.line(&[(3.0, y), (17.0, y)]);
+                pen.dot(x, y, 1.9);
             }
         }
         Crop => {
