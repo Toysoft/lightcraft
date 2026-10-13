@@ -93,23 +93,29 @@ fn starting_colour_with(
     if !t.matrix_is_fallback {
         return (xy, t, None);
     }
-    let (look, black_and_white) = fit(raw, &t);
-    if let Some(look) = look {
-        return (xy, t, Some(look));
-    }
-    let (xy, t) = match raw.metadata.model.as_deref().and_then(|model| lightcraft_raw::spectral::find(raw.metadata.make.as_deref(), model)) {
-        Some(camera) => {
-            camera.fill(&mut raw.color);
-            if lightcraft_pipeline::profiling() {
-                eprintln!("[profile] {:?} camera colour from spectral sensitivities: {} {}", raw.format, camera.make, camera.model);
-            }
-            start(raw)
+    // The camera-look fits pair the mosaic without the lateral CA map with the camera JPEG, as they were tuned
+    // (LOOK_VERSION unchanged); the map goes back for the development, on the one way out below.
+    let ca = raw.opcodes.lateral_ca.take();
+    let out = match fit(raw, &t) {
+        (Some(look), _) => (xy, t, Some(look)),
+        (None, black_and_white) => {
+            let (xy, t) = match raw.metadata.model.as_deref().and_then(|model| lightcraft_raw::spectral::find(raw.metadata.make.as_deref(), model)) {
+                Some(camera) => {
+                    camera.fill(&mut raw.color);
+                    if lightcraft_pipeline::profiling() {
+                        eprintln!("[profile] {:?} camera colour from spectral sensitivities: {} {}", raw.format, camera.make, camera.model);
+                    }
+                    start(raw)
+                }
+                None => (xy, t),
+            };
+            // only a black-and-white JPEG: a colour one that gave no look pays nothing more
+            let look = if black_and_white { monochrome(raw, &t) } else { None };
+            (xy, t, look)
         }
-        None => (xy, t),
     };
-    // only a black-and-white JPEG: a colour one that gave no look pays nothing more
-    let look = if black_and_white { monochrome(raw, &t) } else { None };
-    (xy, t, look)
+    raw.opcodes.lateral_ca = ca;
+    out
 }
 
 /// The colour a raw starts from ([`starting_colour`]) as DNG colour tags, for a DNG of the raw's camera RGB (Photo
@@ -2018,6 +2024,38 @@ mod tests {
         );
         assert_eq!(raw.color, color);
         assert!(!t.matrix_is_fallback && look.is_none());
+    }
+
+    /// The camera-look fits (the colour JPEG's and the black-and-white JPEG's) see the mosaic without the lateral CA
+    /// map (the fit and LOOK_VERSION are unchanged); the map is back afterwards for the development.
+    #[test]
+    fn the_camera_look_fit_sees_the_mosaic_without_lateral_ca() {
+        let mut raw = raw_of(RawFormat::Arw, "SONY", "ILCE-7RM6", Default::default());
+        let ca = lightcraft_raw::LateralCa::new([0.5, 0.5], 400.0, vec![1e-4, 2e-4], vec![-1e-4, -2e-4]).unwrap();
+        raw.opcodes.lateral_ca = Some(ca.clone());
+        let (mut seen, mut seen_monochrome) = (None, None);
+        let _ = starting_colour_with(
+            &mut raw,
+            |r, _| {
+                seen = Some(r.opcodes.lateral_ca.clone());
+                (None, true)
+            },
+            |r, _| {
+                seen_monochrome = Some(r.opcodes.lateral_ca.clone());
+                None
+            },
+        );
+        assert_eq!((seen, seen_monochrome), (Some(None), Some(None)), "both fits ran, without the map");
+        assert_eq!(raw.opcodes.lateral_ca, Some(ca.clone()), "restored");
+        // an accepted fit returns early: the map is back too
+        let fitted = dro_test_look(&std::array::from_fn(|i| 0.006 * 1.13f32.powi(i as i32)), &|x| x.sqrt());
+        let (_, _, look) = starting_colour_with(
+            &mut raw,
+            |r, _| (r.opcodes.lateral_ca.is_none().then_some(fitted), false),
+            |_, _| panic!("no black-and-white JPEG fit after an accepted fit"),
+        );
+        assert!(look.is_some(), "the fit ran without the map");
+        assert_eq!(raw.opcodes.lateral_ca, Some(ca), "restored after an accepted fit");
     }
 
     /// Steps 2 and 3 before step 4: an accepted JPEG fit (with or without a camera profile) is kept for a model that

@@ -10,6 +10,7 @@ use lightcraft_geom::Orientation;
 use lightcraft_pipeline::SourceInfo;
 use lightcraft_raster::Rgb32f;
 use lightcraft_raster::resample::{Filter, fit};
+use lightcraft_raw::highlight::CLIP as HIGHLIGHT_CLIP;
 
 use crate::media::{DenoiseSpec, FileLoader, FileProbe, PairLoader, PreviewLoader, ProbeInfo};
 
@@ -232,9 +233,6 @@ fn preview_reason(bytes: &[u8], e: lightcraft_raw::RawError) -> Result<String, S
         e => Ok(e.to_string()),
     }
 }
-
-/// Sensor clip level (normalised) for highlight reconstruction.
-const HIGHLIGHT_CLIP: f32 = 0.99;
 
 /// How a raw's camera RGB becomes the linear Rec.2020 the pipeline takes.
 pub(crate) struct CameraColourModel<'a> {
@@ -2294,6 +2292,163 @@ mod tests {
         let job = s.thumb_job(id, 128).unwrap();
         assert!(s.quick_thumb_job(&job).is_none());
         assert_eq!(s.quick_view_job(id, 1600, true).unwrap().run().quick, Some(QuickSource::Small));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Sony ARW of `model`: a 72 × 48 uncompressed 14-bit CFA strip in a SubIFD (as `crates/raw/tests/vendor_robust.rs`
+    /// lays it out) whose IFD carries the full-frame 16–35 mm distortion table (tag 0x7037) and its lateral CA table
+    /// (tag 0x7035, the `FF_CA` of `arw_lens_rm6`'s tests).
+    fn sony_arw(model: &str) -> Vec<u8> {
+        use lightcraft_tiff::tags::{self as t, photometric};
+        use lightcraft_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, Value};
+        // 3:2, the aspect Sony's lens opcodes are limited to
+        let (w, h) = (72u32, 48u32);
+        let mut raw = IfdBuilder::new();
+        raw.set(t::NEW_SUBFILE_TYPE, Value::Long(vec![0]));
+        raw.set(t::IMAGE_WIDTH, Value::Long(vec![w]));
+        raw.set(t::IMAGE_LENGTH, Value::Long(vec![h]));
+        raw.set(t::BITS_PER_SAMPLE, Value::Short(vec![14]));
+        raw.set(t::COMPRESSION, Value::Short(vec![1]));
+        raw.set(t::PHOTOMETRIC, Value::Short(vec![photometric::CFA]));
+        raw.set(t::CFA_REPEAT_PATTERN_DIM, Value::Short(vec![2, 2]));
+        raw.set(t::CFA_PATTERN_EP, Value::Byte(vec![0, 1, 1, 2]));
+        raw.set(0x7037, Value::SShort(vec![16, 0, 2, 7, 16, 28, 43, 61, 83, 109, 139, 175, 217, 267, 325, 395, 479]));
+        raw.set(
+            0x7035,
+            Value::SShort(vec![
+                32, 242, 234, 224, 212, 196, 176, 154, 132, 108, 86, 66, 46, 30, 16, 8, 4, -276, -258, -238, -212, -184, -148, -114, -74, -40, -6,
+                20, 42, 56, 60, 54, 32,
+            ]),
+        );
+        raw.set_image(ImageData::Strips { rows_per_strip: h, strips: vec![2000u16.to_le_bytes().repeat((w * h) as usize)] });
+        let mut ifd0 = IfdBuilder::new();
+        ifd0.set(t::MAKE, Value::Ascii("SONY".into()));
+        ifd0.set(t::MODEL, Value::Ascii(model.into()));
+        ifd0.add_sub_ifd(raw);
+        TiffWriter::new(ByteOrder::Little, false).write(&[ifd0]).unwrap()
+    }
+
+    /// Spec E1: a DNG exported from an ILCE-7RM6 ARW carries the distortion warp (one plane) and no lateral CA map:
+    /// no DNG opcode resamples the CFA before demosaic, so Convert to DNG loses the CA correction (documented limit).
+    #[test]
+    fn dng_export_of_an_arw_keeps_distortion_and_drops_lateral_ca() {
+        let dir = std::env::temp_dir().join(format!("lc-arw-dng-ca-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("rm6.arw");
+        let arw = sony_arw("ILCE-7RM6");
+        assert!(lightcraft_raw::decode(&arw).unwrap().opcodes.lateral_ca.is_some(), "the source carries a map");
+        std::fs::write(&path, &arw).unwrap();
+        let mut s = crate::Session::new().with_fs();
+        let r = s.execute("library.import", &serde_json::json!({"paths": [path.to_string_lossy()]})).unwrap();
+        let id = lightcraft_catalog::PhotoId(r["imported"][0].as_u64().unwrap());
+        let o = crate::export::ExportOptions::from_json(&serde_json::json!({"format": "dng", "dngCompression": "uncompressed"}));
+        let mut out = Vec::new();
+        let mut write = |_: &str, b: &[u8]| {
+            out = b.to_vec();
+            Ok(())
+        };
+        crate::export::export_batch(&mut s, &[id], &o, &crate::export::Destination { dir: "x".into(), exact: None }, &mut write, &|_| false).unwrap();
+        let dng = lightcraft_raw::decode(&out).unwrap();
+        assert!(dng.opcodes.lateral_ca.is_none());
+        assert!(
+            matches!(dng.opcodes.list3.as_slice(), [lightcraft_raw::Opcode::WarpRectilinear { planes, .. }] if planes.len() == 1),
+            "{:?}",
+            dng.opcodes.list3
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The camera-profile pool ([`crate::camera_profiles::Pool::add`]) reads an ILCE-7RM6 ARW without its lens
+    /// corrections: no distortion warp and no lateral CA map (the profiles were tuned on such sensor proxies).
+    #[test]
+    fn profile_pool_decodes_arws_without_lens_corrections() {
+        let arw = sony_arw("ILCE-7RM6");
+        let opcodes = lightcraft_raw::decode(&arw).unwrap().opcodes;
+        assert!(opcodes.lateral_ca.is_some() && !opcodes.list3.is_empty(), "the file carries both");
+        assert_eq!(crate::camera_profiles::decode_colour_only(&arw).unwrap().opcodes, lightcraft_raw::OpcodeLists::default());
+    }
+
+    /// Sony's embedded distortion correction is on by default: an ARW of a verified body imports with "Enable Lens
+    /// Corrections" on and still counts as unedited; another body's tables aren't read, so its correction is off.
+    #[test]
+    fn arw_with_lens_data_imports_with_profile_corrections_on() {
+        let dir = std::env::temp_dir().join(format!("lc-arw-lens-default-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = crate::Session::new().with_fs();
+        for (model, on) in [("ILCE-7RM6", true), ("ILCE-7M4", false)] {
+            let path = dir.join(format!("{model}.arw"));
+            std::fs::write(&path, sony_arw(model)).unwrap();
+            let r = s.execute("library.import", &serde_json::json!({"paths": [path.to_string_lossy()]})).unwrap();
+            let p = s.catalog.photo(lightcraft_catalog::PhotoId(r["imported"][0].as_u64().unwrap())).unwrap();
+            assert_eq!((p.format.as_str(), p.embedded_lens.is_some(), p.develop.optics.lens_profile), ("ARW", on, on), "{model}");
+            assert!(!p.is_edited(), "{model}: as imported");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RW2 and DNG keep their default: the correction is on when the file carries one (RW2 distortion, a DNG's
+    /// opcodes), off when it doesn't.
+    #[test]
+    fn rw2_and_dng_defaults_unchanged() {
+        use lightcraft_catalog::{Photo, PhotoId, Source};
+        let s = crate::Session::new();
+        let lens = lightcraft_develop::EmbeddedLens { warp: Some(Default::default()), ..Default::default() };
+        for format in ["RW2", "DNG"] {
+            for embedded in [None, Some(lens)] {
+                let name = format!("x.{format}");
+                let mut p = Photo::new(PhotoId(1), Source::File { path: format!("/{name}") }, &name, format, 64, 48, "");
+                p.kind = MediaKind::Raw;
+                p.embedded_lens = embedded;
+                crate::import::apply_import_defaults(&s, &mut p);
+                assert_eq!(p.develop.optics.lens_profile, embedded.is_some(), "{format} {embedded:?}");
+            }
+        }
+    }
+
+    /// Stored settings stay as they are when the library opens again: an ARW catalogued before its lens data was read
+    /// (none, correction off) keeps the correction off and counts as unedited, and one whose user switched the
+    /// correction off keeps it off.
+    #[test]
+    fn existing_photo_settings_are_not_rewritten() {
+        use lightcraft_catalog::{Op, PhotoId};
+        let dir = std::env::temp_dir().join(format!("lc-arw-lens-existing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (lib, files) = (dir.join("lib"), dir.join("files"));
+        std::fs::create_dir_all(&files).unwrap();
+        let mut s = crate::Session::new().with_fs();
+        s.open_library(&lib, false).unwrap();
+        let import = |s: &mut crate::Session, name: &str| {
+            let path = files.join(name);
+            // trailing bytes of its own: not a duplicate of the other file
+            std::fs::write(&path, [sony_arw("ILCE-7RM6"), name.as_bytes().to_vec()].concat()).unwrap();
+            let r = s.execute("library.import", &serde_json::json!({"paths": [path.to_string_lossy()]})).unwrap();
+            PhotoId(r["imported"][0].as_u64().unwrap())
+        };
+        let old = import(&mut s, "old.arw");
+        // as a release that didn't read the Sony tables catalogued it
+        let mut d = (*s.catalog.photo(old).unwrap().develop).clone();
+        d.optics.lens_profile = false;
+        let ops = vec![
+            Op::SetEmbeddedLens { id: old, lens: None },
+            Op::SetDevelop { id: old, settings: std::sync::Arc::new(d), label: "x".into(), edited: None },
+        ];
+        s.commit("x", Op::Batch { ops }).unwrap();
+        let off = import(&mut s, "off.arw");
+        s.execute("develop.merge", &serde_json::json!({"settings": {"optics": {"lens_profile": false}}})).unwrap();
+        let before: Vec<_> = [old, off].iter().map(|id| s.catalog.photo(*id).unwrap().clone()).collect();
+        assert!(before.iter().all(|p| !p.develop.optics.lens_profile));
+        s.persist().unwrap();
+        drop(s);
+        let mut s = crate::Session::new().with_fs();
+        s.open_library(&lib, false).unwrap();
+        for b in &before {
+            let p = s.catalog.photo(b.id).unwrap();
+            assert_eq!((&p.develop, &p.embedded_lens), (&b.develop, &b.embedded_lens), "{}", p.file_name);
+        }
+        assert!(!s.catalog.photo(old).unwrap().is_edited(), "still as imported");
+        drop(s);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

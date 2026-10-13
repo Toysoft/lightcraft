@@ -1,12 +1,13 @@
 # RAW parity: cameras, formats, demosaic, colour and lens profiles
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Leica Q3 verified by a recorded check of 38 private DNGs; EOS R5 Mark II decoded and verified: CRX QP-map escape, odd-height planes) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6 (Camera Raw 18.7)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Sony ILCE-7RM6 lateral CA corrected before demosaic; Leica Q3 verified by a recorded check of 38 private DNGs; EOS R5 Mark II decoded and verified: CRX QP-map escape, odd-height planes) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6 (Camera Raw 18.7)
 
 Raw processing is the deepest single dimension of Lightroom parity: a photographer whose camera
 does not decode, or decodes with the wrong colour, cannot switch. This document measures it model by
 model. The numbers feed [target-app-parity.md](target-app-parity.md); individual shortfalls are
 ranked in [gaps.md](gaps.md). Details per format: [cr3.md](cr3.md),
 [raf-compression.md](raf-compression.md), [sony-lens-corrections.md](sony-lens-corrections.md),
+[sony-ilce7rm6-lens-corrections.md](sony-ilce7rm6-lens-corrections.md),
 [camera-preview-colour.md](camera-preview-colour.md), [denoise.md](denoise.md).
 
 ## Headline
@@ -219,8 +220,8 @@ essentials user (the default look is what they keep).
 | Item | Adobe | LightCraft |
 |---|---|---|
 | Profile database | 3,635 profile files, 56 makers, auto-selected | **0** (Adobe LCPs never used; no database of our own) |
-| In-file corrections | ✅ | DNG opcodes (WarpRectilinear, FixVignetteRadial, GainMap…) applied; Panasonic / Leica RW2 distortion (79 photos, 13 bodies, 11 lenses); Sony tag 0x7037 distortion for the ILCE-7RM4A (2 lenses) |
-| Vignetting / lateral CA from maker notes | ✅ | ⬜ |
+| In-file corrections | ✅ | DNG opcodes (WarpRectilinear, FixVignetteRadial, GainMap…) applied; Panasonic / Leica RW2 distortion (79 photos, 13 bodies, 11 lenses); Sony tag 0x7037 distortion for the ILCE-7RM4A (2 lenses, checked against Sony's exports) and the ILCE-7RM6 (three lenses, a fourth, the 16–35 mm, only as a control with correction off; checked against the camera JPEG), with different conventions ([sony-ilce7rm6-lens-corrections.md](sony-ilce7rm6-lens-corrections.md#two-conventions)); the ILCE-7RM6's raw-IFD lateral CA table corrected on the raw mosaic before demosaic (Bayer files framed 3:2), its raw-IFD vignetting table not applied |
+| Vignetting / lateral CA from maker notes | ✅ | 🟡 lateral CA: Sony ILCE-7RM6 raw-IFD table, on the mosaic; vignetting not applied |
 | Manual distortion, vignetting, CA, defringe | ✅ | ✅ |
 
 **Lens score ~10%** (estimated): automatic correction reaches roughly Panasonic / Leica, phone and
@@ -278,8 +279,10 @@ Beyond decoding:
 | 2026-10-12 | minor | Olympus E-10: as-shot white balance (`0x1017`/`0x1018`) and black level (`0x1012` in `0x102c` ValidBits units) from the main maker note, issue #1273; ΔE76 against its thumbnail 18.5 → 11.5, camera-look fit now accepted; counts unchanged |
 | 2026-10-13 | minor | Nikon D90 image area (4288 × 2848 at 10, 10) and white level (3830) measured on 10 of 550 NEFs from one body: its 42 filler columns no longer develop as a pink band |
 | 2026-10-12 | minor | Hasselblad Lunar verified (a Sony NEX-7 ARW under Make HASSELBLAD, now decoded): 236 verified, 232 preview; an uncompressed Leaf MOS is recognised as a raw (preview only) instead of opening as a greyscale image of its mosaic (#1275) |
+| 2026-10-11 | minor | Lens profiles: the Sony ILCE-7RM6's lateral CA table is corrected on the raw mosaic before demosaic (was parsed, off); *Vignetting / lateral CA from maker notes* ⬜ → 🟡; lens score unchanged (~10%) |
 | 2026-10-10 | minor | Compressed ORF: pointer to the two Olympus patents that describe the method, as a clean-room starting point |
 | 2026-10-12 | minor | PEF without area tags: masked border rows and columns trimmed against the BlackPoint (issue #1271; KP, KF, K-3 Mark III, K-70, K-1, K-1 Mark II, K-S1, K-S2, 645Z); counts unchanged |
 | 2026-10-11 | minor | EOS R5 Mark II verified (CRX QP-map first literal and limited-length escape, odd-height Bayer planes; 4 CC0 files pinned, QP maps of 33,665 private files): 235 verified, 942 unverified; use-weighted 85% (42% on verified bodies); decoding 77%, RAW readiness unchanged at ~56% |
+| 2026-10-10 (later) | minor | Lens profiles: Sony ILCE-7RM6 in-file distortion next to the ILCE-7RM4A's (its lateral CA parsed, off by default); lens score unchanged (~10%: one more body) |
 | 2026-10-10 (later) | major | Model-by-model measurement against Adobe's published list (1,446 models: 234 verified, 943 unverified, 233 preview, 36 unsupported); `docs/raw/` data and re-measure script; use-weighted share 84% (40% on verified bodies); variant matrix; colour and lens sections with scores; ranked next cameras; RAW readiness ~56% from written parts |
 | 2026-10-10 | major | Created: formats, makers, demosaic, colour and lens checklists; target counts from the installed Lightroom 9.6 bundle listing |

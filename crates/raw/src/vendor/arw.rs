@@ -2,7 +2,8 @@
 //!
 //! Sources: H. Dietz, "Sony ARW2 Compression: Artifacts And Credible Repair" (IS&T Electronic Imaging 2016) for
 //! the ARW2 ("cRAW") scheme, and the ExifTool Sony tag-name documentation for the meaning of the raw-IFD tags
-//! (`0x7010` tone-curve thresholds, `0x7310` black levels, `0x7313` WB levels, `0x74c7/0x74c8` crop).
+//! (`0x7010` tone-curve thresholds, `0x7310` black levels, `0x7313` WB levels, `0x74c7/0x74c8` crop, `0x7031`–`0x7037`
+//! lens-correction tables: see [`super::arw_lens`] for the ILCE-7RM4A and [`super::arw_lens_rm6`] for the ILCE-7RM6).
 //!
 //! ARW2, as described in the paper:
 //! 1. Sensor values are tone-mapped to 11-bit codes by a five-segment piecewise-linear curve whose step doubles at
@@ -748,6 +749,11 @@ pub(crate) fn decode(bytes: &[u8], mode: Mode) -> Result<RawImage> {
     let mut metadata = lightcraft_meta::from_tiff(&tiff);
     metadata.width = Some(crop.width as u32);
     metadata.height = Some(crop.height as u32);
+    // DefaultCrop can retain native geometry while Sony's tags select an aspect crop.
+    // Both the image framing and the table geometry must stay within the validated 3:2 scope.
+    let three_two = crop.height > 0 && (crop.width as f64 / crop.height as f64 - 1.5).abs() <= 0.005;
+    let lens_crop = (!linear_rgb && three_two).then(|| dng_default_crop(raw, w, h).unwrap_or(crop));
+    let active = Rect::new(0, 0, w, h);
     let img = RawImage {
         format: RawFormat::Arw,
         width: w,
@@ -770,16 +776,20 @@ pub(crate) fn decode(bytes: &[u8], mode: Mode) -> Result<RawImage> {
         // The distortion table is centred on the DNG-style default crop when the file has one: on the ILCE-7RM4A
         // it starts at x = 32 where Sony's crop tags (the image crop, unchanged) start at 0, and the warp was
         // validated against Sony's exports with that centre. The opcode's centre is in active-area coordinates, so
-        // it stays on the optical centre whichever crop frames the image.
+        // it stays on the optical centre whichever crop frames the image. The ILCE-7RM6's tables follow other
+        // conventions, measured against its camera JPEGs ([`super::arw_lens_rm6`]); the two allowlists are
+        // disjoint, so at most one of them produces an opcode.
+        // The ILCE-7RM6's lateral CA is a map on the mosaic, applied before demosaic whatever Lens Corrections says.
         opcodes: OpcodeLists {
-            // DefaultCrop can retain native geometry while Sony's tags select an aspect crop.
-            // Both the image framing and the table geometry must stay within the validated 3:2 scope.
-            list3: if linear_rgb || crop.height == 0 || (crop.width as f64 / crop.height as f64 - 1.5).abs() > 0.005 {
-                Vec::new()
-            } else {
-                let geometry = dng_default_crop(raw, w, h).unwrap_or(crop);
-                super::arw_lens::distortion(&model, raw, Rect::new(0, 0, w, h), geometry).into_iter().collect()
-            },
+            list3: lens_crop
+                .map(|g| {
+                    super::arw_lens::distortion(&model, raw, active, g)
+                        .into_iter()
+                        .chain(super::arw_lens_rm6::lens_opcodes(raw, &model, active, g))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            lateral_ca: lens_crop.and_then(|g| super::arw_lens_rm6::lateral_ca(raw, &model, g)),
             ..Default::default()
         },
         metadata,
@@ -797,7 +807,21 @@ mod tests {
         use lightcraft_tiff::{IfdBuilder, ImageData, TiffWriter, Value};
         let mut raw = IfdBuilder::new();
         raw.set(t::MAKE, Value::Ascii("SONY".into()));
-        raw.set(t::MODEL, Value::Ascii("ILCE-7M4".into()));
+        // a verified body with distortion and CA tables and a 3:2 crop: linear data still gets no warp and no map
+        raw.set(t::MODEL, Value::Ascii("ILCE-7RM6".into()));
+        raw.set(
+            super::super::arw_lens_rm6::DISTORTION_PARAMS,
+            Value::SShort(vec![16, 0, 2, 7, 16, 28, 43, 61, 83, 109, 139, 175, 217, 267, 325, 395, 479]),
+        );
+        raw.set(
+            super::super::arw_lens_rm6::CA_PARAMS,
+            Value::SShort(vec![
+                32, 242, 234, 224, 212, 196, 176, 154, 132, 108, 86, 66, 46, 30, 16, 8, 4, -276, -258, -238, -212, -184, -148, -114, -74, -40, -6,
+                20, 42, 56, 60, 54, 32,
+            ]),
+        );
+        raw.set(CROP_TOP_LEFT, Value::Long(vec![0, 0]));
+        raw.set(CROP_SIZE, Value::Long(vec![3, 2]));
         raw.set(t::IMAGE_WIDTH, Value::Long(vec![4]));
         raw.set(t::IMAGE_LENGTH, Value::Long(vec![4]));
         raw.set(t::BITS_PER_SAMPLE, Value::Short(vec![15, 15, 15]));
@@ -824,7 +848,8 @@ mod tests {
         };
         assert_eq!(&pixels[..3], &[1140, 929, 1000]);
         let developed = full.develop(crate::Method::Bilinear).unwrap();
-        assert_eq!((developed.width, developed.height), (4, 4));
+        assert_eq!((developed.width, developed.height), (3, 2));
+        assert!(full.opcodes.lateral_ca.is_none() && full.opcodes.list3.is_empty(), "linear data: no CFA to correct");
     }
 
     #[test]
@@ -865,6 +890,66 @@ mod tests {
         raw.set(TONE_CURVE, Value::Short(vec![8000, 10400, 12900, 14100]));
         raw.set_image(ImageData::Strips { rows_per_strip: 4, strips: vec![vec![0u8; strip]] });
         TiffWriter::default().write(&[raw]).unwrap()
+    }
+
+    /// The ILCE-7RM6's distortion table reaches `OpcodeList3`, in the headers-only probe and in the full decode, as
+    /// one plane, and the CA table becomes the pre-demosaic map (`OpcodeLists::lateral_ca`) centred on the crop;
+    /// another body's tables don't (see [`super::super::arw_lens_rm6`]), nor does a frame that isn't 3:2.
+    #[test]
+    fn lens_tables_reach_opcode_list3() {
+        use lightcraft_tiff::{IfdBuilder, ImageData, TiffWriter, Value};
+        let file_sized = |model: &str, ca: bool, height: u32| {
+            let mut raw = IfdBuilder::new();
+            raw.set(t::MAKE, Value::Ascii("SONY".into()));
+            raw.set(t::MODEL, Value::Ascii(model.into()));
+            raw.set(t::IMAGE_WIDTH, Value::Long(vec![96]));
+            raw.set(t::IMAGE_LENGTH, Value::Long(vec![height]));
+            raw.set(t::BITS_PER_SAMPLE, Value::Short(vec![12]));
+            raw.set(t::SAMPLES_PER_PIXEL, Value::Short(vec![1]));
+            raw.set(t::PHOTOMETRIC, Value::Short(vec![photometric::CFA]));
+            raw.set(t::COMPRESSION, Value::Short(vec![32767]));
+            raw.set(TONE_CURVE, Value::Short(vec![8000, 10400, 12900, 14100]));
+            // Sony's image crop is the whole frame; the tables are centred on DefaultCrop, off-centre on both axes
+            raw.set(CROP_TOP_LEFT, Value::Long(vec![0, 0]));
+            raw.set(CROP_SIZE, Value::Long(vec![96, height]));
+            raw.set(t::DEFAULT_CROP_ORIGIN, Value::Long(vec![2, 1]));
+            raw.set(t::DEFAULT_CROP_SIZE, Value::Long(vec![90, 60]));
+            let table = vec![16, 0, 2, 7, 16, 28, 43, 61, 83, 109, 139, 175, 217, 267, 325, 395, 479];
+            raw.set(super::super::arw_lens_rm6::DISTORTION_PARAMS, Value::SShort(table));
+            if ca {
+                let table = vec![
+                    32, 242, 234, 224, 212, 196, 176, 154, 132, 108, 86, 66, 46, 30, 16, 8, 4, -276, -258, -238, -212, -184, -148, -114, -74, -40,
+                    -6, 20, 42, 56, 60, 54, 32,
+                ];
+                raw.set(super::super::arw_lens_rm6::CA_PARAMS, Value::SShort(table));
+            }
+            raw.set_image(ImageData::Strips { rows_per_strip: height, strips: vec![vec![0u8; 96 * height as usize]] });
+            TiffWriter::default().write(&[raw]).unwrap()
+        };
+        // 3:2, the aspect the corrections are limited to
+        let file = |model: &str, ca: bool| file_sized(model, ca, 64);
+        for mode in [Mode::Header, Mode::Full] {
+            for ca in [false, true] {
+                let img = decode(&file("ILCE-7RM6", ca), mode).unwrap();
+                assert_eq!(img.crop, Rect::new(0, 0, 96, 64));
+                let ops = &img.opcodes.list3;
+                let [crate::Opcode::WarpRectilinear { planes, center }] = ops.as_slice() else { panic!("{mode:?} {ca}: {ops:?}") };
+                assert_eq!(planes.len(), 1, "{mode:?} {ca}");
+                assert_eq!(img.opcodes.lateral_ca.is_some(), ca, "{mode:?} {ca}");
+                if let Some(m) = &img.opcodes.lateral_ca {
+                    // one optical centre for CA and distortion: DefaultCrop's, not the image crop's (47.5, 31.5)
+                    assert_eq!(m.center, [2.0 + 89.0 / 2.0, 1.0 + 59.0 / 2.0]);
+                    assert!((m.center[0] - center[0] * 95.0).abs() < 1e-9 && (m.center[1] - center[1] * 63.0).abs() < 1e-9, "{m:?} {center:?}");
+                }
+                let other = decode(&file("ILCE-7M4", ca), mode).unwrap().opcodes;
+                assert!(other.list3.is_empty() && other.lateral_ca.is_none(), "{mode:?} {ca}");
+            }
+            // 4:3 (an in-camera aspect crop): the map switches off with the warp
+            let four_three = decode(&file_sized("ILCE-7RM6", true, 72), mode).unwrap().opcodes;
+            assert!(four_three.list3.is_empty() && four_three.lateral_ca.is_none(), "{mode:?}");
+        }
+        // the headers-only probe reads the same map
+        assert_eq!(decode(&file("ILCE-7RM6", true), Mode::Header).unwrap().opcodes, decode(&file("ILCE-7RM6", true), Mode::Full).unwrap().opcodes);
     }
 
     #[test]

@@ -12,7 +12,7 @@
 //! Value convention: list 1 runs on raw sample values (16-bit scale), lists 2 and 3 on values normalised to
 //! [0, 1]; table/polynomial/delta opcodes are defined on the normalised range and are rescaled accordingly.
 
-use crate::{Cfa, Rgb32f};
+use crate::{Cfa, LateralCa, Rgb32f};
 use serde::{Deserialize, Serialize};
 
 /// Rectangular area + plane selection + pitch shared by the "area" opcodes.
@@ -160,6 +160,10 @@ pub struct OpcodeLists {
     pub list1: Vec<Opcode>,
     pub list2: Vec<Opcode>,
     pub list3: Vec<Opcode>,
+    /// Lateral chromatic aberration corrected on the mosaic before demosaic (after list 2). Not a DNG list: never
+    /// written to a DNG.
+    #[serde(default)]
+    pub lateral_ca: Option<LateralCa>,
 }
 
 struct Rd<'a> {
@@ -454,7 +458,7 @@ fn gain_at(points_v: u32, points_h: u32, spacing: [f64; 2], origin: [f64; 2], ma
 }
 
 /// Radius normaliser: distance from the centre to the farthest image corner.
-fn max_radius(cx: f64, cy: f64, w: f64, h: f64) -> f64 {
+pub(crate) fn max_radius(cx: f64, cy: f64, w: f64, h: f64) -> f64 {
     [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)].iter().map(|&(x, y)| (x - cx).hypot(y - cy)).fold(0.0, f64::max).max(1e-9)
 }
 
