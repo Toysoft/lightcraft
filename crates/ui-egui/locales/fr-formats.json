@@ -245,6 +245,9 @@
   "{n} added to Apple Photos album “{album}”": "{n} ajouté(s) à l'album Apple Photos « {album} »",
   "{n} added to Apple Photos": "{n} ajouté(s) à Apple Photos",
   "{n} photos opened for editing; each is stacked with its original": "{n} photos ouvertes pour modification ; chacune est empilée avec son original",
+  "{name} opened in the other editor": "{name} ouvert dans l’autre éditeur",
+  "{n} originals opened in the other editor": "{n} originaux ouverts dans l’autre éditeur",
+  "· {in_source} identical copies": "· {in_source} copies identiques",
   "Delete the saved location “{name}”?": "Supprimer le lieu enregistré « {name} » ?",
   "In the private location “{name}”: its map is hidden.": "Dans le lieu privé « {name} » : sa carte est masquée.",
   "within {d} of {lat}, {lon}": "à moins de {d} de {lat}, {lon}"
