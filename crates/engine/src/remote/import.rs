@@ -567,7 +567,7 @@ pub(crate) fn apply_events(s: &mut Session, tally: &mut Tally) {
                 _ => found.push((task, photos)),
             },
             Event::Meta { reads: r, .. } => reads.extend(r),
-            Event::Downloaded { path, local } => downloaded.push((path, local)),
+            Event::Downloaded { path, info } => downloaded.push((path, info)),
         }
     }
     // (the photos first: a photo's metadata never comes before the photo)

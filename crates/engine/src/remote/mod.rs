@@ -25,7 +25,7 @@ mod originals;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -217,9 +217,10 @@ pub enum Event {
     Found { task: u64, generation: u64, photos: Vec<(String, crate::media::ProbeInfo)> },
     /// Metadata an import read, filling what the photos lack.
     Meta { task: u64, generation: u64, reads: Vec<MetaRead> },
-    /// The original at `path` was downloaded to `local`: the photos with that path (in whatever
-    /// library is open) are completed from the whole file.
-    Downloaded { path: String, local: PathBuf },
+    /// The original at `path` was downloaded: the photos with that path (in whatever library is
+    /// open) are completed with what the whole file says (`info`, read by the downloading thread;
+    /// `None` when it couldn't be described).
+    Downloaded { path: String, info: Option<Box<crate::media::ProbeInfo>> },
 }
 
 /// The metadata read for the photo at `path`. With `described`, `info` describes the whole file
@@ -264,9 +265,12 @@ pub struct Remote {
     inner: Mutex<Inner>,
     /// Held while an original downloads: one at a time.
     downloads: Mutex<()>,
-    /// The original of the photo open in Develop, kept from eviction ([`Remote::hold`]).
-    held: Mutex<Option<Hold>>,
-    /// The path being prefetched and what cancels it ([`Remote::prefetch`]).
+    /// Interactive loads waiting for [`Remote::downloads`]: prefetches and offline copies give it up
+    /// to them.
+    pub(crate) loads_waiting: AtomicUsize,
+    /// The photo open in Develop and the hold keeping its original from eviction ([`Remote::hold`]).
+    held: Mutex<Option<(String, Hold)>>,
+    /// The path last prefetched (or found on disk) and what cancels its prefetch ([`Remote::prefetch`]).
     prefetching: Mutex<Option<(String, Arc<AtomicBool>)>>,
     /// The last [`MAX_SIGN_INS`] sign-ins, oldest first. Kept across [`Remote::configure`]: they are
     /// this session's.
@@ -294,6 +298,7 @@ impl Remote {
             activity,
             inner: Mutex::default(),
             downloads: Mutex::default(),
+            loads_waiting: AtomicUsize::new(0),
             held: Mutex::default(),
             prefetching: Mutex::default(),
             sign_ins: Mutex::default(),

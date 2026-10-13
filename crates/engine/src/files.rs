@@ -132,7 +132,18 @@ pub(crate) fn ext_upper(name: &str) -> String {
 /// ([`lightcraft_codecs::read_header`], which refuses truncated files but can't see damage inside
 /// compressed data that is all there: such a file imports and shows as unreadable when rendered).
 pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
-    let content_hash = Some(lightcraft_preview::hash_bytes(bytes).to_string());
+    probe_hashing(name, bytes, true)
+}
+
+/// [`probe_bytes`] without the content hash (`None`), saving a pass over every byte: for a file
+/// whose hash isn't wanted (a Nextcloud original: its keys stay `file:{path}:{size}`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn probe_unhashed(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
+    probe_hashing(name, bytes, false)
+}
+
+fn probe_hashing(name: &str, bytes: &[u8], hash: bool) -> Result<ProbeInfo, String> {
+    let content_hash = hash.then(|| lightcraft_preview::hash_bytes(bytes).to_string());
     let m = lightcraft_meta::extract(bytes);
     let (meta, captured) = meta_of(&m);
     if lightcraft_raw::probe(bytes).is_some() {

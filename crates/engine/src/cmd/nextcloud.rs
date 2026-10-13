@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use lightcraft_catalog::{Source, is_remote};
+use lightcraft_catalog::{PhotoId, Source, is_remote};
 use serde_json::{Value, json};
 
 use super::{CommandSpec, always, bad, bool_or, cmd, str_param};
@@ -90,19 +90,23 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     crate::remote::import::start(s, account, dirs, bool_or(p, "wait", false))
 }
 
+/// The path of photo `id`'s original, when it is on Nextcloud.
+fn remote_path(s: &Session, id: PhotoId) -> Option<&String> {
+    match s.catalog.photo(id).map(|ph| &ph.source) {
+        Some(Source::File { path }) if is_remote(path) => Some(path),
+        _ => None,
+    }
+}
+
 /// The originals of the Nextcloud photos among the targets (`ids`/`id`, else the selection), each
 /// once (virtual copies share their master's).
 fn remote_targets(s: &Session, p: &Value) -> BTreeSet<String> {
-    let path = |id| match s.catalog.photo(id).map(|ph| &ph.source) {
-        Some(Source::File { path }) if is_remote(path) => Some(path.clone()),
-        _ => None,
-    };
-    s.targets(p).into_iter().filter_map(path).collect()
+    s.targets(p).into_iter().filter_map(|id| remote_path(s, id).cloned()).collect()
 }
 
 /// Enabled while a selected photo is on Nextcloud.
 fn has_remote_target(s: &Session) -> std::result::Result<(), String> {
-    if remote_targets(s, &Value::Null).is_empty() { Err(NO_REMOTE.into()) } else { Ok(()) }
+    if s.targets(&Value::Null).into_iter().any(|id| remote_path(s, id).is_some()) { Ok(()) } else { Err(NO_REMOTE.into()) }
 }
 
 /// [`remote_targets`] of a command `c`, which is off without any (photos named in the call too).

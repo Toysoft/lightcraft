@@ -3,6 +3,7 @@
 //! download of an original completes the photo's record (and builds its smart preview), and
 //! copies made available offline are pinned.
 
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
@@ -14,7 +15,7 @@ use serde_json::json;
 use crate::cmd::previews::has_smart_preview;
 use crate::media::SourceLevel;
 use crate::remote::{AccountState, Event};
-use crate::tests_nextcloud_hooks::{jpeg, raw_blob, remote, signed_in, wait_until};
+use crate::tests_nextcloud_hooks::{cached_files, jpeg, raw_blob, remote, signed_in, wait_until};
 use crate::{EngineError, Selection, Session, find_command};
 
 fn rows(s: &Session) -> Vec<(&'static str, String)> {
@@ -52,6 +53,21 @@ fn small_budget(s: &Session, bytes: u64) {
     s.remote.cache().unwrap().set_budget(bytes);
 }
 
+/// Photos `names` (`.ARW` blobs of `len` bytes) on the server, their etags known (so no `stat`
+/// comes before their downloads).
+fn listed<const N: usize>(s: &Session, fake: &craft_nextcloud::testing::FakeServer, names: [&str; N], len: usize) -> [String; N] {
+    names.map(|n| {
+        fake.add_file(&format!("/Photos/{n}.ARW"), raw_blob(len));
+        let p = remote(fake, &format!("Photos/{n}.ARW"));
+        s.remote.etag_and_size(&RemotePath::parse(&p).unwrap()).unwrap();
+        p
+    })
+}
+
+fn row(label: &str) -> Vec<(&'static str, String)> {
+    vec![("download", label.to_string())]
+}
+
 #[test]
 fn the_open_photo_is_held() {
     let (s, fake, _d) = signed_in("held");
@@ -79,7 +95,7 @@ fn the_open_photo_is_held() {
 
 #[test]
 fn prefetch_downloads_the_next_photo_once() {
-    let (s, fake, _d) = signed_in("prefetch");
+    let (s, fake, d) = signed_in("prefetch");
     fake.add_file("/Photos/b.ARW", raw_blob(4000));
     let b = remote(&fake, "Photos/b.ARW");
     let step = step_downloads(&s);
@@ -96,6 +112,11 @@ fn prefetch_downloads_the_next_photo_once() {
     s.remote.prefetch(None);
     let before = fake.requests();
     s.remote.prefetch(Some(&b));
+    // asked every frame, it isn't looked for again (a copy gone meanwhile goes unnoticed)
+    for f in cached_files(&d) {
+        std::fs::remove_file(f).unwrap();
+    }
+    s.remote.prefetch(Some(&b));
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(fake.requests(), before);
     assert!(s.activity.list().is_empty());
@@ -107,22 +128,18 @@ fn prefetch_downloads_the_next_photo_once() {
 #[test]
 fn prefetch_is_cancelled_by_moving_on() {
     let (s, fake, _d) = signed_in("prefetch-cancel");
-    s.remote.set_stall_limit(Duration::from_secs(1));
-    fake.add_file("/Photos/b.ARW", raw_blob(4000));
-    fake.add_file("/Photos/c.ARW", raw_blob(5000));
-    let (b, c) = (remote(&fake, "Photos/b.ARW"), remote(&fake, "Photos/c.ARW"));
-    // (their etags are known: the stall hits b's download, with its row up)
-    for p in [&b, &c] {
-        s.remote.etag_and_size(&RemotePath::parse(p).unwrap()).unwrap();
-    }
+    // (long enough that b's request is still stalled when the test moves on)
+    s.remote.set_stall_limit(Duration::from_secs(5));
+    let [b, c] = listed(&s, &fake, ["b", "c"], 4000);
+    // (the etags are known: the stall hits the `stat` b's fetch starts with, once its row is up)
     fake.fail_next(Fault::Stall);
     let before = fake.requests();
     s.remote.prefetch(Some(&b));
-    wait_until("b's row", || rows(&s) == [("download", "Prefetching b.ARW".to_string())]);
-    wait_until("b's download stalls", || fake.requests() > before);
+    wait_until("b's row", || rows(&s) == row("Prefetching b.ARW"));
+    wait_until("b's fetch stalls in its stat", || fake.requests() > before);
     s.remote.prefetch(Some(&c));
     wait_until("c is prefetched instead", || is_cached(&s, &c) && s.activity.list().is_empty());
-    assert!(!is_cached(&s, &b), "nothing half-downloaded is kept");
+    assert!(!is_cached(&s, &b), "b never downloads");
     assert_eq!(fake.downloads(), 1, "c only");
     assert_eq!(s.remote.accounts()[0].1, AccountState::SignedIn, "a cancelled download says nothing about the server");
     // moving on to no photo cancels too
@@ -152,6 +169,59 @@ fn prefetches_wait_for_the_download_running() {
     wait_until("c is here", || is_cached(&s, &c) && s.activity.list().is_empty());
     assert!(!is_cached(&s, &b));
     assert_eq!(fake.downloads(), 2);
+}
+
+#[test]
+fn loads_go_before_prefetches() {
+    let (s, fake, _d) = signed_in("loads-first");
+    let [x, a, b] = listed(&s, &fake, ["x", "a", "b"], 4000);
+    let step = step_downloads(&s);
+    let r = s.remote.clone();
+    let first = std::thread::spawn(move || r.local_original(&x));
+    wait_until("x downloads", || rows(&s) == row("Downloading x.ARW (1 MB)"));
+    // a prefetch and the loupe's load both wait for x: the load goes first
+    s.remote.prefetch(Some(&b));
+    let r = s.remote.clone();
+    let loading = std::thread::spawn(move || r.local_original(&a));
+    wait_until("the load waits", || s.remote.loads_waiting.load(Ordering::SeqCst) == 1);
+    step.send(()).unwrap();
+    first.join().unwrap().unwrap();
+    wait_until("the next download", || !s.activity.list().is_empty());
+    assert_eq!(rows(&s), row("Downloading a.ARW (1 MB)"));
+    step.send(()).unwrap();
+    loading.join().unwrap().unwrap();
+    wait_until("then the prefetch", || rows(&s) == row("Prefetching b.ARW"));
+    step.send(()).unwrap();
+    wait_until("b is here", || is_cached(&s, &b) && s.activity.list().is_empty());
+    assert_eq!(fake.downloads(), 3);
+}
+
+#[test]
+fn opening_the_prefetched_photo_keeps_its_download() {
+    let (s, fake, _d) = signed_in("prefetch-open");
+    let [b, c] = listed(&s, &fake, ["b", "c"], 4000);
+    let step = step_downloads(&s);
+    s.remote.prefetch(Some(&b));
+    wait_until("b's prefetch", || rows(&s) == row("Prefetching b.ARW"));
+    // Develop opens b and prefetches the next photo: b's prefetch goes on, and its load waits for it
+    s.remote.hold(Some(&b));
+    s.remote.prefetch(Some(&c));
+    let (r, open) = (s.remote.clone(), b.clone());
+    let loading = std::thread::spawn(move || r.local_original(&open));
+    wait_until("the load waits", || s.remote.loads_waiting.load(Ordering::SeqCst) == 1);
+    step.send(()).unwrap();
+    wait_until("the load finds b's copy", || {
+        assert!(!rows(&s).iter().any(|(_, l)| l.starts_with("Downloading b")), "no second download row");
+        loading.is_finished()
+    });
+    loading.join().unwrap().unwrap();
+    wait_until("c's turn", || rows(&s) == row("Prefetching c.ARW"));
+    step.send(()).unwrap();
+    wait_until("c is here", || is_cached(&s, &c) && s.activity.list().is_empty());
+    assert_eq!(fake.downloads(), 2, "b once, c once");
+    let paths: Vec<String> =
+        s.remote.take_events().into_iter().filter_map(|e| if let Event::Downloaded { path, .. } = e { Some(path) } else { None }).collect();
+    assert_eq!(paths, [b, c]);
 }
 
 #[test]
@@ -211,6 +281,22 @@ fn first_download_completes_the_record() {
 }
 
 #[test]
+fn the_downloading_thread_describes_the_photo() {
+    let (mut s, fake, d) = signed_in("described");
+    fake.add_file("/Photos/x.jpg", jpeg(96, 64, None));
+    let xp = remote(&fake, "Photos/x.jpg");
+    let x = add(&mut s, 1, &xp, MediaKind::Image);
+    s.remote.local_original(&xp).unwrap();
+    // the drain reads no file (the copy may even be gone by then)
+    for f in cached_files(&d) {
+        std::fs::remove_file(f).unwrap();
+    }
+    s.drain_remote();
+    let px = s.catalog.photo(x).unwrap();
+    assert_eq!((px.width, px.height, px.meta.camera.as_str(), px.content_hash.as_deref()), (96, 64, "Canon EOS R8", None));
+}
+
+#[test]
 fn copies_on_disk_are_not_downloads() {
     let (s, fake, _d) = signed_in("on-disk");
     fake.add_file("/Photos/x.jpg", jpeg(96, 64, None));
@@ -219,7 +305,9 @@ fn copies_on_disk_are_not_downloads() {
     s.remote.list(&RemotePath::parse(&remote(&fake, "Photos")).unwrap()).unwrap();
     fake.add_file("/Photos/x.jpg", jpeg(128, 64, None));
     s.remote.local_original(&x).unwrap();
-    assert!(matches!(s.remote.take_events().as_slice(), [Event::Downloaded { .. }]), "the new version");
+    let events = s.remote.take_events();
+    let [Event::Downloaded { info: Some(info), .. }] = events.as_slice() else { panic!("one download, described") };
+    assert_eq!((info.width, info.content_hash.as_deref()), (128, None), "the new version, no hash");
     // (the etag remembered is still the old one: the download finds the new copy on disk)
     s.remote.local_original(&x).unwrap();
     assert!(s.remote.take_events().is_empty(), "a copy on disk isn't a download");
