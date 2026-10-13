@@ -596,6 +596,9 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                 if app.ui.folder_parents.len() >= crate::state::MAX_FOLDER_PARENTS {
                     return Some(Err(format!("{id}: {} parent folders are shown already; hide one first", crate::state::MAX_FOLDER_PARENTS)));
                 }
+                // (asked for: it is listed open, with the row it was asked from under it,
+                // whatever was said of the rows inside its disk)
+                app.ui.sidebar_trees.set(&crate::tree_state::Branch::folder(&key, true), true);
                 app.ui.folder_parents.insert(key);
             }
             Ok(json!({"path": node, "show": show}))
