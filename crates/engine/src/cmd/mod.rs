@@ -34,6 +34,7 @@ mod preset_files;
 pub mod previews;
 mod query;
 mod sync;
+pub mod updates;
 mod xmp;
 
 use serde::Serialize;
@@ -166,6 +167,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(face_detect::specs());
         v.extend(face_recognize::specs());
         v.extend(activity::specs());
+        v.extend(updates::specs());
         v
     })
 }

@@ -242,6 +242,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         Dialog::FaceModel { info, .. } if info["download"].is_string() => "Download Face Model",
         Dialog::FaceModel { .. } => "Add Face Model",
         Dialog::WhatsNew => "What's New",
+        Dialog::UpdateAvailable { .. } => "Update Available",
         Dialog::Cull { .. } => "Assisted Culling",
         Dialog::SmartRules { id: None, .. } => "New Smart Album",
         Dialog::SmartRules { .. } => "Edit Smart Album",
@@ -323,6 +324,19 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     let r = ui.checkbox(pick_best, crate::i18n::tr("Pick the sharpest photo of each burst"));
                     crate::widgets::register(ui.ctx(), "check:cullPick", r.rect);
                     ui.label(egui::RichText::new(crate::i18n::tr("Scores stay on the photos: filter or make smart albums with Focus and Best of Similar Shots.")).color(t.text_dim));
+                }
+                Dialog::UpdateAvailable { latest, url } => {
+                    ui.set_min_width(420.0);
+                    ui.label(
+                        egui::RichText::new(crate::i18n::tr_format!("LightCraft {latest} is available.", latest = latest)).font(t.semibold(15.0)).color(t.text),
+                    );
+                    ui.label(crate::i18n::tr_format!("You have version {}.", env!("CARGO_PKG_VERSION")));
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(crate::i18n::tr("Download opens the release page in your browser; your library and edits stay as they are."))
+                            .color(t.text_dim),
+                    )
+                    .on_hover_text(url.as_str());
                 }
                 Dialog::WhatsNew => {
                     egui::ScrollArea::vertical().max_height(list_height(ui, 460.0)).auto_shrink([false, true]).show(ui, |ui| {
@@ -1208,6 +1222,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                 // no download location in this build: nothing to offer but the manual install
                 let sam_nowhere = sam_by_hand(sam);
                 let cancel = match &dlg {
+                    Dialog::UpdateAvailable { .. } => "Later",
                     Dialog::SamModel { .. } if sam_running || sam_installed || sam_nowhere => "Close",
                     Dialog::SamModel { .. } => "Not Now",
                     _ => "Cancel",
@@ -1246,6 +1261,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     Dialog::SamModel { .. } if sam_installed || sam_running || sam_nowhere => "",
                     Dialog::SamModel { error, .. } if error.is_some() || sam_failed => "Try Again",
                     Dialog::SamModel { .. } => "Download",
+                    Dialog::UpdateAvailable { .. } => "Download",
                     _ if informational => "Close",
                     _ => "OK",
                 };
@@ -1659,6 +1675,7 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
         Dialog::DenoiseModel { info, accepted } => crate::panels::denoise::install(app, info, *accepted),
         Dialog::FaceModel { path, info, accepted } => crate::panels::faces::install(app, path, info, *accepted),
         Dialog::AllMetadata { .. } | Dialog::SystemInfo { .. } | Dialog::WhatsNew => Ok(serde_json::Value::Null),
+        Dialog::UpdateAvailable { url, .. } => crate::links::open(app, url),
         Dialog::Cull { reject_below, pick_best } => {
             let mut p = json!({"pickBest": pick_best});
             if *reject_below > 0.0 {
