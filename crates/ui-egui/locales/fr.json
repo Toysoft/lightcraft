@@ -761,6 +761,7 @@
   "Local folders": "Dossiers locaux",
   "Local library — no cloud account needed": "Bibliothèque locale : aucun compte cloud nécessaire",
   "Locate Missing File…": "Localiser le fichier manquant…",
+  "Locate Missing Files…": "Localiser les fichiers manquants…",
   "Locate Photo": "Localiser la photo",
   "Location": "Lieu",
   "Lock": "Verrouiller",
@@ -1316,6 +1317,8 @@
   "Show Luminance Map": "Afficher la carte de luminance",
   "Show Mask": "Afficher le masque",
   "Show Mask Overlay": "Afficher l'incrustation du masque",
+  "Show All Mask Overlays": "Afficher toutes les superpositions de masque",
+  "Show all overlays": "Afficher toutes les superpositions",
   "Show Mask Pins": "Afficher les épingles de masque",
   "Show Original": "Afficher l'original",
   "Show Photo Counts": "Afficher le nombre de photos",
@@ -1967,5 +1970,8 @@
   "No lens database — set one up or download it…": "Aucune base d'objectifs — en configurer ou en télécharger une…",
   "Lens profiles apply to raw photos only.": "Les profils d'objectif ne s'appliquent qu'aux photos raw.",
   "No lens named in this photo's metadata.": "Les métadonnées de cette photo ne nomment aucun objectif.",
-  "No profile for {lens} in the lens database.": "Aucun profil pour {lens} dans la base d'objectifs."
+  "No profile for {lens} in the lens database.": "Aucun profil pour {lens} dans la base d'objectifs.",
+  "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Aucun processeur graphique trouvé : LightCraft effectue le rendu sur le processeur, ce qui est beaucoup plus lent. Détails dans Aide → Informations système.",
+  "On NixOS, start it from `nix develop`.": "Sous NixOS, lancez-le depuis `nix develop`.",
+  "Files with the same content as another file in this import: only the first is imported.": "Fichiers au contenu identique à un autre fichier de cette importation : seul le premier est importé."
 }
