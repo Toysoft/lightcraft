@@ -22,7 +22,7 @@ pub(crate) fn content_width(ctx: &egui::Context) -> f32 {
 const MAX_NAME_NEED: f32 = 140.0;
 
 /// Height of a sidebar row.
-const ROW_HEIGHT: f32 = 29.0;
+const ROW_HEIGHT: f32 = 22.0;
 
 /// Temp-data key of the row (its widget id after `source:`, lower-case) the sidebar scrolls to
 /// this frame: set before the sections are drawn, cleared after.
@@ -111,7 +111,7 @@ fn row_sensed(
         icon,
         if selected { t.text } else { t.icon },
     );
-    let font = t.font(13.5);
+    let font = t.font(12.0);
     let color = if selected { t.text } else { t.text_label };
     // a count of nothing is there, but fainter: the rows that hold photos stand out
     let count_color = |n: usize| if n == 0 { t.text_dim.gamma_multiply(0.55) } else { t.text_dim };
@@ -155,7 +155,7 @@ fn out_of_sight(app: &LightcraftApp, ui: &mut egui::Ui, id: &str, label: &str, c
     register(ui.ctx(), format!("source:{id}"), r);
     let t = Tokens::get(ui.ctx());
     let painter = ui.painter();
-    let name_w = painter.layout_no_wrap(label.to_string(), t.font(13.5), t.text_label).size().x;
+    let name_w = painter.layout_no_wrap(label.to_string(), t.font(12.0), t.text_label).size().x;
     let count_w = count.filter(|_| app.ui.show_counts).map(|n| painter.layout_no_wrap(n.to_string(), t.font(12.5), t.text_dim).size().x);
     note_width(ui, row_need(indent, name_w, if mark { MARK_W } else { 0.0 }, count_w));
     true
@@ -221,9 +221,9 @@ fn triangle_points(c: egui::Pos2, open: bool) -> Vec<egui::Pos2> {
 }
 
 /// Space above a section's header.
-const SECTION_GAP: f32 = 10.0;
+const SECTION_GAP: f32 = 6.0;
 /// Height of a section's header.
-const SECTION_HEADER: f32 = 34.0;
+const SECTION_HEADER: f32 = 24.0;
 
 /// One sidebar section: the gap above it, its header, and (while it is open) the rows `body`
 /// draws. Every section goes through here, so they all fold, space and announce themselves alike.
@@ -601,7 +601,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         // the title offers the sections' menu too: where hidden sections come back from
-        let (hr, title) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
+        let (hr, title) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
         register(ui.ctx(), "sidebarTitle", hr);
         title.context_menu(|ui| sections_menu(app, ui, None));
         // the open library's name under the title, so nobody edits in the wrong one (issue #902)

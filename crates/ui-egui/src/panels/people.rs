@@ -21,7 +21,7 @@ const HEADER_H: f32 = 44.0;
 /// The name under a card's picture.
 const NAME_H: f32 = 26.0;
 /// The unnamed-faces heading and its hints.
-const SECTION_H: f32 = 70.0;
+const SECTION_H: f32 = 48.0;
 
 /// `thumb` (the thumbnail slider, 90 to 480) as a position between `low` and `high`.
 fn between(thumb: f32, low: f32, high: f32) -> f32 {

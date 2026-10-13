@@ -35,7 +35,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     if left_rect.width() >= 270.0 {
                         for &(id, icon, mode, tip) in VIEW_MODES {
-                            if icon_button(ui, id, icon, vec2(32.0, 32.0), app.ui.view == mode, true, tip).clicked() {
+                            if icon_button(ui, id, icon, vec2(22.0, 22.0), app.ui.view == mode, true, tip).clicked() {
                                 let _ = app.run(&format!("view.{id}"), json!({}));
                             }
                         }
@@ -43,11 +43,11 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                         let (sep, _) = ui.allocate_exact_size(vec2(1.0, 22.0), Sense::hover());
                         ui.painter().rect_filled(sep, 0.0, t.button_border);
                         ui.add_space(10.0);
-                        let sort = icon_button(ui, "sort", Icon::Sort, vec2(30.0, 30.0), false, true, "Sort");
+                        let sort = icon_button(ui, "sort", Icon::Sort, vec2(22.0, 22.0), false, true, "Sort");
                         egui::Popup::menu(&sort).show(|ui| sort_menu(app, ui));
                     } else {
                         let current_icon = VIEW_MODES.iter().find(|(_, _, mode, _)| *mode == app.ui.view).map_or(Icon::More, |(_, icon, _, _)| *icon);
-                        let more = icon_button(ui, "viewOptions", current_icon, vec2(40.0, 32.0), true, true, "View");
+                        let more = icon_button(ui, "viewOptions", current_icon, vec2(28.0, 22.0), true, true, "View");
                         paint(
                             ui.painter(),
                             Rect::from_center_size(more.rect.right_bottom() - vec2(5.0, 5.0), vec2(7.0, 7.0)),
@@ -86,8 +86,8 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
     let t = Tokens::get(ui.ctx());
     let has_clip = app.session.clipboard.is_some();
     let label = crate::i18n::tr(if has_clip { "Paste Edit Settings" } else { "Copy Edit Settings" });
-    let copy_width = (ui.painter().layout_no_wrap(label.to_string(), t.font(13.0), t.text_label).size().x + 24.0).max(136.0);
-    let centre_width = PILL_W + 10.0 + copy_width + 4.0 + 30.0;
+    let copy_width = (ui.painter().layout_no_wrap(label.to_string(), t.font(11.0), t.text_label).size().x + 20.0).max(120.0);
+    let centre_width = PILL_W + 10.0 + copy_width + 4.0 + 22.0;
     let room = to - from;
     if room < PILL_W {
         return;
@@ -97,13 +97,13 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
     // where it sits with room to spare (slightly left of centre), kept between the side groups
     let left = (full.center().x - 60.0 - PILL_W / 2.0).clamp(from, to - w);
     let active = app.session.active().and_then(|id| app.session.catalog.photo(id).cloned());
-    let pill = Rect::from_min_size(pos2(left, full.center().y - 15.0), vec2(PILL_W, 30.0));
-    ui.painter().rect_filled(pill, 15.0, t.canvas);
+    let pill = Rect::from_min_size(pos2(left, full.center().y - 11.0), vec2(PILL_W, 22.0));
+    ui.painter().rect_filled(pill, 11.0, t.canvas);
     let mut pill_ui =
         ui.new_child(egui::UiBuilder::new().max_rect(pill.shrink2(vec2(10.0, 4.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
     pill_ui.spacing_mut().item_spacing.x = 3.0;
     let rating = active.as_ref().map(|p| p.rating).unwrap_or(0);
-    if let Some(r) = stars(&mut pill_ui, "bottom", rating, 19.0) {
+    if let Some(r) = stars(&mut pill_ui, "bottom", rating, 14.0) {
         let mut params = json!({"rating": r});
         crate::panels::compare::target_active(app, &mut params);
         let _ = app.run("photo.rate", params);
@@ -111,7 +111,7 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
     pill_ui.add_space(6.0);
     let flag = active.as_ref().map(|p| p.flag).unwrap_or_default();
     for (id, icon, f) in [("unflag", Icon::Circle, Flag::None), ("pick", Icon::FlagPick, Flag::Pick), ("reject", Icon::FlagReject, Flag::Reject)] {
-        let (r, resp) = pill_ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+        let (r, resp) = pill_ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
         register(pill_ui.ctx(), format!("flag:{id}"), r);
         let on = flag == f && f != Flag::None;
         let c = if on {
@@ -132,21 +132,21 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
     if !with_copy {
         return;
     }
-    let copy_r = Rect::from_min_size(pos2(pill.right() + 10.0, pill.top()), vec2(copy_width, 30.0));
+    let copy_r = Rect::from_min_size(pos2(pill.right() + 10.0, pill.top()), vec2(copy_width, pill.height()));
     let cresp = ui.interact(copy_r, egui::Id::new("copy-settings"), Sense::click());
     register(ui.ctx(), "button:copySettings", copy_r);
-    ui.painter().rect_filled(copy_r, 15.0, if cresp.hovered() { t.hover } else { t.canvas });
-    ui.painter().text(copy_r.center(), Align2::CENTER_CENTER, label, t.font(13.0), if active.is_some() { t.text_label } else { t.text_disabled });
+    ui.painter().rect_filled(copy_r, 11.0, if cresp.hovered() { t.hover } else { t.canvas });
+    ui.painter().text(copy_r.center(), Align2::CENTER_CENTER, label, t.font(11.0), if active.is_some() { t.text_label } else { t.text_disabled });
     if cresp.clicked() && active.is_some() {
         let _ = if has_clip { app.run("develop.paste", json!({})) } else { app.run("develop.copy", json!({})) };
         let msg = if has_clip { "Settings pasted" } else { "Edit settings copied" };
         app.toast(ui.ctx(), crate::i18n::tr(msg));
     }
-    let gear_r = Rect::from_min_size(pos2(copy_r.right() + 4.0, pill.top()), vec2(30.0, 30.0));
+    let gear_r = Rect::from_min_size(pos2(copy_r.right() + 4.0, pill.top()), vec2(22.0, 22.0));
     let gresp = ui.interact(gear_r, egui::Id::new("copy-gear"), Sense::click());
     register(ui.ctx(), "icon:copyGear", gear_r);
-    ui.painter().rect_filled(gear_r, 15.0, if gresp.hovered() { t.hover } else { t.canvas });
-    paint(ui.painter(), gear_r.shrink(7.0), Icon::Gear, t.icon);
+    ui.painter().rect_filled(gear_r, 11.0, if gresp.hovered() { t.hover } else { t.canvas });
+    paint(ui.painter(), gear_r.shrink(5.0), Icon::Gear, t.icon);
     if gresp.clicked() {
         let _ = app.run("dialog.copySettings", json!({}));
     }
@@ -166,7 +166,7 @@ fn right_side(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, compact_zo
             &mut child,
             "autoAdvance",
             Icon::ChevronRight,
-            vec2(30.0, 30.0),
+            vec2(22.0, 22.0),
             app.ui.auto_advance,
             true,
             "Auto Advance after rating or flagging",
@@ -182,7 +182,7 @@ fn right_side(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, compact_zo
             &mut child,
             "beforeAfter",
             Icon::BeforeAfter,
-            vec2(30.0, 30.0),
+            vec2(22.0, 22.0),
             app.ui.before_after != BeforeAfter::Off,
             true,
             "Before/After (Y)",
@@ -192,11 +192,11 @@ fn right_side(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, compact_zo
             let _ = app.run("view.beforeAfter", json!({}));
         }
         if app.ui.view == ViewMode::Detail
-            && icon_button(&mut child, "faceBoxes", Icon::FaceBox, vec2(30.0, 30.0), app.ui.face_boxes, true, "Face boxes").clicked()
+            && icon_button(&mut child, "faceBoxes", Icon::FaceBox, vec2(22.0, 22.0), app.ui.face_boxes, true, "Face boxes").clicked()
         {
             let _ = app.run("view.faceBoxes", json!({}));
         }
-        if icon_button(&mut child, "filmstrip", Icon::Filmstrip, vec2(30.0, 30.0), app.ui.filmstrip, true, "Filmstrip (/)").clicked() {
+        if icon_button(&mut child, "filmstrip", Icon::Filmstrip, vec2(22.0, 22.0), app.ui.filmstrip, true, "Filmstrip (/)").clicked() {
             let _ = app.run("view.filmstrip", json!({}));
         }
         child.add_space(10.0);
@@ -205,7 +205,7 @@ fn right_side(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, compact_zo
             Zoom::Fill => "Fill".to_string(),
             Zoom::Percent(p) => format!("{p:.0}%"),
         };
-        let zr = crate::widgets::dropdown(&mut child, "zoom", crate::i18n::tr(&zoom_label), t.font(13.0), t.text_label);
+        let zr = crate::widgets::dropdown(&mut child, "zoom", crate::i18n::tr(&zoom_label), t.font(12.0), t.text_label);
         egui::Popup::menu(&zr).show(|ui| {
             for (label, z) in [
                 ("Fit", Zoom::Fit),
@@ -227,7 +227,7 @@ fn right_side(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, compact_zo
                 &mut child,
                 "clickZoom",
                 &crate::i18n::tr_format!("Click {}:1", app.ui.click_zoom / 100),
-                t.font(13.0),
+                t.font(12.0),
                 t.text_label,
             );
             egui::Popup::menu(&cz).show(|ui| click_zoom_menu(app, ui));
