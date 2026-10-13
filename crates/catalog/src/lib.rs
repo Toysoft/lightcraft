@@ -21,6 +21,7 @@ pub mod local;
 pub mod lock;
 pub mod model;
 pub mod query;
+pub mod revision;
 pub mod rules;
 pub mod safe_file;
 pub mod stacks;
@@ -38,6 +39,7 @@ pub use local::{DEFAULT_FORGET_DAYS, ForgetPlan, folder_of};
 pub use lock::{LibraryLock, LockError, LockOwner};
 pub use model::*;
 pub use query::{DateGroup, Filter, Person, RatingOp, Sort, SortKey, mix64};
+pub use revision::ViewRevision;
 pub use rules::{Match, Rule, RuleSet};
 use serde::{Deserialize, Serialize};
 pub use store::{FsStore, MemStore, Store};
@@ -275,6 +277,11 @@ pub struct Catalog {
     /// Increments on every applied op.
     #[serde(skip)]
     pub revision: u64,
+    /// Increments on every applied op that changes more than photos' develop state
+    /// ([`Op::is_develop_only`]): what views that don't read develop state key on (see
+    /// [`revision`]), so a slider drag doesn't work them out again on every tick.
+    #[serde(skip)]
+    pub library_revision: u64,
 }
 
 impl Catalog {
@@ -479,8 +486,12 @@ impl Catalog {
 
     /// Apply an op; returns its inverse. On error nothing changes.
     pub fn apply(&mut self, op: Op) -> Result<Op> {
+        let develop_only = op.is_develop_only();
         let inv = self.apply_inner(op)?;
         self.revision += 1;
+        if !develop_only {
+            self.library_revision += 1;
+        }
         Ok(inv)
     }
 

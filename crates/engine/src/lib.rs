@@ -175,15 +175,16 @@ pub struct Session {
     pub filter: Filter,
     pub sort: Sort,
     pub selection: Selection,
-    /// The grid order for the current source/filter/sort (cached by catalog revision).
+    /// The grid order for the current source/filter/sort (cached by library revision, and by the
+    /// full catalog revision when the filter, sort or source reads develop state).
     /// Shared, so frontends can hold it across frames without copying ([`Session::visible_shared`]).
     visible: Arc<[PhotoId]>,
-    visible_key: Option<(u64, String)>,
+    visible_key: Option<ViewKey>,
     /// Identifies the current `visible` list: a new value (unique in the process) every time it
     /// is recomputed, so frontends can key their per-view caches on it instead of hashing the ids.
     visible_gen: u64,
     /// Photos in the current source with no filter on (cached like `visible`).
-    total: Option<((u64, String), usize)>,
+    total: Option<(ViewKey, usize)>,
     pub undo: Vec<UndoEntry>,
     /// Undo steps committed in this session, ever (the history drops its oldest past 1000, so
     /// its length can't tell how many steps a command just made; see [`Session::commits`]).
@@ -839,13 +840,14 @@ impl Session {
 
     /// Photos shown in the grid/filmstrip for the current source, filter and sort.
     pub fn visible(&mut self) -> &[PhotoId] {
-        let mut key =
-            (self.catalog.revision, format!("{:?}|{:?}|{:?}|{:?}|{:?}", self.source, self.filter, self.sort, self.browse, self.library_folder));
-        if self.source == LibrarySource::Missing && self.media.availability.is_background() {
-            // the view fills in as the background checks find files gone
-            key.1.push_str(&format!("|{}", self.media.availability.generation()));
-        }
-        if self.visible_key.as_ref() != Some(&key) {
+        // a develop edit (a slider tick) only redoes the query when the filter, sort or source reads develop state
+        let reads_develop = self.source_reads_develop() || self.sort.reads_develop() || self.catalog.filter_reads_develop(&self.filter);
+        let revision = self.catalog.view_revision(reads_develop);
+        // the Missing Photos view fills in as the background checks find files gone
+        let availability =
+            (self.source == LibrarySource::Missing && self.media.availability.is_background()).then(|| self.media.availability.generation());
+        if !self.visible_key.as_ref().is_some_and(|k| k.is(self, revision, true, availability)) {
+            let key = ViewKey::of(self, revision, true, availability);
             // "in the last N days" rules count back from the session's clock
             lightcraft_catalog::rules::set_now(Some((self.clock)()));
             let mut f = self.source.to_filter(&self.filter, &self.catalog);
@@ -916,8 +918,9 @@ impl Session {
         if self.source == LibrarySource::Missing {
             return None;
         }
-        let key = (self.catalog.revision, format!("{:?}|{:?}|{:?}", self.source, self.browse, self.library_folder));
-        if self.total.as_ref().map(|t| &t.0) != Some(&key) {
+        let revision = self.catalog.view_revision(self.source_reads_develop());
+        if !self.total.as_ref().is_some_and(|t| t.0.is(self, revision, false, None)) {
+            let key = ViewKey::of(self, revision, false, None);
             let mut f = self.source.to_filter(&Filter::default(), &self.catalog);
             if self.source == LibrarySource::Folder {
                 let b = self.browse.clone().unwrap_or_default();
@@ -933,12 +936,21 @@ impl Session {
         self.total.as_ref().map(|t| t.1)
     }
 
+    /// Whether what the current source holds can change with a develop edit (a smart album
+    /// whose rules read develop state; see [`lightcraft_catalog::revision`]).
+    fn source_reads_develop(&self) -> bool {
+        match self.source {
+            LibrarySource::Album(a) => self.catalog.album_reads_develop(a),
+            _ => false,
+        }
+    }
+
     pub fn visible_cloned(&mut self) -> Vec<PhotoId> {
         self.visible().to_vec()
     }
 
     /// The visible photos without copying them, with their generation: equal generations mean
-    /// the very same list (same catalog revision, source, filter, sort), so a frontend can cache
+    /// the very same list (same library, source, filter, sort), so a frontend can cache
     /// whatever it derives from the list under that number.
     pub fn visible_shared(&mut self) -> (u64, Arc<[PhotoId]>) {
         self.visible();
@@ -954,6 +966,45 @@ impl Session {
             return vec![PhotoId(id)];
         }
         if self.selection.ids.is_empty() { self.selection.active.into_iter().collect() } else { self.selection.ids.clone() }
+    }
+}
+
+/// What [`Session::visible`] (or [`Session::source_total`]) was worked out from. Compared every
+/// frame, so without formatting or copying anything.
+#[derive(Clone, Debug, PartialEq)]
+struct ViewKey {
+    revision: lightcraft_catalog::ViewRevision,
+    source: LibrarySource,
+    /// The filter bar and sort (`None` for the source total, which ignores them).
+    view: Option<(Filter, Sort)>,
+    browse: Option<Browse>,
+    library_folder: Option<String>,
+    availability: Option<u64>,
+}
+
+impl ViewKey {
+    fn of(s: &Session, revision: lightcraft_catalog::ViewRevision, filtered: bool, availability: Option<u64>) -> ViewKey {
+        ViewKey {
+            revision,
+            source: s.source,
+            view: filtered.then(|| (s.filter.clone(), s.sort)),
+            browse: s.browse.clone(),
+            library_folder: s.library_folder.clone(),
+            availability,
+        }
+    }
+
+    fn is(&self, s: &Session, revision: lightcraft_catalog::ViewRevision, filtered: bool, availability: Option<u64>) -> bool {
+        let view = match &self.view {
+            Some((f, sort)) => filtered && *f == s.filter && *sort == s.sort,
+            None => !filtered,
+        };
+        self.revision == revision
+            && self.source == s.source
+            && view
+            && self.browse == s.browse
+            && self.library_folder == s.library_folder
+            && self.availability == availability
     }
 }
 
@@ -1002,6 +1053,8 @@ mod tests_forget_local;
 mod tests_import;
 #[cfg(test)]
 mod tests_import_move;
+#[cfg(test)]
+mod tests_invalidation;
 #[cfg(test)]
 mod tests_keyword_list;
 #[cfg(test)]

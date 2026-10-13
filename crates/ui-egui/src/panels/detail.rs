@@ -487,7 +487,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     // once this photo is on screen: prepare its neighbours in filmstrip order (source decoded and
     // kept, view render cached) so stepping to them is instant
     if !interacting && !app.renderer.is_pending(Slot::Main) && app.renderer.textures.get(&Slot::Main).is_some_and(|t| t.photo == id) {
-        let ids = app.session.visible_cloned();
+        let ids = app.session.visible_shared().1;
         if let Some(i) = ids.iter().position(|p| *p == id) {
             let next = ids.get(i + 1).copied();
             let prev = i.checked_sub(1).and_then(|j| ids.get(j)).copied();
@@ -2132,7 +2132,8 @@ pub(crate) fn filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, r: Rect) {
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(r, 0.0, t.canvas);
     ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width(), 4.0)), 0.0, Color32::from_gray(0x20));
-    let ids = app.session.visible_cloned();
+    // shared, not copied: the strip is drawn every frame
+    let ids = app.session.visible_shared().1;
     let active = app.session.selection.active;
     let cell_w = 120.0;
     let ppp = ui.ctx().pixels_per_point();
