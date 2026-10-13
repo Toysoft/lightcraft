@@ -127,7 +127,7 @@ impl Remote {
         let client = self.client(&key)?;
         let mut size = known.map(|(_, size)| size);
         let may_download = crate::memory::may_download();
-        // ponytail: one `stat` to learn the etag `cached` needs; a "newest copy" accessor in craft would save it
+        // (one `stat` for the current etag: while the server answers, an out-of-date copy isn't opened)
         if size.is_none() && state != AccountState::Unreachable {
             // (moved on already: not even a `stat`)
             if cancel.load(Ordering::Relaxed) {
@@ -230,15 +230,20 @@ impl Remote {
         }
     }
 
-    /// The copy of `path` on this computer, no request: at the etag last seen, else (none seen yet, as
-    /// after a restart) the cache's newest one, which may be out of date. A load holds `path` first
-    /// (`hooks::with_original`), so the copy stays on disk until it is read.
+    /// The copy of `path` on this computer, no request: at the etag last seen; else (none seen yet, as
+    /// after a restart, or none of that version while the server doesn't answer) the cache's newest
+    /// one, which may be out of date. A load holds `path` first (`hooks::with_original`), so the copy
+    /// stays on disk until it is read.
     fn cached_copy(&self, path: &RemotePath) -> Option<PathBuf> {
-        let known = self.lock().known.get(path).map(|(etag, _)| etag.clone());
+        let (known, unreachable) = {
+            let inner = self.lock();
+            (inner.known.get(path).map(|(etag, _)| etag.clone()), inner.state(&path.account_key()) == AccountState::Unreachable)
+        };
         let cache = self.cache().ok()?;
         match known {
-            Some(etag) => cache.cached(path, &etag),
-            None => cache.newest(path),
+            // (while the server answers, an out-of-date copy isn't opened)
+            Some(etag) if !unreachable => cache.cached(path, &etag),
+            known => known.and_then(|etag| cache.cached(path, &etag)).or_else(|| cache.newest(path)),
         }
     }
 

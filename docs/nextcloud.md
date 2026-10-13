@@ -95,8 +95,8 @@ the Info panel open doesn't.
   Above it, the least recently used originals are deleted, except offline copies (pinned) and the photo open in
   Develop (held).
 - **A file changed on the server** (new etag) is downloaded again when next needed; the old copy goes.
-- **Copies are found without the server,** after a restart too: with no etag seen this session for a file, its
-  newest copy in the cache is used (craft's `OriginalsCache::newest`; no request).
+- **Copies are found without the server,** after a restart too: while the server doesn't answer, or for a file with
+  no etag seen this session, its newest copy in the cache is used (craft's `OriginalsCache::newest`; no request).
 - **Thumbnails** made from server previews go to the usual thumbnail disk cache, keyed by path and size (Nextcloud
   photos have no content hash).
 - **Accounts** are in `<settings folder>/nextcloud.json` (`{accounts: [{server, user, trust}], cacheBudgetMb}`); no
@@ -180,8 +180,7 @@ Trust on first use, with no silent changes:
 - **The quick view is capped at 2,560 px** (the preview size), not the 4,096 px first planned: an unedited photo at
   Fit on a screen wider than that is a little soft outside Develop.
 - **Offline, LightCraft can't tell whether a copy on disk is the latest version:** it is used as it is, and a newer
-  version is downloaded once the server answers again (a copy older than a version a listing showed this session isn't
-  used).
+  version is downloaded once the server answers again.
 - **Labels in the Nextcloud dialogs and Settings tab are English only** so far.
 - One account per import; a login name that differs from the user id (e-mail or LDAP logins) isn't supported by the
   client.
@@ -278,8 +277,9 @@ MiB; CR3s that Memories hasn't indexed get their size from the file's header.
 7. **Folders are full paths.** `library.importNextcloud {dirs}` and `nextcloud.browse {dir}` take `nextcloud://` paths
    and the account comes from the path, so there is no separate `account` param to get out of step.
 8. **The cache is keyed by etag.** LightCraft remembers etags from listings and `stat`s this session; a lookup with no
-   known etag costs one `stat`. Where nothing is asked (the account unreachable, a prefetch or All Metadata checking
-   for a copy), a file with no known etag uses the cache's newest copy, so copies are found offline after a restart.
+   known etag costs one `stat`, and while the server answers an out-of-date copy isn't opened. While the account is
+   unreachable, and for a file with no known etag where nothing is asked (a prefetch or All Metadata checking for a
+   copy), the cache's newest copy is used, so copies are found offline, after a restart too.
 9. **One download at a time,** behind one lock, interactive loads first. Per-path downloads can come if measurements
    show a waiting loupe.
 10. **Local-only actions refuse.** Merge, Convert to DNG, Duplicate, Edit In, file renames and moves, folder

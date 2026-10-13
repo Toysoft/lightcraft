@@ -198,11 +198,14 @@ fn metadata_gives_local_capture_times_and_missing_sizes() {
     for f in ["/Photos/b.dng", "/Photos/c.dng"] {
         fake.add_file(f, dng.clone());
     }
-    // b is in the library already, as a timeline listing left it: two hours early, and sized
-    let mut p = Photo::new(PhotoId(2), Source::File { path: remote(&fake, "Photos/b.dng") }, "b.dng", "", 4000, 6000, "2026-10-13");
-    p.kind = MediaKind::Raw;
-    p.captured = Some("2025-01-02T01:04:05".into());
-    s.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    // a and b are in the library already, as a timeline listing left them: at the UTC instant (two
+    // hours early), and sized
+    for (id, name, captured) in [(1, "a.ARW", "2023-11-14T22:13:20"), (2, "b.dng", "2025-01-02T01:04:05")] {
+        let mut p = Photo::new(PhotoId(id), Source::File { path: remote(&fake, &format!("Photos/{name}")) }, name, "", 4000, 6000, "2026-10-13");
+        p.kind = MediaKind::Raw;
+        p.captured = Some(captured.into());
+        s.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    }
     import(&mut s, &[remote(&fake, "Photos")]);
     let a = photo(&s, &remote(&fake, "Photos/a.ARW"));
     assert_eq!((a.captured.as_deref(), a.meta.camera.as_str()), (Some("2023-11-15T00:13:20"), "Sony ILCE-7RM6"), "Memories' datetaken");

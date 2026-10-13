@@ -626,6 +626,26 @@ fn offline_copies_open_at_once_after_a_restart() {
     assert_eq!(fake.requests(), before, "nothing asked the server");
 }
 
+/// While the server can't be reached, a photo whose newer version a listing showed this session, and
+/// whose older copy is all that is here, opens from that copy (not the smart preview), with no request.
+#[test]
+fn an_unreachable_server_opens_an_older_copy() {
+    let (s, fake, _d) = signed_in("offline-older");
+    fake.add_file("/Photos/y.jpg", jpeg(96, 64, None));
+    let y = remote(&fake, "Photos/y.jpg");
+    let load = s.media.file_loader.clone().unwrap();
+    load(&y, 512).unwrap();
+    // a newer version on the server, its etag seen by a listing; then the server stops answering
+    fake.add_file("/Photos/y.jpg", jpeg(48, 32, None));
+    s.remote.list(&RemotePath::parse(&remote(&fake, "Photos")).unwrap()).unwrap();
+    s.remote.note_error(&fake.account().key(), &craft_nextcloud::Error::Unreachable("timed out".into()));
+    let before = fake.requests();
+    let (img, _) = load(&y, 512).unwrap();
+    assert_eq!((img.width, img.height), (96, 64), "the older copy");
+    assert!(s.remote.exists(&y), "a photo with an original here is there");
+    assert_eq!(fake.requests(), before, "nothing asked the server");
+}
+
 /// R32: a raw the server has no preview of (no preview provider for its format: all CR3s on a live
 /// server) shows the embedded preview in its first MiB, from a Range read, in the grid and the quick
 /// view alike. A preview past that window isn't read: none, as before.
