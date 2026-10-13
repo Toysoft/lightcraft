@@ -1312,10 +1312,15 @@ impl crate::Session {
         Some(job)
     }
 
-    /// The embedded preview of an unedited raw (path, loader), when the app installed a loader.
+    /// The embedded preview of an unedited raw, or the server's preview of an unedited Nextcloud photo
+    /// of any kind (path, loader), when the app installed a loader.
     fn embedded_of(&self, p: &Photo) -> Option<(String, PreviewLoader)> {
         match (&p.source, &self.media.preview_loader) {
-            (Source::File { path }, Some(l)) if p.kind == MediaKind::Raw && crate::import::has_import_look(p) => Some((path.clone(), l.clone())),
+            (Source::File { path }, Some(l))
+                if (p.kind == MediaKind::Raw || lightcraft_catalog::is_remote(path)) && crate::import::has_import_look(p) =>
+            {
+                Some((path.clone(), l.clone()))
+            }
             _ => None,
         }
     }
@@ -1330,8 +1335,9 @@ impl crate::Session {
     /// 45 s a photo: a 149-photo folder spent 8.3 GB of traffic on thumbnails, and the queue behind
     /// it delayed the render the user was waiting for.
     ///
-    /// Only unedited raws answer `true`: any edit must be rendered, and `has_import_look` is what
-    /// says the photo still looks the way it did at import. A photo the user edits re-renders
+    /// Only unedited raws (and unedited Nextcloud photos of any kind, whose "embedded" preview is the
+    /// server's: their originals aren't downloaded just to look at them) answer `true`: any edit must
+    /// be rendered, and `has_import_look` is what says the photo still looks the way it did at import. A photo the user edits re-renders
     /// through the ordinary path, because its thumbnail key (settings hash) changes.
     pub fn embedded_thumb_is_final(&self, p: &Photo) -> bool {
         self.embedded_of(p).is_some()

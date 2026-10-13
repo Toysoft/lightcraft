@@ -224,6 +224,56 @@ fn opening_the_prefetched_photo_keeps_its_download() {
     assert_eq!(paths, [b, c]);
 }
 
+/// A load run by work that moved on to another photo (a render whose view shows another photo now:
+/// its thread's `memory::cancellable` flag) stops: while it waits for the download running, it
+/// starts no download; once its own runs, it stops there. The next photo's load goes ahead.
+#[test]
+fn a_load_stops_when_its_work_moves_on() {
+    let (s, fake, _d) = signed_in("load-moves-on");
+    let [a, b, c] = listed(&s, &fake, ["a", "b", "c"], 4000);
+    let step = step_downloads(&s);
+    let load = |path: &String, flag: Option<Arc<std::sync::atomic::AtomicBool>>| {
+        let (r, path) = (s.remote.clone(), path.clone());
+        std::thread::spawn(move || match flag {
+            Some(flag) => crate::memory::cancellable(flag, || r.local_original(&path)),
+            None => r.local_original(&path),
+        })
+    };
+    let downloading = |name: &str| rows(&s).iter().any(|(_, l)| l.starts_with(&format!("Downloading {name}")));
+    // a waits for c's download, then its view moves on: no row, no request
+    let loading_c = load(&c, None);
+    wait_until("c's download", || downloading("c.ARW"));
+    let moved = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let loading_a = load(&a, Some(moved.clone()));
+    wait_until("a waits", || s.remote.loads_waiting.load(Ordering::SeqCst) == 1);
+    moved.store(true, Ordering::Relaxed);
+    step.send(()).unwrap();
+    assert!(loading_c.join().unwrap().is_ok());
+    wait_until("a gives up", || {
+        assert!(!downloading("a.ARW"), "no row for a");
+        loading_a.is_finished()
+    });
+    assert_eq!(loading_a.join().unwrap().unwrap_err(), craft_nextcloud::Error::Cancelled.to_string());
+    assert!(!is_cached(&s, &a));
+    // a's own download, stopped once its view moves on
+    let moved = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let loading_a = load(&a, Some(moved.clone()));
+    wait_until("a's download", || downloading("a.ARW"));
+    moved.store(true, Ordering::Relaxed);
+    step.send(()).unwrap();
+    assert_eq!(loading_a.join().unwrap().unwrap_err(), craft_nextcloud::Error::Cancelled.to_string());
+    wait_until("a's row goes", || !downloading("a.ARW"));
+    assert!(!is_cached(&s, &a));
+    // the next photo's load goes ahead
+    let loading_b = load(&b, Some(Arc::new(std::sync::atomic::AtomicBool::new(false))));
+    wait_until("b's download", || downloading("b.ARW"));
+    step.send(()).unwrap();
+    assert!(loading_b.join().unwrap().is_ok());
+    assert!(is_cached(&s, &b));
+    assert_eq!(fake.downloads(), 2, "c and b; never a");
+    assert_eq!(s.remote.accounts()[0].1, AccountState::SignedIn, "a stopped download isn't the server's fault");
+}
+
 #[test]
 fn moving_on_cancels_the_open_photos_prefetch() {
     let (s, fake, _d) = signed_in("prefetch-skim");

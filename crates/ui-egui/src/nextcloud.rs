@@ -117,7 +117,12 @@ pub fn open_import(app: &mut LightcraftApp, ctx: &egui::Context) -> Result<Value
 
 /// Show `dir`'s folders in the import dialog `dlg` (read on a worker).
 fn navigate(app: &mut LightcraftApp, dlg: &mut Dialog, to: String) {
-    let Dialog::NextcloudImport { dir, folders, loading, error, .. } = dlg else { return };
+    let Dialog::NextcloudImport { dir, folders, chosen, loading, error } = dlg else { return };
+    // (one import is one account: folders chosen on another go)
+    let account = |p: &str| p.strip_prefix("nextcloud://").and_then(|r| r.split('/').next()).map(str::to_string);
+    if !to.is_empty() {
+        chosen.retain(|c| account(c) == account(&to));
+    }
     *dir = to.clone();
     folders.clear();
     *error = None;

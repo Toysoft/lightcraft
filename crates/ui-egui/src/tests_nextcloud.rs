@@ -239,24 +239,31 @@ fn import_dialog_browses_and_imports() {
     assert!(h.step_until(T, |h| h.app.session.catalog.len() == 3), "photos: {}", h.app.session.catalog.len());
 }
 
-#[test]
-fn browsing_unedited_remote_photos_downloads_nothing() {
+/// A `w`×`h` grey JPEG.
+fn jpeg(w: usize, h: usize) -> Vec<u8> {
+    let px = vec![90; w * h * 3];
+    let img = lightcraft_codecs::EncodeImage::new(w as u32, h as u32, 3, lightcraft_codecs::Samples::U8(&px));
+    lightcraft_codecs::encode_jpeg(&img, 90, lightcraft_codecs::ChromaSubsampling::S444, &Default::default()).unwrap()
+}
+
+/// Three photos `a`, `b`, `c` with extension `ext` (`bytes` each) imported from a fake server that has
+/// previews for them and Memories sizes (4000×6000, portrait); browsing them, then developing the
+/// first: Fit and Fill (where a portrait photo wants window renders), the Compare view, then an
+/// edit tool, then the grid.
+fn browse_then_develop(ext: &str, bytes: Vec<u8>) {
     let fake = FakeServer::start();
-    let preview = lightcraft_codecs::encode_jpeg(
-        &lightcraft_codecs::EncodeImage::new(64, 48, 3, lightcraft_codecs::Samples::U8(&[90; 64 * 48 * 3])),
-        90,
-        lightcraft_codecs::ChromaSubsampling::S444,
-        &Default::default(),
-    )
-    .unwrap();
-    for f in ["/Photos/a.ARW", "/Photos/b.ARW", "/Photos/c.ARW"] {
-        fake.add_file(f, (0..40_000).map(|i| (i % 253) as u8).collect());
-        fake.set_preview(f, preview.clone());
+    fake.enable_memories();
+    for n in ["a", "b", "c"] {
+        let f = format!("/Photos/{n}.{ext}");
+        fake.add_file(&f, bytes.clone());
+        fake.set_preview(&f, jpeg(64, 96));
+        fake.set_photo(&f, 19675, 4000, 6000, 1_700_000_000, json!({}));
     }
-    let d = temp("develop");
+    let d = temp(&format!("develop-{ext}"));
     let mut s = session(&d, &[fake.account()]);
     s.execute("library.importNextcloud", &json!({"dirs": [remote(&fake, "Photos")], "wait": true})).unwrap();
     assert_eq!(s.catalog.len(), 3);
+    assert!(s.catalog.photos().all(|p| (p.width, p.height) == (4000, 6000)), "Memories' sizes");
     let (urls, revealed) = Default::default();
     let mut h = app(s, &urls, &revealed);
     let ids = h.app.session.visible_cloned();
@@ -264,26 +271,100 @@ fn browsing_unedited_remote_photos_downloads_nothing() {
     h.app.session.execute("library.select", &json!({"ids": [first.0]})).unwrap();
     h.app.ui.view = ViewMode::Detail;
     h.app.ui.right = RightPanel::Info;
-    h.app.ui.zoom = Zoom::Fit;
-    h.settle(T);
-    for _ in 0..30 {
-        h.step();
+    for zoom in [Zoom::Fit, Zoom::Fill] {
+        h.app.ui.zoom = zoom;
+        h.settle(T);
+        for _ in 0..30 {
+            h.step();
+        }
+        assert_eq!(fake.downloads(), 0, "{ext} at {zoom:?} shows the server's preview");
     }
-    assert_eq!(fake.downloads(), 0, "browsing at Fit shows the server's preview");
     assert_eq!(cached_files(&d), 0);
     assert!(h.app.renderer.textures.get(&crate::render::Slot::Preview).is_some_and(|t| t.photo == first), "the quick view shows");
+    // comparing photos only looks at them too
+    h.app.session.execute("library.select", &json!({"ids": [first.0, ids[1].0]})).unwrap();
+    h.app.run("view.compare", json!({})).unwrap();
+    assert_eq!(h.app.ui.view, ViewMode::Compare);
+    for zoom in [Zoom::Fit, Zoom::Fill] {
+        h.app.ui.zoom = zoom;
+        h.settle(T);
+        assert_eq!(fake.downloads(), 0, "{ext}: Compare at {zoom:?} shows the server's previews");
+    }
 
     // an edit tool: the photo's original, then the next one's
+    h.app.session.execute("library.select", &json!({"ids": [first.0]})).unwrap();
+    h.app.ui.view = ViewMode::Detail;
     h.app.ui.right = RightPanel::Edit;
     assert!(h.step_until(T, |h| cached_files(&d) == 2 && h.app.session.activity.list().is_empty()), "cached: {}", cached_files(&d));
     h.settle(T);
-    assert_eq!(fake.downloads(), 2, "the open photo once, the next one prefetched");
+    assert_eq!(fake.downloads(), 2, "{ext}: the open photo once, the next one prefetched");
 
     // back in the grid: nothing is held or prefetched any more
     h.app.ui.view = ViewMode::PhotoGrid;
     h.app.session.execute("library.select", &json!({"ids": [ids[2].0]})).unwrap();
     h.settle(T);
     assert_eq!(fake.downloads(), 2, "the grid downloads nothing");
+}
+
+#[test]
+fn browsing_unedited_remote_photos_downloads_nothing() {
+    browse_then_develop("ARW", (0..40_000).map(|i| (i % 253) as u8).collect());
+}
+
+/// Phone photos (JPEG, HEIC…) are most of a Nextcloud archive: browsing them downloads nothing either.
+#[test]
+fn browsing_unedited_remote_jpegs_downloads_nothing() {
+    browse_then_develop("jpg", jpeg(400, 600));
+}
+
+/// Moving on to another photo stops the download the loupe started for the one before
+/// (`memory::cancellable` around the render; `Want::Load` takes its flag).
+#[test]
+fn moving_on_stops_the_last_photos_load() {
+    let mut s = Session::new();
+    for (i, n) in ["a", "b"].into_iter().enumerate() {
+        let p = lightcraft_catalog::Photo::new(
+            lightcraft_catalog::PhotoId(i as u64 + 1),
+            lightcraft_catalog::Source::File { path: format!("/nas/{n}.jpg") },
+            &format!("{n}.jpg"),
+            "JPEG",
+            600,
+            400,
+            "2026-01-01T00:00:00",
+        );
+        s.catalog.apply(lightcraft_catalog::Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    }
+    // a load that, with a cancel flag, waits for it (a download that stops when told)
+    let calls: Arc<Mutex<Vec<String>>> = Default::default();
+    let c = calls.clone();
+    s.media.file_loader = Some(Arc::new(move |path: &str, _| {
+        let Some(flag) = lightcraft_engine::memory::cancel_flag() else { return Err("no flag".into()) };
+        c.lock().unwrap().push(format!("start {path}"));
+        let t = std::time::Instant::now();
+        while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < T {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        c.lock().unwrap().push(format!("stop {path}"));
+        Err("cancelled".into())
+    }));
+    let (urls, revealed) = Default::default();
+    let mut h = app(s, &urls, &revealed);
+    h.app.session.execute("library.select", &json!({"ids": [1]})).unwrap();
+    h.app.ui.view = ViewMode::Detail;
+    h.app.ui.right = RightPanel::Edit;
+    let has = |calls: &Arc<Mutex<Vec<String>>>, what: &str| calls.lock().unwrap().iter().any(|c| c == what);
+    assert!(h.step_until(T, |_| has(&calls, "start /nas/a.jpg")), "{:?}", calls.lock().unwrap());
+    h.app.session.execute("library.select", &json!({"ids": [2]})).unwrap();
+    let t = std::time::Instant::now();
+    assert!(h.step_until(T, |_| has(&calls, "stop /nas/a.jpg")), "{:?}", calls.lock().unwrap());
+    assert!(t.elapsed() < Duration::from_secs(5), "a's load stopped when b opened, not at its timeout");
+    assert!(h.step_until(T, |_| has(&calls, "start /nas/b.jpg")), "{:?}", calls.lock().unwrap());
+    // and a slider drag's renders of the same photo don't stop its load
+    h.app.session.execute("develop.set", &json!({"control": "light.exposure", "value": 0.5})).unwrap();
+    for _ in 0..30 {
+        h.step();
+    }
+    assert!(!has(&calls, "stop /nas/b.jpg"), "{:?}", calls.lock().unwrap());
 }
 
 #[test]
@@ -316,6 +397,13 @@ fn settings_tab_shows_accounts_and_sizes() {
     assert!(h.app.session.remote.accounts().is_empty());
     h.settle(T);
     assert!(!shows(&h, &key), "{:?}", h.painted_text());
+
+    // a settings file that can't be written: the change is refused, and says so
+    std::fs::remove_file(d.join("nextcloud.json")).unwrap();
+    std::fs::create_dir(d.join("nextcloud.json")).unwrap();
+    click(&mut h, "button:settingsNextcloudCache-1");
+    assert_eq!(h.app.session.remote.cache_budget_mb(), 50_000);
+    assert!(h.app.ui.toast.as_ref().is_some_and(|t| t.0.contains("nextcloud.json")), "toast: {:?}", h.app.ui.toast);
 }
 
 #[test]
@@ -366,4 +454,59 @@ fn photos_on_the_server_are_not_missing() {
     }
     assert!(shows(&h, "Recently Deleted"), "the sidebar's Library rows: {:?}", h.painted_text());
     assert!(!shows(&h, "Missing Photos"), "{:?}", h.painted_text());
+}
+
+/// A Nextcloud folder's menu in the sidebar offers Show in Finder switched off: there is no folder
+/// on this computer to show.
+#[test]
+fn nextcloud_folders_are_not_shown_in_finder() {
+    let d = temp("folder-finder");
+    let mut s = session(&d, &[]);
+    let p = lightcraft_catalog::Photo::new(
+        lightcraft_catalog::PhotoId(1),
+        lightcraft_catalog::Source::File { path: "nextcloud://alice@example.com/Photos/a.jpg".into() },
+        "a.jpg",
+        "JPEG",
+        60,
+        40,
+        "2026-01-01T00:00:00",
+    );
+    s.catalog.apply(lightcraft_catalog::Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    let (urls, revealed) = Default::default();
+    let mut h = app(s, &urls, &revealed);
+    h.app.ui.view = ViewMode::PhotoGrid;
+    h.app.ui.left_panel = true;
+    h.settle(T);
+    let rows: Vec<String> = h.app.widgets.iter().map(|(w, _)| w.clone()).filter(|w| w.starts_with("source:libfolder:nextcloud://")).collect();
+    let row = rows.last().unwrap_or_else(|| panic!("no Nextcloud folder row: {:?}", h.app.widgets.iter().map(|(w, _)| w).collect::<Vec<_>>()));
+    let at = h.app.widgets.iter().find(|(w, _)| w == row).unwrap().1.center();
+    let r = h.request("ui.click", json!({"x": at.x, "y": at.y, "button": "right"}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    h.step();
+    h.step();
+    assert!(h.app.widgets.iter().any(|(w, _)| w == "button:folderReveal"), "the menu has Show in Finder");
+    click(&mut h, "button:folderReveal");
+    assert!(revealed.lock().unwrap().is_empty(), "{:?}", revealed.lock().unwrap());
+}
+
+/// One import is one account: folders chosen on one are dropped when the picker goes to another.
+#[test]
+fn switching_accounts_drops_the_folders_chosen() {
+    let (one, two) = (FakeServer::start(), FakeServer::start());
+    for fake in [&one, &two] {
+        fake.add_file("/Photos/a.jpg", vec![0; 10]);
+    }
+    let d = temp("two-accounts");
+    let (urls, revealed) = Default::default();
+    let mut h = app(session(&d, &[one.account(), two.account()]), &urls, &revealed);
+    h.app.run("file.importNextcloud", json!({})).unwrap();
+    // (the picker lists the accounts in the settings' order)
+    click(&mut h, "button:nextcloudAccount-0");
+    assert!(h.step_until(T, |h| listed(h) == ["Photos"]), "{:?}", h.app.ui.dialog);
+    click(&mut h, "check:nextcloudFolder-0");
+    assert!(matches!(&h.app.ui.dialog, Some(Dialog::NextcloudImport { chosen, .. }) if *chosen == [remote(&one, "Photos")]));
+    click(&mut h, "button:nextcloudUp");
+    click(&mut h, "button:nextcloudAccount-1");
+    assert!(h.step_until(T, |h| listed(h) == ["Photos"]), "{:?}", h.app.ui.dialog);
+    assert!(matches!(&h.app.ui.dialog, Some(Dialog::NextcloudImport { chosen, .. }) if chosen.is_empty()), "{:?}", h.app.ui.dialog);
 }

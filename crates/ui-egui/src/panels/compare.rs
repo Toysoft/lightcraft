@@ -199,7 +199,13 @@ fn photo_tile(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, slot: Slo
     let want =
         (img.width().max(img.height()).min(img_area.width().max(img_area.height()) * 4.0) * ppp).min(2560.0_f32.min(texture_side as f32)) as usize;
     let (rw, rh) = if aspect >= 1.0 { (want, (want as f32 / aspect) as usize) } else { ((want as f32 * aspect) as usize, want) };
-    if let Some(job) = app.session.render_job(id, rw.max(8), rh.max(8), false, true) {
+    // an unedited Nextcloud photo only looked at: the server's preview, no download
+    let quick_only = crate::nextcloud::quick_view_is_final(app, &photo);
+    if quick_only {
+        if let Some(q) = app.session.quick_view_job(id, want.max(8), true) {
+            app.renderer.request_quick(slot, q, 60);
+        }
+    } else if let Some(job) = app.session.render_job(id, rw.max(8), rh.max(8), false, true) {
         app.renderer.request(slot, job, 60);
     }
     if let Some(job) = app.session.thumb_job(id, 256) {
@@ -226,7 +232,7 @@ fn photo_tile(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, slot: Slo
             now: ui.input(|i| i.time),
         };
         let plain = shown_aspect.is_none_or(|a| crate::region::same_aspect(a, aspect));
-        let view = if plain { request_window(app, &tile) } else { None };
+        let view = if plain && !quick_only { request_window(app, &tile) } else { None };
         app.compare_windows[i as usize] = view;
         if view.is_none() {
             app.compare_tiles.retain(|(p, _), _| *p != i);

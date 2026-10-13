@@ -82,7 +82,7 @@ impl Remote {
 
     /// A local copy of the original at `path`: a cached one, else (interactive work only, see
     /// [`crate::memory::may_download`]) downloaded, one at a time, with a cancellable `download`
-    /// activity row. Background work gets [`NOT_DOWNLOADED`] instead. While the server doesn't answer, an
+    /// activity row (cancelled too by the [`crate::memory::cancellable`] flag of the work asking). Background work gets [`NOT_DOWNLOADED`] instead. While the server doesn't answer, an
     /// interactive load gets the newest copy on disk (it may be out of date).
     pub fn local_original(&self, path: &str) -> Result<PathBuf, String> {
         self.original(path, Want::Load)
@@ -108,7 +108,8 @@ impl Remote {
             return Err(offline());
         }
         let cancel = match want {
-            Want::Load => Arc::new(AtomicBool::new(false)),
+            // (a render that moved on to another photo stops its download)
+            Want::Load => crate::memory::cancel_flag().unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
             Want::Prefetch(cancel) | Want::Offline(cancel) => cancel.clone(),
         };
         let client = self.client(&key)?;
@@ -187,7 +188,9 @@ impl Remote {
         let lock = || self.downloads.lock().unwrap_or_else(PoisonError::into_inner);
         if matches!(want, Want::Load) {
             let _waiting = Waiting::new(&self.loads_waiting);
-            return Ok(lock());
+            let one = lock();
+            // (moved on while another download ran: no row, no request)
+            return if cancel.load(Ordering::Relaxed) { Err(Error::Cancelled.to_string()) } else { Ok(one) };
         }
         loop {
             if cancel.load(Ordering::Relaxed) {

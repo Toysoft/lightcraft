@@ -699,6 +699,26 @@ fn albums_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, reveal: Option<u64>) 
     albums_tree(app, ui, &kids, None, 0.0, &open_to);
 }
 
+/// Show in Finder for folder `path` in a context menu (off, saying why, for a Nextcloud folder);
+/// true when clicked.
+fn reveal_button(app: &mut LightcraftApp, ui: &mut egui::Ui, path: &str) -> bool {
+    if app.services.reveal.is_none() {
+        return false;
+    }
+    let refused = lightcraft_engine::cmd::local_only(path, crate::menus::reveal_label()).err();
+    let r = ui.add_enabled(refused.is_none(), egui::Button::new(crate::i18n::tr(crate::menus::reveal_label())));
+    crate::widgets::register(ui.ctx(), "button:folderReveal", r.rect);
+    let r = match &refused {
+        Some(why) => r.on_disabled_hover_text(why.to_string()),
+        None => r,
+    };
+    let clicked = r.clicked();
+    if clicked && let Some(f) = app.services.reveal.as_mut() {
+        let _ = f(path);
+    }
+    clicked
+}
+
 /// By Date: year → month → day; a click filters by that prefix, the triangle opens a level.
 fn date_rows(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let groups = app.caches.date_groups(&app.session.catalog);
@@ -1063,12 +1083,7 @@ fn folder_tree(
                 }
             }
         }
-        if app.services.reveal.is_some()
-            && ui.button(crate::i18n::tr(crate::menus::reveal_label())).clicked()
-            && let Some(f) = app.services.reveal.as_mut()
-        {
-            let _ = f(path);
-        }
+        reveal_button(app, ui, path);
     });
     if open && indent < 12.0 * 8.0 {
         for (n, p) in subfolders(ui, path) {
@@ -1806,11 +1821,7 @@ fn folder_menu_for_library(app: &mut LightcraftApp, resp: &egui::Response, n: &F
             }
             ui.close();
         }
-        if app.services.reveal.is_some()
-            && ui.button(crate::i18n::tr(crate::menus::reveal_label())).clicked()
-            && let Some(f) = app.services.reveal.as_mut()
-        {
-            let _ = f(path);
+        if reveal_button(app, ui, path) {
             ui.close();
         }
         folder_label_menu(app, ui, n);

@@ -186,6 +186,9 @@ pub struct Renderer {
     seq: u64,
     /// Slot → (key, priority) of the request in flight (queued or running).
     pending: HashMap<Slot, (u64, u32)>,
+    /// Slot → the photo its renders are for and the flag that cancels their downloads
+    /// ([`lightcraft_engine::memory::cancellable`]): set when the slot moves on to another photo.
+    cancels: HashMap<Slot, (PhotoId, Arc<std::sync::atomic::AtomicBool>)>,
     pub textures: HashMap<Slot, Tex>,
     pub last_main_ms: f64,
     /// Jobs finished since start (for inspect/perf).
@@ -261,6 +264,7 @@ impl Renderer {
             queue: Vec::new(),
             seq: 0,
             pending: HashMap::new(),
+            cancels: HashMap::new(),
             textures: HashMap::new(),
             last_main_ms: 0.0,
             completed: 0,
@@ -436,22 +440,41 @@ impl Renderer {
         let key = job.key;
         let background = matches!(slot, Slot::Thumb(_) | Slot::ThumbQuick(_) | Slot::Prefetch(_));
         let display = self.display.clone();
+        let cancel = self.cancel_for(slot, job.photo);
         self.pool.submit(
             slot,
             key,
             priority,
             Box::new(move || {
                 let run = || if background { lightcraft_engine::memory::in_background(|| job.run()) } else { job.run() };
-                Self::run_for(run, &display)
+                lightcraft_engine::memory::cancellable(cancel, || Self::run_for(run, &display))
             }),
         );
     }
 
-    /// Stop wanting `slot` (a no-op when nothing is pending): its queued job is dropped, and a
-    /// running one's result ignored.
+    /// The flag cancelling `slot`'s downloads for `photo`: the same one while the slot shows that
+    /// photo (a slider drag's renders share its download); another photo sets the old one.
+    fn cancel_for(&mut self, slot: Slot, photo: PhotoId) -> Arc<std::sync::atomic::AtomicBool> {
+        if let Some((p, flag)) = self.cancels.get(&slot)
+            && *p == photo
+        {
+            return flag.clone();
+        }
+        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if let Some((_, old)) = self.cancels.insert(slot, (photo, flag.clone())) {
+            old.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        flag
+    }
+
+    /// Stop wanting `slot` (a no-op when nothing is pending): its queued job is dropped, a running
+    /// one's download stops and its result is ignored.
     pub fn cancel(&mut self, slot: Slot) {
         if self.pending.remove(&slot).is_none() {
             return;
+        }
+        if let Some((_, flag)) = self.cancels.remove(&slot) {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.request_ids.remove(&slot);
         self.queue.retain(|q| q.slot != slot);

@@ -165,6 +165,27 @@ impl Drop for Permit<'_> {
 thread_local! {
     static BACKGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static NO_DOWNLOADS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static CANCEL: std::cell::RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` cancellable by `cancel`: work in it that can stop part-way (a Nextcloud photo's download)
+/// stops once `cancel` is set, e.g. when the view that asked for it moved on to another photo.
+pub fn cancellable<R>(cancel: std::sync::Arc<std::sync::atomic::AtomicBool>, f: impl FnOnce() -> R) -> R {
+    /// Puts the outer flag back when dropped, also when `f` panics.
+    struct Restore(Option<std::sync::Arc<std::sync::atomic::AtomicBool>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let was = self.0.take();
+            CANCEL.with(|c| *c.borrow_mut() = was);
+        }
+    }
+    let _restore = Restore(CANCEL.with(|c| c.borrow_mut().replace(cancel)));
+    f()
+}
+
+/// The flag of the [`cancellable`] work running on this thread, if any.
+pub fn cancel_flag() -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    CANCEL.with(|c| c.borrow().clone())
 }
 
 /// Set while alive; puts the flag back as it was when dropped, also when `f` panics (a thread that
@@ -370,6 +391,14 @@ mod tests {
         assert!(!is_background() && !is_without_downloads() && may_download());
         in_background(|| without_downloads(|| assert!(is_background() && is_without_downloads() && !may_download())));
         assert!(may_download());
+        // a cancel flag goes with its work, and the one outside comes back
+        let (outer, inner) =
+            (std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)));
+        cancellable(outer.clone(), || {
+            assert!(std::panic::catch_unwind(|| cancellable(inner.clone(), || panic!("a render failed"))).is_err());
+            assert!(cancel_flag().is_some_and(|f| std::sync::Arc::ptr_eq(&f, &outer)));
+        });
+        assert!(cancel_flag().is_none());
     }
 
     /// A hostile size (a server's listing) is counted without overflowing, and given back exactly.

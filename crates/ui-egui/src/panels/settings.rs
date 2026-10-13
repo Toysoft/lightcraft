@@ -595,13 +595,17 @@ fn nextcloud_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             ui.label(RichText::new(crate::i18n::tr(state)).color(t.text));
             let r = ui.add_enabled(a["state"] != "signingIn", egui::Button::new(crate::i18n::tr("Sign In Again")));
             register(ui.ctx(), format!("button:nextcloudSignInAgain-{i}"), r.rect);
-            if r.clicked() {
-                let _ = app.run("nextcloud.signIn", json!({"account": key}));
+            if r.clicked()
+                && let Err(e) = app.run("nextcloud.signIn", json!({"account": key}))
+            {
+                app.toast(ui.ctx(), e);
             }
             let r = ui.button(crate::i18n::tr("Remove"));
             register(ui.ctx(), format!("button:nextcloudRemove-{i}"), r.rect);
             if r.clicked() {
-                let _ = app.run("nextcloud.removeAccount", json!({"account": key}));
+                if let Err(e) = app.run("nextcloud.removeAccount", json!({"account": key})) {
+                    app.toast(ui.ctx(), e);
+                }
                 crate::nextcloud::refresh(app);
             }
         });
@@ -610,7 +614,9 @@ fn nextcloud_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     row(ui, t, "Cache size", |ui| {
         let mut v = prefs["cacheBudgetMb"].as_u64().unwrap_or(20_000);
         if choices(ui, "settingsNextcloudCache", &NEXTCLOUD_CACHE, &mut v) {
-            let _ = app.run("nextcloud.preferences", json!({"cacheBudgetMb": v}));
+            if let Err(e) = app.run("nextcloud.preferences", json!({"cacheBudgetMb": v})) {
+                app.toast(ui.ctx(), e);
+            }
             crate::nextcloud::refresh(app);
         }
     });

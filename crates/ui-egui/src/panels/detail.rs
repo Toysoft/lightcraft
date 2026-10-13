@@ -532,7 +532,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let window_ctx = WindowCtx {
         id,
         overlay,
-        frame_edge: plan.window_edge.filter(|_| windowable_view),
+        frame_edge: plan.window_edge.filter(|_| windowable_view && !quick_only),
         drawn_long,
         aspect,
         ppp,

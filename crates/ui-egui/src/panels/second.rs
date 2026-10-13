@@ -39,7 +39,13 @@ fn body(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let ppp = ui.ctx().pixels_per_point();
     let side = super::detail::texture_side(ui.ctx()).clamp(64, 4096);
     let (w, h) = (((area.width() * ppp) as usize).clamp(64, side), ((area.height() * ppp) as usize).clamp(64, side));
-    if let Some(job) = app.session.loupe_job(id, w, h, true).map(|j| app.renderer.job_for(Slot::Second, j))
+    // an unedited Nextcloud photo only looked at: the server's preview, no download
+    let quick_only = app.session.catalog.photo(id).cloned().is_some_and(|p| crate::nextcloud::quick_view_is_final(app, &p));
+    if quick_only {
+        if let Some(q) = app.session.quick_view_job(id, w.max(h), true) {
+            app.renderer.request_quick(Slot::Second, q, 95);
+        }
+    } else if let Some(job) = app.session.loupe_job(id, w, h, true).map(|j| app.renderer.job_for(Slot::Second, j))
         && app.renderer.textures.get(&Slot::Second).is_none_or(|t| t.key != job.key)
         && !app.renderer.is_pending(Slot::Second)
     {
