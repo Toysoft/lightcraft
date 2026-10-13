@@ -575,7 +575,7 @@ fn describe_copy(cache: &OriginalsCache, path: &RemotePath, local: &Path, want: 
 
 /// Complete the photos whose originals were `downloaded` (path, what the whole file says, read by
 /// the downloading thread): dimensions, the camera fields they lack, the capture time the file
-/// records, lens data and as-shot white balance, as Reload does, but not as an undo step. Their
+/// records (for a photo still on the listing's estimate), lens data and as-shot white balance, as Reload does, but not as an undo step. Their
 /// decoded thumbnails go (one may be the server's preview standing in, see `hooks`; a bigger source,
 /// decoded from the original, stays), and their smart previews are built in the background when the
 /// library has a folder for them (from the copy on disk: that build never downloads). No file is
@@ -595,8 +595,16 @@ pub(crate) fn complete(s: &mut Session, downloaded: Vec<(String, Option<Box<Prob
         s.media.forget_thumb(id);
         let (Some(ph), Some(Some(info))) = (s.catalog.photo(id), infos.get(path)) else { continue };
         let info: &ProbeInfo = info;
-        // (a virtual copy's camera fields are its own, as in Reload)
-        let meta = if ph.copy_of.is_none() { super::import::meta_ops(ph, info) } else { Vec::new() };
+        // (a virtual copy's camera fields are its own, as in Reload; the file's capture time replaces
+        // only a listing's estimate: a photo the metadata phase read (it has a camera) keeps its
+        // time, which may be the user's)
+        let meta = if ph.copy_of.is_some() {
+            Vec::new()
+        } else if ph.meta.camera.is_empty() {
+            super::import::meta_ops(ph, info)
+        } else {
+            crate::cmd::convert::fill_missing_meta(id, ph, info)
+        };
         let ops: Vec<Op> = crate::cmd::convert::content_op(id, ph, info.clone())
             .into_iter()
             .chain(meta)

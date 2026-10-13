@@ -56,9 +56,10 @@ struct App(LightcraftApp, PrefsWriter, #[cfg(target_os = "macos")] Option<native
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // (menu-bar commands run on the UI thread like the window's: never downloading, see `LightcraftApp::logic`)
         #[cfg(target_os = "macos")]
         if let Some(m) = self.2.as_mut()
-            && m.update(&mut self.0, ctx)
+            && lightcraft_engine::memory::on_ui_thread(|| m.update(&mut self.0, ctx))
             && lightcraft_ui_egui::panels::notices::may_close(&mut self.0)
         {
             // Quit from the menu bar: save exactly what closing the window saves (settings and

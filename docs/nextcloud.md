@@ -31,7 +31,8 @@ filled in.
 
 **Capture times** are the camera's local time, as for photos on this computer. The Memories timeline gives the moment
 in UTC, so a photo listed from it is first off by its time zone; the metadata phase then sets the local time from
-Memories' `datetaken` or the file's EXIF, and the first download sets the file's own.
+Memories' `datetaken` or the file's EXIF. The first download sets the file's own only on a photo still on the
+listing's estimate (one the metadata phase didn't read), so a time you changed with Edit Capture Time stays.
 
 **Settings ▸ Nextcloud** lists the accounts on this computer with their state (Signed In, Signed Out, Unreachable,
 Signing In…), **Sign In Again** and **Remove**, the cache size (5, 10, 20, 50 or 100 GB) and how much it holds
@@ -68,10 +69,10 @@ the Info panel open doesn't.
   you were developing (between chunks; a server that stopped answering is noticed at the 30 s stall limit). The
   prefetch of the next photo is cancelled by the next prefetch, and the open photo's own prefetch keeps going while you
   stay on it.
-- **After the first download** the photo's record is completed from the whole file (dimensions, capture time,
-  as-shot white balance, lens data) and a smart preview is built, so the photo can still be edited when the server is
-  out of reach. (While another preview build runs, that smart preview is skipped; File ▸ Previews ▸ Build Smart
-  Previews makes it later.)
+- **After the first download** the photo's record is completed from the whole file (dimensions, the capture time
+  when only the listing gave one, as-shot white balance, lens data) and a smart preview is built, so the photo can
+  still be edited when the server is out of reach. (While another preview build runs, that smart preview is skipped;
+  File ▸ Previews ▸ Build Smart Previews makes it later.)
 - **Server previews stand in at thumbnail size only** (the grid, and quick looks such as Find Similar). Once the
   original is downloaded they are dropped (a bigger source decoded from the original stays), so Auto, the
   white-balance picker and spot sampling measure the real file.
@@ -266,7 +267,9 @@ lightcraft-cli run --library ~/lc-lib library.importNextcloud 'dirs=["nextcloud:
    show a waiting loupe.
 10. **Local-only actions refuse.** Merge, Convert to DNG, Duplicate, Edit In, file renames and moves, folder
     operations, Synchronize Folder, sidecar writes and Show in Finder would write beside the original or act on a
-    local file, so they refuse Nextcloud photos. Export, denoise and "all metadata" download the original instead.
+    local file, so they refuse Nextcloud photos. Export and denoise download the original instead, on their own
+    threads; "all metadata" reads the file's first MiB when the original isn't on this computer (the app's window
+    never downloads).
 11. **End to end runs in process.** The MCP test drives the in-process server with an in-memory password store
     (`crates/mcp/tests/e2e.rs`, `nextcloud_add_import_render_export`): the CLI binary can't script a sign-in without
     an OS keyring.

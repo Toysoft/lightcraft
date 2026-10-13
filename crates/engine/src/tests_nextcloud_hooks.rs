@@ -652,3 +652,33 @@ fn raws_without_a_server_preview_show_their_own() {
     assert_eq!(fake.downloads(), 0);
     assert!(cached_files(&d).is_empty());
 }
+
+/// R38: a TIFF-based raw (an ARW, NEF…) the server has no preview of: its JPEG preview shows when the
+/// first MiB holds all of it, and not at all when the window cuts it off (no half-grey thumbnail).
+#[test]
+fn a_preview_the_window_cuts_off_isnt_shown() {
+    let (s, fake, _d) = signed_in("cut-preview");
+    let preview = jpeg(96, 64, None);
+    // a little-endian TIFF whose one IFD points at the JPEG (JPEGInterchangeFormat and its length)
+    let tiff_at = |at: usize| {
+        let mut b = b"II*\0\x08\0\0\0\x02\0".to_vec();
+        for (tag, value) in [(0x0201u16, at as u32), (0x0202, preview.len() as u32)] {
+            b.extend_from_slice(&tag.to_le_bytes());
+            b.extend_from_slice(&4u16.to_le_bytes());
+            b.extend_from_slice(&1u32.to_le_bytes());
+            b.extend_from_slice(&value.to_le_bytes());
+        }
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.resize(at, 0);
+        b.extend_from_slice(&preview);
+        b.resize(at + preview.len() + (1 << 20), 0);
+        b
+    };
+    fake.add_file("/Photos/whole.ARW", tiff_at(4096));
+    fake.add_file("/Photos/cut.ARW", tiff_at((1 << 20) - preview.len() / 2));
+    let load = s.media.preview_loader.clone().unwrap();
+    let img = load(&remote(&fake, "Photos/whole.ARW"), 512).unwrap();
+    assert_eq!((img.width, img.height), (96, 64));
+    assert!(load(&remote(&fake, "Photos/cut.ARW"), 512).is_none(), "half a JPEG isn't a preview");
+    assert_eq!(fake.downloads(), 0);
+}

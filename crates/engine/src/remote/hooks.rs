@@ -93,8 +93,13 @@ pub(crate) fn route(s: &mut crate::Session) {
             let edge = u32::try_from(max_edge.min(MAX_SERVER_PREVIEW)).unwrap_or(1).max(1);
             match r.server_preview(&rp, edge).ok()? {
                 Some(bytes) => decode_upright_srgb(&bytes, max_edge),
-                // (none when its start doesn't hold the preview)
-                None if !previewed(path) => embedded_preview_srgb(&r.read_head(&rp, RAW_PREVIEW_WINDOW).ok()?, max_edge),
+                // (none when its start doesn't hold the whole preview: a JPEG the window cuts off,
+                // with no EOI in it, would decode half grey)
+                None if !previewed(path) => {
+                    let head = r.read_head(&rp, RAW_PREVIEW_WINDOW).ok()?;
+                    lightcraft_raw::embedded_preview(&head).filter(|j| j.ends_with(&[0xff, 0xd9]))?;
+                    embedded_preview_srgb(&head, max_edge)
+                }
                 None => None,
             }
         }));

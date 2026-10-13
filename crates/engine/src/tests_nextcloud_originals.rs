@@ -363,6 +363,30 @@ fn first_download_completes_the_record() {
     assert!(s.remote.take_events().is_empty());
 }
 
+/// R38: the first download sets the file's capture time only on a photo the metadata phase never
+/// read (no camera: its time is the listing's estimate). One it read keeps its time, which may be the
+/// user's (Edit Capture Time before the photo was first opened).
+#[test]
+fn a_download_keeps_an_edited_capture_time() {
+    let (mut s, fake, _d) = signed_in("edited-time");
+    let [ap, bp] = ["a", "b"].map(|n| {
+        fake.add_file(&format!("/Photos/{n}.jpg"), jpeg(96, 64, None));
+        remote(&fake, &format!("Photos/{n}.jpg"))
+    });
+    let (a, b) = (add(&mut s, 1, &ap, MediaKind::Image), add(&mut s, 2, &bp, MediaKind::Image));
+    let mut read = s.catalog.photo(a).unwrap().meta.clone();
+    read.camera = "Canon EOS R8".into();
+    s.catalog.apply(Op::SetMeta { id: a, meta: Box::new(read) }).unwrap();
+    s.execute("library.select", &json!({"ids": [a.0, b.0]})).unwrap();
+    s.execute("photo.setCaptureTime", &json!({"time": "2020-01-01T00:00:00", "each": true})).unwrap();
+    let load = s.media.file_loader.clone().unwrap();
+    load(&ap, 512).unwrap();
+    load(&bp, 512).unwrap();
+    s.drain_remote();
+    assert_eq!(s.catalog.photo(a).unwrap().captured.as_deref(), Some("2020-01-01T00:00:00"), "the user's time");
+    assert_eq!(s.catalog.photo(b).unwrap().captured.as_deref(), Some("2024-09-10T12:34:56"), "the file's local time");
+}
+
 #[test]
 fn the_downloading_thread_describes_the_photo() {
     let (mut s, fake, d) = signed_in("described");

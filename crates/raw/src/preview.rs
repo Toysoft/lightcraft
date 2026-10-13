@@ -362,13 +362,16 @@ fn cr3_preview_boxes(bytes: &[u8]) -> Option<&[u8]> {
         while let Some(i) = bytes.get(from..).and_then(|s| s.windows(4).position(|w| w == tag)).map(|p| p + from) {
             from = i + 4;
             let Some(start) = i.checked_sub(4) else { continue };
-            let be32 = |at: usize| bytes.get(at..at + 4).map(|s| u32::from_be_bytes([s[0], s[1], s[2], s[3]]) as usize);
-            let (Some(size), Some(len)) = (be32(start), be32(start + 20)) else { continue };
-            let j = start + 24;
-            if len < 4 || j + len > start + size.max(24) || j + len > bytes.len() {
+            let be32 = |at: usize| bytes.get(at..at.checked_add(4)?).map(|s| u32::from_be_bytes([s[0], s[1], s[2], s[3]]) as usize);
+            let (Some(size), Some(len)) = (be32(start), start.checked_add(20).and_then(be32)) else { continue };
+            // (hostile sizes: no sum may wrap a 32-bit usize)
+            let Some((j, end, box_end)) = start.checked_add(24).and_then(|j| Some((j, j.checked_add(len)?, start.checked_add(size.max(24))?))) else {
+                continue;
+            };
+            if len < 4 || end > box_end {
                 continue;
             }
-            let jpeg = &bytes[j..j + len];
+            let Some(jpeg) = bytes.get(j..end) else { continue };
             if is_dct_jpeg(jpeg) {
                 if best.is_none_or(|b| b.len() < jpeg.len()) {
                     best = Some(jpeg);
@@ -541,6 +544,24 @@ mod tests {
         for n in 0..cr3.len() {
             let _ = embedded_preview(&cr3[..n]);
         }
+    }
+
+    /// A hostile `PRVW` box (sizes near `u32::MAX`, which would wrap a 32-bit `usize` when added to
+    /// its offset) never panics: a JPEG past the file is skipped, a whole one inside is used.
+    #[test]
+    fn cr3_boxes_with_hostile_sizes_are_safe() {
+        let j = fake_jpeg(300);
+        let cr3 = |size: u32, len: u32| {
+            let mut b = b"\0\0\0\x18ftypcrx \0\0\0\x01crx isom".to_vec();
+            b.extend_from_slice(&size.to_be_bytes());
+            b.extend_from_slice(b"PRVW\0\0\0\0\0\x01\x06\x54\x04\x38\0\x01");
+            b.extend_from_slice(&len.to_be_bytes());
+            b.extend_from_slice(&j);
+            b
+        };
+        assert!(embedded_preview(&cr3(24 + j.len() as u32, u32::MAX)).is_none(), "a length past the file");
+        assert!(embedded_preview(&cr3(u32::MAX, u32::MAX)).is_none());
+        assert_eq!(embedded_preview(&cr3(u32::MAX, j.len() as u32)).unwrap(), j, "a box size past the file, its JPEG whole");
     }
 
     /// CR3 with a full-size JPEG track: that JPEG wins over the smaller `PRVW` box.
