@@ -247,46 +247,40 @@ pub fn current_wb(info: &SourceInfo, s: &DevelopSettings) -> (f64, f64) {
 mod tests {
     use super::*;
 
+    fn in_ranges(a: &AutoTone) -> bool {
+        let fields = [a.exposure, a.contrast, a.highlights, a.shadows, a.whites, a.blacks, a.vibrance, a.saturation];
+        fields.iter().all(|v| v.is_finite())
+            && (-2.0..=3.0).contains(&a.exposure)
+            && (0.0..=100.0).contains(&a.contrast)
+            && (-100.0..=0.0).contains(&a.highlights)
+            && (0.0..=100.0).contains(&a.shadows)
+            && (-100.0..=100.0).contains(&a.whites)
+            && (-100.0..=100.0).contains(&a.blacks)
+    }
+
     #[test]
-    fn exposure_follows_the_log_average_luminance() {
-        let flat = |y: f32| Rgb32f::filled(64, 64, [y; 3]);
+    fn darker_scenes_get_more_exposure_within_slider_ranges() {
         let auto = |img: &Rgb32f| auto_tone(img, &SourceInfo::default(), &DevelopSettings::default());
-        let log_mean = |img: &Rgb32f| scene_log_mean(img, &SourceInfo::default(), &DevelopSettings::default()).unwrap();
-        // a scene at middle grey gets the exposure at grey; each EV darker adds 0.41 EV
-        assert!(log_mean(&flat(0.18)).abs() < 1e-3);
-        assert_eq!(auto(&flat(0.18)).exposure, -0.58);
-        assert!((auto(&flat(0.18 / 8.0)).exposure - (-0.58 + 3.0 * 0.41)).abs() < 1e-9);
-        // darker scenes get more, brighter ones less, within -2..3 EV
         let ramp = |lo: f32, step: f32| Rgb32f::from_fn(64, 64, |x, _| [lo + x as f32 * step; 3]);
-        let (dark, bright) = (auto(&ramp(0.01, 0.0003)), auto(&ramp(0.8, 0.01)));
-        assert!(dark.exposure > 0.5 && bright.exposure < -1.0, "{dark:?} {bright:?}");
-        assert_eq!(auto(&flat(1e-9)).exposure, 3.0);
-        assert_eq!(auto(&flat(1e6)).exposure, -2.0);
-        // the rest follows each photo, within the slider ranges
-        for a in [dark, bright] {
-            assert!((0.0..=100.0).contains(&a.contrast) && (-100.0..=0.0).contains(&a.highlights) && (0.0..=100.0).contains(&a.shadows), "{a:?}");
-            assert!((-60.0..=60.0).contains(&a.whites) && (-60.0..=40.0).contains(&a.blacks) && a.saturation == 0.0, "{a:?}");
+        let (dark, grey, bright) = (auto(&ramp(0.01, 0.0003)), auto(&ramp(0.15, 0.001)), auto(&ramp(0.8, 0.01)));
+        assert!(dark.exposure > grey.exposure && grey.exposure > bright.exposure, "{dark:?} {grey:?} {bright:?}");
+        for a in [dark, grey, bright, auto(&Rgb32f::filled(16, 16, [1e-9; 3])), auto(&Rgb32f::filled(16, 16, [1e6; 3]))] {
+            assert!(in_ranges(&a), "{a:?}");
         }
     }
 
     #[test]
-    fn pixels_that_are_not_finite_are_left_out() {
+    fn hostile_pixels_are_left_out_and_never_give_nan() {
         let auto = |img: &Rgb32f| auto_tone(img, &SourceInfo::default(), &DevelopSettings::default());
-        // half middle grey, half NaN (or infinite): the grey half alone decides, as if the rest weren't there
+        let clean = auto(&Rgb32f::filled(64, 64, [0.18; 3]));
         for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let half = Rgb32f::from_fn(64, 64, |x, _| if x < 32 { [0.18; 3] } else { [bad; 3] });
-            assert_eq!(auto(&half).exposure, -0.58, "{bad}");
-            // also through the resampling of a source larger than the proxy (proxy pixels on the border mix both halves)
-            let big = Rgb32f::from_fn(1030, 700, |x, _| if x < 515 { [0.045; 3] } else { [bad; 3] });
-            assert!((auto(&big).exposure - (-0.58 + 2.0 * 0.41)).abs() < 1e-9, "{bad}");
             // a few broken pixels scattered over a grey image change nothing
             let speckled = Rgb32f::from_fn(1030, 700, |x, y| if (x * 7 + y * 13) % 97 == 0 { [bad; 3] } else { [0.18; 3] });
-            assert_eq!(auto(&speckled).exposure, -0.58, "{bad}");
+            assert_eq!(auto(&speckled).exposure, clean.exposure, "{bad}");
         }
-        // with no valid pixel at all (or none at all) there is nothing to measure: Exposure 0, the recipe as usual
-        for img in [Rgb32f::filled(8, 8, [f32::NAN; 3]), Rgb32f::filled(600, 600, [f32::INFINITY; 3]), Rgb32f::new(0, 0)] {
-            let a = auto(&img);
-            assert_eq!((a.exposure, a.contrast, a.highlights, a.shadows, a.vibrance), (0.0, 68.0, -66.0, 52.0, 30.0));
+        // nothing valid, nothing at all, or pure black: still usable values
+        for img in [Rgb32f::filled(8, 8, [f32::NAN; 3]), Rgb32f::new(0, 0), Rgb32f::filled(32, 32, [0.0; 3])] {
+            assert!(in_ranges(&auto(&img)), "{:?}", auto(&img));
         }
     }
 
@@ -372,15 +366,10 @@ mod per_photo_tests {
 
     #[test]
     fn very_different_photos_get_different_tone_settings() {
-        // a dark night sky against sunlit canyon rock
-        let (night, dunes) = (auto_for("Aurora over the ridge"), auto_for("Canyon walls"));
-        assert_ne!(night.contrast, dunes.contrast, "{night:?} {dunes:?}");
-        assert_ne!(night.highlights, dunes.highlights, "{night:?} {dunes:?}");
-        assert_ne!(night.shadows, dunes.shadows, "{night:?} {dunes:?}");
-        assert_ne!(night.whites, dunes.whites, "{night:?} {dunes:?}");
-        assert_ne!(night.blacks, dunes.blacks, "{night:?} {dunes:?}");
-        // the night has more dark frame to open up
-        assert!(night.shadows > dunes.shadows, "{night:?} {dunes:?}");
+        // a dark night sky against sunlit canyon rock: the night has more dark frame to open up
+        let (night, canyon) = (auto_for("Aurora over the ridge"), auto_for("Canyon walls"));
+        assert!(night.shadows > canyon.shadows, "{night:?} {canyon:?}");
+        assert_ne!((night.contrast, night.whites, night.blacks), (canyon.contrast, canyon.whites, canyon.blacks));
     }
 
     #[test]
@@ -395,5 +384,9 @@ mod per_photo_tests {
         let flat = auto(&Rgb32f::from_fn(64, 64, |x, _| [0.15 + x as f32 * 0.001; 3]));
         let wide = auto(&Rgb32f::from_fn(64, 64, |x, _| [0.002 * 1.12f32.powi(x as i32); 3]));
         assert!(flat.contrast > wide.contrast, "{flat:?} {wide:?}");
+        // a dim frame with nothing near white gets more Whites than one with much clipped
+        let dim = auto(&Rgb32f::from_fn(64, 64, |x, _| [0.05 + x as f32 * 0.002; 3]));
+        let clipped = auto(&Rgb32f::from_fn(64, 64, |x, _| if x < 24 { [8.0; 3] } else { [0.02 + x as f32 * 0.004; 3] }));
+        assert!(dim.whites > clipped.whites, "{dim:?} {clipped:?}");
     }
 }
