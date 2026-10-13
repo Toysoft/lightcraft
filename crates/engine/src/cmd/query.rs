@@ -120,9 +120,15 @@ pub fn specs() -> Vec<CommandSpec> {
             let lightcraft_catalog::Source::File { path } = &ph.source else {
                 return Ok(json!({"exif": [], "xmp": [], "note": "a generated demo photo has no file"}));
             };
-            let bytes = match &s.media.file_bytes {
-                Some(r) => r(path),
-                None => std::fs::read(path).map_err(|e| format!("{path}: {e}")),
+            // a Nextcloud original not on this computer: the start of the file, which holds its tags (no download)
+            #[cfg(not(target_arch = "wasm32"))]
+            let head = (lightcraft_catalog::is_remote(path) && !s.remote.has_local_copy(path)).then(|| s.remote.read_header(path));
+            #[cfg(target_arch = "wasm32")]
+            let head = None;
+            let bytes = match (head, &s.media.file_bytes) {
+                (Some(head), _) => head,
+                (None, Some(r)) => r(path),
+                (None, None) => std::fs::read(path).map_err(|e| format!("{path}: {e}")),
             }
             .map_err(|e| super::bad("photo.allMetadata", e))?;
             let exif: Vec<Value> = lightcraft_meta::file_tag_rows(&bytes)

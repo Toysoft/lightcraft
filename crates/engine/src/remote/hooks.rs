@@ -31,10 +31,11 @@ pub(crate) fn previewed(name: &str) -> bool {
 
 /// Whether a background load of `max_edge` may stand in the server's preview for the original: for a
 /// thumbnail, or for work that only looks (the face scan, Find Similar). A larger one would be kept as
-/// the photo's preview-size source (a loupe prefetch's result is accepted into the cache), and Develop
-/// would then edit the server's JPEG instead of downloading the original.
+/// the photo's preview-size source (a loupe prefetch's result is accepted into the cache, and so is a
+/// UI command's, e.g. Auto Straighten's), and Develop would then edit the server's JPEG instead of
+/// downloading the original.
 fn stand_in_allowed(max_edge: usize) -> bool {
-    max_edge <= SourceLevel::Thumb.max_edge() || crate::memory::is_without_downloads()
+    max_edge <= SourceLevel::Thumb.max_edge() || (crate::memory::is_without_downloads() && !crate::memory::is_ui_thread())
 }
 
 fn parse(path: &str) -> Result<RemotePath, String> {

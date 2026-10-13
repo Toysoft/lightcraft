@@ -331,8 +331,8 @@ pub fn quick_only_job(app: &mut LightcraftApp, slot: Slot, photo: &Photo, edge: 
     (!no_server_preview(app, slot, photo.id, Some(q.key))).then_some(q)
 }
 
-/// In Develop on a Nextcloud photo: hold its original on disk and download the next photo's;
-/// anywhere else, nothing (both calls are no-ops when nothing changed), and the loupe's renders of
+/// In Develop on a Nextcloud photo: hold its original on disk and, once it is here, download the next
+/// photo's; anywhere else, nothing (both calls are no-ops when nothing changed), and the loupe's renders of
 /// a Nextcloud photo left behind stop their downloads.
 #[cfg(not(target_arch = "wasm32"))]
 fn develop_downloads(app: &mut LightcraftApp) {
@@ -342,7 +342,8 @@ fn develop_downloads(app: &mut LightcraftApp) {
     };
     let develop = app.ui.view == crate::state::ViewMode::Detail && wants_original(app);
     let open = app.session.active().filter(|_| develop).and_then(|id| Some((id, remote_path(app, id)?)));
-    let next = open.as_ref().and_then(|(id, _)| {
+    // (the open photo's own download first: the next one's waits until it is on this computer)
+    let next = open.as_ref().filter(|(_, p)| app.session.remote.has_local_copy(p)).and_then(|(id, _)| {
         let (_, visible) = app.session.visible_shared();
         let at = visible.iter().position(|p| p == id)?;
         remote_path(app, *visible.get(at.checked_add(1)?)?)

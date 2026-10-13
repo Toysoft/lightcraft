@@ -29,7 +29,7 @@ const WORKERS: usize = 8;
 /// first 64 KiB of an ARW (and a JPEG's EXIF) hold its camera, lens, exposure and capture time.
 const FIRST_WINDOW: u64 = 64 << 10;
 /// Read when the first window had no camera: a CR3's metadata lies within its first 512 KiB.
-const META_WINDOW: u64 = 1 << 20;
+pub(crate) const META_WINDOW: u64 = 1 << 20;
 /// Photos per event: a drain costs a pass over the catalog, so they come in chunks of this many…
 const CHUNK: usize = 500;
 /// …or once the first of a chunk has waited this long.

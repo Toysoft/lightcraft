@@ -345,6 +345,64 @@ fn photos_without_a_server_preview_render_their_original() {
     assert_eq!(fake.downloads(), 1);
 }
 
+/// `names` (`.ARW` blobs) on a fake server with Memories sizes, imported (their etags known), the app
+/// on them in Detail with the Edit panel open on the first in view (its name returned); with the
+/// settings folder.
+fn developing(names: &[&str]) -> (Headless, FakeServer, PathBuf, String) {
+    let fake = FakeServer::start();
+    fake.enable_memories();
+    for n in names {
+        let f = format!("/Photos/{n}.ARW");
+        fake.add_file(&f, (0..40_000).map(|i| (i % 253) as u8).collect());
+        fake.set_photo(&f, 19675, 4000, 6000, 1_700_000_000, json!({}));
+    }
+    let d = temp(&format!("developing-{}", names.join("")));
+    let mut s = session(&d, &[fake.account()]);
+    s.execute("library.importNextcloud", &json!({"dirs": [remote(&fake, "Photos")], "wait": true})).unwrap();
+    let (urls, revealed) = Default::default();
+    let mut h = app(s, &urls, &revealed);
+    let first = h.app.session.visible_cloned()[0];
+    h.app.session.execute("library.select", &json!({"ids": [first.0]})).unwrap();
+    h.app.ui.view = ViewMode::Detail;
+    h.app.ui.right = RightPanel::Edit;
+    let open = h.app.session.catalog.photo(first).unwrap().file_name.clone();
+    (h, fake, d, open)
+}
+
+/// R35: the next photo is prefetched only once the open one's original is here, so the two never
+/// share the connection: an open photo that can't be downloaded (gone from the server) leaves the
+/// next one alone.
+#[test]
+fn the_next_photo_waits_for_the_open_one() {
+    let (mut h, fake, d, open) = developing(&["a", "b"]);
+    fake.remove(&format!("/Photos/{open}"));
+    let mut prefetched = false;
+    let t = std::time::Instant::now();
+    while t.elapsed() < Duration::from_secs(1) {
+        h.step();
+        prefetched |= h.app.session.activity.list().iter().any(|r| r.label.starts_with("Prefetching"));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    h.settle(T);
+    assert!(!prefetched, "no prefetch while the open photo isn't here");
+    assert_eq!((cached_files(&d), fake.downloads()), (0, 0));
+}
+
+/// R34: the app's UI thread never downloads: Auto (Shift+A) on a photo whose original isn't here
+/// says to open it in Develop, at once, and downloads nothing.
+#[test]
+fn commands_on_the_ui_thread_never_download() {
+    let (mut h, fake, d, _) = developing(&["a"]);
+    h.app.ui.view = ViewMode::PhotoGrid;
+    h.settle(T);
+    let t = std::time::Instant::now();
+    let r = h.request("engine.execute", json!({"command": "develop.auto"}), T);
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    assert!(r["error"].as_str().is_some_and(|e| e.contains("open it in Develop to download it")), "{r}");
+    h.settle(T);
+    assert_eq!((cached_files(&d), fake.downloads()), (0, 0));
+}
+
 /// Loads that, run with a cancel flag (`memory::cancellable`), wait until it is set: a download
 /// that stops when told. Without one they fail at once (thumbnails).
 #[derive(Clone, Default)]

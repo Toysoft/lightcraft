@@ -18,8 +18,9 @@ use crate::Session;
 use crate::activity::{Cancel, TaskGuard, Unit};
 use crate::media::ProbeInfo;
 
-/// A background load (grid thumbnail, prefetch, batch job) found no local copy of the original.
-pub const NOT_DOWNLOADED: &str = "The original isn't downloaded yet";
+/// Work that doesn't download (grid thumbnails, batch jobs, the app's UI thread) found no local copy
+/// of the original.
+pub const NOT_DOWNLOADED: &str = "The original isn't downloaded yet; open it in Develop to download it";
 
 /// The smallest disk budget for downloaded originals, in MB.
 pub(crate) const MIN_CACHE_BUDGET_MB: u64 = 1000;
@@ -233,6 +234,11 @@ impl Remote {
     fn cached_copy(&self, path: &RemotePath) -> Option<PathBuf> {
         let etag = self.lock().known.get(path)?.0.clone();
         self.cache().ok()?.cached(path, &etag)
+    }
+
+    /// Whether the original of `path` is on this computer ([`Remote::cached_copy`]); no request.
+    pub fn has_local_copy(&self, path: &str) -> bool {
+        RemotePath::parse(path).ok().and_then(|rp| self.cached_copy(&rp)).is_some()
     }
 
     /// Keep the original of `path` (the photo open in Develop) on disk until the next call; `None`, or
@@ -459,6 +465,12 @@ impl Remote {
             return Err(offline());
         }
         client.read_range(path, 0..len).map_err(|e| self.failed(path, &e))
+    }
+
+    /// The start of the file at `path` that holds its tags (1 MiB, as the import reads), for All
+    /// Metadata of a photo whose original isn't on this computer.
+    pub(crate) fn read_header(&self, path: &str) -> Result<Vec<u8>, String> {
+        self.read_head(&RemotePath::parse(path).map_err(|e| e.to_string())?, super::import::META_WINDOW)
     }
 
     /// A request about `path` failed: the account's state follows ([`Remote::note_error`]), a file the

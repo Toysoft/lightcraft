@@ -979,7 +979,13 @@ pub struct QuickJob {
 }
 
 impl QuickJob {
+    /// The stand-in. It never downloads a Nextcloud original: the view's own render does that, and
+    /// can be cancelled when the view moves on.
     pub fn run(self) -> RenderResult {
+        crate::memory::without_downloads(|| self.stand_in())
+    }
+
+    fn stand_in(self) -> RenderResult {
         let (photo, key) = (self.photo, self.key);
         let request_id = self.request_id;
         let done = |rendered: Result<Rendered, String>, quick| RenderResult {

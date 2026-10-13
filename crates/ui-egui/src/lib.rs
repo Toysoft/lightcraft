@@ -956,8 +956,14 @@ impl LightcraftApp {
         stopped && idle
     }
 
-    /// Per-frame logic before layout (control channel, renders, shortcuts, drops).
+    /// Per-frame logic before layout (control channel, renders, shortcuts, drops). Like [`Self::ui`],
+    /// it never downloads a Nextcloud original (a frame never waits for one): renders, exports and
+    /// other work on their own threads do.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        lightcraft_engine::memory::on_ui_thread(|| self.logic_frame(ctx));
+    }
+
+    fn logic_frame(&mut self, ctx: &egui::Context) {
         i18n::set_language(self.ui.language);
         let t0 = now_ms();
         panels::library_problem::logic(self);
@@ -1278,8 +1284,12 @@ impl LightcraftApp {
         }
     }
 
-    /// Lay out the whole window.
+    /// Lay out the whole window (never downloading, see [`Self::logic`]).
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        lightcraft_engine::memory::on_ui_thread(|| self.ui_frame(ui));
+    }
+
+    fn ui_frame(&mut self, ui: &mut egui::Ui) {
         i18n::set_language(self.ui.language);
         let ctx = ui.ctx().clone();
         if !self.fonts_ready {

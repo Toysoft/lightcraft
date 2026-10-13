@@ -155,6 +155,9 @@ fn background_stand_ins_are_thumbnails_only() {
     assert_eq!((img.width, img.height), (64, 32), "a thumbnail from the server's preview");
     let (img, _) = crate::memory::without_downloads(|| load(&y, preview_level)).unwrap();
     assert_eq!((img.width, img.height), (64, 32));
+    // R34: the app's UI thread gets thumbnails only (a command's source, e.g. Auto Straighten's, is kept)
+    assert_eq!(crate::memory::on_ui_thread(|| load(&y, preview_level)).unwrap_err(), NOT_DOWNLOADED);
+    assert!(crate::memory::on_ui_thread(|| load(&y, thumb_level)).is_ok());
     assert_eq!(fake.downloads(), 0);
     assert!(cached_files(&d).is_empty());
 }
@@ -543,4 +546,35 @@ fn hostile_budgets_are_clamped() {
     }
     assert_eq!(crate::remote::budget_bytes(u64::MAX), u64::MAX);
     assert_eq!(crate::remote::budget_bytes(0), 1_000_000_000);
+}
+
+/// R36: a loupe's quick view never downloads. A photo the server has no preview of falls back to a
+/// thumbnail that isn't there either; the view's own render (cancellable) downloads the original.
+#[test]
+fn quick_views_never_download() {
+    let (mut s, fake, d) = signed_in("quick");
+    fake.add_file("/Photos/x.ARW", raw_blob(4000));
+    let id = add_photo(&mut s, 1, &remote(&fake, "Photos/x.ARW"), MediaKind::Raw, 4000);
+    let q = s.quick_view_job(id, 1600, true).unwrap().run();
+    assert!(q.rendered.is_err());
+    assert_eq!(fake.downloads(), 0);
+    assert!(cached_files(&d).is_empty());
+}
+
+/// R34: All Metadata of a photo whose original isn't here reads the start of the file (its tags),
+/// not the whole file; once the original is here, it reads that.
+#[test]
+fn all_metadata_reads_the_header_of_a_photo_not_here() {
+    let (mut s, fake, d) = signed_in("all-metadata");
+    fake.add_file("/Photos/y.jpg", jpeg(96, 64, None));
+    let y = remote(&fake, "Photos/y.jpg");
+    let id = add_photo(&mut s, 1, &y, MediaKind::Image, 1000);
+    let tags = |s: &mut Session| s.execute("photo.allMetadata", &json!({"id": id.0})).unwrap()["exif"].to_string();
+    assert!(tags(&mut s).contains("Canon"), "{}", tags(&mut s));
+    assert_eq!(fake.downloads(), 0);
+    assert!(cached_files(&d).is_empty());
+    (s.media.file_loader.clone().unwrap())(&y, 512).unwrap();
+    let before = fake.requests();
+    assert!(tags(&mut s).contains("Canon"));
+    assert_eq!(fake.requests(), before, "the copy on this computer");
 }

@@ -165,6 +165,7 @@ impl Drop for Permit<'_> {
 thread_local! {
     static BACKGROUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static NO_DOWNLOADS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static UI_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static CANCEL: std::cell::RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -226,6 +227,18 @@ pub fn without_downloads<R>(f: impl FnOnce() -> R) -> R {
 /// Is this thread running [`without_downloads`] work?
 pub fn is_without_downloads() -> bool {
     NO_DOWNLOADS.with(|b| b.get())
+}
+
+/// Run `f` as an app's UI thread does: [`without_downloads`] (a frame never waits for one), and a
+/// server's preview stands in for a missing original at thumbnail size only (a command's decoded
+/// source is kept for Develop, which must not edit the server's JPEG).
+pub fn on_ui_thread<R>(f: impl FnOnce() -> R) -> R {
+    flagged(&UI_THREAD, || without_downloads(f))
+}
+
+/// Is this thread running [`on_ui_thread`] work?
+pub fn is_ui_thread() -> bool {
+    UI_THREAD.with(|b| b.get())
 }
 
 /// May work on this thread download an original? Not background work ([`in_background`]) nor
