@@ -27,7 +27,8 @@ fn analyze(s: &mut Session, p: &Value) -> Result<Value> {
     let mut rows: Vec<(PhotoId, Option<i64>, f32, f32, [f32; 64])> = Vec::new();
     let mut failed = Vec::new();
     for id in ids {
-        match s.source_now(id, crate::media::SourceLevel::Thumb) {
+        // (a look at many photos: a Nextcloud photo's original isn't downloaded for it)
+        match crate::memory::without_downloads(|| s.source_now(id, crate::media::SourceLevel::Thumb)) {
             Ok(src) => {
                 let t = s.catalog.photo(id).and_then(|p| p.captured.as_deref().and_then(secs));
                 use lightcraft_pipeline::cull;
@@ -95,7 +96,8 @@ fn find_similar(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(v) = s.signatures.get(&key) {
             return Some(*v);
         }
-        let src = s.source_now(id, crate::media::SourceLevel::Thumb).ok()?;
+        // (a look at many photos: a Nextcloud photo's original isn't downloaded for it)
+        let src = crate::memory::without_downloads(|| s.source_now(id, crate::media::SourceLevel::Thumb)).ok()?;
         let v = lightcraft_pipeline::cull::signature(&src);
         s.signatures.insert(key, v);
         Some(v)

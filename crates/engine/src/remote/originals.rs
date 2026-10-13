@@ -24,15 +24,20 @@ pub(crate) fn budget_bytes(mb: u64) -> u64 {
     mb.max(MIN_CACHE_BUDGET_MB).saturating_mul(1_000_000)
 }
 
-/// The cache in `dir`, opened once per process: craft's caches race when one folder is opened twice.
+/// The cache in `dir` with `budget` bytes, opened once per process (craft's caches race when one
+/// folder is opened twice); a cache opened before with another budget takes this one, evicting down to it.
 fn open_cache(dir: &Path, budget: u64) -> Result<OriginalsCache, String> {
-    static OPEN: Mutex<Vec<(PathBuf, OriginalsCache)>> = Mutex::new(Vec::new());
+    static OPEN: Mutex<Vec<(PathBuf, OriginalsCache, u64)>> = Mutex::new(Vec::new());
     let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some((_, cache)) = open.iter().find(|(d, _)| d == dir) {
+    if let Some((_, cache, had)) = open.iter_mut().find(|(d, _, _)| d == dir) {
+        if *had != budget {
+            cache.set_budget(budget);
+            *had = budget;
+        }
         return Ok(cache.clone());
     }
     let cache = OriginalsCache::open(dir, budget).map_err(|e| e.to_string())?;
-    open.push((dir.to_path_buf(), cache.clone()));
+    open.push((dir.to_path_buf(), cache.clone(), budget));
     Ok(cache)
 }
 
@@ -47,7 +52,7 @@ fn offline() -> String {
 }
 
 impl Remote {
-    /// The originals cache in the configured folder (opened on first use, with the budget from the settings).
+    /// The originals cache in the configured folder, with the budget from the settings (opened on first use).
     pub(crate) fn cache(&self) -> Result<OriginalsCache, String> {
         let (dir, mb) = {
             let inner = self.lock();
@@ -230,5 +235,25 @@ impl Remote {
         if matches!(inner.state(key), AccountState::SignedIn | AccountState::Unreachable) {
             inner.states.insert(key.to_string(), (AccountState::SignedIn, Instant::now()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// R14: a cache already open takes the budget it is asked for later (a reconfigure, a changed setting).
+    #[test]
+    fn an_open_cache_takes_a_new_budget() {
+        let dir = std::env::temp_dir().join(format!("lc-nextcloud-budget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // a copy as craft names them: <account hash>/<path hash>-<etag hash>.<ext>
+        let copy = dir.join("0123456789abcdef").join(format!("{}-{}.jpg", "a".repeat(64), "b".repeat(16)));
+        std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        std::fs::write(&copy, [0u8; 100]).unwrap();
+        assert_eq!(open_cache(&dir, 1000).unwrap().usage().total, 100);
+        assert_eq!(open_cache(&dir, 10).unwrap().usage().total, 0, "evicted down to the new budget");
+        assert!(!copy.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

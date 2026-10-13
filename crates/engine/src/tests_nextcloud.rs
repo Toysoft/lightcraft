@@ -471,3 +471,12 @@ fn sign_in_again_asks_to_trust_a_changed_certificate() {
     assert_eq!(keys(&s), [(key.clone(), AccountState::SignedIn)]);
     assert_eq!(s.remote.accounts()[0].0.trust, Some(fp), "pinned to the confirmed certificate");
 }
+
+/// craft names itself in its bad-address message; LightCraft's users read "LightCraft".
+#[test]
+fn a_bad_address_names_lightcraft() {
+    let d = temp("bad-address");
+    let (mut s, _) = nc_session(&d);
+    let e = s.execute("nextcloud.addAccount", &json!({"server": "ftp://cloud.example"})).unwrap_err().to_string();
+    assert!(e.contains("That isn't a Nextcloud address LightCraft can use (server must be an https:// address); check what you typed"), "{e}");
+}

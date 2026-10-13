@@ -6,6 +6,7 @@
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use craft_nextcloud::testing::{FakeServer, Fault};
@@ -86,7 +87,7 @@ fn cached_files(dir: &Path) -> Vec<PathBuf> {
 /// Add `path` to the catalog as an unedited photo of `kind`.
 fn add_photo(s: &mut Session, id: u64, path: &str, kind: MediaKind, size: u64) -> PhotoId {
     let name = path.rsplit('/').next().unwrap();
-    let mut p = Photo::new(PhotoId(id), Source::File { path: path.into() }, name, "ARW", 64, 32, "2026-10-13");
+    let mut p = Photo::new(PhotoId(id), Source::File { path: path.into() }, name, "ARW", 6000, 4000, "2026-10-13");
     p.kind = kind;
     p.file_size = size;
     p.develop = Arc::new(p.camera_defaults());
@@ -136,6 +137,72 @@ fn background_loads_never_download() {
     assert_eq!((img.width, img.height), (64, 32));
     assert_eq!(fake.downloads(), 0);
     assert!(cached_files(&d).is_empty());
+}
+
+/// R13: a background load bigger than a thumbnail (a loupe prefetch, whose source is kept for Develop)
+/// gets no server preview in place of the original; work that only looks (the face scan) does.
+#[test]
+fn background_stand_ins_are_thumbnails_only() {
+    let (s, fake, d) = signed_in("stand-ins");
+    fake.add_file("/Photos/y.jpg", jpeg(320, 160, None));
+    fake.set_preview("/Photos/y.jpg", jpeg(64, 32, None));
+    let load = s.media.file_loader.clone().unwrap();
+    let y = remote(&fake, "Photos/y.jpg");
+    let preview_level = crate::media::SourceLevel::Preview.max_edge();
+    assert_eq!(crate::memory::in_background(|| load(&y, preview_level)).unwrap_err(), NOT_DOWNLOADED);
+    let thumb_level = crate::media::SourceLevel::Thumb.max_edge();
+    let (img, _) = crate::memory::in_background(|| load(&y, thumb_level)).unwrap();
+    assert_eq!((img.width, img.height), (64, 32), "a thumbnail from the server's preview");
+    let (img, _) = crate::memory::without_downloads(|| load(&y, preview_level)).unwrap();
+    assert_eq!((img.width, img.height), (64, 32));
+    assert_eq!(fake.downloads(), 0);
+    assert!(cached_files(&d).is_empty());
+}
+
+/// Find Similar and Assisted Culling look at many photos: none is downloaded for them (JPEGs are
+/// looked at in their server previews, raws not at all).
+#[test]
+fn looking_at_many_photos_never_downloads() {
+    let (mut s, fake, d) = signed_in("similar");
+    for (i, name) in ["a.jpg", "b.jpg"].into_iter().enumerate() {
+        fake.add_file(&format!("/Photos/{name}"), jpeg(96, 64, None));
+        fake.set_preview(&format!("/Photos/{name}"), jpeg(64, 32, None));
+        add_photo(&mut s, i as u64 + 1, &remote(&fake, &format!("Photos/{name}")), MediaKind::Image, 1000);
+    }
+    fake.add_file("/Photos/c.ARW", raw_blob(4000));
+    add_photo(&mut s, 3, &remote(&fake, "Photos/c.ARW"), MediaKind::Raw, 4000);
+    let r = s.execute("library.findSimilar", &json!({"id": 1, "similarity": 0.0})).unwrap();
+    assert_eq!(r["photos"].as_array().unwrap().len(), 2, "{r}");
+    let r = s.execute("photo.analyze", &json!({"ids": [1, 2, 3]})).unwrap();
+    assert_eq!(r["failed"].as_array().unwrap().len(), 1, "the raw: {r}");
+    assert_eq!(fake.downloads(), 0);
+    assert!(cached_files(&d).is_empty());
+}
+
+/// R14: a listing's size is the server's word; a huge one overflows nothing when the copy on disk is probed.
+#[test]
+fn a_huge_reported_size_is_harmless() {
+    let (s, fake, _d) = signed_in("huge");
+    fake.add_file("/Photos/y.jpg", jpeg(96, 64, None));
+    let y = remote(&fake, "Photos/y.jpg");
+    (s.media.file_loader.clone().unwrap())(&y, 512).unwrap();
+    let rp = RemotePath::parse(&y).unwrap();
+    let etag = s.remote.client(&rp.account_key()).unwrap().stat(&rp).unwrap().etag;
+    let listed = craft_nextcloud::Entry {
+        name: "y.jpg".into(),
+        is_dir: false,
+        size: u64::MAX,
+        etag,
+        fileid: None,
+        mtime: None,
+        content_type: None,
+        has_preview: true,
+    };
+    s.remote.note_listing(&rp.parent().unwrap(), &[listed]);
+    // (something else holds memory at the gate, as the app's other work does)
+    let _other = crate::memory::work_gate().acquire_urgent(1);
+    let info = (s.media.file_probe.clone().unwrap())(&y).unwrap();
+    assert_eq!((info.width, info.height, info.file_size), (96, 64, u64::MAX));
 }
 
 #[test]
@@ -248,10 +315,27 @@ fn truncated_raws_are_not_described_from_their_preview() {
     fake.add_file("/Photos/big.CR3", cr3_with_preview(96, 64, 5 << 20));
     fake.add_file("/Photos/small.CR3", cr3_with_preview(96, 64, 0));
     let probe = s.media.file_probe.clone().unwrap();
+    let before = fake.requests();
     let e = probe(&remote(&fake, "Photos/big.CR3")).unwrap_err();
     assert!(e.contains("doesn't describe it"), "{e}");
+    assert_eq!(fake.requests() - before, 2, "a stat and the header window: no second read of a big raw");
     let small = probe(&remote(&fake, "Photos/small.CR3")).unwrap();
     assert!(small.preview_only.is_some(), "a whole file is described as it is");
+    // a file up to 4 MiB is read whole when its start didn't describe it
+    fake.add_file("/Photos/mid.CR3", cr3_with_preview(96, 64, 1 << 20));
+    assert!(probe(&remote(&fake, "Photos/mid.CR3")).unwrap().preview_only.is_some());
+    // a raw the start does describe, and not from its preview (a small DNG, padded), still doesn't count
+    // from part of the file
+    let mut dng = crate::tests_xmp::synthetic_dng_with(None, lightcraft_meta::Metadata::default());
+    let start = crate::files::probe_bytes("big.dng", &dng);
+    assert!(start.is_ok_and(|i| i.kind == MediaKind::Raw && i.preview_only.is_none()), "the start describes it");
+    dng.resize(5 << 20, 0);
+    fake.add_file("/Photos/big.dng", dng);
+    let e = probe(&remote(&fake, "Photos/big.dng")).unwrap_err();
+    assert!(e.contains("doesn't describe it"), "{e}");
+    // a format no download would open keeps its own error
+    fake.add_file("/Photos/big.xyz", vec![7; 5 << 20]);
+    assert_eq!(probe(&remote(&fake, "Photos/big.xyz")).unwrap_err(), "unrecognized file format");
     assert_eq!(fake.downloads(), 0);
 }
 
@@ -334,9 +418,18 @@ fn unknown_accounts_photos_are_offline() {
 /// Review Focus 1: a server that stops answering costs one wait, not one per request.
 #[test]
 fn unreachable_server_fails_fast() {
-    // accepts connections (the kernel does) and never answers
+    // accepts connections, counts them and never answers
     let silent = TcpListener::bind("127.0.0.1:0").unwrap();
     let account = Account { server: format!("http://{}", silent.local_addr().unwrap()), user: "alice".into(), trust: None };
+    let connections = Arc::new(AtomicUsize::new(0));
+    let counted = connections.clone();
+    std::thread::spawn(move || {
+        let mut open = Vec::new();
+        for stream in silent.incoming().flatten() {
+            counted.fetch_add(1, Ordering::SeqCst);
+            open.push(stream);
+        }
+    });
     let d = temp("unreachable");
     let s = session_for(&d, &account, "pw");
     s.remote.set_stall_limit(Duration::from_secs(1));
@@ -350,7 +443,9 @@ fn unreachable_server_fails_fast() {
     for p in &paths {
         assert!(!s.remote.exists(p));
     }
-    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    // one request waited out the stall limit; the other 99 didn't try (100 s if each had)
+    assert_eq!(connections.load(Ordering::SeqCst), 1);
+    assert!(t.elapsed() < Duration::from_secs(30), "{:?}", t.elapsed());
     assert_eq!(s.remote.accounts()[0].1, AccountState::Unreachable);
 }
 
@@ -383,8 +478,12 @@ fn batch_builders_never_download() {
         fake.add_file(&format!("/Photos/{i}.ARW"), raw_blob(4000));
         ids.push(add_photo(&mut s, i + 1, &remote(&fake, &format!("Photos/{i}.ARW")), MediaKind::Raw, 4000).0);
     }
+    // a JPEG: its server preview makes a thumbnail, but never a preview-size source
+    fake.add_file("/Photos/y.jpg", jpeg(320, 160, None));
+    fake.set_preview("/Photos/y.jpg", jpeg(64, 32, None));
+    ids.push(add_photo(&mut s, 4, &remote(&fake, "Photos/y.jpg"), MediaKind::Image, 1000).0);
     let r = s.execute("library.buildPreviews", &json!({"ids": ids, "wait": true})).unwrap();
-    assert_eq!(r["failed"], 3, "{r}");
+    assert_eq!(r["failed"], 4, "{r}");
     std::fs::create_dir_all(d.join("smart")).unwrap();
     s.media.smart_dir = Some(d.join("smart"));
     let r = s.execute("library.smartPreviews", &json!({"ids": ids})).unwrap();
@@ -393,17 +492,24 @@ fn batch_builders_never_download() {
     assert!(cached_files(&d).is_empty());
 }
 
-/// R5: a hostile settings file can't make the budget 0 or overflow it.
+/// R5: a hostile settings file can't make the budget 0 or overflow it: u64::MAX MB saturates to
+/// u64::MAX bytes, and downloading (and evicting) under it, then under the clamped 0, keeps the copy.
 #[test]
 fn hostile_budgets_are_clamped() {
+    let fake = FakeServer::start();
+    fake.add_file("/Photos/y.jpg", jpeg(96, 64, None));
+    let y = remote(&fake, "Photos/y.jpg");
     let d = temp("budget");
     let creds = Arc::new(MemoryCredentials::default());
-    for (written, kept) in [(0u64, 1000u64), (u64::MAX, u64::MAX)] {
-        std::fs::write(d.join("nextcloud.json"), format!(r#"{{"accounts": [], "cacheBudgetMb": {written}}}"#)).unwrap();
-        let s = Session::new();
+    creds.set(&fake.account(), FakeServer::PASSWORD).unwrap();
+    for (written, kept) in [(u64::MAX, u64::MAX), (0, 1000)] {
+        let settings = json!({"accounts": [fake.account()], "cacheBudgetMb": written});
+        std::fs::write(d.join("nextcloud.json"), serde_json::to_vec(&settings).unwrap()).unwrap();
+        let s = Session::new().with_fs();
         s.remote.configure(config(&d, creds.clone()));
         assert_eq!(s.remote.cache_budget_mb(), kept);
-        s.remote.cache().unwrap();
+        (s.media.file_loader.clone().unwrap())(&y, 512).unwrap();
+        assert_eq!(cached_files(&d).len(), 1, "budget {written} MB");
     }
     assert_eq!(crate::remote::budget_bytes(u64::MAX), u64::MAX);
     assert_eq!(crate::remote::budget_bytes(0), 1_000_000_000);

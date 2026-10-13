@@ -128,20 +128,28 @@ impl WorkGate {
         *self.lock()
     }
 
-    /// Hold `bytes`, waiting until they fit (or nothing else is held).
+    /// Hold `bytes`, waiting until they fit (or nothing else is held). (A size from a hostile source
+    /// can be anything: the count saturates rather than overflow.)
     pub fn acquire(&self, bytes: usize) -> Permit<'_> {
         let mut g = self.lock();
-        while g.0 > 0 && g.0 + bytes > g.1 {
+        while g.0 > 0 && g.0.saturating_add(bytes) > g.1 {
             g = self.cv.wait(g).unwrap_or_else(|e| e.into_inner());
         }
-        g.0 += bytes;
-        Permit { gate: self, bytes }
+        Permit::take(self, &mut g.0, bytes)
     }
 
     /// Hold `bytes` without waiting (interactive work): counted, so background work waits for it.
     pub fn acquire_urgent(&self, bytes: usize) -> Permit<'_> {
-        self.lock().0 += bytes;
-        Permit { gate: self, bytes }
+        Permit::take(self, &mut self.lock().0, bytes)
+    }
+}
+
+impl<'a> Permit<'a> {
+    /// Count `bytes` in `held` (as many as fit), for as long as the permit lives.
+    fn take(gate: &'a WorkGate, held: &mut usize, bytes: usize) -> Permit<'a> {
+        let bytes = bytes.min(usize::MAX - *held);
+        *held += bytes;
+        Permit { gate, bytes }
     }
 }
 
@@ -159,13 +167,27 @@ thread_local! {
     static NO_DOWNLOADS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// Set while alive; puts the flag back as it was when dropped, also when `f` panics (a thread that
+/// goes on after a caught panic must not stay flagged).
+struct Flag(&'static std::thread::LocalKey<std::cell::Cell<bool>>, bool);
+
+impl Drop for Flag {
+    fn drop(&mut self) {
+        let was = self.1;
+        self.0.with(|b| b.set(was));
+    }
+}
+
+/// Run `f` with `flag` set.
+fn flagged<R>(flag: &'static std::thread::LocalKey<std::cell::Cell<bool>>, f: impl FnOnce() -> R) -> R {
+    let _restore = Flag(flag, flag.with(|b| b.replace(true)));
+    f()
+}
+
 /// Run `f` as background work (grid thumbnails, neighbour prefetch): its decodes wait at the
 /// [`work_gate`] while interactive work holds the memory.
 pub fn in_background<R>(f: impl FnOnce() -> R) -> R {
-    let was = BACKGROUND.with(|b| b.replace(true));
-    let r = f();
-    BACKGROUND.with(|b| b.set(was));
-    r
+    flagged(&BACKGROUND, f)
 }
 
 /// Is this thread running background work ([`in_background`])?
@@ -174,19 +196,21 @@ pub fn is_background() -> bool {
 }
 
 /// Run `f` without downloading originals (a Nextcloud photo's), like background work, while its decodes
-/// still count as interactive at the [`work_gate`]: for the face scan, whose pool threads must never
-/// wait there.
+/// still count as interactive at the [`work_gate`]: for work that looks at many photos (the face scan,
+/// whose pool threads must never wait there; Find Similar; Assisted Culling).
 pub fn without_downloads<R>(f: impl FnOnce() -> R) -> R {
-    let was = NO_DOWNLOADS.with(|b| b.replace(true));
-    let r = f();
-    NO_DOWNLOADS.with(|b| b.set(was));
-    r
+    flagged(&NO_DOWNLOADS, f)
+}
+
+/// Is this thread running [`without_downloads`] work?
+pub fn is_without_downloads() -> bool {
+    NO_DOWNLOADS.with(|b| b.get())
 }
 
 /// May work on this thread download an original? Not background work ([`in_background`]) nor
 /// [`without_downloads`].
 pub fn may_download() -> bool {
-    !is_background() && !NO_DOWNLOADS.with(|b| b.get())
+    !is_background() && !is_without_downloads()
 }
 
 /// The process-wide gate for decodes and import probes (limit: a quarter of the budget).
@@ -331,5 +355,37 @@ impl crate::Session {
         let b = set_budget(bytes);
         self.media.set_budget(cache_share(b));
         b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A thread that goes on after a caught panic (a Build Previews lane, a pool thread) is no longer flagged.
+    #[test]
+    fn flags_are_restored_when_the_work_panics() {
+        assert!(std::panic::catch_unwind(|| in_background(|| panic!("a photo's work failed"))).is_err());
+        assert!(std::panic::catch_unwind(|| without_downloads(|| panic!("a photo's work failed"))).is_err());
+        assert!(!is_background() && !is_without_downloads() && may_download());
+        in_background(|| without_downloads(|| assert!(is_background() && is_without_downloads() && !may_download())));
+        assert!(may_download());
+    }
+
+    /// A hostile size (a server's listing) is counted without overflowing, and given back exactly.
+    #[test]
+    fn huge_sizes_saturate_the_gate() {
+        let gate = WorkGate::new(1000);
+        let small = gate.acquire_urgent(10);
+        let huge = gate.acquire_urgent(usize::MAX);
+        assert_eq!(gate.usage().0, usize::MAX);
+        drop(huge);
+        assert_eq!(gate.usage().0, 10, "given back exactly");
+        drop(small);
+        // nothing else held: it goes ahead, and what comes after it still counts without overflowing
+        let huge = gate.acquire(usize::MAX);
+        let more = gate.acquire_urgent(5);
+        drop((huge, more));
+        assert_eq!(gate.usage().0, 0);
     }
 }

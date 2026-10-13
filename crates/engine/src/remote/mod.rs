@@ -26,6 +26,7 @@ use craft_nextcloud::rustls::crypto::CryptoProvider;
 pub use craft_nextcloud::{Account, Fingerprint, RemotePath};
 use craft_nextcloud::{Client, Error, SignIn, SignInState};
 pub use originals::NOT_DOWNLOADED;
+#[cfg(test)]
 pub(crate) use originals::budget_bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -189,6 +190,14 @@ fn no_store() -> String {
     "This build can't store Nextcloud passwords (no OS keyring support)".into()
 }
 
+/// What a failed sign-in or client says to the user: craft's text, naming LightCraft where craft says "Craft".
+fn message(e: &Error) -> String {
+    match e {
+        Error::InvalidAddress(d) => format!("That isn't a Nextcloud address LightCraft can use ({d}); check what you typed"),
+        e => e.to_string(),
+    }
+}
+
 /// A sign-in that ended other than signed in: how, and why in words for the user.
 type SignInEnd = (SignInProgress, String);
 
@@ -279,9 +288,9 @@ impl Remote {
             self.note_error(account_key, &Error::Unauthorized);
             return Err(sign_in_again(account_key));
         };
-        let mut client = Client::new(account, password, provider()).map_err(|e| e.to_string())?;
+        let mut client = Client::new(account, password, provider()).map_err(|e| message(&e))?;
         if let Some(limit) = stall_limit {
-            client = client.with_stall_limit(limit).map_err(|e| e.to_string())?;
+            client = client.with_stall_limit(limit).map_err(|e| message(&e))?;
         }
         let mut inner = self.lock();
         usable(&inner)?;
@@ -379,7 +388,7 @@ impl Remote {
         }
         let login_url = match sign_in.state() {
             SignInState::Waiting { login_url } => login_url.clone(),
-            SignInState::Failed(e) => return Err(e.to_string()),
+            SignInState::Failed(e) => return Err(message(e)),
             // the start ends waiting or failed once trust is answered
             SignInState::NeedsTrust { .. } | SignInState::Done { .. } => return Err(Error::Malformed("unexpected sign-in state".into()).to_string()),
         };
@@ -440,7 +449,7 @@ impl Remote {
                 SignInState::Failed(Error::Cancelled) => {
                     break Err((SignInProgress::TimedOut, "The sign-in wasn't approved in time; start it again".into()));
                 }
-                SignInState::Failed(e) => break Err((SignInProgress::Failed, e.to_string())),
+                SignInState::Failed(e) => break Err((SignInProgress::Failed, message(e))),
                 SignInState::NeedsTrust { .. } => {
                     break Err((SignInProgress::Failed, Error::Malformed("unexpected sign-in state".into()).to_string()));
                 }
@@ -526,10 +535,8 @@ impl Remote {
             let settings = Settings { cache_budget_mb: mb, ..inner.settings.clone() };
             inner.save(settings)?;
         }
-        // (a cache that can't be opened now takes the budget when it is)
-        if let Ok(cache) = self.cache() {
-            cache.set_budget(budget_bytes(mb));
-        }
+        // asking for the cache gives it the new budget (one that can't be opened now takes it when it is)
+        let _ = self.cache();
         Ok(())
     }
 }

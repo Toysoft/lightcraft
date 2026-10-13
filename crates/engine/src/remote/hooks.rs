@@ -1,22 +1,23 @@
 //! The engine's file hooks for `nextcloud://` paths, installed by [`crate::Session::with_fs`] around the
 //! filesystem ones ([`route`]). A remote photo loads from its local original ([`Remote::local_original`]:
-//! downloaded for interactive work only); background work decodes the server's preview of a non-raw
-//! image instead, and a raw fails (its smart preview stands in). Embedded previews are the server's,
-//! probes read the file's first bytes, and `content_hash` stays `None` (keys stay `file:{path}:{size}`).
+//! downloaded for interactive work only); background work makes a non-raw image's thumbnail from the
+//! server's preview instead, and otherwise fails (a smart preview stands in). Embedded previews are the
+//! server's, probes read the file's first bytes, and `content_hash` stays `None` (keys stay
+//! `file:{path}:{size}`).
 
 use std::path::Path;
 use std::sync::Arc;
 
 use craft_nextcloud::RemotePath;
-use lightcraft_catalog::is_remote;
+use lightcraft_catalog::{MediaKind, is_remote};
 
 use super::{NOT_DOWNLOADED, Remote};
 use crate::files::{decode_upright_srgb, load_bytes, probe_bytes};
-use crate::media::ProbeInfo;
+use crate::media::{ProbeInfo, SourceLevel};
 
 /// Bytes read from the start of a remote file to probe it (see the NC5 commit for the measurement).
 pub(crate) const HEADER_WINDOW: u64 = 256 << 10;
-/// Read once more when [`HEADER_WINDOW`] didn't describe the file.
+/// A file up to this size is read whole when [`HEADER_WINDOW`] didn't describe it.
 pub(crate) const HEADER_WINDOW_RETRY: u64 = 4 << 20;
 /// The largest server preview asked for.
 const MAX_SERVER_PREVIEW: usize = 4096;
@@ -25,6 +26,14 @@ const PREVIEWED: [&str; 13] = ["jpg", "jpeg", "png", "tif", "tiff", "webp", "gif
 
 fn previewed(name: &str) -> bool {
     Path::new(name).extension().and_then(|e| e.to_str()).is_some_and(|e| PREVIEWED.iter().any(|p| e.eq_ignore_ascii_case(p)))
+}
+
+/// Whether a background load of `max_edge` may stand in the server's preview for the original: for a
+/// thumbnail, or for work that only looks (the face scan, Find Similar). A larger one would be kept as
+/// the photo's preview-size source (a loupe prefetch's result is accepted into the cache), and Develop
+/// would then edit the server's JPEG instead of downloading the original.
+fn stand_in_allowed(max_edge: usize) -> bool {
+    max_edge <= SourceLevel::Thumb.max_edge() || crate::memory::is_without_downloads()
 }
 
 fn parse(path: &str) -> Result<RemotePath, String> {
@@ -49,7 +58,7 @@ pub(crate) fn route(s: &mut crate::Session) {
                 return fs(path, max_edge);
             }
             match with_original(&r, path, |local| fs(local, max_edge)) {
-                Err(e) if e == NOT_DOWNLOADED && previewed(path) => {
+                Err(e) if e == NOT_DOWNLOADED && previewed(path) && stand_in_allowed(max_edge) => {
                     let edge = u32::try_from(max_edge.min(MAX_SERVER_PREVIEW)).unwrap_or(1).max(1);
                     let bytes = r.server_preview(&parse(path)?, edge)?.ok_or(e)?;
                     load_bytes(&bytes, max_edge)
@@ -102,13 +111,18 @@ fn probe(remote: &Remote, path: &str) -> Result<ProbeInfo, String> {
     let _hold = cache.as_ref().map(|c| c.hold(&rp));
     let mut info = match cache.and_then(|c| c.cached(&rp, &etag)) {
         Some(local) => {
-            let _permit = crate::memory::work_gate().acquire(usize::try_from(size).unwrap_or(usize::MAX));
+            // (the copy's own length, not the server's word for it)
+            let len = std::fs::metadata(&local).map(|m| usize::try_from(m.len()).unwrap_or(usize::MAX)).unwrap_or(0);
+            let _permit = crate::memory::work_gate().acquire(len);
             probe_bytes(name, &std::fs::read(&local).map_err(|e| format!("{}: {e}", local.display()))?)?
         }
         None => {
             let head = remote.read_head(&rp, HEADER_WINDOW)?;
             match describe(name, &head, size) {
-                Err(_) if (head.len() as u64) < size => describe(name, &remote.read_head(&rp, HEADER_WINDOW_RETRY)?, size)?,
+                // a small file is read whole; the start of a big raw never describes it (see `describe`)
+                Err(_) if (head.len() as u64) < size && size <= HEADER_WINDOW_RETRY => {
+                    describe(name, &remote.read_head(&rp, HEADER_WINDOW_RETRY)?, size)?
+                }
                 described => described?,
             }
         }
@@ -118,16 +132,22 @@ fn probe(remote: &Remote, path: &str) -> Result<ProbeInfo, String> {
     Ok(info)
 }
 
-/// [`probe_bytes`] of a file's first bytes `head` (of `size`). Unless they are the whole file, a
-/// description from the embedded preview doesn't count: the raw data lies past the window, and the
-/// photo would be marked preview-only at its preview's size (measured on real ARW and CR3 files).
+/// [`probe_bytes`] of a file's first bytes `head` (of `size`). From part of a file, only an image's
+/// description counts: a raw's data lies past the window, and what the start says about it is wrong
+/// (measured on real ARW and CR3 files: preview-only at the preview's size, or another as-shot white
+/// balance). A failure there is the cut's, unless the format can't be opened anyway (unknown, or not
+/// in this build).
 // ponytail: a probe of the raw's header alone in lightcraft_raw (and a JPEG header read that doesn't
 // need the end-of-image marker) would describe big files from 64-512 KiB, which hold all their metadata.
 fn describe(name: &str, head: &[u8], size: u64) -> Result<ProbeInfo, String> {
-    let whole = head.len() as u64 >= size;
-    match probe_bytes(name, head) {
-        Ok(info) if whole || info.preview_only.is_none() => Ok(info),
-        Err(e) if whole => Err(e),
+    let described = probe_bytes(name, head);
+    if head.len() as u64 >= size {
+        return described;
+    }
+    let opens = lightcraft_raw::probe(head).is_some() || lightcraft_codecs::sniff(head).is_some_and(|f| f.not_decodable().is_none());
+    match described {
+        Ok(info) if info.kind != MediaKind::Raw => Ok(info),
+        Err(e) if !opens => Err(e),
         _ => Err(format!("The start of {name} on the Nextcloud server doesn't describe it; it is read whole once downloaded")),
     }
 }
