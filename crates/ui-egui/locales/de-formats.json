@@ -235,6 +235,7 @@
   "{done} of {total} MB": "{done} von {total} MB",
   "{pct} %": "{pct} %",
   "+{n} more": "+{n} weitere",
+  "Inside: {names}": "Darin: {names}",
   "1 task is still running: {names}. Quitting stops it.": "1 Aufgabe läuft noch: {names}. Beenden bricht sie ab.",
   "{n} tasks are still running: {names}. Quitting stops them.": "{n} Aufgaben laufen noch: {names}. Beenden bricht sie ab.",
   "{what} merge cancelled": "{what}-Zusammenfügung abgebrochen",
