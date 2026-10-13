@@ -225,6 +225,34 @@ fn opening_the_prefetched_photo_keeps_its_download() {
 }
 
 #[test]
+fn moving_on_cancels_the_open_photos_prefetch() {
+    let (s, fake, _d) = signed_in("prefetch-skim");
+    let [b, c, e] = listed(&s, &fake, ["b", "c", "e"], 4000);
+    let step = step_downloads(&s);
+    s.remote.prefetch(Some(&b));
+    wait_until("b's prefetch", || rows(&s) == row("Prefetching b.ARW"));
+    // skimming in Develop: b opens and c is prefetched, then c opens
+    s.remote.hold(Some(&b));
+    s.remote.prefetch(Some(&c));
+    s.remote.hold(Some(&c));
+    step.send(()).unwrap();
+    wait_until("c's turn", || rows(&s) == row("Prefetching c.ARW"));
+    step.send(()).unwrap();
+    wait_until("c is here", || is_cached(&s, &c) && s.activity.list().is_empty());
+    assert!(!is_cached(&s, &b), "b's prefetch stopped");
+    assert_eq!(fake.downloads(), 1, "c only");
+    // leaving Develop stops the open photo's prefetch too
+    s.remote.prefetch(Some(&e));
+    wait_until("e's prefetch", || rows(&s) == row("Prefetching e.ARW"));
+    s.remote.hold(Some(&e));
+    s.remote.hold(None);
+    step.send(()).unwrap();
+    wait_until("e's row goes", || s.activity.list().is_empty());
+    assert!(!is_cached(&s, &e));
+    assert_eq!(fake.downloads(), 1);
+}
+
+#[test]
 fn batch_downloads_skip_an_unreachable_server() {
     let (mut s, fake, _d) = signed_in("prefetch-offline");
     fake.add_file("/Photos/b.ARW", raw_blob(4000));

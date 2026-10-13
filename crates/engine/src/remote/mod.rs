@@ -268,8 +268,9 @@ pub struct Remote {
     /// Interactive loads waiting for [`Remote::downloads`]: prefetches and offline copies give it up
     /// to them.
     pub(crate) loads_waiting: AtomicUsize,
-    /// The photo open in Develop and the hold keeping its original from eviction ([`Remote::hold`]).
-    held: Mutex<Option<(String, Hold)>>,
+    /// The photo open in Develop, the hold keeping its original from eviction, and what cancels its
+    /// prefetch when one was running as it opened ([`Remote::hold`]).
+    held: Mutex<Option<(String, Hold, Option<Arc<AtomicBool>>)>>,
     /// The path last prefetched (or found on disk) and what cancels its prefetch ([`Remote::prefetch`]).
     prefetching: Mutex<Option<(String, Arc<AtomicBool>)>>,
     /// The last [`MAX_SIGN_INS`] sign-ins, oldest first. Kept across [`Remote::configure`]: they are

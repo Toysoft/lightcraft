@@ -61,7 +61,8 @@ fn offline() -> String {
 enum Want<'a> {
     /// An interactive load: a `Downloading` row of its own, cancelled from there.
     Load,
-    /// [`Remote::prefetch`]: a `Prefetching` row, cancelled by moving on.
+    /// [`Remote::prefetch`]: a `Prefetching` row, cancelled by the next prefetch, or, once its photo
+    /// is the one open ([`Remote::hold`]), by moving on from it.
     Prefetch(&'a Arc<AtomicBool>),
     /// [`Remote::make_available_offline`]: a `Downloading` row, cancelled with the command's.
     Offline(&'a Arc<AtomicBool>),
@@ -151,6 +152,10 @@ impl Remote {
             task.set_unit(Unit::Bytes);
             #[cfg(test)]
             self.download_step();
+            // (cancelled since it took its turn: not even a `stat`)
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled.to_string());
+            }
             let total = size.unwrap_or(0);
             // (bytes came: neither a copy on disk nor a stale one)
             let mut downloaded = false;
@@ -181,10 +186,8 @@ impl Remote {
         // ponytail: one download at a time; track downloads per path if a loupe waiting behind another shows up
         let lock = || self.downloads.lock().unwrap_or_else(PoisonError::into_inner);
         if matches!(want, Want::Load) {
-            self.loads_waiting.fetch_add(1, Ordering::SeqCst);
-            let one = lock();
-            self.loads_waiting.fetch_sub(1, Ordering::SeqCst);
-            return Ok(one);
+            let _waiting = Waiting::new(&self.loads_waiting);
+            return Ok(lock());
         }
         loop {
             if cancel.load(Ordering::Relaxed) {
@@ -216,23 +219,39 @@ impl Remote {
 
     /// Keep the original of `path` (the photo open in Develop) on disk until the next call; `None`, or
     /// a photo that isn't on Nextcloud, keeps none. The same path again changes nothing. A prefetch
-    /// of `path` running goes on: moving on no longer cancels it (Develop waits for it instead of
-    /// downloading it again).
+    /// of `path` running goes on: the next prefetch doesn't cancel it (a load of `path` waits for it
+    /// and finds its copy instead of downloading it again), but moving on to another photo, or to
+    /// `None`, does.
     pub fn hold(&self, path: Option<&str>) {
-        {
-            let mut running = self.prefetching.lock().unwrap_or_else(PoisonError::into_inner);
-            if path.is_some() && running.as_ref().map(|(p, _)| p.as_str()) == path {
-                *running = None;
-            }
-        }
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
-        if held.as_ref().map(|(p, _)| p.as_str()) == path {
+        let adopted = path.and_then(|p| {
+            let mut running = self.prefetching.lock().unwrap_or_else(PoisonError::into_inner);
+            if running.as_ref().is_some_and(|(r, _)| r == p) { running.take().map(|(_, cancel)| cancel) } else { None }
+        });
+        if let Some(open) = held.as_mut().filter(|(p, _, _)| Some(p.as_str()) == path) {
+            // (prefetched again while open: the first prefetch goes on, this one stops)
+            match (&open.2, adopted) {
+                (Some(_), Some(again)) => again.store(true, Ordering::Relaxed),
+                (None, again) => open.2 = again,
+                (Some(_), None) => {}
+            }
             return;
         }
-        *held = path.and_then(|p| {
+        if let Some((_, _, Some(cancel))) = held.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        let open = path.and_then(|p| {
             let rp = RemotePath::parse(p).ok()?;
             Some((p.to_string(), self.cache().ok()?.hold(&rp)))
         });
+        match open {
+            Some((p, hold)) => *held = Some((p, hold, adopted)),
+            None => {
+                if let Some(cancel) = adopted {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            }
+        }
     }
 
     /// Download the original of `path` (the photo Develop shows next) on a thread of its own, behind
@@ -240,6 +259,9 @@ impl Remote {
     /// interactive loads waiting for one. Another path, or `None`, cancels the one running (unless it
     /// became the photo open, see [`Remote::hold`]); the one last asked for, or a photo whose original
     /// is on this computer, is left alone. A server that didn't answer a moment ago isn't asked.
+    ///
+    /// Callers call `hold(open)` before `prefetch(next)`: the other order cancels the open photo's
+    /// prefetch before `hold` can keep it.
     pub fn prefetch(self: &Arc<Self>, path: Option<&str>) {
         let mut running = self.prefetching.lock().unwrap_or_else(PoisonError::into_inner);
         if running.as_ref().is_some_and(|(p, _)| Some(p.as_str()) == path) {
@@ -440,6 +462,24 @@ impl Remote {
     }
 }
 
+/// Counts an interactive load waiting for the download lock while it lives
+/// ([`Remote::loads_waiting`]): no path out of the wait, unwinding included, leaves it counted
+/// (which would keep prefetches and offline copies waiting for ever).
+struct Waiting<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl<'a> Waiting<'a> {
+    fn new(count: &'a std::sync::atomic::AtomicUsize) -> Waiting<'a> {
+        count.fetch_add(1, Ordering::SeqCst);
+        Waiting(count)
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// What the whole downloaded copy `local` of `path` says about it: the import's probe with the
 /// remote name (the copy's extension is the cache's) and no content hash (keys stay
 /// `file:{path}:{size}`). On the downloading thread, the copy held from eviction meanwhile.
@@ -499,6 +539,19 @@ pub(crate) fn complete(s: &mut Session, downloaded: Vec<(String, Option<Box<Prob
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// N2: a load that stops waiting, however it stops, is no longer counted.
+    #[test]
+    fn a_waiting_load_is_uncounted_when_it_unwinds() {
+        let count = std::sync::atomic::AtomicUsize::new(0);
+        let r = std::panic::catch_unwind(|| {
+            let _waiting = Waiting::new(&count);
+            assert_eq!(count.load(Ordering::SeqCst), 1);
+            panic!("the wait ends badly");
+        });
+        assert!(r.is_err());
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
 
     /// R14: a cache already open takes the budget it is asked for later (a reconfigure, a changed setting).
     #[test]
