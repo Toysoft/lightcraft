@@ -2,6 +2,10 @@
 
 ## 2026-10-13
 
+### Stepping on from a zoomed 64 MP photo
+- Moving to the next photo after zooming into a high-resolution raw no longer decodes the previews of the photo you
+  move to and of its neighbours again. The kept original of the photo you left now goes first when memory is short.
+
 ### Slider drags on large raws
 - Dragging a slider no longer re-renders the edited photo's filmstrip thumbnail on every frame; it follows once you
   let go. On a 64 MP raw the first of those renders decoded the whole file again, which held up the loupe's
