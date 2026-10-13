@@ -432,8 +432,9 @@ impl Loads {
         s.media.file_loader = Some(Arc::new(move |path: &str, _| {
             let Some(flag) = lightcraft_engine::memory::cancel_flag() else { return Err("no flag".into()) };
             let already = flag.load(std::sync::atomic::Ordering::Relaxed);
-            me.calls.lock().unwrap().push(format!("{} {path}", if already { "start-cancelled" } else { "start" }));
+            // (the flag first: a test that saw "start" can always stop it)
             me.flags.lock().unwrap().push((path.to_string(), flag.clone()));
+            me.calls.lock().unwrap().push(format!("{} {path}", if already { "start-cancelled" } else { "start" }));
             let t = std::time::Instant::now();
             while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < T {
                 std::thread::sleep(Duration::from_millis(5));
@@ -500,9 +501,9 @@ fn a_cancelled_load_starts_again_on_the_next_render() {
     loads.stop_all();
 }
 
-/// Renders a view no longer needs stop their downloads: a released window, the loupe of a Nextcloud
-/// photo once the Detail view is left (a local photo's render goes on), and every render when
-/// another library opens. Thumbnails never get a flag.
+/// Renders a view no longer needs stop their downloads: a released window and the loupe of a
+/// Nextcloud photo once the Detail view is left (a local photo's render goes on, its source kept),
+/// and every render when another library opens. Thumbnails never get a flag.
 #[test]
 fn views_that_go_stop_their_downloads() {
     let loads = Loads::default();
@@ -528,12 +529,22 @@ fn views_that_go_stop_their_downloads() {
     h.app.ui.view = ViewMode::PhotoGrid;
     h.app.renderer.forget_all();
     assert!(h.step_until(Duration::from_secs(5), |_| loads.count(&format!("stop {b}")) == 1), "{:?}", loads.calls.lock().unwrap());
-    // a window the view released
-    let job = h.app.session.render_job(lightcraft_catalog::PhotoId(2), 64, 64, false, true).unwrap();
-    h.app.renderer.request(crate::render::Slot::Region, job, 99);
-    assert!(h.step_until(T, |_| loads.count(&format!("start {b}")) == 2), "{:?}", loads.calls.lock().unwrap());
-    h.app.renderer.release(crate::render::Slot::Region);
-    assert!(h.step_until(Duration::from_secs(5), |_| loads.count(&format!("stop {b}")) == 2), "{:?}", loads.calls.lock().unwrap());
+    // a window the view released (no frames: nothing else stops it)
+    let poll = |what: String, n: usize| {
+        let t = std::time::Instant::now();
+        while loads.count(&what) != n {
+            assert!(t.elapsed() < Duration::from_secs(5), "{what}: {:?}", loads.calls.lock().unwrap());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    for (id, path, stops) in [(2, b, 1), (1, a, 2)] {
+        let job = h.app.session.render_job(lightcraft_catalog::PhotoId(id), 64, 64, false, true).unwrap();
+        h.app.renderer.request(crate::render::Slot::Region, job, 99);
+        poll(format!("start {path}"), 2);
+        h.app.renderer.release(crate::render::Slot::Region);
+        std::thread::sleep(Duration::from_millis(100));
+        poll(format!("stop {path}"), stops);
+    }
     loads.stop_all();
 }
 

@@ -427,6 +427,32 @@ fn no_keyring_is_an_actionable_error() {
     assert!(s.activity.list().is_empty());
 }
 
+/// A computer without a keyring (no Secret Service) fails before the login flow starts, so no app
+/// password is left on the server that LightCraft couldn't store.
+#[test]
+fn a_missing_keyring_fails_before_the_approval() {
+    struct NoKeyring;
+    impl CredentialStore for NoKeyring {
+        fn get(&self, _: &Account) -> Result<Option<String>, String> {
+            Err("No OS keyring is available (no keyring store is configured); the Nextcloud app password can't be stored".into())
+        }
+        fn set(&self, _: &Account, _: &str) -> Result<(), String> {
+            Err("no keyring".into())
+        }
+        fn delete(&self, _: &Account) -> Result<(), String> {
+            Err("no keyring".into())
+        }
+    }
+    let fake = FakeServer::start();
+    let d = temp("missing-keyring");
+    let mut s = Session::new();
+    s.remote.configure(RemoteConfig { settings_file: Some(d.join("nextcloud.json")), cache_dir: None, credentials: Some(Arc::new(NoKeyring)) });
+    let e = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap_err().to_string();
+    assert!(e.contains("No OS keyring is available"), "{e}");
+    assert_eq!(fake.requests(), 0, "no login flow started");
+    assert!(s.activity.list().is_empty() && s.remote.accounts().is_empty());
+}
+
 /// R8: a changed certificate signs the account out like a revoked password (see
 /// `sign_in_again_asks_to_trust_a_changed_certificate` for signing it back in).
 #[test]

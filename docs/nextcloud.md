@@ -29,6 +29,10 @@ LightCraft does with it. Code: `crates/engine/src/remote/` (accounts, routing, i
 Importing again is a rescan: photos already in the library are skipped, new files are added and missing metadata is
 filled in.
 
+**Capture times** are the camera's local time, as for photos on this computer. The Memories timeline gives the moment
+in UTC, so a photo listed from it is first off by its time zone; the metadata phase then sets the local time from
+Memories' `datetaken` or the file's EXIF, and the first download sets the file's own.
+
 **Settings ▸ Nextcloud** lists the accounts on this computer with their state (Signed In, Signed Out, Unreachable,
 Signing In…), **Sign In Again** and **Remove**, the cache size (5, 10, 20, 50 or 100 GB) and how much it holds
 ("Cached: … · Offline copies: …").
@@ -40,12 +44,13 @@ The rule: **browsing never downloads an original; developing downloads the photo
 | You are… | What LightCraft reads from the server |
 |---|---|
 | Importing | Listings, the Memories app's timeline and metadata when the server has it, else the first 64 KiB of each file (1 MiB when that has no camera data). Never a whole original |
-| Looking at the grid | The server's preview of each photo, at thumbnail size, kept in the thumbnail disk cache. An edited photo's thumbnail is rendered from its cached original or smart preview, or, for a non-raw photo with neither, from the server's preview. Never an original |
-| In Detail at Fit or Fill, Compare, the second window, **unedited photo** | The *quick view*: the server's preview, asked for again at a larger size as the view grows (up to 2,560 px). The original is downloaded only when the server has no preview |
+| Looking at the grid | The server's preview of each photo, at thumbnail size, kept in the thumbnail disk cache; for a raw the server has none of, the raw's own embedded preview from the file's first MiB (a Range read). An edited photo's thumbnail is rendered from its cached original or smart preview, or, for a non-raw photo with neither, from the server's preview. Never an original |
+| In Detail at Fit or Fill, Compare, the second window, **unedited photo** | The *quick view*: the server's preview (or a raw's embedded one, as in the grid), asked for again at a larger size as the view grows (up to 2,560 px). The original is downloaded only when there is neither, by the view's own render, which moving on stops |
 | Looking at an **edited** photo in Detail, Compare or the second window | Its original, from the cache or downloaded once: an edit is rendered from the real file, never from the server's JPEG |
-| **Developing** | The open photo's original, held in the cache while it is open, and the next photo's (filmstrip order), prefetched |
-| Exporting, denoising, reading all metadata | The original, from the cache or downloaded once |
-| Building previews or smart previews, the face scan, Find Similar, Assisted Culling | Never an original: they use cached originals and the server's previews, and skip photos that would need a download |
+| **Developing** | The open photo's original, held in the cache while it is open, and, once it is here, the next photo's (filmstrip order), prefetched |
+| Exporting, denoising | The original, from the cache or downloaded once |
+| Reading all metadata | The original when it is on this computer, else the file's first MiB (where its tags are) |
+| Building previews or smart previews, the face scan, Find Similar, Assisted Culling | Never an original: they use cached originals and the server's previews, and skip photos that would need a download (Build Previews counts them as `skipped`) |
 
 **Develop** means the Detail view with an edit tool open (Edit, Profiles, Crop, Remove, Masking, Red Eye) or zoomed
 to a percentage (1:1 and the like). Opening a photo's Edit panel downloads it; arrowing through photos at Fit with only
@@ -53,16 +58,23 @@ the Info panel open doesn't.
 
 - **The download** shows as a cancellable "Downloading _DSC1748.ARW (61 MB)" row with progress, and the loupe keeps
   the server's preview up meanwhile. Downloads run one at a time; the photo you are waiting for goes before a
-  prefetch ("Prefetching …").
+  prefetch ("Prefetching …"), and the next photo's prefetch starts only once the open photo's original is here.
+- **The window never waits for a download.** What runs in the app's window (menu items, shortcuts, buttons, the
+  control channel) never downloads an original. A command that needs one that isn't here (Auto, the white-balance
+  picker, Auto Straighten, …) says "The original isn't downloaded yet; open it in Develop to download it"; work at
+  thumbnail size uses a JPEG's server preview instead. Renders, exports, denoising and the CLI and MCP server, which
+  run elsewhere, download as usual.
 - **Moving on stops it.** Moving to another photo, leaving Detail or closing the view cancels the download of the photo
   you were developing (between chunks; a server that stopped answering is noticed at the 30 s stall limit). The
   prefetch of the next photo is cancelled by the next prefetch, and the open photo's own prefetch keeps going while you
   stay on it.
-- **After the first download** the photo's record is completed from the whole file (dimensions, as-shot white balance,
-  lens data) and a smart preview is built, so the photo can still be edited when the server is out of reach. (While
-  another preview build runs, that smart preview is skipped; File ▸ Previews ▸ Build Smart Previews makes it later.)
+- **After the first download** the photo's record is completed from the whole file (dimensions, capture time,
+  as-shot white balance, lens data) and a smart preview is built, so the photo can still be edited when the server is
+  out of reach. (While another preview build runs, that smart preview is skipped; File ▸ Previews ▸ Build Smart
+  Previews makes it later.)
 - **Server previews stand in at thumbnail size only** (the grid, and quick looks such as Find Similar). Once the
-  original is downloaded they are dropped, so Auto, the white-balance picker and spot sampling measure the real file.
+  original is downloaded they are dropped (a bigger source decoded from the original stays), so Auto, the
+  white-balance picker and spot sampling measure the real file.
 - **Make Available Offline** (Photo menu) downloads the selected photos' originals and pins them, one at a time, behind
   a "Making photos available offline" row (N of M). **Remove Offline Copy** unpins them; the cache then evicts them
   like any other download when it needs the space.
@@ -154,9 +166,19 @@ Trust on first use, with no silent changes:
   is imported twice. Within one path, re-imports are skipped.
 - **Per-camera import presets don't apply** to Nextcloud raws: the camera is known only after the import added the
   photo, so they get the generic raw default.
-- **Without the Memories app**, a photo's dimensions are unknown until its original is first downloaded (reading them
-  needs nearly the whole file), so its grid tile may have the wrong shape until then. Camera, lens, exposure and
-  capture time are read from the start of the file. With Memories, everything comes from the server's index.
+- **Without the Memories app** (or for a photo it hasn't indexed), camera, lens, exposure, capture time and the size
+  are read from the start of the file. The size is the one its EXIF records (raws such as CR3 and ARW have it, many
+  JPEGs don't); without one it is unknown until the original is first downloaded, and the grid tile may have the
+  wrong shape until then. The first download can correct it by a few pixels (an ARW's default crop).
+- **Raw thumbnails depend on the server's preview providers** (Nextcloud's own, or apps such as camerarawpreviews,
+  which see only the formats the server's file types map to raw). For a raw the server has no preview of, LightCraft
+  shows the raw's embedded preview when it lies in the file's first MiB (it does in Canon CR3s); otherwise the photo
+  has no thumbnail until it is downloaded.
+- **An edited raw that was never downloaded has no thumbnail** (edited in the Library, e.g. with Paste Settings or a
+  preset): an edit is rendered from the original, which the grid never downloads. Opening it in Develop once makes
+  one.
+- **The quick view is capped at 2,560 px** (the preview size), not the 4,096 px first planned: an unedited photo at
+  Fit on a screen wider than that is a little soft outside Develop.
 - **Offline, LightCraft can't tell whether a copy on disk is the latest version:** it is used as it is, and a newer
   version is downloaded once the server answers again (a copy older than a version a listing showed this session isn't
   used). An original downloaded by an older LightCraft (before `etags.json`) is found offline only after the server

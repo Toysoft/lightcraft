@@ -570,6 +570,11 @@ impl MediaCache {
         self.full.retain(|e| e.0 != id);
     }
 
+    /// Drop the decoded thumbnail-size source of `id` (the sizes above it stay).
+    pub fn forget_thumb(&mut self, id: PhotoId) {
+        self.thumbs.remove(&id);
+    }
+
     /// (decoded thumbnail sources, bytes).
     pub fn source_usage(&self) -> (usize, usize) {
         (self.thumbs.len(), self.thumbs.cost())

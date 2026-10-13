@@ -483,9 +483,10 @@ impl Remote {
         again: Option<&str>,
         wait: bool,
     ) -> Result<Value, String> {
-        if self.lock().config.credentials.is_none() {
-            return Err(no_store());
-        }
+        let store = self.lock().config.credentials.clone().ok_or_else(no_store)?;
+        // a computer without a keyring fails now, not once the browser approval left an app password
+        // nobody can store on the server
+        store.get(&Account { server: server.to_string(), user: String::new(), trust: None })?;
         // A sign-in object isn't kept between calls: answering `needsTrust` means starting again with
         // `trust`, and the certificate it then finds must be the one the user saw.
         let mut sign_in = SignIn::start(server, "LightCraft", provider());

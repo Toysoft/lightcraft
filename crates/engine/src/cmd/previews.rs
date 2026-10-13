@@ -22,6 +22,8 @@ pub struct PreviewBuild {
     pub total: usize,
     pub done: AtomicUsize,
     pub failed: AtomicUsize,
+    /// Nextcloud photos left out: their originals aren't on this computer, and a build never downloads.
+    pub skipped: AtomicUsize,
     /// Shared with the build's row in the activity stack (its ✕ sets it).
     pub cancel: Arc<AtomicBool>,
     pub finished: AtomicBool,
@@ -39,6 +41,7 @@ impl PreviewBuild {
             "total": self.total,
             "done": self.done.load(Ordering::Relaxed),
             "failed": self.failed.load(Ordering::Relaxed),
+            "skipped": self.skipped.load(Ordering::Relaxed),
             "running": !self.finished.load(Ordering::Relaxed),
             "cancelled": self.cancel.load(Ordering::Relaxed),
             "what": if self.what.is_empty() { "previews" } else { self.what },
@@ -78,10 +81,11 @@ fn task_for(s: &Session, state: &PreviewBuild) -> TaskGuard {
 }
 
 /// Render one photo's jobs in order. The source the first job decodes serves the ones after it
-/// (the grid thumbnail is made from the view's source instead of decoding the file again).
-pub(crate) fn run_photo(jobs: Vec<RenderJob>) -> bool {
+/// (the grid thumbnail is made from the view's source instead of decoding the file again). The first
+/// failure's error, if any.
+pub(crate) fn run_photo(jobs: Vec<RenderJob>) -> std::result::Result<(), String> {
     let mut decoded: Option<crate::media::DecodedSource> = None;
-    let mut ok = true;
+    let mut ok = Ok(());
     for mut j in jobs {
         if let Some(src) = &decoded
             && !matches!(j.source, crate::media::SourceRef::Loaded(_))
@@ -89,7 +93,7 @@ pub(crate) fn run_photo(jobs: Vec<RenderJob>) -> bool {
             j.source = crate::media::SourceRef::Loaded(Box::new(src.clone()));
         }
         let r = j.run();
-        ok &= r.rendered.is_ok();
+        ok = ok.and(r.rendered.as_ref().map(drop).map_err(String::clone));
         if decoded.is_none() {
             decoded = r.loaded;
         }
@@ -105,6 +109,17 @@ fn lanes(n: usize, full: bool) -> usize {
     if full { l.min(2) } else { l }
 }
 
+/// Whether a render failed only because its photo's original isn't on this computer (a Nextcloud photo's).
+#[cfg(not(target_arch = "wasm32"))]
+fn not_downloaded(e: &str) -> bool {
+    e == crate::remote::NOT_DOWNLOADED
+}
+
+#[cfg(target_arch = "wasm32")]
+fn not_downloaded(_: &str) -> bool {
+    false
+}
+
 fn run_all(jobs: Vec<Vec<RenderJob>>, state: &PreviewBuild, task: &TaskGuard, lanes: usize) {
     let total = jobs.len();
     let queue = std::sync::Mutex::new(jobs.into_iter());
@@ -116,9 +131,14 @@ fn run_all(jobs: Vec<Vec<RenderJob>>, state: &PreviewBuild, task: &TaskGuard, la
             let next = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).next();
             let Some(photo_jobs) = next else { break };
             // background work: it waits for interactive renders' memory and never downloads a Nextcloud original
-            let ok = crate::guard::catch("building previews", || crate::memory::in_background(|| run_photo(photo_jobs))).unwrap_or(false);
-            if !ok {
-                state.failed.fetch_add(1, Ordering::Relaxed);
+            match crate::guard::catch("building previews", || crate::memory::in_background(|| run_photo(photo_jobs))) {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) if not_downloaded(&e) => {
+                    state.skipped.fetch_add(1, Ordering::Relaxed);
+                }
+                _ => {
+                    state.failed.fetch_add(1, Ordering::Relaxed);
+                }
             }
             let done = state.done.fetch_add(1, Ordering::Relaxed).saturating_add(1);
             task.progress(done as u64, total as u64);
@@ -517,11 +537,11 @@ pub fn specs() -> Vec<CommandSpec> {
             "Build Previews",
             [],
             None,
-            "{size?: standard (2048 px, or `edge`) | full (1:1), ids?, wait?: bool} — render the grid thumbnail and loupe view of the selected photos (else all in view) into the preview cache, in the background unless `wait` → {total, done, failed, running}",
+            "{size?: standard (2048 px, or `edge`) | full (1:1), ids?, wait?: bool} — render the grid thumbnail and loupe view of the selected photos (else all in view) into the preview cache, in the background unless `wait` → {total, done, failed, skipped (Nextcloud photos whose originals aren't downloaded), running}",
             always,
             build
         ),
-        cmd!(query "library.previewProgress", "Preview Build Progress", [], None, "{} → {total, done, failed, repaired, running, cancelled, what, error} | null", always, |s, _| {
+        cmd!(query "library.previewProgress", "Preview Build Progress", [], None, "{} → {total, done, failed, skipped, repaired, running, cancelled, what, error} | null", always, |s, _| {
             Ok(s.preview_build.as_ref().map_or(Value::Null, |b| b.json()))
         }),
         cmd!("library.cancelPreviews", "Cancel Preview Build", [], None, "{}", always, |s, _| {
@@ -551,7 +571,7 @@ mod tests {
         assert_eq!(jobs.len(), 2, "view and thumbnail");
         assert!(jobs[0].view_cache.is_some(), "the view renders first");
         jobs[1].source = SourceRef::File { path: "/nonexistent/photo.arw".into(), max_edge: 512, loader: None, fallback: None, denoise: None };
-        assert!(run_photo(jobs), "the thumbnail rendered from the view's decoded source");
+        assert!(run_photo(jobs).is_ok(), "the thumbnail rendered from the view's decoded source");
     }
 
     // Given many photos, a standard preview build renders them side by side and counts every one

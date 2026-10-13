@@ -339,6 +339,8 @@ fn first_download_completes_the_record() {
     let load = s.media.file_loader.clone().unwrap();
     load(&xp, 512).unwrap();
     load(&yp, 512).unwrap();
+    // (Develop's render of the original, accepted before the drain)
+    s.source_now(x, SourceLevel::Preview).unwrap();
     assert!(s.catalog.photo(x).unwrap().meta.camera.is_empty(), "nothing changes off the session");
     s.drain_remote();
     let px = s.catalog.photo(x).unwrap();
@@ -349,6 +351,7 @@ fn first_download_completes_the_record() {
     assert!(s.undo.is_empty(), "not an undo step");
     // R15: the stand-in is gone; pixel statistics (Auto Tone, the WB picker) read the original now
     assert!(!s.media.has_source(x, SourceLevel::Thumb));
+    assert!(s.media.has_source(x, SourceLevel::Preview), "a source decoded from the original stays");
     let thumb = s.source_now(x, SourceLevel::Thumb).unwrap();
     assert_eq!((thumb.width, thumb.height), (96, 64));
     // their smart previews are built in the background, from the downloaded copies

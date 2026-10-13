@@ -517,13 +517,30 @@ fn batch_builders_never_download() {
     fake.set_preview("/Photos/y.jpg", jpeg(64, 32, None));
     ids.push(add_photo(&mut s, 4, &remote(&fake, "Photos/y.jpg"), MediaKind::Image, 1000).0);
     let r = s.execute("library.buildPreviews", &json!({"ids": ids, "wait": true})).unwrap();
-    assert_eq!(r["failed"], 4, "{r}");
+    assert_eq!((r["failed"].as_u64(), r["skipped"].as_u64()), (Some(0), Some(4)), "left out, not failed: {r}");
     std::fs::create_dir_all(d.join("smart")).unwrap();
     s.media.smart_dir = Some(d.join("smart"));
     let r = s.execute("library.smartPreviews", &json!({"ids": ids})).unwrap();
     assert_eq!(r["built"], 0, "{r}");
     assert_eq!(fake.downloads(), 0);
     assert!(cached_files(&d).is_empty());
+}
+
+/// A never-downloaded raw edited in the Library (Paste Settings, a preset) gets no thumbnail: an edit is
+/// rendered from the original, which a thumbnail never downloads, and the server's preview can't show
+/// the edit (docs/nextcloud.md, Limits).
+#[test]
+fn an_edited_raw_not_downloaded_has_no_thumbnail() {
+    let (mut s, fake, _d) = signed_in("edited-thumb");
+    fake.add_file("/Photos/x.ARW", raw_blob(4000));
+    fake.set_preview("/Photos/x.ARW", jpeg(64, 32, None));
+    let id = add_photo(&mut s, 1, &remote(&fake, "Photos/x.ARW"), MediaKind::Raw, 4000);
+    s.execute("library.select", &json!({"ids": [id.0]})).unwrap();
+    s.execute("develop.set", &json!({"control": "light.exposure", "value": 1.0})).unwrap();
+    let job = s.thumb_job(id, 256).unwrap();
+    assert!(s.quick_thumb_job(&job).is_none(), "an edit isn't the server's preview");
+    assert_eq!(crate::memory::in_background(|| job.run()).rendered.err().as_deref(), Some(NOT_DOWNLOADED));
+    assert_eq!(fake.downloads(), 0);
 }
 
 /// R5: a hostile settings file can't make the budget 0 or overflow it: u64::MAX MB saturates to

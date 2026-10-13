@@ -656,6 +656,10 @@ impl LightcraftApp {
                 if failed > 0 {
                     msg.push_str(&crate::i18n::tr_format!(" · {failed} couldn't be rendered", failed = failed));
                 }
+                let skipped = b.skipped.load(Ordering::Relaxed);
+                if skipped > 0 {
+                    msg.push_str(&format!(" · {skipped} {}", crate::i18n::tr("not downloaded from Nextcloud")));
+                }
                 self.toast(ctx, msg);
             }
         } else {

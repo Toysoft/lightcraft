@@ -163,7 +163,10 @@ for the server) run on a worker thread: the reply is the same, it just comes whe
 keeps drawing meanwhile. Leave `wait` off (false) in the desktop app: a sign-in waiting for approval would run into
 the 60 s reply timeout, and a waiting import or offline download would hold the UI thread. Without it,
 `library.importNextcloud` and `photo.makeAvailableOffline` return at once with `{started: true, task}` and run behind
-activity rows; how an import ended is in `nextcloud.preferences` → `imports`.
+activity rows; how an import ended is in `nextcloud.preferences` → `imports`. Commands run on the UI thread never
+download an original: one that needs an original that isn't on this computer (`develop.auto`, `ui.render`, …)
+answers "The original isn't downloaded yet; open it in Develop to download it" (`photo.allMetadata` reads the start
+of the file instead). Open the photo in Develop to download it, or use the headless MCP server.
 
 ## Headless rendering (no window, no GPU)
 

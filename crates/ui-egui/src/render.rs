@@ -186,9 +186,10 @@ pub struct Renderer {
     seq: u64,
     /// Slot → (key, priority) of the request in flight (queued or running).
     pending: HashMap<Slot, (u64, u32)>,
-    /// Slot → the photo its renders are for and the flag that cancels their downloads
-    /// ([`lightcraft_engine::memory::cancellable`]): set when the slot moves on to another photo.
-    cancels: HashMap<Slot, (PhotoId, Arc<std::sync::atomic::AtomicBool>)>,
+    /// Slot → the photo its renders are for, the flag that cancels their downloads
+    /// ([`lightcraft_engine::memory::cancellable`]; set when the slot moves on to another photo) and
+    /// whether it is a Nextcloud photo.
+    cancels: HashMap<Slot, (PhotoId, Arc<std::sync::atomic::AtomicBool>, bool)>,
     pub textures: HashMap<Slot, Tex>,
     pub last_main_ms: f64,
     /// Jobs finished since start (for inspect/perf).
@@ -400,10 +401,13 @@ impl Renderer {
         }
         true
     }
-    /// Free a view slot's texture and stage cache (the view is no longer shown); a render still
-    /// running for it stops its download and is ignored.
+    /// Free a view slot's texture and stage cache (the view is no longer shown). A render still
+    /// running for it stops its download and is ignored when it is a Nextcloud photo's; a local
+    /// photo's goes on (its decoded source is kept for the next view).
     pub fn release(&mut self, slot: Slot) {
-        self.cancel(slot);
+        if self.cancels.get(&slot).is_some_and(|(_, _, remote)| *remote) {
+            self.cancel(slot);
+        }
         self.textures.remove(&slot);
         self.stages.remove(&slot);
     }
@@ -448,7 +452,8 @@ impl Renderer {
         let key = job.key;
         let background = matches!(slot, Slot::Thumb(_) | Slot::ThumbQuick(_) | Slot::Prefetch(_));
         let display = self.display.clone();
-        let cancel = slot.moves_on().then(|| self.cancel_for(slot, job.photo));
+        let remote = matches!(&job.origin, lightcraft_catalog::Source::File { path } if lightcraft_catalog::is_remote(path));
+        let cancel = slot.moves_on().then(|| self.cancel_for(slot, job.photo, remote));
         self.pool.submit(
             slot,
             key,
@@ -466,15 +471,15 @@ impl Renderer {
     /// The flag cancelling `slot`'s downloads for `photo`: the same one while the slot shows that
     /// photo (a slider drag's renders share its download) and nobody cancelled it (the download
     /// row's ✕ sets it too: the next render starts again); another photo sets the old one.
-    fn cancel_for(&mut self, slot: Slot, photo: PhotoId) -> Arc<std::sync::atomic::AtomicBool> {
-        if let Some((p, flag)) = self.cancels.get(&slot)
+    fn cancel_for(&mut self, slot: Slot, photo: PhotoId, remote: bool) -> Arc<std::sync::atomic::AtomicBool> {
+        if let Some((p, flag, _)) = self.cancels.get(&slot)
             && *p == photo
             && !flag.load(std::sync::atomic::Ordering::Relaxed)
         {
             return flag.clone();
         }
         let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        if let Some((_, old)) = self.cancels.insert(slot, (photo, flag.clone())) {
+        if let Some((_, old, _)) = self.cancels.insert(slot, (photo, flag.clone(), remote)) {
             old.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         flag
@@ -482,7 +487,7 @@ impl Renderer {
 
     /// The photo of `slot`'s latest render that can download ([`Slot::moves_on`]).
     pub fn photo_in(&self, slot: Slot) -> Option<PhotoId> {
-        self.cancels.get(&slot).map(|(p, _)| *p)
+        self.cancels.get(&slot).map(|(p, ..)| *p)
     }
 
     /// The key of `slot`'s last failed job.
@@ -496,7 +501,7 @@ impl Renderer {
         if self.pending.remove(&slot).is_none() {
             return;
         }
-        if let Some((_, flag)) = self.cancels.remove(&slot) {
+        if let Some((_, flag, _)) = self.cancels.remove(&slot) {
             flag.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.request_ids.remove(&slot);
@@ -548,7 +553,7 @@ impl Renderer {
         self.prefetched.clear();
         self.pending.clear();
         self.queue.clear();
-        for (_, (_, flag)) in self.cancels.drain() {
+        for (_, (_, flag, _)) in self.cancels.drain() {
             flag.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
