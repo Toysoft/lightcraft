@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (LR-MERGE-HDR: merges of raws without colour matrices keep their colour (#965); rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (experimental local reflection removal; LR-MERGE-HDR: merges of raws without colour matrices keep their colour (#965); rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -34,7 +34,7 @@ cited here still exists. Formerly docs/parity.md.
 | F. Edit panel — global adjustments (EDIT) | 43 | 2 | 3 | 1 | 28/28 (100%) | 13/14 (93%) |
 | G. Profiles (PROF) | 7 | 1 | 3 | 0 | 3/4 (75%) | 3/3 (100%) |
 | H. Crop & rotate (CROP) | 9 | 0 | 0 | 1 | 6/6 (100%) | 3/3 (100%) |
-| I. Remove / healing (REM) | 8 | 1 | 2 | 2 | 4/4 (100%) | 2/3 (67%) |
+| I. Remove / healing (REM) | 8 | 2 | 1 | 2 | 4/4 (100%) | 2/3 (67%) |
 | J. Red eye (EYE) | 2 | 0 | 0 | 0 | — | 1/1 (100%) |
 | K. Masking (MASK) | 13 | 5 | 5 | 0 | 7/8 (88%) | 5/5 (100%) |
 | L. Presets (PRE) | 6 | 0 | 1 | 1 | 2/2 (100%) | 2/2 (100%) |
@@ -53,9 +53,9 @@ cited here still exists. Formerly docs/parity.md.
 | Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 76 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
 | Lightroom Classic extras | 34 | 16 | 35 | 8 | — | 24/26 (92%) |
-| **Total** | 408 | 52 | 72 | 35 | 193/201 (96%) | 145/157 (92%) |
+| **Total** | 408 | 53 | 71 | 35 | 193/201 (96%) | 145/157 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.6%** of 532 in-scope rows — P0 98.0% of 201 · P1 95.2% of 157 · P2 50.0% of 173.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.7%** of 532 in-scope rows — P0 98.0% of 201 · P1 95.2% of 157 · P2 50.3% of 173.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -269,7 +269,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-REM-SPOT-EDIT | Edit existing spots | P0 | ✅ | `cmd:spot.select`, `cmd:spot.update`, `cmd:spot.refreshSource`, `cmd:spot.delete` | click a pin to select, drag target or source, ⌫ deletes the selected spot, `/` picks another source; automatic sources are resolved when the spot is added |
 | LR-REM-VISUALIZE | Visualize spots | P1 | ✅ | `cmd:view.visualizeSpots` | |
 | LR-REM-PEOPLE | Remove people (generative) | OOS | 🚫 | | |
-| LR-REM-REFLECT | Remove reflections | P2 | ⬜ | | |
+| LR-REM-REFLECT | Remove reflections | P2 | 🟡 | `cmd:photo.removeReflections`, `cmd:reflection.apply`, `cmd:reflection.install`, `ctl:reflection.amount`, `crates/reflections/src/lib.rs`, `crates/ui-egui/src/reflections.rs` | Local DSRNet-S / L / L Nature; strength, sky estimate, detail and area protection. Desktop-only, experimental; [setup and limitations](ai-reflections.md). |
 | LR-REM-DUST | Dust detection | P2 | ✅ | `cmd:spot.findDust`, `crates/pipeline/src/dust.rs` | Remove panel ▸ Find Dust Spots: small, soft, round dark spots on smooth areas become heal spots (sensitivity; one undo step); Visualize Spots for checking by eye |
 | LR-REM-BLEMISH | Find blemishes on faces (beyond Lightroom) | P2 | ✅ | `cmd:spot.findBlemishes`, `crates/pipeline/src/blemish.rs`, `crates/engine/src/cmd/face_detect.rs` | Remove panel ▸ Find Blemishes: with the YuNet detector installed, small darker-or-redder round spots on each face's skin (eyes, brows, nostrils and mouth cut out around the landmarks) become heal spots (one undo step); faces under 160 px and faces with more than 12 candidates (stubble, freckles) get none, at most 6 per face; sensitivity 0–100. Classical, no learned model beyond the detector; not a Lightroom feature |
 | LR-REM-SYNC | Sync spots | P1 | ✅ | `cmd:develop.copy` (`groups`), `crates/develop/src/presets.rs` | |
@@ -789,6 +789,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Experimental DSRNet reflection removal integrated; photographic parity remains unverified. |
 | 2026-10-11 | minor | LR-MERGE-HDR: HDR and panorama merges of raws without colour matrices (CR2, NEF, ARW…) write the colour they open with as DNG tags (issue #965); status unchanged |
 | 2026-10-12 | minor | LR-META-XMP: Read Metadata from File no longer auto-writes the sidecar it has just read, which added `lc:settings` and hid another app's later `crs:` edits (#934); status unchanged (✅) |
 | 2026-10-12 | patch | LR-IMP-CAMERA-COVERAGE: CR2 white level from the active area, not the saturated masked rows above it (issue #1272); status unchanged (🟡) |

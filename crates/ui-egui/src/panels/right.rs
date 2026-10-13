@@ -460,6 +460,7 @@ fn remove(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             }
         }
     });
+    crate::reflections::panel(app, ui, id);
 }
 
 fn red_eye(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
