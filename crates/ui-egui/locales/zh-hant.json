@@ -2132,5 +2132,8 @@
   "Animal Eye Tracking": "動物眼部追蹤",
   "Human Eye Tracking": "人眼追蹤",
   "Read Focus Points": "讀取對焦點",
-  "Reading focus points": "正在讀取對焦點"
+  "Reading focus points": "正在讀取對焦點",
+  "LightCraft lost its graphics device": "LightCraft 遺失了圖形裝置",
+  "The graphics driver stopped responding, so LightCraft can't draw its window any more. Your library and edits are saved.\n\nRestart LightCraft to continue.": "圖形驅動程式已停止回應，LightCraft 無法再繪製視窗。你的圖庫與編輯都已儲存。\n\n請重新啟動 LightCraft 以繼續。",
+  "Restart": "重新啟動"
 }

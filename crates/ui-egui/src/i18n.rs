@@ -827,6 +827,19 @@ mod tests {
         }
     }
 
+    /// The lost-device dialog (issue #1228) is a native dialog shown when nothing else can be
+    /// drawn: every language has its title, text and buttons.
+    #[test]
+    fn device_lost_dialog_is_translated_in_every_language() {
+        let english = device_lost_message();
+        for language in Locale::ALL.iter().filter(|language| **language != Locale::En) {
+            for key in [&english.0, &english.1, &english.2, &english.3] {
+                let value = language.tr(key);
+                assert!(!value.is_empty() && value != key.as_str(), "{language:?}: {key}");
+            }
+        }
+    }
+
     /// Smart-album choice values read as words in every language (English "Public Domain", German
     /// "Gemeinfrei"), never as rule ids like `publicDomain`; an id the field doesn't know shows as
     /// written. Unlike other labels these must be translated: an untranslated one would be English
