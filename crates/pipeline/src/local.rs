@@ -313,7 +313,17 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
     let scale = (out_long as f32 / src_long.max(1) as f32).clamp(0.05, 1.0);
     let l = (lum > 0.0).then(|| {
         let detail = (s.detail.nr_detail / 100.0) as f32;
-        NrLum { sigma: (1.0 + 2.5 * lum) * scale.max(0.4), eps: 0.002 + lum * lum * 0.25 * (1.0 - 0.7 * detail), k: lum.sqrt() }
+        // `Contrast` in the Detail panel is a contrast *restore* over the noise reduction, which is
+        // Lightroom's own reading of it: a smaller `eps` lets the guided filter follow edges more
+        // closely, so more of the image's own contrast survives the smoothing, and the larger `k`
+        // puts back proportionally more of the detail the filter removed. The field existed in the
+        // settings and was read nowhere before this.
+        let contrast = (s.detail.nr_contrast / 100.0) as f32;
+        NrLum {
+            sigma: (1.0 + 2.5 * lum) * scale.max(0.4),
+            eps: (0.002 + lum * lum * 0.25 * (1.0 - 0.7 * detail)) * (1.0 - 0.5 * contrast),
+            k: lum.sqrt() * (1.0 + 0.5 * contrast),
+        }
     });
     let c = (col > 0.0).then(|| {
         let sigma = (1.5 + 6.0 * col) * scale.max(0.35) * (1.0 + (s.detail.nr_color_smoothness / 100.0) as f32);
@@ -383,6 +393,7 @@ pub(crate) struct Planes {
     pub base: Option<(BaseKey, Arc<Plane>)>,
     pub clarity: Option<(u32, Arc<Plane>)>,
     pub texture: Option<(u32, Arc<Plane>)>,
+    pub sharpen: Option<(u32, Arc<Plane>)>,
     /// Dark channel and its airlight.
     pub dark: Option<(u32, Arc<Plane>, f32)>,
     /// Blurred chromaticity (local Moiré / Noise).
@@ -446,6 +457,10 @@ pub struct PlaneSigmas {
     pub clarity: Option<f32>,
     /// Texture / sharpening band (Gaussian).
     pub texture: Option<f32>,
+    /// Sharpening's own band (Gaussian), at the user's Sharpening Radius. Separate from the texture
+    /// band because that one is at a fixed scale: `detail.sharpen_radius` had no effect at all
+    /// before this, since the sharpening simply read the texture band.
+    pub sharpen: Option<f32>,
     /// Dehaze dark channel (Gaussian).
     pub dark: Option<f32>,
     /// Chromaticity blur for local Moiré / colour noise (Gaussian).
@@ -473,10 +488,15 @@ pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneS
         || local_any(|a| a.noise)
         || s.masks.iter().any(|m| m.adjust.defringe > 0.0))
     .then(|| (0.0018 * ppl).max(0.6));
+    // Sharpening's own radius: Lightroom's Sharpening Radius is 0.5..3, a multiplier of the same
+    // 0.18% base scale the texture band uses, so it stays resolution-independent and a preview and
+    // a full render agree.
+    let sharpen = (s.detail.sharpen_amount != 0.0 || local_any(|a| a.sharpness))
+        .then(|| (0.0018 * ppl * s.detail.sharpen_radius.max(0.1) as f32).max(0.6));
     let dark = (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze)).then(|| (0.02 * ppl).max(1.0));
     let chroma = (local_any(|a| a.moire) || s.masks.iter().any(|m| m.adjust.noise > 0.0)).then(|| (CHROMA_SIGMA * ppl).max(1.0));
     let base_detail = if base.is_some() { tone_base_detail(s, px_per_long) } else { 0 };
-    PlaneSigmas { base, base_detail, clarity, texture, dark, chroma }
+    PlaneSigmas { base, base_detail, clarity, texture, sharpen, dark, chroma }
 }
 
 /// The spatial planes the per-pixel stage needs for `img` (white-balanced, before exposure),
@@ -493,10 +513,10 @@ pub(crate) fn prepare(
     mattes: Option<&masks::Mattes>,
 ) -> Prepared {
     let log_l = planes.log_l.get_or_insert_with(|| Arc::new(timed("log_l", || img.map(log_lum)))).clone();
-    let PlaneSigmas { base: base_sigma, base_detail, clarity: clarity_sigma, texture: texture_sigma, dark: dark_sigma, chroma: chroma_sigma } =
+    let PlaneSigmas { base: base_sigma, base_detail, clarity: clarity_sigma, texture: texture_sigma, sharpen: sharpen_sigma, dark: dark_sigma, chroma: chroma_sigma } =
         plane_sigmas(s, px_per_long, q);
 
-    let Planes { base: sb, clarity: sc, texture: st, dark: sd, chroma: sch, .. } = planes;
+    let Planes { base: sb, clarity: sc, texture: st, sharpen: ss, dark: sd, chroma: sch, .. } = planes;
     let chroma_blur = chroma_sigma.map(|sg| match sch {
         Some((k, c)) if *k == sg.to_bits() => c.clone(),
         _ => {
@@ -506,7 +526,7 @@ pub(crate) fn prepare(
         }
     });
     let l = &log_l;
-    let (base, (clarity_blur, (texture_blur, dark))) = par_join(
+    let (base, (clarity_blur, (texture_blur, (sharpen_blur, dark)))) = par_join(
         || base_sigma.map(|sg| plane_at(sb, base_key(s, sg, base_detail), || timed("base", || tone_base(l, sg, base_detail)))),
         || {
             par_join(
@@ -515,15 +535,22 @@ pub(crate) fn prepare(
                     par_join(
                         || texture_sigma.map(|sg| plane_at(st, sg.to_bits(), || timed("texture", || gaussian(l, sg)))),
                         || {
-                            dark_sigma.map(|sg| match sd {
-                                Some((k, d, air)) if *k == sg.to_bits() => (d.clone(), *air),
-                                _ => {
-                                    let d = timed("dehaze", || Arc::new(gaussian(&img.map(dark_of), sg)));
-                                    let air = airlight(&d);
-                                    *sd = Some((sg.to_bits(), d.clone(), air));
-                                    (d, air)
-                                }
-                            })
+                            // Sharpening's own band, so detail.sharpen_radius scales the scale the
+                            // sharpening works at rather than reusing the texture band's fixed one.
+                            par_join(
+                                || sharpen_sigma.map(|sg| plane_at(ss, sg.to_bits(), || timed("sharpen", || gaussian(l, sg)))),
+                                || {
+                                    dark_sigma.map(|sg| match sd {
+                                        Some((k, d, air)) if *k == sg.to_bits() => (d.clone(), *air),
+                                        _ => {
+                                            let d = timed("dehaze", || Arc::new(gaussian(&img.map(dark_of), sg)));
+                                            let air = airlight(&d);
+                                            *sd = Some((sg.to_bits(), d.clone(), air));
+                                            (d, air)
+                                        }
+                                    })
+                                },
+                            )
                         },
                     )
                 },
@@ -537,7 +564,7 @@ pub(crate) fn prepare(
     };
     let ev = s.light.exposure as f32;
     let masks = timed("masks", || masks::evaluate(&s.masks, frame, img.width, img.height, &img, &log_l, ev, mattes));
-    Prepared { img, log_l, base, clarity_blur, texture_blur, dark, chroma_blur, air, masks, px_per_long }
+    Prepared { img, log_l, base, clarity_blur, texture_blur, sharpen_blur, dark, chroma_blur, air, masks, px_per_long }
 }
 
 /// The airlight of the whole output frame, estimated on a small render of it (`proxy_w` px wide):

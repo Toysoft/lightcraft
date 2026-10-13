@@ -711,3 +711,61 @@ fn stored_process_numbers_render_with_a_known_process() {
         }
     }
 }
+
+/// `nr_contrast` and `sharpen_detail` were carried by the settings and read by no stage at all. Both
+/// now reach the image — but, as in Lightroom, each only matters once its own pass is engaged, so
+/// this turns that pass on first, and also asserts the converse: with both passes at zero neither
+/// field can change a pixel.
+#[test]
+fn the_three_detail_fields_that_were_dead_reach_the_image() {
+    let src = Rgb32f::from_fn(512, 384, |x, y| {
+        let stripe = if (x / 3) % 2 == 0 { 0.02 } else { 0.0 };
+        let grain = ((x * 37 + y * 17) % 11) as f32 * 0.004;
+        [0.08 + x as f32 / 200.0 + stripe + grain, 0.10 + y as f32 / 160.0 + stripe, 0.20 + stripe]
+    });
+    let info = SourceInfo { raw: true, ..Default::default() };
+    // Sized so the sharpening bands clear their 0.6 px floor: at 48 px both radii clamp to the same
+    // sub-pixel blur, which is correct behaviour but proves nothing.
+    let req = RenderRequest::fit(512, 384);
+
+    let mut nr = DevelopSettings::default();
+    nr.detail.nr_luminance = 70.0;
+    let nr_base = render(&src, &info, &nr, &req).image.data;
+    nr.detail.nr_contrast = 100.0;
+    assert_ne!(
+        render(&src, &info, &nr, &req).image.data,
+        nr_base,
+        "nr_contrast must reach the image once the noise reduction is on"
+    );
+
+    let mut sp = DevelopSettings::default();
+    sp.detail.sharpen_amount = 120.0;
+    let sp_base = render(&src, &info, &sp, &req).image.data;
+    sp.detail.sharpen_detail = 100.0;
+    assert_ne!(
+        render(&src, &info, &sp, &req).image.data,
+        sp_base,
+        "sharpen_detail must reach the image once the sharpening is on"
+    );
+
+    // Its Radius is a band of its own, at the scale the setting asks for.
+    let mut rad = DevelopSettings::default();
+    rad.detail.sharpen_amount = 120.0;
+    let rad_base = render(&src, &info, &rad, &req).image.data;
+    rad.detail.sharpen_radius = 3.0;
+    assert_ne!(
+        render(&src, &info, &rad, &req).image.data,
+        rad_base,
+        "sharpen_radius must reach the image once the sharpening is on"
+    );
+
+    let mut off = DevelopSettings::default();
+    off.detail.nr_contrast = 100.0;
+    off.detail.sharpen_detail = 100.0;
+    let plain = render(&src, &info, &DevelopSettings::default(), &req).image.data;
+    assert_eq!(
+        render(&src, &info, &off, &req).image.data,
+        plain,
+        "with both passes at zero neither field can change anything"
+    );
+}

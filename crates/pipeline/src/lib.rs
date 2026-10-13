@@ -202,6 +202,8 @@ pub(crate) struct Prepared {
     pub base: Arc<Plane>,
     pub clarity_blur: Option<Arc<Plane>>,
     pub texture_blur: Option<Arc<Plane>>,
+    /// Sharpening's own band, at the user's Sharpening Radius (see `PlaneSigmas::sharpen`).
+    pub sharpen_blur: Option<Arc<Plane>>,
     pub dark: Option<Arc<Plane>>,
     /// Blurred chromaticity (`rgb / Y`) for local Moiré / Noise.
     pub chroma_blur: Option<Arc<Rgb32f>>,

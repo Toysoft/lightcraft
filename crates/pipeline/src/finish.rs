@@ -176,6 +176,9 @@ pub struct FinishParams {
     pub dehaze: f32,
     pub sharpen: f32,
     pub sharpen_mask: f32,
+    /// Sharpening Detail 0..1: how much of the fine detail the sharpening removes may be put back,
+    /// which is also how much halo it can produce. Read nowhere before this.
+    pub sharpen_detail: f32,
     /// Airlight after and before exposure, exposure gain and EV (see [`crate::Prepared`]).
     pub air: f32,
     pub air_pre: f32,
@@ -245,6 +248,7 @@ impl FinishParams {
             dehaze,
             sharpen: (s.detail.sharpen_amount / 150.0) as f32,
             sharpen_mask: (s.detail.sharpen_masking / 100.0) as f32,
+            sharpen_detail: (s.detail.sharpen_detail / 100.0) as f32,
             air: air_pre * gain,
             air_pre,
             gain,
@@ -379,6 +383,7 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
         dehaze,
         sharpen,
         sharpen_mask,
+        sharpen_detail,
         air,
         air_pre,
         gain,
@@ -386,8 +391,8 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
         grain,
         ..
     } = fp;
-    let (hl, sh, clar, tex, dehaze, sharpen, sharpen_mask, air, air_pre, gain, ev) =
-        (*hl, *sh, *clar, *tex, *dehaze, *sharpen, *sharpen_mask, *air, *air_pre, *gain, *ev);
+    let (hl, sh, clar, tex, dehaze, sharpen, sharpen_mask, sharpen_detail, air, air_pre, gain, ev) =
+        (*hl, *sh, *clar, *tex, *dehaze, *sharpen, *sharpen_mask, *sharpen_detail, *air, *air_pre, *gain, *ev);
     let terms: Vec<[f32; MASK_TERMS]> = p.masks.iter().map(|m| mask_terms(&m.adjust)).collect();
     let out_to_norm = fp.out_to_norm;
     let long = fp.ow.max(fp.oh);
@@ -509,8 +514,18 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
                 let tame = 1.0 - 0.6 * smooth(0.4, 1.6, det.abs());
                 delta += tx * 1.1 * det.clamp(-1.0, 1.0) * tame;
                 if sp != 0.0 {
-                    let m = if sharpen_mask > 0.0 { smooth(sharpen_mask * 0.25, sharpen_mask * 0.25 + 0.15, det.abs()) } else { 1.0 };
-                    delta += sp * 1.3 * det.clamp(-0.8, 0.8) * m;
+                    // Sharpening reads its own band, so its Radius is a real scale rather than the
+                    // texture band's fixed one. The fallback only matters if a partially prepared
+                    // image ever lacks it, which cannot happen while sharpening is on.
+                    let sb = p.sharpen_blur.as_deref().unwrap_or(b);
+                    let sdet = l_pre - sb.data[i];
+                    let m = if sharpen_mask > 0.0 { smooth(sharpen_mask * 0.25, sharpen_mask * 0.25 + 0.15, sdet.abs()) } else { 1.0 };
+                    // Detail decides how much of the removed fine detail is put back — Lightroom's
+                    // reading of the pair, where Amount is the overall strength and Detail sets the
+                    // fine-detail balance — so it scales the correction directly. The clamp stays
+                    // fixed, so a hard edge cannot ring whatever the setting.
+                    let gain = 0.5 + sharpen_detail;
+                    delta += sp * 1.3 * sdet.clamp(-0.8, 0.8) * gain * m;
                 }
             }
             // local Noise: smooth (or, negative, boost) small-amplitude detail, keep edges
