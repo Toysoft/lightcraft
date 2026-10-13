@@ -238,6 +238,25 @@ lightcraft-cli run nextcloud.browse dir=nextcloud://bob@cloud.example.com/Photos
 lightcraft-cli run --library ~/lc-lib library.importNextcloud 'dirs=["nextcloud://bob@cloud.example.com/Photos/2026"]' wait=true
 ```
 
+## Measurements
+
+Against a Nextcloud 35 server on the LAN with Memories (2026-10-13; 52,414 photos; Sony A7R VI ARW and Canon R8
+CR3), from the engine with a release build. The sign-in and the OS keyring were not part of this run.
+
+| What | Result |
+|---|---|
+| Memories timeline (52,414 photos) | 1.9 s |
+| Listing `Sony A7R VI/` (37,314 photos, with date, size and dimensions) | 3.2 s |
+| Importing `Canon R8/` (5,973 photos), listing then camera, lens and exposure for all | 2.2 s, then 32.9 s in all; no original downloaded |
+| Server preview, 512 px (50 photos) | 50 ms median, 76 ms p90 |
+| Opening in Develop: CR3 (16 MB) / ARW (58 MB), download plus decode | 1.4 s / 2.1 s (the download runs at ~35 MB/s) |
+| The next photo after its prefetch: CR3 / ARW | 0.50 s / 0.41 s (decode only) |
+| Camera, lens, exposure, time and size from the file's first 64 KiB | ~30 ms per file |
+
+What the run changed: Memories' timeline time is a UTC instant, so capture times now come from the photo's own local
+time; this server makes no previews of CR3 files, so LightCraft now reads the preview embedded in the file's first
+MiB; CR3s that Memories hasn't indexed get their size from the file's header.
+
 ## Design decisions
 
 1. **One routing check.** A catalog path starting `nextcloud://` is remote (`lightcraft_catalog::is_remote`, the same
