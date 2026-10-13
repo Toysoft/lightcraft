@@ -23,9 +23,10 @@ fn preferences(s: &mut Session, p: &Value) -> Result<Value> {
     // (no cache folder configured: nothing cached)
     let usage = s.remote.cache().ok().map(|c| c.usage());
     let (cached, pinned) = usage.map_or((0, 0), |u| (u.total, u.pinned));
-    Ok(
-        json!({"accounts": accounts, "cacheBudgetMb": s.remote.cache_budget_mb(), "cachedBytes": cached, "pinnedBytes": pinned, "signIns": s.remote.sign_ins()}),
-    )
+    Ok(json!({
+        "accounts": accounts, "cacheBudgetMb": s.remote.cache_budget_mb(), "cachedBytes": cached, "pinnedBytes": pinned,
+        "signIns": s.remote.sign_ins(), "imports": s.remote.imports(),
+    }))
 }
 
 fn remove_account(s: &mut Session, p: &Value) -> Result<Value> {
@@ -87,13 +88,13 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             "Import from Nextcloud",
             [],
             None,
-            "{dirs: [nextcloud://user@host/folder], wait?: false} → {started: true} | with wait: {added, skipped, metadata} — add the photos in Nextcloud folders and their subfolders to the library where they are, without downloading them. A worker lists the folders (an `import` activity row; the photos join the library as they are found, with the dimensions and capture time the server's Memories app knows), then reads the camera, lens, exposure and capture time of photos that have none yet from Memories or the first MiB of each file (a cancellable `scan` row). Photos already in the library are skipped, so running it again adds only new files and finishes the metadata. All folders on one account. `wait: true` returns once both are done: photos added, skipped, and whose metadata was filled",
+            "{dirs: [nextcloud://user@host/folder], wait?: false} → {started: true, task} | with wait: {added, skipped, metadata, failedFolders} — add the photos in Nextcloud folders and their subfolders to the library where they are, without downloading them. A worker lists the folders (an `import` activity row; the photos join the library as they are found, with the dimensions and capture time the server's Memories app knows), then reads the camera, lens, exposure and capture time of photos that have none yet from Memories or the start of each file (a cancellable `scan` row). Photos already in the library are skipped, so running it again adds only new files and finishes the metadata; the photos an import adds are one undo step. All folders on one account. How it went (by `task`, the row's id) shows in nextcloud.preferences → imports: subfolders that couldn't be listed (failedFolders), or the error that stopped it (a folder asked for missing, the account signed out or unreachable). Opening another library cancels it. `wait: true` returns once both are done: photos added, skipped, whose metadata was filled, and subfolders that couldn't be listed",
             always,
             import
         ),
         cmd!(query "nextcloud.addAccount", "Add Nextcloud Account…", [], None, "{server, trust?: fingerprint, wait?: false} → {state: needsTrust, fingerprint} | {state: waiting, loginUrl, task} | {state: signedIn, account} — sign in through the browser: open `loginUrl` and approve; the app password goes to the OS keyring. An untrusted certificate answers needsTrust: check the fingerprint with the server's admin and run again with `trust`. Waiting shows a cancellable activity row (id `task`); how it ends shows in nextcloud.preferences → signIns; `wait: true` blocks until approved", always, add_account),
         cmd!(query "nextcloud.signIn", "Sign In to Nextcloud", [], None, "{account: user@host, trust?: fingerprint, wait?: false} → like nextcloud.addAccount — sign the account in again (after its app password was revoked or its certificate changed), with its server and pinned certificate. A certificate other than the pinned one answers {state: needsTrust, fingerprint, changed: true}: check it with the server's admin and run again with `trust` to pin it", always, sign_in),
-        cmd!(query "nextcloud.preferences", "Nextcloud Preferences", [], None, "{cacheBudgetMb?} → {accounts: [{account, server, user, root, state: signedIn | signedOut | unreachable | signingIn}], cacheBudgetMb, cachedBytes, pinnedBytes, signIns: [{task, state: waiting | signedIn | failed | cancelled | timedOut, account?, error?}]} — the Nextcloud accounts on this computer and the last 8 sign-ins; `cacheBudgetMb` (at least 1000) sets the disk budget for downloaded originals", always, preferences),
+        cmd!(query "nextcloud.preferences", "Nextcloud Preferences", [], None, "{cacheBudgetMb?} → {accounts: [{account, server, user, root, state: signedIn | signedOut | unreachable | signingIn}], cacheBudgetMb, cachedBytes, pinnedBytes, signIns: [{task, state: waiting | signedIn | failed | cancelled | timedOut, account?, error?}], imports: [{task, state: running | done | failed | cancelled, added, failedFolders, error?}]} — the Nextcloud accounts on this computer, the last 8 sign-ins and the last 8 imports (library.importNextcloud); `cacheBudgetMb` (at least 1000) sets the disk budget for downloaded originals", always, preferences),
         cmd!(query "nextcloud.removeAccount", "Remove Nextcloud Account", [], None, "{account: user@host} → {removed} — forget the account on this computer (its app password and settings); its photos stay in the library, offline", always, remove_account),
     ]
 }

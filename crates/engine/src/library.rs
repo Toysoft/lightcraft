@@ -373,6 +373,9 @@ impl Session {
         catalog.revision = LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1) << 32;
         self.catalog = catalog;
         self.library_generation = crate::LIBRARY_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // Nextcloud imports into the old library stop, and what they still send is dropped
+        #[cfg(not(target_arch = "wasm32"))]
+        self.remote.library_changed();
         for entry in self.undo.iter_mut().chain(self.redo.iter_mut()) {
             self.pending_sidecar_repairs.append(&mut entry.retry_sidecars);
         }

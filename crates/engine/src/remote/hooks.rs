@@ -139,7 +139,7 @@ fn probe(remote: &Remote, path: &str) -> Result<ProbeInfo, String> {
 /// in this build).
 // ponytail: a probe of the raw's header alone in lightcraft_raw (and a JPEG header read that doesn't
 // need the end-of-image marker) would describe big files from 64-512 KiB, which hold all their metadata.
-pub(crate) fn describe(name: &str, head: &[u8], size: u64) -> Result<ProbeInfo, String> {
+fn describe(name: &str, head: &[u8], size: u64) -> Result<ProbeInfo, String> {
     let described = probe_bytes(name, head);
     if head.len() as u64 >= size {
         return described;

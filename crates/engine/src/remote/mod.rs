@@ -205,14 +205,50 @@ fn message(e: &Error) -> String {
 /// A sign-in that ended other than signed in: how, and why in words for the user.
 type SignInEnd = (SignInProgress, String);
 
-/// What work off the session found, for [`crate::Session::drain_remote`] to apply.
+/// What work off the session found, for [`crate::Session::drain_remote`] to apply. Each comes from
+/// import `task` (its activity row's id) into the library of `generation`
+/// ([`crate::Session::library_generation`]); another library's are dropped.
 pub enum Event {
     /// Photos an import listed, to add (path, what the listing and Memories told: size, kind,
     /// format; dimensions and capture time when Memories knows them).
-    Found(Vec<(String, crate::media::ProbeInfo)>),
-    /// The metadata read for the photo at `path`, filling what it lacks. With `described`, `info`
-    /// describes the whole file (dimensions, preview-only), else only its metadata and capture time.
-    Meta { path: String, info: Box<crate::media::ProbeInfo>, described: bool },
+    Found { task: u64, generation: u64, photos: Vec<(String, crate::media::ProbeInfo)> },
+    /// Metadata an import read, filling what the photos lack.
+    Meta { task: u64, generation: u64, reads: Vec<MetaRead> },
+}
+
+/// The metadata read for the photo at `path`. With `described`, `info` describes the whole file
+/// (dimensions, preview-only), else only its metadata and capture time.
+pub struct MetaRead {
+    pub path: String,
+    pub info: crate::media::ProbeInfo,
+    pub described: bool,
+}
+
+/// Where an import stands ([`ImportOutcome::state`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ImportProgress {
+    Running,
+    Done,
+    /// Stopped by an error ([`ImportOutcome::error`]).
+    Failed,
+    /// Cancelled from its activity row, or by opening another library.
+    Cancelled,
+}
+
+/// How an import went, by its activity row's id (`task` in the `wait: false` reply).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportOutcome {
+    pub task: u64,
+    pub state: ImportProgress,
+    /// Photos added to the library so far (or brought back from Recently Deleted).
+    pub added: usize,
+    /// Folders below the ones asked for that couldn't be listed.
+    pub failed_folders: usize,
+    /// Why it failed, for the user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// The session's Nextcloud accounts. Shared (`Arc`) with the threads that load remote photos.
@@ -227,6 +263,8 @@ pub struct Remote {
     sign_ins: Mutex<VecDeque<SignInOutcome>>,
     /// Waiting for [`crate::Session::drain_remote`], oldest first.
     events: Mutex<Vec<Event>>,
+    /// The last [`import::MAX_IMPORTS`] imports, oldest first ([`Remote::imports`]).
+    imports: Mutex<VecDeque<import::ImportRecord>>,
     /// Sign-ins started from now on are past craft's deadline at once (tests of the timeout).
     #[cfg(test)]
     pub(crate) expire_sign_ins: AtomicBool,
@@ -245,6 +283,7 @@ impl Remote {
             downloads: Mutex::default(),
             sign_ins: Mutex::default(),
             events: Mutex::default(),
+            imports: Mutex::default(),
             #[cfg(test)]
             expire_sign_ins: AtomicBool::new(false),
             #[cfg(test)]
