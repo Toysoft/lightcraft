@@ -86,6 +86,26 @@ sparse_corpus -- --nocapture` prints these numbers. `LIGHTCRAFT_PROFILE=1` says 
 [profile] preview …/arw-sony-a7rm4a-compressed.arw: read 688128 of 61832192 bytes (plan, window 483441)
 ```
 
+### The smallest preview that covers the display
+
+A display of `max_edge` pixels takes the smallest embedded preview that covers it
+(`embedded_preview_at_least`): a 512 px grid thumbnail or content-index picture of a Sony α1 ARW uses its
+1616 × 1080 JPEG, not the 8640 × 5760 one. The planned read takes the same one and reads only it:
+`sparse::preview_plan_at_least(bytes, loaded, min_edge)` reads the header ranges with every large preview
+skipped but its first 64 KiB (the strips of preview IFDs, and the `JPEGInterchangeFormat` blobs where a Sony
+ARW keeps its full-size JPEG), then the head of every candidate up to its frame header, which is what the
+choice looks at, and then only the preview it takes. A CR3 or a RAF carries one preview and gets
+`preview_plan`. Measured on real files, with the bytes the planned read took and its pixels compared with
+the whole-file path's:
+
+| File | at 512 px (content scan) | at 2048 px (face scan) |
+|---|---|---|
+| Sony α1 ARW, 74.1 MB, Adobe RGB | 0.75 MB (1.0 %) | 7.8 MB (10.5 %) |
+| Sony A7S III ARW, 25.5 MB | 0.48 MB (1.9 %) | 1.16 MB (4.5 %) |
+
+The same check over 17 more files of that library (9 ARWs from five bodies, 8 DNGs: drone, panorama and
+merged HDR files), gave the whole-file path's pixels for every one, reading 0.4 % to 11.3 % of each file.
+
 A Canon CR3's preview is a JPEG track instead (issue #832 measured 3 MB of one R5 Mark II file,
 ~15 %), and Canon is the largest bucket in [gaps.md](gaps.md)'s ranking (33 % of photographers), so
 before this change every unedited CR3 thumbnail paid for the whole file.
@@ -123,7 +143,15 @@ render queue stayed empty.
   whole-file path can show. One that states Adobe RGB takes the plan route and shows the same pixels
   as the whole-file path (the space changes them: decoded as sRGB they differ), and one that states
   sRGB stays on the fast path.
-- `crates/raw/tests/sparse_corpus.rs`: `preview_plan` is asked for **every** corpus file, not only
+- `crates/raw/src/sparse.rs`: on a raw with a full-size JPEG beside a small one, `preview_plan_at_least`
+  reads the small one and not the big one for 512 px and the big one past the small one's size, and the
+  buffer gives `embedded_preview_at_least`'s whole-file answer with the skipped bytes `0` and `0xFF`; a
+  candidate whose frame header sits past the kept 64 KiB is read up to it before the choice.
+- `crates/engine/src/files.rs`: the content scan's loader reads a fixture's small preview and not its big
+  one, with the whole-file path's pixels; asked for more, it reads the big one; a file the planner cannot
+  describe is read whole.
+- `crates/raw/tests/sparse_corpus.rs`: `preview_plan_at_least` at 512 and 2048 px must hand on the whole
+  file's choice for every corpus file it answers for. `preview_plan` is asked for **every** corpus file, not only
   the ones whose header plan is `Ready`, and the preview it yields must equal the whole file's with
   the skipped bytes `0` and `0xFF`. The test prints what each format reads.
 - `crates/engine/tests/preview_read.rs` (opt-in, `#[ignore]`): the same measurement on a **real**

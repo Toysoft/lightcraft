@@ -693,7 +693,7 @@ pub fn load_embedded_preview(bytes: &[u8], max_edge: usize) -> Option<(Rgb32f, S
 /// It is decoded from the smallest embedded preview that still covers `max_edge` (a raw with a full-size JPEG and a
 /// small one shows a thumbnail from the small one, at a fraction of the time and memory).
 pub fn embedded_preview_srgb(bytes: &[u8], max_edge: usize) -> Option<lightcraft_raster::Rgba8> {
-    let min_edge = u32::try_from(max_edge).ok().filter(|e| *e < u32::MAX);
+    let min_edge = min_preview_edge(max_edge);
     let mut d = decode_raw_preview_from(bytes, fit_box(max_edge), min_edge)?;
     if d.image.width.max(d.image.height) > max_edge {
         d.image = fit(&d.image, max_edge, max_edge, Filter::Box);
@@ -701,6 +701,12 @@ pub fn embedded_preview_srgb(bytes: &[u8], max_edge: usize) -> Option<lightcraft
     }
     let o = preview_orientation(bytes, d.orientation);
     Some(d.to_srgb8().oriented(o))
+}
+
+/// The smallest preview edge a display of `max_edge` takes ([`lightcraft_raw::embedded_preview_at_least`]); `None`
+/// for a full-size load, which takes the largest.
+fn min_preview_edge(max_edge: usize) -> Option<u32> {
+    u32::try_from(max_edge).ok().filter(|e| *e < u32::MAX)
 }
 
 /// Decode options fitting into a `max_edge` square; `usize::MAX` (a full-size load) or any edge past
@@ -717,13 +723,19 @@ fn fit_box(max_edge: usize) -> lightcraft_codecs::DecodeOptions {
 /// (`lightcraft_raw::sparse::preview_plan`, the same module the import path probes with), and only a
 /// file the planner cannot describe falls back to the whole-file path. The memory gate still counts
 /// the whole file, which is what the decode of one can hold.
+///
+/// Both routes take the smallest preview that covers `max_edge` ([`embedded_preview_srgb`]), so the planned read of a
+/// raw with a full-size JPEG beside a small one reads only the small one when that is enough (a content scan's 512 px
+/// picture of a Sony α1 ARW).
 pub fn fs_preview_loader() -> PreviewLoader {
     Arc::new(|path: &str, max_edge: usize| {
         let len = std::fs::metadata(path).map(|m| usize::try_from(m.len()).unwrap_or(usize::MAX)).unwrap_or(0);
         let gate = crate::memory::work_gate();
         let _permit = if crate::memory::is_background() { gate.acquire(len.saturating_mul(2)) } else { gate.acquire_urgent(len.saturating_mul(2)) };
-        if let Some(image) =
-            preview_window(path).ok().flatten().and_then(|(header, window, read)| quick_image_srgb(&header, &window, read.adobe_rgb, max_edge))
+        if let Some(image) = preview_window_for(path, min_preview_edge(max_edge))
+            .ok()
+            .flatten()
+            .and_then(|(header, window, read)| quick_image_srgb(&header, &window, read.adobe_rgb, max_edge))
         {
             return Some(image);
         }
@@ -771,6 +783,13 @@ impl PreviewRead {
 /// out of a container that carries no preview colour space of its own (Nikon's maker note) the
 /// whole-file fallback stays in charge.
 pub fn preview_window(path: &str) -> Result<Option<(Vec<u8>, Vec<u8>, PreviewRead)>, String> {
+    preview_window_for(path, None)
+}
+
+/// [`preview_window`] for the smallest preview whose long edge is at least `min_edge`
+/// ([`lightcraft_raw::embedded_preview_at_least`]; `None`: the largest). Only the planned route chooses: the header
+/// route serves a RAF, which carries one preview.
+pub fn preview_window_for(path: &str, min_edge: Option<u32>) -> Result<Option<(Vec<u8>, Vec<u8>, PreviewRead)>, String> {
     use std::io::{Read, Seek, SeekFrom};
 
     let mut file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
@@ -792,7 +811,7 @@ pub fn preview_window(path: &str) -> Result<Option<(Vec<u8>, Vec<u8>, PreviewRea
         // preview tag sits past the prefix, the containers whose preview only a scan finds: ask the
         // sparse planner which ranges `embedded_preview` reads before handing the caller the
         // whole-file fallback.
-        return planned_preview(&mut file, path, total);
+        return planned_preview(&mut file, path, total, min_edge);
     };
     // A preview at the file's end may have been padded past it: clamp rather than fail.
     let end = range.offset.saturating_add(range.window_len).min(total);
@@ -825,8 +844,9 @@ pub fn preview_window(path: &str) -> Result<Option<(Vec<u8>, Vec<u8>, PreviewRea
 }
 
 /// The most times the sparse planner may name ranges before the preview gives up: the plan is
-/// monotone (it never asks for a range twice), so a real file needs a handful.
-const MAX_PREVIEW_PLAN_ROUNDS: usize = 8;
+/// monotone (it never asks for a range twice), so a real file needs a handful. A preview of at least an edge
+/// (`preview_plan_at_least`) can take two more: the heads of the candidate previews, then the one it takes.
+const MAX_PREVIEW_PLAN_ROUNDS: usize = 12;
 /// Tenths of a file the planner may have read before the preview gives up and the whole-file path
 /// takes over. The import path bounds its own loop the same way; a "preview" that wants most of the
 /// file has stopped being one.
@@ -857,7 +877,15 @@ const PLAN_PREFIX: u64 = 64 * 1024;
 /// below). The planner's contract is the one its corpus test asserts over real files (what it loaded
 /// gives what the whole file gives), so a window that still fails to decode ends in the same
 /// whole-file fallback in [`fs_preview_loader`], never in a wrong picture.
-fn planned_preview(file: &mut std::fs::File, path: &str, total: u64) -> Result<Option<(Vec<u8>, Vec<u8>, PreviewRead)>, String> {
+///
+/// With `min_edge`, the plan is `preview_plan_at_least` and the preview `embedded_preview_at_least`: of a raw with a
+/// full-size JPEG beside a small one, only the one the whole-file path would take is read.
+fn planned_preview(
+    file: &mut std::fs::File,
+    path: &str,
+    total: u64,
+    min_edge: Option<u32>,
+) -> Result<Option<(Vec<u8>, Vec<u8>, PreviewRead)>, String> {
     use std::io::{Read, Seek, SeekFrom};
 
     if total > MAX_PREVIEW_PLAN_BYTES {
@@ -871,7 +899,11 @@ fn planned_preview(file: &mut std::fs::File, path: &str, total: u64) -> Result<O
     let mut loaded = lightcraft_raw::sparse::Ranges::new();
     loaded.insert(0, header.len() as u64);
     for _ in 0..MAX_PREVIEW_PLAN_ROUNDS {
-        match lightcraft_raw::sparse::preview_plan(&buf, &loaded) {
+        let plan = match min_edge {
+            Some(edge) => lightcraft_raw::sparse::preview_plan_at_least(&buf, &loaded, edge),
+            None => lightcraft_raw::sparse::preview_plan(&buf, &loaded),
+        };
+        match plan {
             lightcraft_raw::sparse::HeaderPlan::Need(ranges) => {
                 let wanted = loaded.total().saturating_add(ranges.total());
                 if wanted.saturating_mul(10) > total.saturating_mul(MAX_PREVIEW_PLAN_SHARE) {
@@ -886,7 +918,11 @@ fn planned_preview(file: &mut std::fs::File, path: &str, total: u64) -> Result<O
                 }
             }
             lightcraft_raw::sparse::HeaderPlan::Ready => {
-                let Some(window) = lightcraft_raw::embedded_preview(&buf) else { return Ok(None) };
+                let window = match min_edge {
+                    Some(edge) => lightcraft_raw::embedded_preview_at_least(&buf, edge),
+                    None => lightcraft_raw::embedded_preview(&buf),
+                };
+                let Some(window) = window else { return Ok(None) };
                 // The quick path hands the JPEG to the decoder alone, so what the *container* says
                 // about the preview has to be something the bytes it is handed can show. Two container
                 // facts change the pixels and are not in the JPEG: the preview's colour space (which
@@ -1382,6 +1418,84 @@ mod tests {
         let r = crate::import::import(&mut s, &[path], crate::import::ImportMode::Add).unwrap();
         let id = lightcraft_catalog::PhotoId(r.imported[0]);
         assert_eq!(s.catalog.photo(id).unwrap().captured.as_deref(), Some(want.as_str()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A DNG-shaped raw with two preview strips — `big` in IFD0, `small` in IFD1 — and a CFA strip of `tail` bytes;
+    /// without `dng`, the same structure without the tag that makes it a raw.
+    fn tiff_with_two_preview_strips(big: &[u8], small: &[u8], tail: usize, dng: bool) -> Vec<u8> {
+        use lightcraft_tiff::{IfdBuilder, ImageData, TiffWriter, Value, tags as t};
+        let preview = |strip: &[u8]| {
+            let mut ifd = IfdBuilder::new();
+            ifd.set(t::COMPRESSION, Value::Short(vec![7]));
+            ifd.set(t::PHOTOMETRIC, Value::Short(vec![t::photometric::RGB]));
+            ifd.set(t::IMAGE_WIDTH, Value::Long(vec![48]));
+            ifd.set(t::IMAGE_LENGTH, Value::Long(vec![32]));
+            ifd.set_image(ImageData::Strips { rows_per_strip: 32, strips: vec![strip.to_vec()] });
+            ifd
+        };
+        let mut first = preview(big);
+        if dng {
+            first.set(t::DNG_VERSION, Value::Byte(vec![1, 4, 0, 0]));
+        }
+        let mut raw = IfdBuilder::new();
+        raw.set(t::COMPRESSION, Value::Short(vec![1]));
+        raw.set(t::PHOTOMETRIC, Value::Short(vec![t::photometric::CFA]));
+        raw.set(t::IMAGE_WIDTH, Value::Long(vec![6000]));
+        raw.set(t::IMAGE_LENGTH, Value::Long(vec![4000]));
+        raw.set_image(ImageData::Strips { rows_per_strip: 4000, strips: vec![vec![0x33u8; tail]] });
+        TiffWriter::default().write(&[first, preview(small), raw]).expect("the fixture writes")
+    }
+
+    /// A noisy JPEG of `w` × `h` (noise keeps it large, like a camera's full-size preview).
+    fn noisy_jpeg(w: u32, h: u32, seed: u32) -> Vec<u8> {
+        let rgb: Vec<u8> = (0..w * h * 3).map(|i| (i.wrapping_mul(2_654_435_761).wrapping_add(seed) >> 13) as u8).collect();
+        encode_jpeg(&EncodeImage::new(w, h, 3, Samples::U8(&rgb)), 95, ChromaSubsampling::S444, &EncodeMeta::default()).unwrap()
+    }
+
+    /// The content scan reads a raw's picture through `Session::scan_preview_of` at 512 px. Of a raw with a full-size
+    /// JPEG beside a small one that covers 512 px (a Sony α1's 1616 × 1080), the whole-file path takes the small one,
+    /// and so must the planned read: it reads the small one and not the big one, with the whole-file path's pixels.
+    /// A file the planner cannot describe is still scanned, from the whole file.
+    #[test]
+    fn the_content_scan_reads_only_the_small_preview_it_needs() {
+        let big = noisy_jpeg(1536, 1024, 1);
+        let small = noisy_jpeg(768, 512, 2);
+        assert!(big.len() > 3 * small.len(), "the fixture's big preview is the costly one");
+        let file = tiff_with_two_preview_strips(&big, &small, 4_000_000, true);
+        let dir = crate::tests_xmp::temp_dir("content-scan-plan");
+        let path = dir.join("dsc00001.dng");
+        std::fs::write(&path, &file).unwrap();
+        let path = path.to_string_lossy().into_owned();
+        let edge = crate::content_worker::EDGE;
+
+        let s = crate::Session::with_demo().with_fs();
+        let mut photo = (**s.catalog.photos().next().expect("a demo photo")).clone();
+        photo.source = lightcraft_catalog::Source::File { path: path.clone() };
+        photo.kind = lightcraft_catalog::MediaKind::Raw;
+        let (at, load) = s.scan_preview_of(&photo).expect("a raw is scanned from its preview");
+        // what the loader's planned read takes for that edge: the small preview, not the big one
+        let (_, _, read) = preview_window_for(&path, min_preview_edge(edge)).expect("the file reads").expect("the plan answers");
+        assert!(read.planned && read.read < big.len() as u64, "the content scan read {read:?}; the big preview alone is {}", big.len());
+        // and the loader shows it: the whole-file path's picture (the big one, scaled down, would differ)
+        let scanned = load(&at, edge).expect("the preview loads");
+        let whole = embedded_preview_srgb(&file, edge).expect("the whole file decodes");
+        assert_eq!((scanned.width, scanned.height), (whole.width, whole.height));
+        assert_eq!(scanned.data, whole.data, "the scan sees the whole-file path's picture");
+        // asked for more than the small one has, the planned read takes the big one, as the whole file does
+        let (_, _, read) = preview_window_for(&path, min_preview_edge(1536)).expect("the file reads").expect("the plan answers");
+        assert!(read.read > big.len() as u64, "{read:?}");
+        let large = load(&at, 1536).expect("the big preview loads");
+        assert_eq!(Some(large.data), embedded_preview_srgb(&file, 1536).map(|i| i.data));
+
+        // the same structure without the tag that makes it a raw: the plan declines, so the loader reads the whole
+        // file, with the whole-file path's picture
+        let not_a_raw = tiff_with_two_preview_strips(&big, &small, 4_000_000, false);
+        std::fs::write(&path, &not_a_raw).unwrap();
+        assert!(preview_window_for(&path, min_preview_edge(edge)).expect("the file reads").is_none(), "the whole file is read");
+        let fallback = load(&at, edge);
+        assert!(fallback.is_some());
+        assert_eq!(fallback.map(|i| i.data), embedded_preview_srgb(&not_a_raw, edge).map(|i| i.data));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

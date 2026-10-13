@@ -14,6 +14,12 @@
   photos it renders itself (no usable preview) are rendered on the processor.
 - Agents: `content.status` gives `device`, `textDevice` and `gpuFallback`.
 
+### Indexing reads less of each raw
+- Indexing reads only a raw's header and the small embedded preview it uses, not its full-size preview: a 70 MB Sony
+  α1 ARW now costs under 1 MB of disk reads (8 MB before), so indexing a library on an external or network drive no
+  longer saturates the drive and leaves the grid's thumbnails waiting. Grid thumbnails of those raws read the small
+  preview the same way.
+
 ### Search by content: a second model, and models tuned one by one
 - **CLIP ViT-B/32** (OpenAI, MIT licence, 605 MB) joins the SigLIP 2 models in Settings ▸ Search: the small, quick one,
   about twice as fast at indexing as SigLIP 2 Base and a third of its download, for English searches and tags. It finds
