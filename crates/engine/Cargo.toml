@@ -63,4 +63,4 @@ lightcraft-tiff = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # the Finder's Trash (photo.trashFiles): NSFileManager says where the file went, so undo can put it back
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSFileManager", "NSURL", "NSString", "NSError"] }
+objc2-foundation = { workspace = true, features = ["NSFileManager", "NSURL", "NSString", "NSError"] }
