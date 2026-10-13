@@ -16,6 +16,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod align;
+pub mod drizzle;
 pub mod features;
 pub mod focus;
 pub mod frame;
@@ -28,6 +29,7 @@ pub mod ransac;
 pub mod stack;
 pub mod synth;
 
+pub use drizzle::{DrizzleOptions, DrizzleResult, drizzle};
 pub use focus::{FocusOptions, FocusResult, stack_focus};
 pub use frame::{Frame, FrameColor, load_frame};
 pub use fuse::{FuseOptions, FuseResult, fuse_exposures};
