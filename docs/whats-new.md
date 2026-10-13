@@ -223,6 +223,21 @@
   on the top bar it comes back zoomed. The other way round, a window you drag out until it is as wide as the
   screen and nearly as tall counts as zoomed.
 - For scripts: a size set with `ui.resize` is remembered like any other, so a script that needs a size sets it.
+### The sidebar's trees open as you left them
+- What you open or fold in the left sidebar stays that way the next time you start LightCraft: folders of albums,
+  folders in Local, years and months in By Date, folders in Folders, and keywords with keywords inside them. Until
+  now every tree started over at each launch (Albums with every folder open, a disk in Folders open down to where
+  the library branches, the rest folded).
+- Nothing changes until you fold or open something: each tree starts as it always has.
+- Rows that open by themselves to show where the grid is (the folders above the one you browse) do so in each
+  session, as before, and are not kept. One you had folded by hand and that opened this way stays open.
+- A folder you folded stays folded when LightCraft starts, or a library opens, on a folder inside it. Choosing
+  another folder inside it opens it, as before.
+- Kept with the app's settings, the same for every library: a folder of albums is remembered by its number, so
+  two libraries can share what one of them left. The 2,000 rows changed last are kept.
+- For scripts: `ui.set` takes `sidebarTrees`, the whole list of up to 2,000 rows such as
+  `[["album:12", false], ["date:2026", true]]` (it replaces the rows that were kept), and says what is wrong with
+  anything else.
 
 ### HDR merges keep the lens correction
 - An HDR made with Photo ▸ Photo Merge ▸ HDR now keeps the lens correction the photos carry (Sony's, Panasonic's
