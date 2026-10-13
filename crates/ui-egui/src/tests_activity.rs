@@ -3,11 +3,11 @@
 
 use std::time::Duration;
 
-use lightcraft_engine::activity::{Cancel, TaskInfo, Unit};
+use lightcraft_engine::activity::{Cancel, Ending, Failure, Outcome, TaskInfo, Unit};
 use serde_json::json;
 
 use crate::headless::Headless;
-use crate::panels::activity::{WIDTH, count_text, overall, readout_text};
+use crate::panels::activity::{WIDTH, count_text, failures_text, overall, readout_text, summary_of, took};
 use crate::{LightcraftApp, Services};
 
 // generous: merges and renders run on worker threads that a busy machine (a full workspace test run) slows a lot
@@ -501,7 +501,7 @@ fn export_shows_a_row_and_stops_on_activity_cancel() {
 }
 
 #[test]
-fn dead_export_worker_leaves_no_row() {
+fn dead_export_worker_leaves_no_running_row() {
     let mut h = demo();
     h.app.services.write_shared = Some(std::sync::Arc::new(|_: &str, _: &[u8]| -> Result<(), String> { panic!("synthetic writer panic") }));
     start_export(&mut h, 2);
@@ -546,6 +546,11 @@ fn import_cancelled_by_command_reports_cancelled() {
     assert!(h.step_until(Duration::from_secs(60), |h| h.app.import.is_none()));
     assert!(h.app.session.activity.list().is_empty());
     assert!(h.app.ui.toast.as_ref().is_some_and(|t| t.0.starts_with("Import cancelled")), "{:?}", h.app.ui.toast);
+    // and, once the toast has passed, it is still in the list under the bell, saying how far it got
+    let rows = h.app.session.activity.finished();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!((rows[0].kind, rows[0].ending), ("import", Ending::Stopped));
+    assert!(rows[0].summary.starts_with("Import cancelled"), "{}", rows[0].summary);
     assert!(h.app.session.catalog.len() < n, "stopped part-way");
     assert_eq!(h.app.session.undo.len(), undo0 + 1, "one undo step");
     let _ = std::fs::remove_dir_all(&dir);
@@ -745,4 +750,191 @@ fn immediate_library_commands_and_auto_sync_show_completion() {
     h.app.ui.toast = None;
     assert!(h.app.run("library.compact", json!({})).is_err());
     assert!(h.app.ui.toast.is_none());
+}
+
+/// A task that ended `ending`, kept in the list whatever time it took. Its id.
+fn ended(h: &mut Headless, label: &str, ending: Ending, summary: &str) -> u64 {
+    h.app.session.activity.keep_after(0);
+    let g = h.app.session.activity.start("export", label, Cancel::Yes);
+    let id = g.id();
+    assert!(g.finish(Outcome { ending, summary: summary.into(), ..Default::default() }));
+    id
+}
+
+#[test]
+fn a_task_that_ended_stays_in_the_list_until_dismissed() {
+    let mut h = demo();
+    // Given an export that ran long and ended well, and nothing running
+    let id = ended(&mut h, "Exporting", Ending::Done, "Exported 5,000 photos");
+    h.step();
+    h.step();
+    // Then the bell asks for nothing: no ring, no mark
+    assert!(!has(&h, "activity:ring") && !has(&h, "activity:attention"));
+    // When the list is opened, Then the task is there, and "No tasks are running" is not said over it
+    open_list(&mut h);
+    assert!(has(&h, &format!("activity:done:{id}")) && !has(&h, "activity:empty"));
+    let inspect = h.request("ui.inspect", json!({}), T);
+    assert_eq!(inspect["result"]["activityFinished"][0]["summary"], "Exported 5,000 photos", "{inspect}");
+    // And it stays, frame after frame
+    for _ in 0..20 {
+        h.step();
+    }
+    assert!(has(&h, &format!("activity:done:{id}")));
+    // When its ✕ is clicked, Then it is gone, and the list is still open
+    click(&mut h, &format!("activity:dismiss:{id}"));
+    assert!(h.app.session.activity.finished().is_empty());
+    assert!(has(&h, "activity:empty"), "the list stays open on what is left");
+}
+
+#[test]
+fn a_task_that_did_not_end_well_marks_the_bell_until_its_row_is_dismissed() {
+    let mut h = demo();
+    let id = ended(&mut h, "Exporting", Ending::Failed, "The disk is full");
+    let other = ended(&mut h, "Importing", Ending::Stopped, "Import cancelled");
+    h.step();
+    h.step();
+    // the mark is on the bell while the list is closed, however many frames pass
+    assert!(has(&h, "activity:attention"));
+    for _ in 0..10 {
+        h.step();
+    }
+    assert!(has(&h, "activity:attention"));
+    // looking at the list does not answer it: the mark stays while the list is open, and after it is closed
+    open_list(&mut h);
+    assert!(has(&h, "activity:attention") && has(&h, &format!("activity:done:{id}")));
+    click(&mut h, "icon:bell");
+    assert!(!has(&h, "activity:list") && has(&h, "activity:attention"), "seen is not dealt with");
+    // dismissing one of two leaves the mark; dismissing the last takes it away
+    open_list(&mut h);
+    click(&mut h, &format!("activity:dismiss:{id}"));
+    assert!(has(&h, "activity:attention") && h.app.session.activity.problems() == 1);
+    click(&mut h, &format!("activity:dismiss:{other}"));
+    assert!(!has(&h, "activity:attention") && h.app.session.activity.problems() == 0);
+}
+
+#[test]
+fn rows_are_grouped_by_what_they_need_and_clear_finished_lets_go_of_the_ended_ones() {
+    let mut h = demo();
+    let bad = ended(&mut h, "Importing", Ending::Problems, "Imported 90 photos");
+    let good = ended(&mut h, "Exporting", Ending::Done, "Exported 24 photos");
+    let running = h.app.session.activity.start("previews", "Building previews", Cancel::Yes);
+    wait_visible(&mut h);
+    open_list(&mut h);
+    // what needs looking at first, then what runs, then what ended well
+    let y = |id: &str| rect(&h, id).top();
+    let (bad_y, run_y, good_y) =
+        (y(&format!("activity:done:{bad}")), y(&format!("activity:row:{}", running.id())), y(&format!("activity:done:{good}")));
+    assert!(bad_y < run_y && run_y < good_y, "{bad_y} < {run_y} < {good_y}");
+    // Clear finished lets go of both ended tasks and leaves the running one
+    click(&mut h, "activity:clear");
+    assert!(h.app.session.activity.finished().is_empty());
+    assert!(has(&h, &format!("activity:row:{}", running.id())) && !has(&h, "activity:clear"));
+    assert!(!has(&h, "activity:attention"), "and with them the mark on the bell");
+    assert!(!running.is_cancelled(), "clearing stops nothing");
+}
+
+#[test]
+fn a_task_that_just_ended_is_named_beside_the_bell_for_a_moment() {
+    let mut h = demo_sized([1600.0, 900.0]);
+    ended(&mut h, "Exporting", Ending::Done, "Exported 24 photos");
+    h.step();
+    h.step();
+    assert!(has(&h, "activity:readout"), "the line says how it ended");
+    // after a few seconds the line is gone; the row is not
+    std::thread::sleep(Duration::from_millis(6_100));
+    h.step();
+    h.step();
+    assert!(!has(&h, "activity:readout") && h.app.session.activity.finished().len() == 1);
+}
+
+#[test]
+fn an_ended_task_is_worded_from_its_name_when_it_said_nothing_and_says_how_long_it_took() {
+    let mut h = demo();
+    let id = ended(&mut h, "Building previews", Ending::Died, "");
+    let rows = h.app.session.activity.finished();
+    let row = rows.iter().find(|f| f.id == id).unwrap();
+    assert_eq!(summary_of(row), "Building previews: stopped unexpectedly");
+    assert_eq!(
+        (took(42_900).as_str(), took(12 * 60_000 + 5_000).as_str(), took(6_720_000).as_str()),
+        ("took 42 s", "took 12 min", "took 1 h 52 min")
+    );
+}
+
+#[test]
+fn an_export_that_failed_for_a_file_leaves_a_row_with_the_file_and_the_reason() {
+    let mut h = demo();
+    // Given a disk that refuses the first file of five
+    let refuse = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    h.app.services.write_shared =
+        Some(std::sync::Arc::new(
+            move |_: &str, _: &[u8]| {
+                if refuse.swap(false, std::sync::atomic::Ordering::Relaxed) { Err("The disk is full".into()) } else { Ok(()) }
+            },
+        ));
+    // When five photos are exported
+    start_export(&mut h, 5);
+    assert!(h.step_until(Duration::from_secs(60), |h| h.app.export.is_none()));
+    // Then the export is in the list, however short it was: done, with problems, in its folder
+    let rows = h.app.session.activity.finished();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let row = &rows[0];
+    assert_eq!((row.kind, row.ending, row.failed), ("export", Ending::Problems, 1), "{row:?}");
+    assert_eq!(row.summary, "Exported 4 of 5 photos");
+    assert!(row.path.as_deref().is_some_and(|p| p.starts_with("/lc-test-out/")), "one of the files written: {:?}", row.path);
+    assert!(!row.failures[0].name.is_empty() && row.failures[0].reason.contains("The disk is full"), "{:?}", row.failures);
+    // And it is said at once too, as ever; the bell is marked for when the toast has passed
+    assert!(h.app.ui.toast.as_ref().is_some_and(|t| t.0.starts_with("Exported 4 of 5")), "{:?}", h.app.ui.toast);
+    h.step();
+    assert!(has(&h, "activity:attention"));
+    // When the row's failed files are asked for, Then the file and the reason can be copied
+    open_list(&mut h);
+    click(&mut h, &format!("activity:failures:{}", row.id));
+    click(&mut h, &format!("activity:copy:{}", row.id));
+    let want = format!("{}\t{}", row.failures[0].name, row.failures[0].reason);
+    assert!(h.step_until(T, |h| h.app.copied.as_deref() == Some(want.as_str())), "{:?}", h.app.copied);
+}
+
+#[test]
+fn a_short_clean_export_is_a_toast_and_leaves_no_row() {
+    let mut h = demo();
+    // (short by any machine's clock: the ten seconds a row is kept after are far away here)
+    h.app.session.activity.keep_after(600_000);
+    h.app.services.write_shared = Some(slow_writer(1));
+    start_export(&mut h, 2);
+    assert!(h.step_until(Duration::from_secs(60), |h| h.app.export.is_none()));
+    assert!(h.app.session.activity.finished().is_empty(), "watched to its end: nothing to come back to");
+    assert!(h.app.ui.toast.as_ref().is_some_and(|t| t.0.starts_with("Exported 2 of 2")), "{:?}", h.app.ui.toast);
+}
+
+#[test]
+fn a_stopped_export_and_a_dead_export_worker_each_leave_a_row() {
+    let mut h = demo();
+    h.app.services.write_shared = Some(slow_writer(200));
+    start_export(&mut h, 5);
+    assert_eq!(h.app.session.activity.cancel_all(), 1);
+    assert!(h.step_until(Duration::from_secs(60), |h| h.app.export.is_none()));
+    let rows = h.app.session.activity.finished();
+    assert_eq!(rows.iter().map(|f| f.ending).collect::<Vec<_>>(), vec![Ending::Stopped], "{rows:?}");
+    // a writer that panics takes the worker with it: the export says so instead of vanishing
+    h.app.services.write_shared = Some(std::sync::Arc::new(|_: &str, _: &[u8]| -> Result<(), String> { panic!("synthetic writer panic") }));
+    start_export(&mut h, 2);
+    assert!(h.step_until(Duration::from_secs(60), |h| h.app.export.is_none()));
+    let rows = h.app.session.activity.finished();
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert_eq!((rows[0].ending, rows[0].summary.as_str()), (Ending::Died, "Export stopped unexpectedly"), "{:?}", rows[0]);
+}
+
+#[test]
+fn the_failed_files_copied_say_how_many_were_not_kept_and_stay_a_line_each() {
+    let h = demo();
+    h.app.session.activity.keep_after(0);
+    let g = h.app.session.activity.start("export", "Exporting", Cancel::Yes);
+    let failures = vec![
+        Failure { name: "IMG_1.jpg".into(), reason: "The disk\nis full".into() },
+        Failure { name: "IMG\t2.jpg".into(), reason: "No permission".into() },
+    ];
+    // a job that counted 700 failures and could name two of them
+    g.finish(Outcome { ending: Ending::Problems, failures, failed: 700, ..Default::default() });
+    let row = &h.app.session.activity.finished()[0];
+    assert_eq!(failures_text(row), "IMG_1.jpg\tThe disk is full\nIMG 2.jpg\tNo permission\nand 698 more");
 }

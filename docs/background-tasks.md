@@ -10,6 +10,17 @@ tooltip. A click on the bell or the line opens
 the list (Window ▸ Tasks, `view.tasks`): each task has a row with its name, a progress bar, the count and what it's
 working on, and ✕ if it can stop, the task started last at the top. "No tasks are running" when none is. Esc, a click
 elsewhere or a dialog closes it. Nothing floats over the panels: the list covers them only while it is open.
+A task that says how it ended stays in the list after it: what it did ("Exported 4,963 of 5,000 photos"), what else
+needs reading and how long it took, "Show failed (37)" for the files it could not do, each with its reason (the
+first five in the row, all that were kept through Copy all, with a line saying how many more there were), and "Show
+in Finder" (Explorer, File Manager) for one of the files it made. It stays until its ✕ or "Clear all" lets go of it,
+for this session. The toast that says how a job went still shows, as before: the row is what stays after it. A clean
+end leaves a row only when the task ran 10 s or more (a shorter one was watched to its end); one that did not go
+well always does: done with
+problems, failed, stopped, or stopped unexpectedly (its worker died). Those come first in the list, under "Needs
+attention", and put a mark on the bell until they are dismissed. With nothing running, a task that just ended is
+named beside the bell for a few seconds. Exports and imports report this way so far (an export names the files that
+failed, an import counts them); the other jobs still end in a toast only.
 Quitting asks first while a task that can stop is running. Agents see the same list through `activity.list` /
 `activity.cancel`, and `ui.inspect` reports it as `activity` (and whether the list is open as `activityOpen`).
 
@@ -35,6 +46,13 @@ guard.progress(done as u64, total as u64);
 guard.detail(&file_name);
 ```
 
+- **Say how it ended:** `guard.finish(Outcome { ending, summary, detail, failures, failed, path })` in place of
+  letting the guard drop. `ending` is `Done`, `Problems` (not for every file), `Failed`, `Stopped`, or `Died` when
+  the job finds its worker gone; `summary` is the sentence the row shows (UI code passes it translated; engine code
+  leaves it empty and the row is worded from the label); `failures` are the files with their reasons (`failed`
+  when the job only counts them); `path` is one of the files it made. Keep the toast that says how it went: the row
+  is the record, not the announcement. A guard that is only dropped leaves nothing, as before, unless a panic
+  dropped it: then the row says the task stopped unexpectedly.
 - **Keep the guard for exactly as long as the job runs.** Put it in the struct the UI polls (`ExportTask`, `ScanTask`,
   `SyncRun`…), or move it into the worker thread. Dropping it removes the row, also when the worker panics, so a
   dead job never leaves a stuck bar. A worker that only reports progress takes a `TaskHandle` (`guard.handle()`,
@@ -76,4 +94,8 @@ job, and that the row is gone once the job ends. `crates/ui-egui/src/tests_activ
 job-specific tests show the pattern (`tests_sync.rs`, `export_task.rs`, `tests_denoise.rs`…). The bell shows a
 task once it is 0.5 s old (`activity:ring`; `activity:readout` is the line beside it, `activity:count` the count on
 the bell), and its row is on screen only while the list is open: tests that click a row's ✕ open the list first
-(`view.tasks` with `{"show": true}`, or a click on `icon:bell`) and wait for `activity:cancel:<id>`.
+(`view.tasks` with `{"show": true}`, or a click on `icon:bell`) and wait for `activity:cancel:<id>`. For a job that
+reports how it ended, assert `session.activity.finished()` (ending, summary, failures);
+`session.activity.keep_after(0)` keeps a clean end's row however short the test's job.
+Ended rows are `activity:done:<id>` with `activity:dismiss:<id>`, `activity:failures:<id>`, `activity:copy:<id>` and
+`activity:reveal:<id>`; `activity:clear` is Clear all and `activity:attention` the mark on the bell.
