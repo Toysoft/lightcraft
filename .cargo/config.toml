@@ -1,2 +1,20 @@
 [alias]
 xtask = "run --package xtask --"
+
+# Embed the CJK font set at build time.
+#
+# Without this the engine's build script warns "no craft-fonts embedded: Chinese
+# and Japanese text will render as empty boxes" and the binary ships CJK-blind.
+# It was being passed on the command line, which meant a plain
+# `cargo build --release` silently produced the degraded build -- exactly the
+# kind of thing that is forgotten and then rediscovered as a bug.
+#
+# relative = true makes Cargo resolve this against the directory holding this
+# `.cargo` folder (the repo root), so it keeps working wherever the craft tree is
+# checked out, as long as craft-fonts stays cloned beside lightcraft. An absolute
+# path here would have been one machine's path committed into the repo.
+#
+# A CRAFT_FONTS_DIR already set in the environment wins over this (no force),
+# so a one-off build against a different font set still works.
+[env]
+CRAFT_FONTS_DIR = { value = "../craft-fonts", relative = true }
