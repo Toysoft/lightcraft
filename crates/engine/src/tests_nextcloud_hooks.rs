@@ -41,7 +41,7 @@ fn config(dir: &Path, creds: Arc<MemoryCredentials>) -> RemoteConfig {
 }
 
 /// A fake server and a session signed in to it.
-fn signed_in(name: &str) -> (Session, FakeServer, PathBuf) {
+pub(crate) fn signed_in(name: &str) -> (Session, FakeServer, PathBuf) {
     let fake = FakeServer::start();
     let d = temp(name);
     let s = session_for(&d, &fake.account(), FakeServer::PASSWORD);
@@ -49,12 +49,12 @@ fn signed_in(name: &str) -> (Session, FakeServer, PathBuf) {
 }
 
 /// `nextcloud://alice@127.0.0.1:<port>/<rel>`.
-fn remote(fake: &FakeServer, rel: &str) -> String {
+pub(crate) fn remote(fake: &FakeServer, rel: &str) -> String {
     rel.split('/').try_fold(fake.account().root(), |p, seg| p.join(seg)).unwrap().to_string()
 }
 
 /// A `w`×`h` JPEG with a camera and capture time in its EXIF (and `orientation`, when given).
-fn jpeg(w: u32, h: u32, orientation: Option<u16>) -> Vec<u8> {
+pub(crate) fn jpeg(w: u32, h: u32, orientation: Option<u16>) -> Vec<u8> {
     let px: Vec<u8> = (0..w * h).flat_map(|i| [(i % 251) as u8, 128, 200]).collect();
     let meta = lightcraft_meta::Metadata {
         make: Some("Canon".into()),
@@ -69,12 +69,12 @@ fn jpeg(w: u32, h: u32, orientation: Option<u16>) -> Vec<u8> {
 }
 
 /// Bytes standing in for a raw file (never decoded by these tests).
-fn raw_blob(len: usize) -> Vec<u8> {
+pub(crate) fn raw_blob(len: usize) -> Vec<u8> {
     (0..len).map(|i| (i % 253) as u8).collect()
 }
 
 /// Files in the originals cache (not its index).
-fn cached_files(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn cached_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for acct in std::fs::read_dir(dir.join("cache")).into_iter().flatten().flatten() {
         if acct.path().is_dir() {
@@ -96,7 +96,7 @@ fn add_photo(s: &mut Session, id: u64, path: &str, kind: MediaKind, size: u64) -
 }
 
 /// Poll until `done` holds (fail after 10 s).
-fn wait_until(what: &str, done: impl Fn() -> bool) {
+pub(crate) fn wait_until(what: &str, done: impl Fn() -> bool) {
     let t = Instant::now();
     while !done() {
         assert!(t.elapsed() < Duration::from_secs(10), "{what}");

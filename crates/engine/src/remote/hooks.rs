@@ -24,7 +24,7 @@ const MAX_SERVER_PREVIEW: usize = 4096;
 /// Images (not raws) a background load decodes from the server's preview when the original isn't here.
 const PREVIEWED: [&str; 13] = ["jpg", "jpeg", "png", "tif", "tiff", "webp", "gif", "bmp", "heic", "heif", "avif", "jxl", "psd"];
 
-fn previewed(name: &str) -> bool {
+pub(crate) fn previewed(name: &str) -> bool {
     Path::new(name).extension().and_then(|e| e.to_str()).is_some_and(|e| PREVIEWED.iter().any(|p| e.eq_ignore_ascii_case(p)))
 }
 
@@ -139,7 +139,7 @@ fn probe(remote: &Remote, path: &str) -> Result<ProbeInfo, String> {
 /// in this build).
 // ponytail: a probe of the raw's header alone in lightcraft_raw (and a JPEG header read that doesn't
 // need the end-of-image marker) would describe big files from 64-512 KiB, which hold all their metadata.
-fn describe(name: &str, head: &[u8], size: u64) -> Result<ProbeInfo, String> {
+pub(crate) fn describe(name: &str, head: &[u8], size: u64) -> Result<ProbeInfo, String> {
     let described = probe_bytes(name, head);
     if head.len() as u64 >= size {
         return described;

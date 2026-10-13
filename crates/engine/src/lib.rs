@@ -417,6 +417,7 @@ impl Session {
 
     /// Run a command by id. THE entry point for every frontend.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
+        self.drain_remote();
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         // a command that validates the photos a call names isn't held back by the selection
         if !(spec.explicit_targets && cmd::names_photos(params)) {
@@ -425,6 +426,14 @@ impl Session {
         let empty = Value::Object(Default::default());
         let params = if params.is_null() { &empty } else { params };
         self.run_command(id, spec.journal.then_some(params), |s| (spec.run)(s, params))
+    }
+
+    /// Apply what work off the session found (a Nextcloud import's photos and metadata, see
+    /// [`remote::Event`]). Cheap when nothing is queued (one lock); [`Session::execute`] calls it
+    /// first, and a host's frame loop once per frame.
+    pub fn drain_remote(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        remote::import::apply_events(self, &mut remote::import::Tally::default());
     }
 
     /// Run `f` as command `id` with what [`Session::execute`] does around every command: the
@@ -1027,6 +1036,9 @@ mod tests_nextcloud;
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 mod tests_nextcloud_hooks;
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod tests_nextcloud_import;
 #[cfg(test)]
 mod tests_organize;
 #[cfg(test)]

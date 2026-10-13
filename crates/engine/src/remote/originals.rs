@@ -150,7 +150,6 @@ impl Remote {
 
     /// What a listing of `dir` says: its files' etags and sizes, which names are there (see
     /// [`Remote::exists`]), and that a listed file is no longer gone.
-    #[allow(dead_code)] // the import (NC6) lists folders
     pub(crate) fn note_listing(&self, dir: &RemotePath, entries: &[Entry]) {
         let mut inner = self.lock();
         let mut names = HashSet::new();
@@ -163,6 +162,27 @@ impl Remote {
             }
         }
         inner.listed.insert(dir.clone(), names);
+    }
+
+    /// The entries of folder `dir`, remembered ([`Remote::note_listing`]), unless its server didn't
+    /// answer a moment ago.
+    pub(crate) fn list(&self, dir: &RemotePath) -> Result<Vec<Entry>, String> {
+        let key = dir.account_key();
+        let client = self.client(&key)?;
+        self.reachable(&key)?;
+        match client.list(dir) {
+            Ok(entries) => {
+                self.note_ok(&key);
+                self.note_listing(dir, &entries);
+                Ok(entries)
+            }
+            Err(e) => Err(self.failed(dir, &e)),
+        }
+    }
+
+    /// An error (the offline text) while account `key`'s server is taken as not answering.
+    pub(crate) fn reachable(&self, key: &str) -> Result<(), String> {
+        if self.lock().state(key) == AccountState::Unreachable { Err(offline()) } else { Ok(()) }
     }
 
     /// `stat` of `path`, remembered (etag, size; not gone); a failure is noted ([`Remote::failed`]).

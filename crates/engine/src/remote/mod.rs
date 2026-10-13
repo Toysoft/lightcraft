@@ -12,8 +12,12 @@
 //!
 //! Photos load through the engine's file hooks ([`hooks`]): from the originals downloaded to this
 //! computer ([`Remote::local_original`]), the server's previews and a Range read of the file's start.
+//!
+//! Work done off the session (an import's listing and metadata, see [`import`]) comes back as
+//! [`Event`]s, which [`crate::Session::drain_remote`] applies to the catalog.
 
 pub(crate) mod hooks;
+pub(crate) mod import;
 mod originals;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -201,6 +205,16 @@ fn message(e: &Error) -> String {
 /// A sign-in that ended other than signed in: how, and why in words for the user.
 type SignInEnd = (SignInProgress, String);
 
+/// What work off the session found, for [`crate::Session::drain_remote`] to apply.
+pub enum Event {
+    /// Photos an import listed, to add (path, what the listing and Memories told: size, kind,
+    /// format; dimensions and capture time when Memories knows them).
+    Found(Vec<(String, crate::media::ProbeInfo)>),
+    /// The metadata read for the photo at `path`, filling what it lacks. With `described`, `info`
+    /// describes the whole file (dimensions, preview-only), else only its metadata and capture time.
+    Meta { path: String, info: Box<crate::media::ProbeInfo>, described: bool },
+}
+
 /// The session's Nextcloud accounts. Shared (`Arc`) with the threads that load remote photos.
 pub struct Remote {
     /// Sign-ins and downloads show their rows here.
@@ -211,9 +225,15 @@ pub struct Remote {
     /// The last [`MAX_SIGN_INS`] sign-ins, oldest first. Kept across [`Remote::configure`]: they are
     /// this session's.
     sign_ins: Mutex<VecDeque<SignInOutcome>>,
+    /// Waiting for [`crate::Session::drain_remote`], oldest first.
+    events: Mutex<Vec<Event>>,
     /// Sign-ins started from now on are past craft's deadline at once (tests of the timeout).
     #[cfg(test)]
     pub(crate) expire_sign_ins: AtomicBool,
+    /// When set, an import waits for a message here before it lists and before it reads metadata
+    /// (tests of its activity rows).
+    #[cfg(test)]
+    pub(crate) import_steps: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
 impl Remote {
@@ -224,9 +244,22 @@ impl Remote {
             inner: Mutex::default(),
             downloads: Mutex::default(),
             sign_ins: Mutex::default(),
+            events: Mutex::default(),
             #[cfg(test)]
             expire_sign_ins: AtomicBool::new(false),
+            #[cfg(test)]
+            import_steps: Mutex::default(),
         }
+    }
+
+    /// Queue `event` for [`crate::Session::drain_remote`].
+    pub(crate) fn push_event(&self, event: Event) {
+        self.events.lock().unwrap_or_else(PoisonError::into_inner).push(event);
+    }
+
+    /// The queued events, oldest first; the queue is empty afterwards.
+    pub fn take_events(&self) -> Vec<Event> {
+        std::mem::take(&mut *self.events.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {

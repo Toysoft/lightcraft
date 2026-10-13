@@ -890,19 +890,7 @@ impl ImportJob {
         let mut out = Prepared { scanned: files.len(), items: Vec::new() };
         let mut todo = Vec::new();
         for f in files {
-            match self.by_path.get(f.as_str()).copied() {
-                Some((id, true)) if !opts.local => {
-                    // a file that was only browsed (Local) joins the library when it is imported for real
-                    self.by_path.insert(f, (id, false));
-                    out.items.push(PreparedItem::Promote(id));
-                    self.done.fetch_add(1, Relaxed);
-                }
-                Some((id, _)) => {
-                    out.items.push(PreparedItem::Duplicate { path: f, existing: Some(id), reason: "path", hash: None });
-                    self.done.fetch_add(1, Relaxed);
-                }
-                None => todo.push(f),
-            }
+            todo.extend(self.new_path(f, &mut out));
         }
 
         // files a preceding scan already probed are not read again (a network share is slow to read),
@@ -1032,6 +1020,40 @@ impl ImportJob {
             plan.slots.push(Slot::Item(PreparedItem::Ready(Box::new(ReadyFile { path, stored, info, sidecar, placed: None }))));
         }
         self.run_plan(&mut plan, &mut out, cancel);
+        out
+    }
+
+    /// `f` unless the catalog has its path; then its item goes to `out` instead: a duplicate, or a
+    /// Local (browsed) record that joins the library.
+    fn new_path(&mut self, f: String, out: &mut Prepared) -> Option<String> {
+        match self.by_path.get(f.as_str()).copied() {
+            Some((id, true)) if !self.opts.local => {
+                // a file that was only browsed (Local) joins the library when it is imported for real
+                self.by_path.insert(f, (id, false));
+                out.items.push(PreparedItem::Promote(id));
+            }
+            Some((id, _)) => out.items.push(PreparedItem::Duplicate { path: f, existing: Some(id), reason: "path", hash: None }),
+            None => return Some(f),
+        }
+        self.done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        None
+    }
+
+    /// [`ImportJob::prepare_files`] for files already described (path and probe, e.g. from a Nextcloud
+    /// listing), added where they are: the same skip of paths the catalog (or `items`) has, and no
+    /// file-system calls (no sidecars, no copies).
+    pub fn prepare_infos(&mut self, items: Vec<(String, ProbeInfo)>) -> Prepared {
+        let mut out = Prepared { scanned: items.len(), items: Vec::new() };
+        let mut seen = std::collections::HashSet::new();
+        for (path, info) in items {
+            let Some(path) = self.new_path(path, &mut out) else { continue };
+            self.done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            out.items.push(if seen.insert(path.clone()) {
+                PreparedItem::Ready(Box::new(ReadyFile { stored: path.clone(), path, info, sidecar: None, placed: None }))
+            } else {
+                PreparedItem::Duplicate { path, existing: None, reason: "path", hash: None }
+            });
+        }
         out
     }
 
