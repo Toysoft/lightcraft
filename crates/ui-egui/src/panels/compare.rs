@@ -200,11 +200,10 @@ fn photo_tile(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, slot: Slo
         (img.width().max(img.height()).min(img_area.width().max(img_area.height()) * 4.0) * ppp).min(2560.0_f32.min(texture_side as f32)) as usize;
     let (rw, rh) = if aspect >= 1.0 { (want, (want as f32 / aspect) as usize) } else { ((want as f32 * aspect) as usize, want) };
     // an unedited Nextcloud photo only looked at: the server's preview, no download
-    let quick_only = crate::nextcloud::quick_view_is_final(app, &photo);
-    if quick_only {
-        if let Some(q) = app.session.quick_view_job(id, want.max(8), true) {
-            app.renderer.request_quick(slot, q, 60);
-        }
+    let quick = crate::nextcloud::quick_only_job(app, slot, &photo, want.max(8));
+    let quick_only = quick.is_some();
+    if let Some(q) = quick {
+        app.renderer.request_quick(slot, q, 60);
     } else if let Some(job) = app.session.render_job(id, rw.max(8), rh.max(8), false, true) {
         app.renderer.request(slot, job, 60);
     }

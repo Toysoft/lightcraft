@@ -5,11 +5,13 @@
 //! open photo's original and prefetches the next one's.
 
 use egui::RichText;
-use lightcraft_catalog::{Photo, Source, is_remote};
+use lightcraft_catalog::{Photo, PhotoId, Source, is_remote};
+use lightcraft_engine::media::QuickSource;
 use serde_json::{Value, json};
 
 use crate::LightcraftApp;
 use crate::i18n::tr;
+use crate::render::Slot;
 use crate::state::{Dialog, Zoom};
 use crate::theme::Tokens;
 
@@ -310,8 +312,28 @@ pub fn quick_view_is_final(app: &LightcraftApp, photo: &Photo) -> bool {
     matches!(&photo.source, Source::File { path } if is_remote(path)) && !wants_original(app) && app.session.embedded_thumb_is_final(photo)
 }
 
+/// The quick view of photo `id` in `slot` didn't come from the server's preview (a thumbnail render
+/// of the original instead, or nothing, the request for `quick_key` having failed): the server has
+/// none, so the view renders the original as for any other photo.
+pub fn no_server_preview(app: &LightcraftApp, slot: Slot, id: PhotoId, quick_key: Option<u64>) -> bool {
+    let r = &app.renderer;
+    r.textures.get(&slot).is_some_and(|t| t.photo == id && !matches!(t.quick, Some(QuickSource::Embedded | QuickSource::Cached)))
+        || quick_key.is_some_and(|k| r.failed_key(slot) == Some(k))
+}
+
+/// The quick view (the server's preview) of `photo` for `slot` when that is all the view shows
+/// ([`quick_view_is_final`], and the server has a preview), at `edge` px.
+pub fn quick_only_job(app: &mut LightcraftApp, slot: Slot, photo: &Photo, edge: usize) -> Option<lightcraft_engine::media::QuickJob> {
+    if !quick_view_is_final(app, photo) {
+        return None;
+    }
+    let q = app.session.quick_view_job(photo.id, edge, true)?;
+    (!no_server_preview(app, slot, photo.id, Some(q.key))).then_some(q)
+}
+
 /// In Develop on a Nextcloud photo: hold its original on disk and download the next photo's;
-/// anywhere else, nothing (both calls are no-ops when nothing changed).
+/// anywhere else, nothing (both calls are no-ops when nothing changed), and the loupe's renders of
+/// a Nextcloud photo left behind stop their downloads.
 #[cfg(not(target_arch = "wasm32"))]
 fn develop_downloads(app: &mut LightcraftApp) {
     let remote_path = |app: &LightcraftApp, id| match &app.session.catalog.photo(id)?.source {
@@ -328,6 +350,13 @@ fn develop_downloads(app: &mut LightcraftApp) {
     // (the open photo first: prefetching first would cancel a prefetch of the open photo `hold` keeps)
     app.session.remote.hold(open.as_ref().map(|(_, p)| p.as_str()));
     app.session.remote.prefetch(next.as_deref());
+    if app.ui.view != crate::state::ViewMode::Detail {
+        for slot in [Slot::Main, Slot::Region, Slot::RegionBefore, Slot::Before, Slot::Hover] {
+            if app.renderer.photo_in(slot).is_some_and(|id| remote_path(app, id).is_some()) {
+                app.renderer.cancel(slot);
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------------- dialogs

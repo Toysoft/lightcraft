@@ -468,9 +468,19 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     // hover and before renders are stand-ins: the preview size is plenty and keeps them cheap
     let se = app.ui.settings.stand_in_edge(want, texture_side);
     let (sw, sh) = if aspect >= 1.0 { (se, (se as f32 / aspect) as usize) } else { ((se as f32 * aspect) as usize, se) };
+    // until the loupe has this photo: its cached render / embedded preview / a thumbnail (asked below)
+    let quick = app
+        .renderer
+        .textures
+        .get(&Slot::Main)
+        .is_none_or(|t| t.photo != id)
+        .then(|| app.session.quick_view_job(id, want.max(8), !crop_tool))
+        .flatten();
     // an unedited Nextcloud photo only looked at stays on the server's preview (the quick view): no
-    // render that would download its original, and none left over from the photo before
-    let quick_only = crate::nextcloud::quick_view_is_final(app, &photo);
+    // render that would download its original, and none left over from the photo before; unless the
+    // server has no preview of it
+    let quick_only = crate::nextcloud::quick_view_is_final(app, &photo)
+        && !crate::nextcloud::no_server_preview(app, Slot::Preview, id, quick.as_ref().map(|q| q.key));
     if quick_only {
         app.renderer.cancel(Slot::Main);
     } else if let Some(job) = app.session.loupe_job(id, rw.max(8), rh.max(8), !crop_tool) {
@@ -511,10 +521,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             }
         }
     }
-    // until the loupe has this photo: show its cached render / embedded preview / a thumbnail
-    if app.renderer.textures.get(&Slot::Main).is_none_or(|t| t.photo != id)
-        && let Some(q) = app.session.quick_view_job(id, want.max(8), !crop_tool)
-    {
+    if let Some(q) = quick {
         app.renderer.request_quick(Slot::Preview, q, 110);
     }
     let show_before = app.ui.before_after == BeforeAfter::Original || ui.input(|i| i.key_down(egui::Key::Backslash));

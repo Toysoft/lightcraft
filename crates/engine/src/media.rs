@@ -1361,9 +1361,11 @@ impl crate::Session {
         let small = self.thumb_job(id, THUMB_SIZES[THUMB_SIZES.len() - 1])?;
         // (the thumbnail job itself starts with the cached thumbnail, after the sharper embedded preview)
         let cached = vec![(self.media.rendered.clone(), Self::view_key(&p, apply_crop))];
-        let h = Hasher128::new().str(&content_key(&p)).str("quick").u64(p.develop.hash64()).u64(apply_crop as u64).finish();
+        // (in steps of two: a view that grows a step (Fit to Fill, a bigger window) asks for a sharper one)
+        let edge = max_edge.clamp(1, SourceLevel::Preview.max_edge()).next_power_of_two().min(SourceLevel::Preview.max_edge());
+        let h = Hasher128::new().str(&content_key(&p)).str("quick").u64(p.develop.hash64()).u64(apply_crop as u64).u64(edge as u64).finish();
         let key = h.0 as u64;
-        let embedded = self.embedded_of(&p).map(|(path, l)| (path, l, max_edge.clamp(1, SourceLevel::Preview.max_edge())));
+        let embedded = self.embedded_of(&p).map(|(path, l)| (path, l, edge));
         Some(QuickJob { request_id: 0, photo: id, key, cached, embedded, keep_embedded: false, small: apply_crop.then(|| Box::new(small)) })
     }
 

@@ -253,10 +253,11 @@ fn jpeg(w: usize, h: usize) -> Vec<u8> {
 fn browse_then_develop(ext: &str, bytes: Vec<u8>) {
     let fake = FakeServer::start();
     fake.enable_memories();
+    let preview = jpeg(1000, 1500);
     for n in ["a", "b", "c"] {
         let f = format!("/Photos/{n}.{ext}");
         fake.add_file(&f, bytes.clone());
-        fake.set_preview(&f, jpeg(64, 96));
+        fake.set_preview(&f, preview.clone());
         fake.set_photo(&f, 19675, 4000, 6000, 1_700_000_000, json!({}));
     }
     let d = temp(&format!("develop-{ext}"));
@@ -271,6 +272,7 @@ fn browse_then_develop(ext: &str, bytes: Vec<u8>) {
     h.app.session.execute("library.select", &json!({"ids": [first.0]})).unwrap();
     h.app.ui.view = ViewMode::Detail;
     h.app.ui.right = RightPanel::Info;
+    let mut sizes = vec![];
     for zoom in [Zoom::Fit, Zoom::Fill] {
         h.app.ui.zoom = zoom;
         h.settle(T);
@@ -278,7 +280,9 @@ fn browse_then_develop(ext: &str, bytes: Vec<u8>) {
             h.step();
         }
         assert_eq!(fake.downloads(), 0, "{ext} at {zoom:?} shows the server's preview");
+        sizes.push(h.app.renderer.textures.get(&crate::render::Slot::Preview).map_or(0, |t| t.size[1]));
     }
+    assert!(sizes[1] > sizes[0], "Fill asks for a sharper server preview than Fit: {sizes:?}");
     assert_eq!(cached_files(&d), 0);
     assert!(h.app.renderer.textures.get(&crate::render::Slot::Preview).is_some_and(|t| t.photo == first), "the quick view shows");
     // comparing photos only looks at them too
@@ -317,54 +321,162 @@ fn browsing_unedited_remote_jpegs_downloads_nothing() {
     browse_then_develop("jpg", jpeg(400, 600));
 }
 
+/// A server without a preview of a photo (no preview provider for its format): the loupe renders
+/// its original at full size (one download), not the 512 px thumbnail the quick view fell back to.
+#[test]
+fn photos_without_a_server_preview_render_their_original() {
+    let fake = FakeServer::start();
+    fake.enable_memories();
+    fake.add_file("/Photos/a.jpg", jpeg(1200, 1800));
+    fake.set_photo("/Photos/a.jpg", 19675, 1200, 1800, 1_700_000_000, json!({}));
+    let d = temp("no-preview");
+    let mut s = session(&d, &[fake.account()]);
+    s.execute("library.importNextcloud", &json!({"dirs": [remote(&fake, "Photos")], "wait": true})).unwrap();
+    let (urls, revealed) = Default::default();
+    let mut h = app(s, &urls, &revealed);
+    let first = h.app.session.visible_cloned()[0];
+    h.app.session.execute("library.select", &json!({"ids": [first.0]})).unwrap();
+    h.app.ui.view = ViewMode::Detail;
+    h.app.ui.right = RightPanel::Info;
+    h.app.ui.zoom = Zoom::Fit;
+    let main = |h: &Headless| h.app.renderer.textures.get(&crate::render::Slot::Main).filter(|t| t.photo == first).map(|t| t.size);
+    assert!(h.step_until(T, |h| main(h).is_some_and(|s| s[1] > 512)), "Main: {:?}", main(&h));
+    h.settle(T);
+    assert_eq!(fake.downloads(), 1);
+}
+
+/// Loads that, run with a cancel flag (`memory::cancellable`), wait until it is set: a download
+/// that stops when told. Without one they fail at once (thumbnails).
+#[derive(Clone, Default)]
+struct Loads {
+    calls: Arc<Mutex<Vec<String>>>,
+    flags: Arc<Mutex<Vec<(String, Arc<std::sync::atomic::AtomicBool>)>>>,
+}
+
+impl Loads {
+    /// A session with photos at `paths` (600×400) that load through these loads.
+    fn session(&self, paths: &[&str]) -> Session {
+        let mut s = Session::new();
+        for (i, path) in paths.iter().enumerate() {
+            let id = lightcraft_catalog::PhotoId(i as u64 + 1);
+            let p = lightcraft_catalog::Photo::new(
+                id,
+                lightcraft_catalog::Source::File { path: path.to_string() },
+                "x.jpg",
+                "JPEG",
+                600,
+                400,
+                "2026-01-01T00:00:00",
+            );
+            s.catalog.apply(lightcraft_catalog::Op::AddPhoto { photo: Box::new(p) }).unwrap();
+        }
+        let me = self.clone();
+        s.media.file_loader = Some(Arc::new(move |path: &str, _| {
+            let Some(flag) = lightcraft_engine::memory::cancel_flag() else { return Err("no flag".into()) };
+            let already = flag.load(std::sync::atomic::Ordering::Relaxed);
+            me.calls.lock().unwrap().push(format!("{} {path}", if already { "start-cancelled" } else { "start" }));
+            me.flags.lock().unwrap().push((path.to_string(), flag.clone()));
+            let t = std::time::Instant::now();
+            while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < T {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            me.calls.lock().unwrap().push(format!("stop {path}"));
+            Err("cancelled".into())
+        }));
+        s
+    }
+
+    fn count(&self, what: &str) -> usize {
+        self.calls.lock().unwrap().iter().filter(|c| *c == what).count()
+    }
+
+    /// Set every flag handed out (so no load waits on after the test).
+    fn stop_all(&self) {
+        for (_, f) in self.flags.lock().unwrap().iter() {
+            f.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
 /// Moving on to another photo stops the download the loupe started for the one before
 /// (`memory::cancellable` around the render; `Want::Load` takes its flag).
 #[test]
 fn moving_on_stops_the_last_photos_load() {
-    let mut s = Session::new();
-    for (i, n) in ["a", "b"].into_iter().enumerate() {
-        let p = lightcraft_catalog::Photo::new(
-            lightcraft_catalog::PhotoId(i as u64 + 1),
-            lightcraft_catalog::Source::File { path: format!("/nas/{n}.jpg") },
-            &format!("{n}.jpg"),
-            "JPEG",
-            600,
-            400,
-            "2026-01-01T00:00:00",
-        );
-        s.catalog.apply(lightcraft_catalog::Op::AddPhoto { photo: Box::new(p) }).unwrap();
-    }
-    // a load that, with a cancel flag, waits for it (a download that stops when told)
-    let calls: Arc<Mutex<Vec<String>>> = Default::default();
-    let c = calls.clone();
-    s.media.file_loader = Some(Arc::new(move |path: &str, _| {
-        let Some(flag) = lightcraft_engine::memory::cancel_flag() else { return Err("no flag".into()) };
-        c.lock().unwrap().push(format!("start {path}"));
-        let t = std::time::Instant::now();
-        while !flag.load(std::sync::atomic::Ordering::Relaxed) && t.elapsed() < T {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        c.lock().unwrap().push(format!("stop {path}"));
-        Err("cancelled".into())
-    }));
+    let loads = Loads::default();
     let (urls, revealed) = Default::default();
-    let mut h = app(s, &urls, &revealed);
+    let mut h = app(loads.session(&["/nas/a.jpg", "/nas/b.jpg"]), &urls, &revealed);
     h.app.session.execute("library.select", &json!({"ids": [1]})).unwrap();
     h.app.ui.view = ViewMode::Detail;
     h.app.ui.right = RightPanel::Edit;
-    let has = |calls: &Arc<Mutex<Vec<String>>>, what: &str| calls.lock().unwrap().iter().any(|c| c == what);
-    assert!(h.step_until(T, |_| has(&calls, "start /nas/a.jpg")), "{:?}", calls.lock().unwrap());
+    assert!(h.step_until(T, |_| loads.count("start /nas/a.jpg") == 1), "{:?}", loads.calls.lock().unwrap());
     h.app.session.execute("library.select", &json!({"ids": [2]})).unwrap();
     let t = std::time::Instant::now();
-    assert!(h.step_until(T, |_| has(&calls, "stop /nas/a.jpg")), "{:?}", calls.lock().unwrap());
+    assert!(h.step_until(T, |_| loads.count("stop /nas/a.jpg") == 1), "{:?}", loads.calls.lock().unwrap());
     assert!(t.elapsed() < Duration::from_secs(5), "a's load stopped when b opened, not at its timeout");
-    assert!(h.step_until(T, |_| has(&calls, "start /nas/b.jpg")), "{:?}", calls.lock().unwrap());
+    assert!(h.step_until(T, |_| loads.count("start /nas/b.jpg") == 1), "{:?}", loads.calls.lock().unwrap());
     // and a slider drag's renders of the same photo don't stop its load
     h.app.session.execute("develop.set", &json!({"control": "light.exposure", "value": 0.5})).unwrap();
     for _ in 0..30 {
         h.step();
     }
-    assert!(!has(&calls, "stop /nas/b.jpg"), "{:?}", calls.lock().unwrap());
+    assert_eq!(loads.count("stop /nas/b.jpg"), 0, "{:?}", loads.calls.lock().unwrap());
+    loads.stop_all();
+}
+
+/// The download row's ✕ stops the photo's load (it sets the render's flag); the photo's next render
+/// (an edit) starts it again instead of being cancelled at once.
+#[test]
+fn a_cancelled_load_starts_again_on_the_next_render() {
+    let loads = Loads::default();
+    let (urls, revealed) = Default::default();
+    let mut h = app(loads.session(&["/nas/a.jpg"]), &urls, &revealed);
+    h.app.session.execute("library.select", &json!({"ids": [1]})).unwrap();
+    h.app.ui.view = ViewMode::Detail;
+    h.app.ui.right = RightPanel::Edit;
+    assert!(h.step_until(T, |_| loads.count("start /nas/a.jpg") == 1), "{:?}", loads.calls.lock().unwrap());
+    loads.stop_all();
+    assert!(h.step_until(T, |_| loads.count("stop /nas/a.jpg") == 1), "{:?}", loads.calls.lock().unwrap());
+    h.app.session.execute("develop.set", &json!({"control": "light.exposure", "value": 0.5})).unwrap();
+    assert!(h.step_until(T, |_| loads.count("start /nas/a.jpg") == 2), "{:?}", loads.calls.lock().unwrap());
+    assert_eq!(loads.count("start-cancelled /nas/a.jpg"), 0);
+    loads.stop_all();
+}
+
+/// Renders a view no longer needs stop their downloads: a released window, the loupe of a Nextcloud
+/// photo once the Detail view is left (a local photo's render goes on), and every render when
+/// another library opens. Thumbnails never get a flag.
+#[test]
+fn views_that_go_stop_their_downloads() {
+    let loads = Loads::default();
+    let (urls, revealed) = Default::default();
+    let mut h = app(loads.session(&["nextcloud://alice@example.com/a.jpg", "/nas/b.jpg"]), &urls, &revealed);
+    let (a, b) = ("nextcloud://alice@example.com/a.jpg", "/nas/b.jpg");
+    h.app.ui.view = ViewMode::Detail;
+    h.app.ui.right = RightPanel::Edit;
+    // (the Nextcloud photo's load stops in the grid; the local photo's render goes on)
+    for (id, path, stops) in [(1, a, 1), (2, b, 0)] {
+        h.app.session.execute("library.select", &json!({"ids": [id]})).unwrap();
+        assert!(h.step_until(T, |_| loads.count(&format!("start {path}")) == 1), "{:?}", loads.calls.lock().unwrap());
+        h.app.ui.view = ViewMode::PhotoGrid;
+        for _ in 0..30 {
+            h.step();
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(loads.count(&format!("stop {path}")), stops, "{path}: {:?}", loads.calls.lock().unwrap());
+        h.app.ui.view = ViewMode::Detail;
+    }
+    assert!(h.app.renderer.photo_in(crate::render::Slot::Thumb(lightcraft_catalog::PhotoId(2))).is_none(), "no flag for thumbnails");
+    // another library: every render stops (now, not at the load's own timeout)
+    h.app.ui.view = ViewMode::PhotoGrid;
+    h.app.renderer.forget_all();
+    assert!(h.step_until(Duration::from_secs(5), |_| loads.count(&format!("stop {b}")) == 1), "{:?}", loads.calls.lock().unwrap());
+    // a window the view released
+    let job = h.app.session.render_job(lightcraft_catalog::PhotoId(2), 64, 64, false, true).unwrap();
+    h.app.renderer.request(crate::render::Slot::Region, job, 99);
+    assert!(h.step_until(T, |_| loads.count(&format!("start {b}")) == 2), "{:?}", loads.calls.lock().unwrap());
+    h.app.renderer.release(crate::render::Slot::Region);
+    assert!(h.step_until(Duration::from_secs(5), |_| loads.count(&format!("stop {b}")) == 2), "{:?}", loads.calls.lock().unwrap());
+    loads.stop_all();
 }
 
 #[test]

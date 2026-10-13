@@ -236,6 +236,12 @@ impl Slot {
     pub fn is_view(self) -> bool {
         matches!(self, Slot::Main | Slot::Region | Slot::RegionBefore | Slot::Before | Slot::Hover)
     }
+
+    /// A view that goes from photo to photo (a few of them): the downloads its renders start stop
+    /// when it moves on ([`Renderer::cancel_for`]). Background slots never download.
+    fn moves_on(self) -> bool {
+        self.is_view() || matches!(self, Slot::Compare(_) | Slot::CompareRegion(_) | Slot::Second)
+    }
 }
 
 impl Default for Renderer {
@@ -394,8 +400,10 @@ impl Renderer {
         }
         true
     }
-    /// Free a view slot's texture and stage cache (the view is no longer shown).
+    /// Free a view slot's texture and stage cache (the view is no longer shown); a render still
+    /// running for it stops its download and is ignored.
     pub fn release(&mut self, slot: Slot) {
+        self.cancel(slot);
         self.textures.remove(&slot);
         self.stages.remove(&slot);
     }
@@ -440,23 +448,28 @@ impl Renderer {
         let key = job.key;
         let background = matches!(slot, Slot::Thumb(_) | Slot::ThumbQuick(_) | Slot::Prefetch(_));
         let display = self.display.clone();
-        let cancel = self.cancel_for(slot, job.photo);
+        let cancel = slot.moves_on().then(|| self.cancel_for(slot, job.photo));
         self.pool.submit(
             slot,
             key,
             priority,
             Box::new(move || {
                 let run = || if background { lightcraft_engine::memory::in_background(|| job.run()) } else { job.run() };
-                lightcraft_engine::memory::cancellable(cancel, || Self::run_for(run, &display))
+                match cancel {
+                    Some(cancel) => lightcraft_engine::memory::cancellable(cancel, || Self::run_for(run, &display)),
+                    None => Self::run_for(run, &display),
+                }
             }),
         );
     }
 
     /// The flag cancelling `slot`'s downloads for `photo`: the same one while the slot shows that
-    /// photo (a slider drag's renders share its download); another photo sets the old one.
+    /// photo (a slider drag's renders share its download) and nobody cancelled it (the download
+    /// row's ✕ sets it too: the next render starts again); another photo sets the old one.
     fn cancel_for(&mut self, slot: Slot, photo: PhotoId) -> Arc<std::sync::atomic::AtomicBool> {
         if let Some((p, flag)) = self.cancels.get(&slot)
             && *p == photo
+            && !flag.load(std::sync::atomic::Ordering::Relaxed)
         {
             return flag.clone();
         }
@@ -465,6 +478,16 @@ impl Renderer {
             old.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         flag
+    }
+
+    /// The photo of `slot`'s latest render that can download ([`Slot::moves_on`]).
+    pub fn photo_in(&self, slot: Slot) -> Option<PhotoId> {
+        self.cancels.get(&slot).map(|(p, _)| *p)
+    }
+
+    /// The key of `slot`'s last failed job.
+    pub fn failed_key(&self, slot: Slot) -> Option<u64> {
+        self.failed.get(&slot).map(|f| f.0)
     }
 
     /// Stop wanting `slot` (a no-op when nothing is pending): its queued job is dropped, a running
@@ -525,6 +548,9 @@ impl Renderer {
         self.prefetched.clear();
         self.pending.clear();
         self.queue.clear();
+        for (_, (_, flag)) in self.cancels.drain() {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     pub fn is_pending(&self, slot: Slot) -> bool {
