@@ -1239,7 +1239,8 @@ fn ai_masks_without_the_model_offer_the_download() {
             log.lock().unwrap().push(p.to_string());
             Ok(())
         }));
-        h.step();
+        // Adding the reveal service changes the wrapped dialog layout; settle before clicking.
+        assert!(h.settle(SETTLE));
         let r = h.request("ui.clickWidget", json!({"id": "button:samFolder"}), T);
         assert_eq!(r["ok"], true, "{r}");
         assert!(dir.is_dir(), "the model folder is created to be shown");
