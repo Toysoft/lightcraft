@@ -1844,6 +1844,7 @@ mod tests {
                 name: format!("Look {i}"),
                 group: format!("Big {:02}", i / 500),
                 settings: json!({"light": {"exposure": (i % 20) as f64 / 10.0}}),
+                unsupported_edits: Vec::new(),
                 favorite: false,
                 builtin: false,
             })
