@@ -40,7 +40,7 @@ The rule: **browsing never downloads an original; developing downloads the photo
 | You are… | What LightCraft reads from the server |
 |---|---|
 | Importing | Listings, the Memories app's timeline and metadata when the server has it, else the first 64 KiB of each file (1 MiB when that has no camera data). Never a whole original |
-| Looking at the grid | The server's preview of each photo, at thumbnail size, kept in the thumbnail disk cache. An edited photo's thumbnail is rendered from what is already here (its cached original or smart preview). Never an original |
+| Looking at the grid | The server's preview of each photo, at thumbnail size, kept in the thumbnail disk cache. An edited photo's thumbnail is rendered from its cached original or smart preview, or, for a non-raw photo with neither, from the server's preview. Never an original |
 | In Detail at Fit or Fill, Compare, the second window, **unedited photo** | The *quick view*: the server's preview, asked for again at a larger size as the view grows (up to 2,560 px). The original is downloaded only when the server has no preview |
 | Looking at an **edited** photo in Detail, Compare or the second window | Its original, from the cache or downloaded once: an edit is rendered from the real file, never from the server's JPEG |
 | **Developing** | The open photo's original, held in the cache while it is open, and the next photo's (filmstrip order), prefetched |
@@ -54,11 +54,13 @@ the Info panel open doesn't.
 - **The download** shows as a cancellable "Downloading _DSC1748.ARW (61 MB)" row with progress, and the loupe keeps
   the server's preview up meanwhile. Downloads run one at a time; the photo you are waiting for goes before a
   prefetch ("Prefetching …").
-- **Moving on stops it.** Moving to another photo, leaving Detail or closing the view cancels the download it started
-  (between chunks; a server that stopped answering is noticed at the 30 s stall limit). The prefetch of the next photo
-  is cancelled by the next prefetch, and the open photo's own prefetch keeps going while you stay on it.
+- **Moving on stops it.** Moving to another photo, leaving Detail or closing the view cancels the download of the photo
+  you were developing (between chunks; a server that stopped answering is noticed at the 30 s stall limit). The
+  prefetch of the next photo is cancelled by the next prefetch, and the open photo's own prefetch keeps going while you
+  stay on it.
 - **After the first download** the photo's record is completed from the whole file (dimensions, as-shot white balance,
-  lens data) and a smart preview is built, so the photo can still be edited when the server is out of reach.
+  lens data) and a smart preview is built, so the photo can still be edited when the server is out of reach. (While
+  another preview build runs, that smart preview is skipped; File ▸ Previews ▸ Build Smart Previews makes it later.)
 - **Server previews stand in at thumbnail size only** (the grid, and quick looks such as Find Similar). Once the
   original is downloaded they are dropped, so Auto, the white-balance picker and spot sampling measure the real file.
 - **Make Available Offline** (Photo menu) downloads the selected photos' originals and pins them, one at a time, behind
@@ -84,8 +86,12 @@ the Info panel open doesn't.
   photos have no content hash).
 - **Accounts** are in `<settings folder>/nextcloud.json` (`{accounts: [{server, user, trust}], cacheBudgetMb}`); no
   password is ever written there.
-- The desktop app, `lightcraft-cli` and the MCP server share both folders. The cache has no lock between processes:
-  don't download from two of them at the same time.
+- The desktop app, `lightcraft-cli` and the MCP server share both folders, but **one process at a time uses the
+  download cache**: the first to need it keeps it (a lock on `<cache>/nextcloud/.lock`) until it quits. Meanwhile the
+  others can't download ("Another LightCraft window or lightcraft-cli is using the Nextcloud download cache; close it
+  and try again") and show no cache sizes; browsing with server previews still works there.
+- A desktop-app window started with `--memory` or `LIGHTCRAFT_NO_PREFS` (tests, scripts) leaves this computer's
+  Nextcloud settings, cache and keyring alone: it can't sign in ("Nextcloud sign-in isn't available in this window").
 
 ## When the server can't be reached
 
@@ -121,9 +127,9 @@ Trust on first use, with no silent changes:
   (GNOME Keyring, KWallet) elsewhere, under the service "LightCraft" and the account `user@host`. It is never written
   to the settings file, the library, logs, crash reports, error messages or command replies. Without a keyring (a
   headless Linux box with no Secret Service) adding an account fails and says so; there is no plaintext fallback.
-- **One exception, logging at TRACE:** the HTTP library LightCraft uses (`ureq`, `ureq_proto`) logs raw requests at
-  the TRACE level, including the password in the `Authorization` header and in the sign-in reply. LightCraft logs at
-  info by default; `RUST_LOG=trace` (or `ureq=trace`) would put the password in the log file. Don't share such a log.
+- **Logs:** the HTTP library LightCraft uses (`ureq`, `ureq_proto`) would log raw requests at the TRACE level,
+  password included. LightCraft never logs those two targets at TRACE, whatever `RUST_LOG` says (the CLI shows only
+  warnings from other crates), so the password stays out of the log file and standard error.
 - **Remove** forgets the account on this computer (password and settings); its photos stay in the library, offline.
   The app password stays valid on the server until you revoke it there (Personal settings ▸ Security ▸ Devices &
   sessions, listed as "LightCraft").
@@ -180,15 +186,18 @@ All are in `engine.commands`; agents call them through the control channel, `lig
   library cancels running imports.
 
 Errors are plain sentences with a next step, e.g. "No Nextcloud account bob@cloud.example on this computer; add it with
-File ▸ Add Nextcloud Account…", "This build can't store Nextcloud passwords (no OS keyring support)", "That isn't a
+File ▸ Add Nextcloud Account…", "Nextcloud sign-in isn't available in this window", "That isn't a
 Nextcloud address LightCraft can use (…); check what you typed".
 
-**Sign in from the desktop app or an MCP session** ([mcp.md](mcp.md#nextcloud)); the desktop app's control channel is
-in [control-protocol.md](control-protocol.md#nextcloud). `lightcraft-cli run` can't finish a sign-in on its own: with
-`wait: false` the process ends before you approve, and with `wait: true` it blocks without printing the login page.
-It uses the accounts signed in elsewhere (same settings folder, same keyring):
+Agents in an MCP session: [mcp.md](mcp.md#nextcloud); the desktop app's control channel:
+[control-protocol.md](control-protocol.md#nextcloud). From a shell, sign in with `wait=true`: while it waits, the
+CLI prints the page to open on standard error ("Approve LightCraft in your browser: https://…") and it returns
+once you approved. (With `wait: false` the process would end before you approve.) The CLI, the MCP server and the
+desktop app share accounts (same settings folder, same keyring):
 
 ```sh
+lightcraft-cli run nextcloud.addAccount server=cloud.example.com wait=true
+# a self-signed server answers needsTrust first: check the fingerprint, then add trust=AB:CD:…
 lightcraft-cli run nextcloud.preferences
 lightcraft-cli run nextcloud.browse dir=nextcloud://bob@cloud.example.com/Photos
 lightcraft-cli run --library ~/lc-lib library.importNextcloud 'dirs=["nextcloud://bob@cloud.example.com/Photos/2026"]' wait=true

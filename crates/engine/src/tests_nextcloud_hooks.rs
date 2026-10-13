@@ -229,6 +229,36 @@ fn an_interactive_miss_downloads_once() {
     assert!(s.activity.list().is_empty(), "the download row went");
 }
 
+/// R26: another process (another window, lightcraft-cli) holding the originals cache keeps this one
+/// out of it: downloads say so, nextcloud.preferences reports no sizes, and once it lets go the cache
+/// is this process's for good. (A second handle on the lock file stands in for the other process.)
+#[test]
+fn another_process_using_the_cache_keeps_downloads_out() {
+    let (mut s, fake, d) = signed_in("cache-lock");
+    fake.add_file("/Photos/y.jpg", jpeg(96, 64, None));
+    fake.set_preview("/Photos/y.jpg", jpeg(64, 32, None));
+    let y = remote(&fake, "Photos/y.jpg");
+    let load = s.media.file_loader.clone().unwrap();
+    let lock_file = || std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(d.join("cache/.lock")).unwrap();
+    std::fs::create_dir_all(d.join("cache")).unwrap();
+    let other = lock_file();
+    other.try_lock().unwrap();
+    let e = s.remote.local_original(&y).unwrap_err();
+    assert!(e.contains("Another LightCraft window or lightcraft-cli is using the Nextcloud download cache"), "{e}");
+    assert_eq!(fake.downloads(), 0);
+    let r = s.execute("nextcloud.preferences", &json!({})).unwrap();
+    assert_eq!((r["cachedBytes"].as_u64(), r["pinnedBytes"].as_u64()), (Some(0), Some(0)), "{r}");
+    // browsing goes on: a thumbnail still comes from the server's preview
+    let thumb_level = crate::media::SourceLevel::Thumb.max_edge();
+    let (img, _) = crate::memory::in_background(|| load(&y, thumb_level)).unwrap();
+    assert_eq!((img.width, img.height), (64, 32));
+    // the other process quits: the next use opens the cache and keeps it locked
+    drop(other);
+    s.remote.local_original(&y).unwrap();
+    assert_eq!(fake.downloads(), 1);
+    assert!(matches!(lock_file().try_lock(), Err(std::fs::TryLockError::WouldBlock)), "held while this process runs");
+}
+
 #[test]
 fn downloads_show_and_cancel_in_activity() {
     let (s, fake, d) = signed_in("activity");

@@ -378,6 +378,41 @@ fn nextcloud_accounts_come_from_the_settings_folder() {
     assert_eq!(prefs["cacheBudgetMb"], 5000, "{prefs}");
 }
 
+/// R28: while `nextcloud.addAccount {wait: true}` waits for the browser approval, the CLI shows the
+/// page to open on stderr (never the password). Not approved here: that would store the password in
+/// this computer's keyring.
+#[test]
+fn a_waiting_sign_in_shows_its_login_page() {
+    let fake = craft_nextcloud::testing::FakeServer::start();
+    let config = tmp("nextcloud-sign-in-config");
+    std::fs::create_dir_all(&config).unwrap();
+    let mut child = Command::new(BIN)
+        .env("LIGHTCRAFT_CONFIG_DIR", &config)
+        .env("LIGHTCRAFT_CACHE_DIR", tmp("nextcloud-sign-in-cache"))
+        .args(["run", "nextcloud.addAccount", &format!("server={}", fake.url()), "wait=true"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || BufReader::new(stderr).lines().map_while(Result::ok).for_each(|l| drop(tx.send(l))));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let line = loop {
+        let line = rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()));
+        match line {
+            Ok(l) if l.contains("Approve LightCraft in your browser") => break Ok(l),
+            Ok(_) => {}
+            Err(e) => break Err(e),
+        }
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    let line = line.expect("the login page on stderr while waiting");
+    assert!(line.contains(&format!("{}/", fake.url())), "{line}");
+    assert!(!line.contains(craft_nextcloud::testing::FakeServer::PASSWORD), "{line}");
+}
+
 fn run_cli(args: &[&str], stdin: Option<&str>) -> (bool, Vec<Value>, String) {
     let mut child = Command::new(BIN).arg("run").args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     if let Some(text) = stdin {

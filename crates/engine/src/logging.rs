@@ -112,6 +112,9 @@ mod tests {
         assert!(log.enabled(&meta(Level::Debug, "lightcraft_gpu::ctx")));
         assert!(!log.enabled(&meta(Level::Info, "wgpu_core::device")));
         assert!(!log.enabled(&meta(Level::Trace, "lightcraft_gpu::ctx")));
+        // the HTTP library's raw requests (Nextcloud app passwords) never, even at TRACE
+        let all = StderrLog::new("test", LevelFilter::Trace);
+        assert!(!all.enabled(&meta(Level::Trace, "ureq_proto::client")) && !all.enabled(&meta(Level::Trace, "ureq::unversioned")));
         let quiet = StderrLog::new("test", LevelFilter::Off);
         assert!(!quiet.enabled(&meta(Level::Error, "lightcraft_engine")));
     }

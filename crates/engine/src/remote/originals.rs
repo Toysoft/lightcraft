@@ -29,20 +29,35 @@ pub(crate) fn budget_bytes(mb: u64) -> u64 {
     mb.max(MIN_CACHE_BUDGET_MB).saturating_mul(1_000_000)
 }
 
-/// The cache in `dir` with `budget` bytes, opened once per process (craft's caches race when one
-/// folder is opened twice); a cache opened before with another budget takes this one, evicting down to it.
+/// Why the originals cache can't be used: another process has it ([`open_cache`]).
+pub(crate) const CACHE_IN_USE: &str = "Another LightCraft window or lightcraft-cli is using the Nextcloud download cache; close it and try again";
+
+/// The cache in `dir` with `budget` bytes, opened once per process and per computer (craft's caches
+/// race when one folder is opened twice): the first open locks `<dir>/.lock` for the process's
+/// lifetime, and while another process holds it the cache isn't available here ([`CACHE_IN_USE`];
+/// asked again on the next use). A cache opened before with another budget takes this one,
+/// evicting down to it.
 fn open_cache(dir: &Path, budget: u64) -> Result<OriginalsCache, String> {
-    static OPEN: Mutex<Vec<(PathBuf, OriginalsCache, u64)>> = Mutex::new(Vec::new());
+    static OPEN: Mutex<Vec<(PathBuf, OriginalsCache, u64, std::fs::File)>> = Mutex::new(Vec::new());
     let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some((_, cache, had)) = open.iter_mut().find(|(d, _, _)| d == dir) {
+    if let Some((_, cache, had, _)) = open.iter_mut().find(|(d, ..)| d == dir) {
         if *had != budget {
             cache.set_budget(budget);
             *had = budget;
         }
         return Ok(cache.clone());
     }
+    let failed = |e: std::io::Error| format!("The Nextcloud download cache {} can't be used: {e}", dir.display());
+    std::fs::create_dir_all(dir).map_err(failed)?;
+    let lock = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(dir.join(".lock")).map_err(failed)?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => return Err(CACHE_IN_USE.into()),
+        // a file system without locks: go on unlocked rather than without downloads
+        Err(std::fs::TryLockError::Error(e)) => log::warn!("Nextcloud download cache {}: no lock ({e})", dir.display()),
+    }
     let cache = OriginalsCache::open(dir, budget).map_err(|e| e.to_string())?;
-    open.push((dir.to_path_buf(), cache.clone(), budget));
+    open.push((dir.to_path_buf(), cache.clone(), budget, lock));
     Ok(cache)
 }
 

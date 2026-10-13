@@ -212,7 +212,7 @@ fn sign_in_again(key: &str) -> String {
 }
 
 fn no_store() -> String {
-    "This build can't store Nextcloud passwords (no OS keyring support)".into()
+    "Nextcloud sign-in isn't available in this window".into()
 }
 
 /// What a failed sign-in or client says to the user: craft's text, naming LightCraft where craft says "Craft".
@@ -514,6 +514,8 @@ impl Remote {
         }
         self.note_sign_in(SignInOutcome { task: id, state: SignInProgress::Waiting, account: again.clone(), error: None });
         if wait {
+            // the caller only hears back once approved: a CLI shows the page to open here (never the password)
+            log::warn!("Approve LightCraft in your browser: {login_url}");
             let key = self.wait_for_approval(id, sign_in, &cancel, again.as_deref())?;
             return Ok(json!({"state": "signedIn", "account": key}));
         }

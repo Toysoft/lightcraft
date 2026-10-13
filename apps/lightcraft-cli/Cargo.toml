@@ -25,6 +25,10 @@ lightcraft-merge = { workspace = true }
 serde_json = { workspace = true }
 dhat = { workspace = true, optional = true }
 
+[dev-dependencies]
+# `FakeServer`, a scripted in-process Nextcloud (the sign-in test)
+craft-nextcloud = { workspace = true, features = ["testing"] }
+
 [features]
 default = ["denoise"]
 denoise = ["lightcraft-engine/denoise"]

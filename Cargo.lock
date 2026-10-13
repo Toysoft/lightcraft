@@ -3355,6 +3355,7 @@ dependencies = [
 name = "lightcraft-cli"
 version = "0.7.1"
 dependencies = [
+ "craft-nextcloud",
  "dhat",
  "lightcraft-codecs",
  "lightcraft-denoise",

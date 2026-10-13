@@ -423,7 +423,7 @@ fn no_keyring_is_an_actionable_error() {
 
     s.remote.configure(RemoteConfig { credentials: None, ..config });
     let e = s.execute("nextcloud.addAccount", &json!({"server": fake.url()})).unwrap_err().to_string();
-    assert!(e.contains("This build can't store Nextcloud passwords (no OS keyring support)"), "{e}");
+    assert!(e.contains("Nextcloud sign-in isn't available in this window"), "{e}");
     assert!(s.activity.list().is_empty());
 }
 

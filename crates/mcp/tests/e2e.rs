@@ -319,7 +319,8 @@ fn export_without_token_finishes_after_eof() {
 
 /// Nextcloud end to end, as an agent drives it: add the account (the browser approval is the fake
 /// server's), import a folder without downloading it, then edit, render and export a photo, which
-/// downloads its original. The session keeps its password in memory, not in the OS keyring.
+/// downloads its original. The session keeps its password in memory, not in the OS keyring, and
+/// its settings and cache in a temporary folder.
 #[test]
 fn nextcloud_add_import_render_export() {
     use craft_nextcloud::testing::FakeServer;
@@ -334,7 +335,8 @@ fn nextcloud_add_import_render_export() {
         fake.add_file(&format!("/Photos/{name}"), lightcraft_mcp::encode_image("jpg", &img, 90).unwrap());
         fake.set_photo(&format!("/Photos/{name}"), 19675, 96, 64, epoch, json!({"Make": "Sony", "Model": "ILCE-7RM6"}));
     }
-    let headless = Headless::default();
+    // configured before anything runs: never this computer's nextcloud.json or keyring
+    let headless = Headless::new(lightcraft_engine::Session::new().with_fs());
     headless.session.remote.configure(RemoteConfig {
         settings_file: Some(dir.join("nextcloud.json")),
         cache_dir: Some(dir.join("cache")),

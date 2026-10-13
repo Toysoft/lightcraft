@@ -38,6 +38,10 @@ pub const KEEP: usize = 2;
 pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 /// Records kept in memory until the log file is attached.
 pub const MAX_PENDING: usize = 512;
+/// The HTTP library's targets: at TRACE they log raw requests and replies, Nextcloud app passwords
+/// included, so no directive lowers them past [`SECRET_CAP`].
+const SECRET_TARGETS: [&str; 2] = ["ureq", "ureq_proto"];
+const SECRET_CAP: LevelFilter = LevelFilter::Debug;
 /// The built-in filter when neither `LIGHTCRAFT_LOG` nor `RUST_LOG` says otherwise.
 pub const DEFAULT_FILTER: &str = "warn,lightcraft*=info";
 
@@ -88,9 +92,16 @@ impl Filter {
         f
     }
 
-    /// The level that applies to `target` (the most specific matching directive wins).
+    /// The level that applies to `target` (the most specific matching directive wins), at most
+    /// [`SECRET_CAP`] for [`SECRET_TARGETS`].
     pub fn level_for(&self, target: &str) -> LevelFilter {
-        self.directives.iter().filter(|(name, _)| matches(name, target)).max_by_key(|(name, _)| name.len()).map_or(self.default, |(_, level)| *level)
+        let level = self
+            .directives
+            .iter()
+            .filter(|(name, _)| matches(name, target))
+            .max_by_key(|(name, _)| name.len())
+            .map_or(self.default, |(_, level)| *level);
+        if SECRET_TARGETS.iter().any(|name| matches(name, target)) { level.min(SECRET_CAP) } else { level }
     }
 
     /// The most verbose level any target can reach (for `log::set_max_level`).
@@ -380,6 +391,20 @@ mod tests {
         assert_eq!(filter_spec(None, None), DEFAULT_FILTER);
         // An empty variable is the same as an unset one.
         assert_eq!(filter_spec(Some(""), Some("  ")), DEFAULT_FILTER);
+    }
+
+    /// The HTTP library never logs at TRACE, whatever `RUST_LOG` says: its raw requests and replies
+    /// carry Nextcloud app passwords.
+    #[test]
+    fn the_http_library_never_logs_app_passwords() {
+        for spec in ["trace", "ureq=trace,ureq_proto=trace", "ureq*=trace"] {
+            let f = Filter::parse(spec);
+            for target in ["ureq", "ureq::unversioned::transport", "ureq_proto", "ureq_proto::client"] {
+                assert_eq!(f.level_for(target), LevelFilter::Debug, "{spec} {target}");
+            }
+        }
+        assert_eq!(Filter::parse("trace").level_for("lightcraft_engine::remote"), LevelFilter::Trace);
+        assert_eq!(Filter::parse("ureq=off").level_for("ureq"), LevelFilter::Off);
     }
 
     /// `LIGHTCRAFT_LOG` keeps working exactly as it did with the old stderr-only logger.

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use craft_nextcloud::RemotePath;
 use lightcraft_catalog::{MediaKind, is_remote};
 
+use super::originals::CACHE_IN_USE;
 use super::{NOT_DOWNLOADED, Remote};
 use crate::files::{decode_upright_srgb, load_bytes, probe_bytes};
 use crate::media::{ProbeInfo, SourceLevel};
@@ -58,7 +59,8 @@ pub(crate) fn route(s: &mut crate::Session) {
                 return fs(path, max_edge);
             }
             match with_original(&r, path, |local| fs(local, max_edge)) {
-                Err(e) if e == NOT_DOWNLOADED && previewed(path) && stand_in_allowed(max_edge) => {
+                // (no original here: not downloaded, or another process has the download cache)
+                Err(e) if (e == NOT_DOWNLOADED || e == CACHE_IN_USE) && previewed(path) && stand_in_allowed(max_edge) => {
                     let edge = u32::try_from(max_edge.min(MAX_SERVER_PREVIEW)).unwrap_or(1).max(1);
                     let bytes = r.server_preview(&parse(path)?, edge)?.ok_or(e)?;
                     load_bytes(&bytes, max_edge)

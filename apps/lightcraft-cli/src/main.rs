@@ -109,6 +109,10 @@ USAGE:
       <config>/camera-profiles, or $LIGHTCRAFT_CAMERA_PROFILES). Raws of a profiled model then
       take their colour from the profile and only their tone from their own JPEG.
   lightcraft-cli --version | --help
+
+ENVIRONMENT:
+  LIGHTCRAFT_CACHE_DIR=DIR   keep downloaded Nextcloud originals in DIR/nextcloud instead of the platform
+                             cache folder (empty = no cache: nothing is downloaded; see docs/nextcloud.md)
 ";
 
 #[cfg(feature = "dhat-heap")]
