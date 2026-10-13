@@ -2,6 +2,10 @@
 
 ## 2026-10-13
 
+### Faster Build Smart Previews
+- Build Smart Previews works on several photos at once, up to four on a machine with 16 or more cores (issue #1492).
+  On a 16-core Mac, 24 raws took 2.6 s instead of 5.8 s (Compact) and 3.1 s instead of 8.3 s (Lossless).
+
 ### Slider drags on large raws
 - Dragging a slider no longer re-renders the edited photo's filmstrip thumbnail on every frame; it follows once you
   let go. On a 64 MP raw the first of those renders decoded the whole file again, which held up the loupe's
