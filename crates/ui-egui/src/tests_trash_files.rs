@@ -284,3 +284,34 @@ fn no_shortcut_can_move_files_without_the_question() {
     let ids: Vec<&str> = crate::shortcuts::bindable().iter().map(|b| b.id).collect();
     assert!(ids.contains(&"dialog.trashFiles") && !ids.contains(&"photo.trashFiles"), "only the question");
 }
+
+/// Move Files to Trash…: in the nine languages LightCraft had when this was written, none of the words stay
+/// English. (A string with no entry in a language's catalog is shown as written, so nothing else fails when
+/// one is forgotten. A language added later is not asked for them here: it shows them in English until it
+/// is translated.)
+#[test]
+fn the_words_of_moving_files_to_the_trash_are_in_every_language() {
+    let words = [
+        "Move Files to Trash",
+        "Move Files to Trash…",
+        "Move All Files in Recently Deleted to Trash…",
+        "Moving files to the Trash is not available here yet",
+        "Recently Deleted is empty",
+        "No photos of the library are selected",
+        "Erase Files",
+        "Move to Trash",
+        "Move this photo's file to the Trash?",
+        "The photos leave the library, also Recently Deleted. Their files go to the system Trash, with their XMP sidecars.",
+        "Undo brings the photos back and moves the files back, as long as they are still in the Trash.",
+        "This photo is on a disk that has no Trash. Erase its file for good?",
+        "This cannot be undone: the files are not kept anywhere.",
+        "Only these files are erased; XMP sidecars beside them stay.",
+        "Cancel leaves these photos in the library and their files where they are.",
+    ];
+    use crate::i18n::Locale::{De, Es, Fr, Ja, PtBr, Ru, Uk, ZhHans, ZhHant};
+    for language in [De, Es, Fr, Ja, PtBr, Ru, Uk, ZhHans, ZhHant] {
+        for word in words {
+            assert_ne!(language.tr(word), word, "{language:?} has no entry for {word:?}");
+        }
+    }
+}
