@@ -200,10 +200,17 @@ pub fn apply(img: &mut Rgba8, o: Overlay, plan: &Plan<'_>, mask: Option<&Plane>,
         }
         Overlay::AllMasks { view, color, opacity } => {
             if let Some(planes) = masks {
-                for a in planes {
-                    if (a.width, a.height) == (img.width, img.height) {
-                        mask_view(img, a, view, color, opacity);
+                let mut matching = planes.iter().filter(|a| (a.width, a.height) == (img.width, img.height));
+                if let Some(first) = matching.next() {
+                    let mut union = first.clone();
+                    for a in matching {
+                        for (combined, alpha) in union.data.iter_mut().zip(&a.data) {
+                            *combined = combined.max(*alpha);
+                        }
                     }
+                    // Paint the union once: repainting a full view for each mask erases earlier
+                    // regions or compounds their tint. Max matches the additive mask operation.
+                    mask_view(img, &union, view, color, opacity);
                 }
             }
         }
@@ -425,7 +432,6 @@ mod tests {
             components: vec![MaskComponent { name: None, op: MaskOp::Add, invert: false, shape: right }],
             ..Default::default()
         });
-        let plain = render(&src, &info, &s, &RenderRequest::fit(80, 40)).image;
         let o = Overlay::AllMasks { view: MaskView::WhiteOnBlack, color: [255, 0, 0], opacity: 100 };
         let img = render(&src, &info, &s, &RenderRequest { overlay: o, ..RenderRequest::fit(80, 40) }).image;
         let (in_l, in_r, mid) = (20 * 80 + 12, 20 * 80 + 60, 20 * 80 + 40);
@@ -435,11 +441,64 @@ mod tests {
         // a hidden mask is skipped
         s.masks[1].visible = false;
         let img2 = render(&src, &info, &s, &RenderRequest { overlay: o, ..RenderRequest::fit(80, 40) }).image;
-        assert_eq!(img2.data[in_r], plain.data[in_r], "hidden right mask not painted");
+        assert_eq!(img2.data[in_r], [0, 0, 0, 255], "hidden right mask leaves the overlay background black");
         assert_eq!(img2.data[in_l], [255; 4], "visible left mask still painted");
         // parts round trip and a stable, distinct cache key
         let (k, v) = o.to_parts();
         assert_eq!(Overlay::from_parts(k, v), o);
         assert_ne!(o.key(), Overlay::Mask { id: 1, view: MaskView::WhiteOnBlack, color: [255, 0, 0], opacity: 100 }.key());
+    }
+
+    #[test]
+    fn all_masks_overlay_combines_coverage_once_in_every_view() {
+        let src = Rgb32f::filled(4, 1, [0.1; 3]);
+        let s = DevelopSettings::default();
+        let plan = crate::plan(&src, &SourceInfo::default(), &s, &RenderRequest::fit(4, 1));
+        let original = Rgba8::filled(4, 1, [100, 150, 200, 255]);
+        // Disjoint full-coverage pixels, a shared feathered pixel, and an unmasked pixel.
+        let left = Plane { width: 4, height: 1, data: vec![1.0, 0.0, 0.5, 0.0] };
+        let right = Plane { width: 4, height: 1, data: vec![0.0, 1.0, 0.5, 0.0] };
+        // Same sample count, different dimensions: it must not enter the union.
+        let wrong_size = Plane::filled(2, 2, 1.0);
+        let cases = [
+            (MaskView::Color, [[170, 95, 110, 255], [170, 95, 110, 255], [135, 123, 155, 255], [100, 150, 200, 255]]),
+            (MaskView::ColorOnBw, [[191, 91, 81, 255], [191, 91, 81, 255], [167, 117, 112, 255], [143, 143, 143, 255]]),
+            (MaskView::ImageOnBlack, [[100, 150, 200, 255], [100, 150, 200, 255], [50, 75, 100, 255], [0, 0, 0, 255]]),
+            (MaskView::ImageOnWhite, [[100, 150, 200, 255], [100, 150, 200, 255], [178, 203, 228, 255], [255; 4]]),
+            (MaskView::WhiteOnBlack, [[255; 4], [255; 4], [128, 128, 128, 255], [0, 0, 0, 255]]),
+        ];
+        for (view, expected) in cases {
+            let o = Overlay::AllMasks { view, color: [240, 40, 20], opacity: 50 };
+            for planes in [
+                vec![left.clone(), right.clone()],
+                vec![right.clone(), left.clone()],
+                vec![wrong_size.clone(), left.clone(), wrong_size.clone(), right.clone()],
+            ] {
+                let mut img = original.clone();
+                apply(&mut img, o, &plan, None, Some(&planes));
+                assert_eq!(img.data, expected, "{view:?}: union is independent of mask order and opacity is applied once");
+            }
+            // A matching plane with no coverage still draws the selected view's background.
+            let mut img = original.clone();
+            apply(&mut img, o, &plan, None, Some(&[Plane::new(4, 1)]));
+            assert_eq!(img.data, vec![expected[3]; 4], "{view:?}: empty coverage draws the background");
+        }
+    }
+
+    #[test]
+    fn all_masks_overlay_without_matching_planes_leaves_image_unchanged() {
+        let src = Rgb32f::filled(4, 1, [0.1; 3]);
+        let s = DevelopSettings::default();
+        let plan = crate::plan(&src, &SourceInfo::default(), &s, &RenderRequest::fit(4, 1));
+        let original = Rgba8::filled(4, 1, [100, 150, 200, 255]);
+        let wrong_size = [Plane::filled(2, 2, 1.0)];
+        for view in MaskView::ALL {
+            let o = Overlay::AllMasks { view, color: [240, 40, 20], opacity: 50 };
+            for planes in [None, Some([].as_slice()), Some(wrong_size.as_slice())] {
+                let mut img = original.clone();
+                apply(&mut img, o, &plan, None, planes);
+                assert_eq!(img, original, "{view:?}: no matching planes draw nothing");
+            }
+        }
     }
 }
