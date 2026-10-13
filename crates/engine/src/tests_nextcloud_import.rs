@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use craft_nextcloud::testing::Fault;
 
-use lightcraft_catalog::{MediaKind, Op, Photo, Source};
+use lightcraft_catalog::{MediaKind, Op, Photo, PhotoId, Source};
 use lightcraft_codecs::{ChromaSubsampling, EncodeImage, EncodeMeta, Samples, encode_jpeg};
 use serde_json::{Value, json};
 
@@ -130,7 +130,7 @@ fn import_without_memories_probes_headers() {
     let (mut s, fake, _d) = signed_in("import-headers");
     // small enough to be read whole: described from its bytes (oriented)
     fake.add_file("/Photos/x.jpg", jpeg(96, 64, Some(6)));
-    // a raw past the 1 MiB window: only its metadata counts, its size stays unknown
+    // a raw past the 1 MiB window: its metadata and the size its header records (R29)
     let meta = lightcraft_meta::Metadata {
         make: Some("Sony".into()),
         model: Some("ILCE-7RM6".into()),
@@ -161,15 +161,56 @@ fn import_without_memories_probes_headers() {
     assert_eq!(x.captured.as_deref(), Some("2024-09-10T12:34:56"));
     assert_eq!((x.meta.camera.as_str(), x.content_hash.as_deref()), ("Canon EOS R8", None));
     let big = photo(&s, &remote(&fake, "Photos/big.dng"));
-    assert_eq!((big.width, big.height, big.kind, big.format.as_str(), big.file_size), (0, 0, MediaKind::Raw, "DNG", 2 << 20));
+    assert_eq!((big.width, big.height, big.kind, big.format.as_str(), big.file_size), (32, 24, MediaKind::Raw, "DNG", 2 << 20));
     assert_eq!((big.meta.camera.as_str(), big.meta.lens.as_str(), big.meta.shutter.as_str()), ("Sony ILCE-7RM6", "FE 50mm F1.2 GM", "1/250"));
     assert_eq!((big.meta.aperture, big.meta.iso, big.captured.as_deref()), (Some(1.2), Some(800), Some("2025-01-02T03:04:05")));
     assert!(big.preview_only.is_none(), "nothing from part of a raw beyond its metadata");
     let jpg = photo(&s, &remote(&fake, "Photos/big.jpg"));
-    assert_eq!((jpg.width, jpg.height, jpg.meta.camera.as_str()), (0, 0, "Canon EOS R8"), "dimensions stay as listed");
+    assert_eq!((jpg.width, jpg.height, jpg.meta.camera.as_str()), (0, 0, "Canon EOS R8"), "no size in its EXIF: unknown");
     assert_eq!(jpg.captured.as_deref(), Some("2024-09-10T12:34:56"));
     let motion = photo(&s, &remote(&fake, "Photos/motion.jpg"));
     assert_eq!((motion.width, motion.height, motion.meta.camera.as_str()), (0, 0, "Canon EOS R8"));
+    assert_eq!(fake.downloads(), 0);
+}
+
+/// R31/R29: the metadata phase gives a photo the capture time its file's header (or Memories'
+/// `datetaken`) records over the one it had: a listing's is the Memories timeline's UTC instant, hours
+/// off the camera's local time. A photo nothing sized gets the size its header records; one with a
+/// size keeps it.
+#[test]
+fn metadata_gives_local_capture_times_and_missing_sizes() {
+    let (mut s, fake, _d) = signed_in("import-local-times");
+    fake.enable_memories();
+    // on the timeline: Memories' `datetaken`
+    fake.add_file("/Photos/a.ARW", raw_blob(3000));
+    fake.set_photo("/Photos/a.ARW", 19675, 6000, 4000, 1_700_000_000, json!({"Make": "Sony", "Model": "ILCE-7RM6"}));
+    // not on it, and past the first window: the header's EXIF
+    let meta = lightcraft_meta::Metadata {
+        make: Some("Sony".into()),
+        model: Some("ILCE-7RM6".into()),
+        capture_time: lightcraft_meta::DateTime::parse_exif("2025:01:02 03:04:05"),
+        ..Default::default()
+    };
+    let mut dng = crate::tests_xmp::synthetic_dng_with(None, meta);
+    dng.resize(2 << 20, 0);
+    for f in ["/Photos/b.dng", "/Photos/c.dng"] {
+        fake.add_file(f, dng.clone());
+    }
+    // a and b are in the library already, as a timeline listing left them: an hour or two early (the
+    // fake serves one time for the timeline and `datetaken`), and sized
+    for (id, name, captured) in [(1, "a.ARW", "2023-11-14T21:13:20"), (2, "b.dng", "2025-01-02T01:04:05")] {
+        let mut p = Photo::new(PhotoId(id), Source::File { path: remote(&fake, &format!("Photos/{name}")) }, name, "", 4000, 6000, "2026-10-13");
+        p.kind = MediaKind::Raw;
+        p.captured = Some(captured.into());
+        s.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
+    }
+    import(&mut s, &[remote(&fake, "Photos")]);
+    let a = photo(&s, &remote(&fake, "Photos/a.ARW"));
+    assert_eq!((a.captured.as_deref(), a.meta.camera.as_str()), (Some("2023-11-14T22:13:20"), "Sony ILCE-7RM6"), "Memories' datetaken");
+    let b = photo(&s, &remote(&fake, "Photos/b.dng"));
+    assert_eq!((b.captured.as_deref(), b.width, b.height), (Some("2025-01-02T03:04:05"), 4000, 6000), "the header's time; its size kept");
+    let c = photo(&s, &remote(&fake, "Photos/c.dng"));
+    assert_eq!((c.captured.as_deref(), c.width, c.height), (Some("2025-01-02T03:04:05"), 32, 24), "the size its header records");
     assert_eq!(fake.downloads(), 0);
 }
 

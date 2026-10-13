@@ -2,8 +2,8 @@
 //! filesystem ones ([`route`]). A remote photo loads from its local original ([`Remote::local_original`]:
 //! downloaded for interactive work only); background work makes a non-raw image's thumbnail from the
 //! server's preview instead, and otherwise fails (a smart preview stands in). Embedded previews are the
-//! server's, probes read the file's first bytes, and `content_hash` stays `None` (keys stay
-//! `file:{path}:{size}`).
+//! server's (a raw's own, from the file's first MiB, when the server has none), probes read the file's
+//! first bytes, and `content_hash` stays `None` (keys stay `file:{path}:{size}`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use lightcraft_catalog::{MediaKind, is_remote};
 
 use super::originals::CACHE_IN_USE;
 use super::{NOT_DOWNLOADED, Remote};
-use crate::files::{decode_upright_srgb, load_bytes, probe_bytes};
+use crate::files::{decode_upright_srgb, embedded_preview_srgb, load_bytes, probe_bytes};
 use crate::media::{ProbeInfo, SourceLevel};
 
 /// Bytes read from the start of a remote file to probe it (see the NC5 commit for the measurement).
@@ -22,6 +22,10 @@ pub(crate) const HEADER_WINDOW: u64 = 256 << 10;
 pub(crate) const HEADER_WINDOW_RETRY: u64 = 4 << 20;
 /// The largest server preview asked for.
 const MAX_SERVER_PREVIEW: usize = 4096;
+/// Bytes read from the start of a raw the server has no preview of (no preview provider for its
+/// format), for the raw's own embedded preview. Measured on real Canon R8 CR3s: their `PRVW` JPEG
+/// (1620×1080) ends at 435 and 524 KB; 512 KiB missed one.
+const RAW_PREVIEW_WINDOW: u64 = 1 << 20;
 /// Images (not raws) a background load decodes from the server's preview when the original isn't here.
 const PREVIEWED: [&str; 13] = ["jpg", "jpeg", "png", "tif", "tiff", "webp", "gif", "bmp", "heic", "heif", "avif", "jxl", "psd"];
 
@@ -85,9 +89,14 @@ pub(crate) fn route(s: &mut crate::Session) {
             if !is_remote(path) {
                 return fs(path, max_edge);
             }
+            let rp = RemotePath::parse(path).ok()?;
             let edge = u32::try_from(max_edge.min(MAX_SERVER_PREVIEW)).unwrap_or(1).max(1);
-            let bytes = r.server_preview(&RemotePath::parse(path).ok()?, edge).ok()??;
-            decode_upright_srgb(&bytes, max_edge)
+            match r.server_preview(&rp, edge).ok()? {
+                Some(bytes) => decode_upright_srgb(&bytes, max_edge),
+                // (none when its start doesn't hold the preview)
+                None if !previewed(path) => embedded_preview_srgb(&r.read_head(&rp, RAW_PREVIEW_WINDOW).ok()?, max_edge),
+                None => None,
+            }
         }));
     }
     if let Some(fs) = s.media.file_probe.clone() {

@@ -615,3 +615,23 @@ fn offline_copies_open_at_once_after_a_restart() {
     assert!(!s.remote.exists(&y));
     assert_eq!(fake.requests(), before);
 }
+
+/// R32: a raw the server has no preview of (no preview provider for its format: all CR3s on a live
+/// server) shows the embedded preview in its first MiB, from a Range read, in the grid and the quick
+/// view alike. A preview past that window isn't read: none, as before.
+#[test]
+fn raws_without_a_server_preview_show_their_own() {
+    let (s, fake, d) = signed_in("raw-previews");
+    fake.add_file("/Photos/x.CR3", cr3_with_preview(96, 64, 5 << 20));
+    let small = cr3_with_preview(96, 64, 0);
+    let mut far = small[..24].to_vec();
+    far.resize(24 + (1 << 20), 0);
+    far.extend_from_slice(&small[24..]);
+    fake.add_file("/Photos/far.CR3", far);
+    let preview = s.media.preview_loader.clone().unwrap();
+    let img = preview(&remote(&fake, "Photos/x.CR3"), 512).unwrap();
+    assert_eq!((img.width, img.height), (96, 64));
+    assert!(preview(&remote(&fake, "Photos/far.CR3"), 512).is_none());
+    assert_eq!(fake.downloads(), 0);
+    assert!(cached_files(&d).is_empty());
+}

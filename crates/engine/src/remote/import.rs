@@ -401,8 +401,7 @@ fn walk(job: &Job, row: &TaskGuard, timeline: &HashMap<u64, MemoriesPhoto>) -> R
 fn listed(e: &Entry, day: Option<&MemoriesPhoto>) -> ProbeInfo {
     let format = crate::files::ext_upper(&e.name);
     // (a size no decoder would open is the server's mistake: unknown)
-    let max = lightcraft_codecs::DecodeOptions::default().max_pixels;
-    let (width, height) = day.map(|d| (d.w, d.h)).filter(|(w, h)| *w > 0 && *h > 0 && u64::from(*w) * u64::from(*h) <= max).unwrap_or((0, 0));
+    let (width, height) = day.map_or((0, 0), |d| sane_size(d.w, d.h));
     ProbeInfo {
         width,
         height,
@@ -410,6 +409,7 @@ fn listed(e: &Entry, day: Option<&MemoriesPhoto>) -> ProbeInfo {
         format: if format == "JPG" { "JPEG".into() } else { format },
         kind: if hooks::previewed(&e.name) { MediaKind::Image } else { MediaKind::Raw },
         file_size: e.size,
+        // (the timeline's epoch is the UTC instant: an estimate until the metadata phase reads the local time)
         captured: day.and_then(|d| d.epoch).and_then(wall_time),
         content_hash: None,
         ..ProbeInfo::default()
@@ -495,10 +495,21 @@ fn metadata(remote: &Remote, memories: Option<Memories<'_>>, t: &Todo) -> Result
     Ok((read, false))
 }
 
-/// The metadata and capture time in a file's first bytes `head`.
+/// The metadata, capture time and size (upright, as the file records it) in a file's first bytes `head`.
 fn metadata_only(head: &[u8]) -> ProbeInfo {
-    let (meta, captured) = crate::files::meta_of(&lightcraft_meta::extract(head));
-    ProbeInfo { meta, captured, ..ProbeInfo::default() }
+    let read = lightcraft_meta::extract(head);
+    let (meta, captured) = crate::files::meta_of(&read);
+    let (mut width, mut height) = sane_size(read.width.unwrap_or(0), read.height.unwrap_or(0));
+    if read.orientation.is_some_and(|o| o.swaps_axes()) {
+        std::mem::swap(&mut width, &mut height);
+    }
+    ProbeInfo { meta, captured, width, height, ..ProbeInfo::default() }
+}
+
+/// `w`×`h`, or 0×0 (unknown) when it is empty or bigger than any decoder would open (a hostile value).
+fn sane_size(w: u32, h: u32) -> (u32, u32) {
+    let max = lightcraft_codecs::DecodeOptions::default().max_pixels;
+    if w > 0 && h > 0 && u64::from(w) * u64::from(h) <= max { (w, h) } else { (0, 0) }
 }
 
 /// Memories' EXIF details as the probe of the file would give them (no zero or negative exposure,
@@ -625,6 +636,17 @@ fn add(s: &mut Session, task: u64, photos: Vec<(String, ProbeInfo)>, tally: &mut
     s.remote.update_import(task, |r| r.undo = Some(mark));
 }
 
+/// The ops that fill what `ph` lacks from `info` (what its file, or Memories, says) and give it the
+/// capture time `info` has: a listing's is the Memories timeline's UTC instant, an estimate of the
+/// camera's local time that the file's EXIF (or Memories' `datetaken`) records.
+pub(crate) fn meta_ops(ph: &lightcraft_catalog::Photo, info: &ProbeInfo) -> Vec<Op> {
+    let mut ops = crate::cmd::convert::fill_missing_meta(ph.id, ph, info);
+    if ph.captured.is_some() && info.captured.is_some() && ph.captured != info.captured {
+        ops.push(Op::SetCaptured { id: ph.id, captured: info.captured.clone() });
+    }
+    ops
+}
+
 /// Fill what photos lack from the metadata `reads` (one pass over the catalog).
 fn fill(s: &mut Session, reads: Vec<MetaRead>, tally: &mut Tally) {
     let ids: HashMap<String, PhotoId> = {
@@ -640,10 +662,20 @@ fn fill(s: &mut Session, reads: Vec<MetaRead>, tally: &mut Tally) {
     };
     for MetaRead { path, info, described } in reads {
         let Some(ph) = ids.get(&path).and_then(|id| s.catalog.photo(*id)) else { continue };
-        let mut ops = crate::cmd::convert::fill_missing_meta(ph.id, ph, &info);
+        let mut ops = meta_ops(ph, &info);
         if described {
             // (the size stays the listing's)
             ops.extend(crate::cmd::convert::content_op(ph.id, ph, ProbeInfo { file_size: ph.file_size, ..info }));
+        } else if (ph.width == 0 || ph.height == 0) && info.width > 0 && info.height > 0 {
+            // the size the file's header records, for a photo Memories didn't size (never over one it did)
+            ops.push(Op::SetContent {
+                id: ph.id,
+                width: info.width,
+                height: info.height,
+                file_size: ph.file_size,
+                content_hash: ph.content_hash.clone(),
+                preview_only: ph.preview_only.clone(),
+            });
         }
         if ops.is_empty() {
             continue;

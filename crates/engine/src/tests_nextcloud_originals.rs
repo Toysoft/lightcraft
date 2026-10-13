@@ -330,6 +330,8 @@ fn first_download_completes_the_record() {
     let (xp, yp) = (remote(&fake, "Photos/x.jpg"), remote(&fake, "Photos/y.dng"));
     let x = add(&mut s, 1, &xp, MediaKind::Image);
     let y = add(&mut s, 2, &yp, MediaKind::Raw);
+    // R31: listed from the Memories timeline (its UTC instant), two hours early
+    s.catalog.apply(Op::SetCaptured { id: x, captured: Some("2024-09-10T10:34:56".into()) }).unwrap();
     // the grid's thumbnail stands in the server's preview
     let thumb = crate::memory::in_background(|| s.source_now(x, SourceLevel::Thumb)).unwrap();
     assert_eq!((thumb.width, thumb.height), (64, 32));
