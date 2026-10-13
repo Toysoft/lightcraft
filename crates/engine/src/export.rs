@@ -626,6 +626,32 @@ pub enum MetadataPolicy {
     None,
 }
 
+/// Transfer curve of an HDR AVIF export (`hdrTransfer`): PQ (absolute, SDR white at 203 cd/m²) or
+/// HLG (relative to the display; BT.2100 with SDR white at signal 0.75).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HdrCurve {
+    #[default]
+    Pq,
+    Hlg,
+}
+
+impl HdrCurve {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "pq" => Some(Self::Pq),
+            "hlg" => Some(Self::Hlg),
+            _ => None,
+        }
+    }
+    fn codec(self) -> lightcraft_codecs::HdrTransfer {
+        match self {
+            Self::Pq => lightcraft_codecs::HdrTransfer::Pq,
+            Self::Hlg => lightcraft_codecs::HdrTransfer::Hlg,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ExportOptions {
@@ -684,6 +710,8 @@ pub struct ExportOptions {
     pub add_to_photos: bool,
     /// The Photos album they go into, made when missing (empty = none).
     pub photos_album: String,
+    /// The curve of an HDR AVIF: PQ (default) or HLG.
+    pub hdr_transfer: HdrCurve,
 }
 
 impl Default for ExportOptions {
@@ -713,6 +741,7 @@ impl Default for ExportOptions {
             jxl_progressive: false,
             add_to_photos: false,
             photos_album: String::new(),
+            hdr_transfer: HdrCurve::Pq,
         }
     }
 }
@@ -754,6 +783,7 @@ pub const OPTION_PARAMS: &[&str] = &[
     "jxlProgressive",
     "addToPhotos",
     "photosAlbum",
+    "hdrTransfer",
 ];
 
 /// Why an export can't add its files to Apple Photos on this platform (`None`: it can, when the
@@ -926,6 +956,7 @@ impl ExportOptions {
                 }
                 "sharpen" => one_of(k, v, &["none", "screen", "matte", "glossy"])?,
                 "sharpenAmount" => one_of(k, v, &["low", "standard", "high"])?,
+                "hdrTransfer" => one_of(k, v, &["pq", "hlg"])?,
                 "conflict" => one_of(k, v, &["unique", "overwrite", "skip"])?,
                 "tiffCompression" => one_of(k, v, &["none", "lzw", "zip", "deflate"])?,
                 "jxlEffort" => one_of(k, v, &["fast", "normal"])?,
@@ -1064,6 +1095,7 @@ impl ExportOptions {
             jxl_progressive: p.get("jxlProgressive").and_then(Value::as_bool).unwrap_or(d.jxl_progressive),
             add_to_photos: p.get("addToPhotos").and_then(Value::as_bool).unwrap_or(d.add_to_photos),
             photos_album: s("photosAlbum").map_or(d.photos_album, |a| a.trim().to_string()),
+            hdr_transfer: s("hdrTransfer").and_then(HdrCurve::parse).unwrap_or(d.hdr_transfer),
         }
     }
 
@@ -1462,7 +1494,7 @@ pub fn encode_deep(img: &DeepImage, o: &ExportOptions, meta: Option<&Metadata>) 
             return lightcraft_raw::write_rendered_dng(img.width, img.height, v, &img.space.rgb_space(), &m, xmp.clone()).map_err(|e| e.to_string());
         }
         (ExportFormat::Avif, DeepSamples::F32(v)) if img.space == OutputSpace::Rec2020 => {
-            lightcraft_codecs::encode_avif_pq(w, h, v, o.quality, 8, &meta)
+            lightcraft_codecs::encode_avif_hdr(w, h, v, o.quality, 8, &meta, o.hdr_transfer.codec())
         }
         (ExportFormat::Avif, _) => encode::encode_avif(&e, o.quality, 8, &meta),
         (ExportFormat::Jxl, DeepSamples::F32(_)) if img.space == OutputSpace::Rec2020 => {
@@ -1548,9 +1580,11 @@ pub struct Exported {
 /// Output size of photo `p` under `o` (its cropped full size when `o.resize` is `None`).
 pub fn output_size(p: &lightcraft_catalog::Photo, o: &ExportOptions) -> (usize, usize) {
     let (w, h) = lightcraft_pipeline::native_output_size(p.width.max(1) as usize, p.height.max(1) as usize, &p.develop);
+    // whole pixels first: a crop's float noise (5999.999… for 6000) must not decide a half-pixel tie
+    let (w, h) = (w.round().max(1.0), h.round().max(1.0));
     match &o.resize {
         Some(r) => r.apply(w, h),
-        None => ((w.round() as usize).max(1), (h.round() as usize).max(1)),
+        None => (w as usize, h as usize),
     }
 }
 
@@ -2706,6 +2740,47 @@ mod tests {
         // never larger than the encoders' limit, never empty
         assert_eq!(size(json!({"percent": 10000, "dontEnlarge": false}), 6000.0, 4000.0), Some((65535, 43690)));
         assert_eq!(size(json!({"width": 1}), 6000.0, 40.0).map(|s| s.1), Some(1));
+    }
+
+    #[test]
+    fn resize_size_survives_the_render() {
+        // the render fits the photo into the size `apply` gives; that must not cost a pixel (#1312)
+        let cropped = |r: Resize, w: u32, h: u32, x1: f64| {
+            let mut p = named("IMG.ARW");
+            (p.width, p.height) = (w, h);
+            std::sync::Arc::make_mut(&mut p.develop).crop.geometry.rect = lightcraft_geom::Rect::new(0.0, 0.0, x1, 1.0);
+            let (bw, bh) = output_size(&p, &ExportOptions { resize: Some(r), ..Default::default() });
+            lightcraft_pipeline::output_size(w as usize, h as usize, &p.develop, &lightcraft_pipeline::RenderRequest::fit(bw, bh))
+        };
+        let rendered = |r: Resize, w: u32, h: u32| cropped(r, w, h, 1.0);
+        let mode = |mode: ResizeMode, value: f32, height: u32| Resize { mode, value, height, dont_enlarge: true };
+        // a frame a hair narrower than 3:2 (a raw's default crop in floats) puts 1333 × 1.5 just under 1999.5
+        let hair = 1.0 - 1e-9;
+        assert_eq!(cropped(Resize::long_edge(2000), 6000, 4000, hair), (2000, 1333));
+        assert_eq!(cropped(Resize::long_edge(2048), 6000, 4000, hair), (2048, 1365));
+        assert_eq!(cropped(mode(ResizeMode::Width, 2000.0, 0), 6000, 4000, hair), (2000, 1333));
+        assert_eq!(cropped(mode(ResizeMode::ShortEdge, 1333.0, 0), 6000, 4000, hair), (2000, 1333));
+        assert_eq!(cropped(mode(ResizeMode::Height, 1333.0, 0), 6000, 4000, hair), (2000, 1333));
+        assert_eq!(rendered(Resize::long_edge(2000), 4000, 6000), (1333, 2000));
+        // 3:2, 4:3, 16:9, 1:1 and their portraits, every mode: the render keeps what `apply` says
+        for (w, h) in [(6000u32, 4000u32), (6240, 4160), (4032, 3024), (5184, 3888), (3840, 2160), (6000, 3375), (4000, 4000)] {
+            for (w, h) in [(w, h), (h, w)] {
+                for value in [1000.0, 1080.0, 1333.0, 2000.0, 2048.0, 2500.0, 3000.0] {
+                    for r in [
+                        Resize::long_edge(value as u32),
+                        mode(ResizeMode::ShortEdge, value, 0),
+                        mode(ResizeMode::Width, value, 0),
+                        mode(ResizeMode::Height, value, 0),
+                        mode(ResizeMode::Dimensions, value, 1365),
+                        mode(ResizeMode::Megapixels, value / 1000.0, 0),
+                        mode(ResizeMode::Percent, value / 100.0, 0),
+                    ] {
+                        let want = r.apply(w.into(), h.into());
+                        assert_eq!(rendered(r, w, h), want, "{r:?} on {w}×{h}");
+                    }
+                }
+            }
+        }
     }
 
     /// A flat field of a saturated green inside Display P3 but outside sRGB, rendered into `space`.
