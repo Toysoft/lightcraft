@@ -211,7 +211,8 @@ fn op_variants_are_versioned() {
             Op::SetKeyword { .. } => 5,
             Op::SetFolderRecord { .. } => 6,
             Op::SetAsShotWb { .. } => 7,
-            Op::SetAlbumPhotoOrder { .. } => 8,
+            Op::SetHistoryCursor { .. } => 8,
+            Op::SetAlbumPhotoOrder { .. } => 9,
         }
     }
     let newest = since(&Op::SetAlbumPhotoOrder { id: AlbumId(1), order: vec![] });
