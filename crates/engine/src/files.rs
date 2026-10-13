@@ -182,6 +182,7 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
             content_hash,
             xmp: lightcraft_meta::embedded(bytes).xmp,
             preview_only: None,
+            orientation: Some(raw.orientation),
         });
     }
     let fmt = lightcraft_codecs::sniff(bytes).ok_or("unrecognized file format")?;
@@ -215,6 +216,7 @@ pub fn probe_bytes(name: &str, bytes: &[u8]) -> Result<ProbeInfo, String> {
         embedded_lens: None,
         xmp: None,
         preview_only: None,
+        orientation: Some(o),
     })
 }
 
@@ -2171,8 +2173,8 @@ mod tests {
         }
     }
 
-    /// Recognised raw containers we don't decode (Minolta MRW here: the preview's first byte is
-    /// overwritten in the file) import as preview only with the JPEG's size, instead of failing.
+    /// Recognised raw containers we can't decode (an MRW whose block header is damaged here; its preview's first
+    /// byte is overwritten, as in real MRW files) import as preview only with the JPEG's size, instead of failing.
     #[test]
     fn undecodable_container_with_a_preview_imports_as_preview_only() {
         let px: Vec<u8> = (0..40 * 30).flat_map(|i| [(i % 251) as u8, 128, 200]).collect();

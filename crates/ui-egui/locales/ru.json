@@ -579,7 +579,7 @@
   "Join the ArtCraft Discord": "Присоединяйтесь к Discord ArtCraft",
   "Join the ArtCraft Discord…": "Присоединиться к Discord ArtCraft…",
   "Keep in Local": "Оставить в «Локальном»",
-  "Keep it on a drive with room: smart previews are about 1 MB per photo. The thumbnail cache stays in the library.": "Храните их на диске со свободным местом: смарт-просмотр занимает около 1 МБ на фото. Кэш миниатюр остаётся в библиотеке.",
+  "Keep it on a drive with room: smart previews are about 1 MB per photo.": "Храните их на диске со свободным местом: смарт-просмотр занимает около 1 МБ на фото.",
   "Keyboard Shortcuts": "Сочетания клавиш",
   "Keyboard shortcuts": "Сочетания клавиш",
   "Keyword": "Ключевое слово",
@@ -841,6 +841,7 @@
   "Photos": "Фото",
   "Photos seen in Local but never added or changed leave the catalog when their folder hasn't been browsed for this long (checked when the library opens). Files stay on disk; browsing the folder shows them again.": "Фото, которые видели в «Локальном», но ни разу не добавляли и не меняли, исключаются из каталога, если папку не открывали так долго (проверяется при открытии библиотеки). Файлы остаются на диске; при просмотре папки они появятся снова.",
   "Photos that arrive in this folder (tethering, a scanner, a sync app) are added as soon as they're complete.": "Фото, поступающие в эту папку (тетеринг, сканер, приложение синхронизации), добавляются, как только будут готовы.",
+  "Photos in folders inside the watched folder are added too (hidden folders and the library's own folder are skipped).": "Фотографии из папок внутри отслеживаемой папки тоже добавляются (скрытые папки и папка самой библиотеки пропускаются).",
   "Pick": "Выбрать",
   "Pick a colour on the photo with the eyedropper.": "Выберите цвет на фото пипеткой.",
   "Pick the sharpest photo of each burst": "Выбирать самое чёткое фото в каждой серии",
@@ -2149,5 +2150,14 @@
   "Adding to Apple Photos": "Добавление в Apple Фото",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Графический процессор не найден: LightCraft выполняет рендеринг на CPU, а это намного медленнее. Подробности: Справка → Сведения о системе.",
   "On NixOS, start it from `nix develop`.": "В NixOS запускайте его из `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Файлы с тем же содержимым, что и другой файл этого импорта: импортируется только первый."
+  "Files with the same content as another file in this import: only the first is imported.": "Файлы с тем же содержимым, что и другой файл этого импорта: импортируется только первый.",
+  "Continue in Background": "Продолжить в фоне",
+  "Folder not found": "Папка не найдена",
+  "Dismiss": "Скрыть",
+  "Review…": "Просмотреть…",
+  "Open Synchronize Folder with what the scan found": "Открыть «Синхронизировать папку» с результатами поиска",
+  "You can go on working: a notice at the top left says when the scan is done.": "Можно продолжать работу: уведомление слева вверху сообщит, когда поиск завершится.",
+  "Render to DNG": "Отрисовать в DNG",
+  "Rendering to DNG": "Отрисовка в DNG",
+  "Render to DNG stopped unexpectedly": "Отрисовка в DNG неожиданно остановлена"
 }

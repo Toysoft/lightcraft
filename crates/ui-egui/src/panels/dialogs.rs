@@ -238,6 +238,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         Dialog::NewSmartAlbum { .. } => "Create Smart Album",
         Dialog::AllMetadata { .. } => "All Metadata",
         Dialog::SystemInfo { .. } => "System Info",
+        Dialog::ReportBug { .. } => "Report a Bug",
         Dialog::DenoiseModel { .. } => "AI Denoise Model",
         Dialog::FaceModel { info, .. } if info["download"].is_string() => "Download Face Model",
         Dialog::FaceModel { .. } => "Add Face Model",
@@ -290,6 +291,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
             Dialog::SmartRules { .. } => 680.0,
             Dialog::AllMetadata { .. } => 620.0,
             Dialog::FaceModel { .. } => 460.0,
+            Dialog::ReportBug { .. } => 560.0,
             Dialog::LightroomCatalog { .. } => 440.0,
             _ => 380.0,
         })
@@ -343,6 +345,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         }
                     });
                 }
+                Dialog::ReportBug { opts, rows, logs } => crate::bug_report::dialog_body(ui, &t, opts, rows, logs),
                 Dialog::DenoiseModel { info, accepted } => crate::panels::denoise::model_dialog(app, ui, &t, info, accepted),
                 Dialog::FaceModel { info, accepted, .. } => crate::panels::faces::model_dialog(app, ui, &t, info, accepted),
                 Dialog::SystemInfo { rows } => {
@@ -987,7 +990,9 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                 }
                 Dialog::Merge { opts } => crate::merge::body(app, ui, opts),
                 Dialog::Import { opts } => crate::import::body(app, ui, opts),
-                Dialog::Settings { tab } => crate::panels::settings::body(app, ui, tab),
+                // (Settings is never taller than `body_max`, so the scroll area round it never
+                // scrolls: its tab bar stays put and its pages scroll by themselves)
+                Dialog::Settings { tab } => crate::panels::settings::window(app, ui, tab, body_max),
                 Dialog::SamModel { error, .. } => sam_model_body(app, ui, error.as_deref()),
                 Dialog::KeywordTag {
                     editing,
@@ -1241,7 +1246,10 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     Dialog::KeywordTag { .. } => "Save",
                     Dialog::RemoveFolder { .. } => "Remove",
                     Dialog::LightroomCatalog { .. } => "Import Lightroom Catalog…",
+                    // the scan need not be waited for
+                    Dialog::SynchronizeFolder { counts: None, .. } => "Continue in Background",
                     Dialog::SynchronizeFolder { .. } => "Synchronize",
+                    Dialog::ReportBug { .. } => "Create Report",
                     Dialog::SamModel { then: Some(_), .. } if sam_installed => "Continue",
                     Dialog::SamModel { .. } if sam_installed || sam_running || sam_nowhere => "",
                     Dialog::SamModel { error, .. } if error.is_some() || sam_failed => "Try Again",
@@ -1250,12 +1258,10 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     _ => "OK",
                 };
                 // installing waits for the licence to be accepted
-                // (and Synchronize waits for the scan)
                 let can_confirm = informational
-                    || !matches!(
-                        &dlg,
-                        Dialog::DenoiseModel { accepted: false, .. } | Dialog::FaceModel { accepted: false, .. } | Dialog::SynchronizeFolder { counts: None, .. }
-                    )
+                    || !matches!(&dlg, Dialog::DenoiseModel { accepted: false, .. } | Dialog::FaceModel { accepted: false, .. })
+                        // (Synchronize, just after its button stopped being Continue in Background)
+                        && !(matches!(&dlg, Dialog::SynchronizeFolder { counts: Some(_), .. }) && !crate::sync::settled(app, ui.ctx()))
                         // smart-album rules that can't mean anything wait to be fixed
                         && !matches!(&dlg, Dialog::SmartRules { id, rules, .. } if !rules.check_for(&app.session.catalog, id.map(lightcraft_catalog::AlbumId)).is_empty());
                 let r = (!ok.is_empty()).then(|| ui.add_enabled(can_confirm, egui::Button::new(crate::i18n::tr(ok))));
@@ -1659,6 +1665,7 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
         Dialog::DenoiseModel { info, accepted } => crate::panels::denoise::install(app, info, *accepted),
         Dialog::FaceModel { path, info, accepted } => crate::panels::faces::install(app, path, info, *accepted),
         Dialog::AllMetadata { .. } | Dialog::SystemInfo { .. } | Dialog::WhatsNew => Ok(serde_json::Value::Null),
+        Dialog::ReportBug { opts, rows, logs } => crate::bug_report::create(app, opts, rows, logs),
         Dialog::Cull { reject_below, pick_best } => {
             let mut p = json!({"pickBest": pick_best});
             if *reject_below > 0.0 {

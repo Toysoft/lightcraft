@@ -826,7 +826,7 @@
   "Invert": "反転",
   "Invert Mask": "マスクを反転",
   "Keep in Local": "ローカルに残す",
-  "Keep it on a drive with room: smart previews are about 1 MB per photo. The thumbnail cache stays in the library.": "スマートプレビューは1枚あたり約1MBです。空き容量のあるドライブを指定してください。サムネイルキャッシュはライブラリに残ります",
+  "Keep it on a drive with room: smart previews are about 1 MB per photo.": "スマートプレビューは1枚あたり約1MBです。空き容量のあるドライブを指定してください。",
   "Keyboard Shortcuts": "キーボードショートカット",
   "Keyboard shortcuts": "キーボードショートカット",
   "Keyword": "キーワード",
@@ -1020,6 +1020,7 @@
   "Photos": "写真",
   "Photos seen in Local but never added or changed leave the catalog when their folder hasn't been browsed for this long (checked when the library opens). Files stay on disk; browsing the folder shows them again.": "ローカルで参照しただけの写真は、この期間フォルダを開いていなければカタログから外します。ファイルはディスクに残り、再びフォルダを開くと表示されます",
   "Photos that arrive in this folder (tethering, a scanner, a sync app) are added as soon as they're complete.": "このフォルダに転送された写真は、転送が完了すると自動で追加されます",
+  "Photos in folders inside the watched folder are added too (hidden folders and the library's own folder are skipped).": "監視フォルダー内のフォルダーにある写真も追加されます（隠しフォルダーとライブラリ自体のフォルダーはスキップされます）。",
   "Pick": "採用",
   "Pick a colour on the photo with the eyedropper.": "スポイトで写真の色を選択してください",
   "Pick the sharpest photo of each burst": "連写ごとに最も鮮明な写真を採用",
@@ -1959,5 +1960,14 @@
   "Adding to Apple Photos": "Appleの写真に追加中",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "グラフィックプロセッサが見つかりません。LightCraftはCPUで描画するため、かなり遅くなります。詳細は「ヘルプ → システム情報」を参照してください。",
   "On NixOS, start it from `nix develop`.": "NixOSでは `nix develop` から起動してください。",
-  "Files with the same content as another file in this import: only the first is imported.": "この読み込み内の別のファイルと内容が同じファイルです。最初のファイルだけが読み込まれます。"
+  "Files with the same content as another file in this import: only the first is imported.": "この読み込み内の別のファイルと内容が同じファイルです。最初のファイルだけが読み込まれます。",
+  "Continue in Background": "バックグラウンドで続行",
+  "Folder not found": "フォルダが見つかりません",
+  "Dismiss": "閉じる",
+  "Review…": "確認…",
+  "Open Synchronize Folder with what the scan found": "スキャンの結果を「フォルダを同期」で開く",
+  "You can go on working: a notice at the top left says when the scan is done.": "作業を続けられます。スキャンが終わると左上に通知が表示されます。",
+  "Render to DNG": "DNG にレンダリング",
+  "Rendering to DNG": "DNG にレンダリング中",
+  "Render to DNG stopped unexpectedly": "DNG へのレンダリングが予期せず停止しました"
 }

@@ -46,6 +46,7 @@ mod lightroom_archive;
 pub mod lightroom_catalog;
 pub mod lightroom_folder;
 pub mod lightroom_job;
+mod lightroom_smart;
 mod lightroom_sqlite;
 pub mod logging;
 pub mod media;
@@ -58,10 +59,12 @@ pub mod preset_luminar;
 pub mod presets;
 pub mod proof;
 pub mod rename;
+pub mod render_dng;
 pub mod segment;
 pub mod sidecar;
 pub mod smart;
 pub mod sync;
+pub mod upright_transfer;
 mod view;
 pub mod walk;
 
@@ -176,15 +179,16 @@ pub struct Session {
     pub filter: Filter,
     pub sort: Sort,
     pub selection: Selection,
-    /// The grid order for the current source/filter/sort (cached by catalog revision).
+    /// The grid order for the current source/filter/sort (cached by library revision, and by the
+    /// full catalog revision when the filter, sort or source reads develop state).
     /// Shared, so frontends can hold it across frames without copying ([`Session::visible_shared`]).
     visible: Arc<[PhotoId]>,
-    visible_key: Option<(u64, String)>,
+    visible_key: Option<ViewKey>,
     /// Identifies the current `visible` list: a new value (unique in the process) every time it
     /// is recomputed, so frontends can key their per-view caches on it instead of hashing the ids.
     visible_gen: u64,
     /// Photos in the current source with no filter on (cached like `visible`).
-    total: Option<((u64, String), usize)>,
+    total: Option<(ViewKey, usize)>,
     pub undo: Vec<UndoEntry>,
     /// Undo steps committed in this session, ever (the history drops its oldest past 1000, so
     /// its length can't tell how many steps a command just made; see [`Session::commits`]).
@@ -211,6 +215,9 @@ pub struct Session {
     pub(crate) faces: faces_index::FacesState,
     /// Copied develop settings (partial JSON) for Paste.
     pub clipboard: Option<Value>,
+    /// The photo the clipboard was copied from (an Upright correction moves only between entries of
+    /// the same file: [`crate::upright_transfer`]).
+    pub clipboard_source: Option<crate::upright_transfer::UprightSource>,
     /// The folder on disk the [`LibrarySource::Folder`] view browses.
     pub browse: Option<Browse>,
     /// The folder the [`LibrarySource::LibraryFolder`] view shows: the library's photos imported
@@ -222,7 +229,8 @@ pub struct Session {
     pub previous_active: Option<PhotoId>,
     /// Groups last used for Copy (Lightroom remembers them).
     pub copy_groups: Vec<lightcraft_develop::SettingsGroup>,
-    pub presets: Vec<lightcraft_develop::Preset>,
+    /// Built-in then user presets; its generation tells savers and caches when it changed.
+    pub presets: presets::PresetList,
     /// Favourite profile ids (persisted with the library, like preset favourites).
     pub profile_favorites: Vec<String>,
     /// Recently applied profile ids, newest first (at most [`presets::RECENT_PROFILES`]).
@@ -293,6 +301,9 @@ pub struct Session {
     pub cache_mb: u32,
     /// Where smart previews are kept when not in the library folder (persisted in prefs.json).
     pub smart_previews_dir: Option<std::path::PathBuf>,
+    /// Where the thumbnail cache is kept when not in the library's `thumbs` folder (persisted in
+    /// prefs.json; see [`Session::thumb_cache_dir`]).
+    pub thumbs_dir: Option<std::path::PathBuf>,
     /// Untouched Local records of folders not browsed for this many days are forgotten when the
     /// library opens (0 = never; persisted in prefs.json). See `cmd/browse.rs`.
     pub forget_local_days: u32,
@@ -350,12 +361,13 @@ impl Session {
             #[cfg(not(target_arch = "wasm32"))]
             faces: Default::default(),
             clipboard: None,
+            clipboard_source: None,
             meta_clipboard: None,
             browse: None,
             library_folder: None,
             previous_active: None,
             copy_groups: lightcraft_develop::SettingsGroup::default_copy(),
-            presets: presets::builtin(),
+            presets: presets::PresetList::new(presets::builtin()),
             profile_favorites: Vec::new(),
             profile_recent: Vec::new(),
             journal: Vec::new(),
@@ -390,6 +402,7 @@ impl Session {
             import_defaults: import::ImportDefaults::default(),
             cache_mb: 0,
             smart_previews_dir: None,
+            thumbs_dir: None,
             forget_local_days: lightcraft_catalog::DEFAULT_FORGET_DAYS,
             #[cfg(not(target_arch = "wasm32"))]
             apple_photos: None,
@@ -785,16 +798,28 @@ impl Session {
                 return Vec::new();
             }
         }
+        // an Upright correction moves only between entries of the same file
+        let source = self.catalog.photo(id).map(|p| crate::upright_transfer::source_of(p, new, &self.library_identity));
         self.selection
             .ids
             .iter()
             .filter(|x| **x != id)
             .filter_map(|x| self.develop_of(*x).map(|d| (*x, d)))
             .filter_map(|(x, d)| {
-                let synced = lightcraft_develop::apply_partial(&d, &delta, 1.0);
+                let synced = match self.catalog.photo(x) {
+                    Some(p) => crate::upright_transfer::transferred(p, &d, &delta, source.as_ref()),
+                    None => lightcraft_develop::apply_partial(&d, &delta, 1.0),
+                };
                 (synced != *d).then(|| self.develop_op(x, synced, label)).flatten()
             })
             .collect()
+    }
+
+    /// What `preset` at `amount` makes of photo `id`'s settings, as Apply Preset stores it (its
+    /// Upright correction settled: [`crate::upright_transfer::apply_preset`]); for previews too.
+    pub fn preset_look(&self, id: PhotoId, preset: &lightcraft_develop::Preset, amount: f64) -> Option<DevelopSettings> {
+        let p = self.catalog.photo(id)?;
+        Some(crate::upright_transfer::apply_preset(p, &p.develop, preset, amount))
     }
 
     /// The op that sets a photo's develop settings and appends a History entry (for batches).
@@ -840,13 +865,14 @@ impl Session {
 
     /// Photos shown in the grid/filmstrip for the current source, filter and sort.
     pub fn visible(&mut self) -> &[PhotoId] {
-        let mut key =
-            (self.catalog.revision, format!("{:?}|{:?}|{:?}|{:?}|{:?}", self.source, self.filter, self.sort, self.browse, self.library_folder));
-        if self.source == LibrarySource::Missing && self.media.availability.is_background() {
-            // the view fills in as the background checks find files gone
-            key.1.push_str(&format!("|{}", self.media.availability.generation()));
-        }
-        if self.visible_key.as_ref() != Some(&key) {
+        // a develop edit (a slider tick) only redoes the query when the filter, sort or source reads develop state
+        let reads_develop = self.source_reads_develop() || self.sort.reads_develop() || self.catalog.filter_reads_develop(&self.filter);
+        let revision = self.catalog.view_revision(reads_develop);
+        // the Missing Photos view fills in as the background checks find files gone
+        let availability =
+            (self.source == LibrarySource::Missing && self.media.availability.is_background()).then(|| self.media.availability.generation());
+        if !self.visible_key.as_ref().is_some_and(|k| k.is(self, revision, true, availability)) {
+            let key = ViewKey::of(self, revision, true, availability);
             // "in the last N days" rules count back from the session's clock
             lightcraft_catalog::rules::set_now(Some((self.clock)()));
             let mut f = self.source.to_filter(&self.filter, &self.catalog);
@@ -923,8 +949,9 @@ impl Session {
         if self.source == LibrarySource::Missing {
             return None;
         }
-        let key = (self.catalog.revision, format!("{:?}|{:?}|{:?}", self.source, self.browse, self.library_folder));
-        if self.total.as_ref().map(|t| &t.0) != Some(&key) {
+        let revision = self.catalog.view_revision(self.source_reads_develop());
+        if !self.total.as_ref().is_some_and(|t| t.0.is(self, revision, false, None)) {
+            let key = ViewKey::of(self, revision, false, None);
             let mut f = self.source.to_filter(&Filter::default(), &self.catalog);
             if self.source == LibrarySource::Folder {
                 let b = self.browse.clone().unwrap_or_default();
@@ -940,12 +967,21 @@ impl Session {
         self.total.as_ref().map(|t| t.1)
     }
 
+    /// Whether what the current source holds can change with a develop edit (a smart album
+    /// whose rules read develop state; see [`lightcraft_catalog::revision`]).
+    fn source_reads_develop(&self) -> bool {
+        match self.source {
+            LibrarySource::Album(a) => self.catalog.album_reads_develop(a),
+            _ => false,
+        }
+    }
+
     pub fn visible_cloned(&mut self) -> Vec<PhotoId> {
         self.visible().to_vec()
     }
 
     /// The visible photos without copying them, with their generation: equal generations mean
-    /// the very same list (same catalog revision, source, filter, sort), so a frontend can cache
+    /// the very same list (same library, source, filter, sort), so a frontend can cache
     /// whatever it derives from the list under that number.
     pub fn visible_shared(&mut self) -> (u64, Arc<[PhotoId]>) {
         self.visible();
@@ -961,6 +997,45 @@ impl Session {
             return vec![PhotoId(id)];
         }
         if self.selection.ids.is_empty() { self.selection.active.into_iter().collect() } else { self.selection.ids.clone() }
+    }
+}
+
+/// What [`Session::visible`] (or [`Session::source_total`]) was worked out from. Compared every
+/// frame, so without formatting or copying anything.
+#[derive(Clone, Debug, PartialEq)]
+struct ViewKey {
+    revision: lightcraft_catalog::ViewRevision,
+    source: LibrarySource,
+    /// The filter bar and sort (`None` for the source total, which ignores them).
+    view: Option<(Filter, Sort)>,
+    browse: Option<Browse>,
+    library_folder: Option<String>,
+    availability: Option<u64>,
+}
+
+impl ViewKey {
+    fn of(s: &Session, revision: lightcraft_catalog::ViewRevision, filtered: bool, availability: Option<u64>) -> ViewKey {
+        ViewKey {
+            revision,
+            source: s.source,
+            view: filtered.then(|| (s.filter.clone(), s.sort)),
+            browse: s.browse.clone(),
+            library_folder: s.library_folder.clone(),
+            availability,
+        }
+    }
+
+    fn is(&self, s: &Session, revision: lightcraft_catalog::ViewRevision, filtered: bool, availability: Option<u64>) -> bool {
+        let view = match &self.view {
+            Some((f, sort)) => filtered && *f == s.filter && *sort == s.sort,
+            None => !filtered,
+        };
+        self.revision == revision
+            && self.source == s.source
+            && view
+            && self.browse == s.browse
+            && self.library_folder == s.library_folder
+            && self.availability == availability
     }
 }
 
@@ -987,6 +1062,8 @@ mod tests_album_order;
 #[cfg(test)]
 mod tests_albums_local;
 #[cfg(test)]
+mod tests_auto_import;
+#[cfg(test)]
 mod tests_color;
 #[cfg(test)]
 mod tests_crop_angle;
@@ -1012,6 +1089,8 @@ mod tests_import;
 #[cfg(test)]
 mod tests_import_move;
 #[cfg(test)]
+mod tests_invalidation;
+#[cfg(test)]
 mod tests_keyword_list;
 #[cfg(test)]
 mod tests_libops;
@@ -1028,6 +1107,8 @@ mod tests_persist;
 #[cfg(test)]
 mod tests_prefs;
 #[cfg(test)]
+mod tests_presets_scale;
+#[cfg(test)]
 mod tests_process;
 #[cfg(test)]
 mod tests_segment;
@@ -1037,5 +1118,7 @@ mod tests_settings_files;
 mod tests_spots;
 #[cfg(test)]
 mod tests_sync;
+#[cfg(test)]
+mod tests_upright;
 #[cfg(test)]
 mod tests_xmp;

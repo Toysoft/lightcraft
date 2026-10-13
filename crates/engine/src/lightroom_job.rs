@@ -332,6 +332,7 @@ mod tests {
             collections: Vec::new(),
             members: Vec::new(),
             collection_content: Vec::new(),
+            stacks: Vec::new(),
             warnings: Vec::new(),
         }
     }
@@ -375,6 +376,7 @@ mod tests {
                 collections: Vec::new(),
                 members: Vec::new(),
                 collection_content: Vec::new(),
+                stacks: Vec::new(),
                 warnings: Vec::new(),
             },
             normal: Prepared::default(),

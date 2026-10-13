@@ -253,7 +253,7 @@ fn animated_rect(ctx: &egui::Context, anim: &mut bool, target: Rect) -> Rect {
 /// Mask overlays are evaluated from the same mask alpha as the full render; the other diagnostic
 /// overlays either need whole-frame context or deliberately replace the loupe.
 pub(crate) fn overlay_supports_window(overlay: lightcraft_pipeline::Overlay) -> bool {
-    matches!(overlay, lightcraft_pipeline::Overlay::None | lightcraft_pipeline::Overlay::Mask { .. })
+    overlay.per_pixel()
 }
 
 /// What a window render of the loupe needs to know about the view it belongs to.
@@ -447,7 +447,8 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let look = d.hash64();
     let overlay = view_overlay(app, &d);
     // Diagnostic views that need whole-frame context, soft proofing, or reads too far for one
-    // window still render the whole frame at the size it is drawn. A mask overlay is window-safe.
+    // window still render the whole frame at the size it is drawn. Per-pixel ones (a mask,
+    // clipping) are window-safe.
     let sizes = crate::region::ViewSizes {
         drawn_long,
         canvas_long: canvas.width().max(canvas.height()) * ppp,
@@ -499,7 +500,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     // once this photo is on screen: prepare its neighbours in filmstrip order (source decoded and
     // kept, view render cached) so stepping to them is instant
     if !interacting && !app.renderer.is_pending(Slot::Main) && app.renderer.textures.get(&Slot::Main).is_some_and(|t| t.photo == id) {
-        let ids = app.session.visible_cloned();
+        let ids = app.session.visible_shared().1;
         if let Some(i) = ids.iter().position(|p| *p == id) {
             let next = ids.get(i + 1).copied();
             let prev = i.checked_sub(1).and_then(|j| ids.get(j)).copied();
@@ -747,17 +748,17 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             RightPanel::Remove => remove_overlay(app, ui, &resp, &map, &d),
             RightPanel::RedEye => eye_overlay(app, ui, &resp, &map, &d),
             _ => {
-                // side by side / stacked: Before shows the same frame, so a click in its view (white
-                // balance, colour samples, targeted adjustment) means the same point of the photo.
-                // Zoomed in, a view's image reaches past its pane: what counts is the pane clicked.
+                // Side by side / stacked: Before has the same frame, but its own image and pane.
+                // Use that pane for picking, click-zoom and pan; a zoomed image can extend past it.
                 let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
-                let map = match (split, areas.first(), pointer) {
+                let (map, interaction_img, interaction_area) = match (split, areas.first(), pointer) {
                     (true, Some(before), Some(q)) if before.contains(q) => {
-                        CanvasMap::new(&frame, fit_rect(*before, aspect, app.ui.zoom, native, ppp, app.ui.pan))
+                        let before_img = fit_rect(*before, aspect, app.ui.zoom, native, ppp, app.ui.pan);
+                        (CanvasMap::new(&frame, before_img), before_img, *before)
                     }
-                    _ => map,
+                    _ => (map, img_rect, main_area),
                 };
-                general_interaction(app, ui, &resp, &map, img_rect, main_area, native, aspect)
+                general_interaction(app, ui, &resp, &map, interaction_img, interaction_area, native, aspect)
             }
         }
     }
@@ -1235,12 +1236,19 @@ fn targeted_drag(app: &mut LightcraftApp, resp: &egui::Response, map: &CanvasMap
     }
 }
 
-/// The diagnostic overlay the loupe shows (the selected mask, Point Color's visualized range,
-/// Visualize Spots).
+/// The diagnostic overlay the loupe shows (an Alt-drag preview, the selected mask, Point Color's
+/// visualized range, Visualize Spots).
 pub(crate) fn view_overlay(app: &LightcraftApp, d: &DevelopSettings) -> lightcraft_pipeline::Overlay {
     use lightcraft_pipeline::{MaskView, Overlay};
     if app.ui.fullscreen {
         return Overlay::None;
+    }
+    // Lightroom's temporary previews: clipping, greyscale, sharpening detail / mask
+    if app.ui.right == RightPanel::Edit
+        && app.ui.alt_held
+        && let Some(o) = app.ui.dragging_control.as_deref().and_then(Overlay::for_control)
+    {
+        return o;
     }
     if app.ui.right == RightPanel::Masking
         && app.ui.mask_overlay
@@ -2249,7 +2257,8 @@ pub(crate) fn filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, r: Rect) {
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(r, 0.0, t.canvas);
     ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width(), 4.0)), 0.0, Color32::from_gray(0x20));
-    let ids = app.session.visible_cloned();
+    // shared, not copied: the strip is drawn every frame
+    let ids = app.session.visible_shared().1;
     let active = app.session.selection.active;
     let cell_w = 120.0;
     let ppp = ui.ctx().pixels_per_point();
@@ -2363,7 +2372,7 @@ fn film_badges(p: &egui::Painter, t: &Tokens, fr: Rect, ph: &lightcraft_catalog:
     }
     x += ph.rating as f32 * 9.0 + 2.0;
     match ph.flag {
-        Flag::Pick => paint(p, Rect::from_min_size(pos2(x, y - 5.0), vec2(10.0, 10.0)), Icon::FlagPick, t.pick),
+        Flag::Pick => paint(p, Rect::from_min_size(pos2(x, y - 5.0), vec2(10.0, 10.0)), Icon::FlagPickFilled, t.pick),
         Flag::Reject => paint(p, Rect::from_min_size(pos2(x, y - 5.0), vec2(10.0, 10.0)), Icon::FlagReject, t.reject),
         Flag::None => {}
     }

@@ -31,7 +31,7 @@ Each audience with its own hours (Opus 5.5 agent wall-clock hours to ~95%):
 The gap between breadth and readiness is quality and coverage, not missing buttons: camera colour is
 estimated rather than measured, CR3 decodes on four verified Canon bodies, compressed ORF and HE NEF
 open as previews, rendering is tuned by eye, AI masks are heuristics, there is no lens database, and
-tests run in CI on FreeBSD only. **Why alpha:** core workflows run end to end, but readiness is below
+`main` does not yet pass the tests CI now runs on macOS, Windows and Linux (`ci.yml`). **Why alpha:** core workflows run end to end, but readiness is below
 the ~75% beta bar (it is above the ~40% alpha bar) and Lightroom's main inputs, raw files, still have blocking gaps (Canon, ~30% of
 raw users, decodes CR3 on four verified bodies). It passes the alpha gate: all six core workflows
 (import, cull, develop, save and reopen, batch looks, export) work end to end on macOS
@@ -47,6 +47,8 @@ Hours are calibrated on this repo's PR history; see
 | Features | ~61% | ~77% (checklist 81.1%) | 600–1,100 h | [target-app-parity](docs/target-app-parity.md#features) |
 | ↳ RAW cameras, colour, lens profiles | ~56% | 81% of 1,446 Adobe models decode, 16% verified | 255–480 h | [raw-parity](docs/raw-parity.md) |
 | UI/UX fidelity | ~70% | ~85% | 34–58 h | [ui-parity](docs/ui-parity.md) |
+| ↳ RAW cameras, colour, lens profiles | ~56% | 82% of 1,446 Adobe models decode, 17% verified | 255–480 h | [raw-parity](docs/raw-parity.md) |
+| UI/UX fidelity | ~70% | ~85% | 40–70 h | [ui-parity](docs/ui-parity.md) |
 | File formats (non-raw) | ~70% | ~85% | 30–55 h | [file-format-parity](docs/file-format-parity.md) |
 | Hardware | ~40% | ~50% | 40–80 h | [hardware-parity](docs/hardware-parity.md) |
 | Localization | ~52% of the 12 key languages | 7 of 12 present | 130–210 h (+145–255 h new scripts) | [localization-parity](docs/localization-parity.md) |
@@ -109,13 +111,17 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 5. AI masks: Subject / Sky / People (40–70 h + model decision)
 6. Compressed ORF and HE NEF (28–55 h)
 7. Lens profile database of our own (40–80 h)
-8. Tests in CI on macOS, Windows and Linux (6–12 h)
+8. Tests in CI on macOS, Windows and Linux: green on `main` (2–4 h; `ci.yml` runs, #1050)
 9. Per-model raw verification (20–35 h)
 
 ## Progress log
 
 - 2026-10-11: Leica Q3 verified by a recorded check of 38 private DNGs (all decode and develop at full
   size; mean ΔE to the camera JPEG 6.3–13.9). 236 models verified; headline numbers unchanged.
+- 2026-10-11 (CI): `ci.yml` runs `cargo xtask ci` on Linux and clippy and the tests on macOS and Windows, and the CPU ↔ GPU equivalence tests on lavapipe, Metal and WARP (`LIGHTCRAFT_GPU_ALLOW_SOFTWARE`, tests only), within the documented bounds on all three (max 1 LSB on lavapipe and WARP, 2 in one case on the runner's Metal; the bound is 3). `main` fails there until the #989 fixes and #1052 (Windows) land (#1050). Headline numbers unchanged.
+- 2026-10-12: Minolta / Konica Minolta MRW decodes from sensor data (12-bit packed and 16-bit words,
+  RGGB and GBRG, as-shot WB from `WBG`); DiMAGE 7, 7Hi, A1, A2, A200 and Dynax / Maxxum 7D verified on
+  CC0 files. 241 models verified, 222 preview-only; headline numbers unchanged.
 - 2026-10-11: Canon EOS R5 Mark II C-RAW decodes from sensor data (57% of its files opened as a
   preview): the CRX QP map's first-symbol literal and limited-length escape; four CC0 R5 Mark II files
   pinned, the QP maps of 33,665 private C-RAW files decode exactly ([cr3.md](docs/cr3.md)). 235 models
@@ -164,6 +170,8 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-12 | minor | UI/UX remaining 40–70 h → 34–58 h (accessibility audit landed); headline numbers unchanged |
+| 2026-10-11 | minor | Tests in CI on macOS, Windows and Linux (`ci.yml`, #1050), GPU equivalence tests on software adapters; not green on `main` yet, gap 9 6–12 h → 2–4 h; headline numbers unchanged |
+| 2026-10-12 | minor | Minolta MRW decoded: 6 more verified models (241), 11 fewer preview-only; headline numbers unchanged |
 | 2026-10-11 | minor | EOS R5 Mark II CR3 verified: CR3 on four verified bodies, RAW decoding 76% → 77%; headline numbers unchanged |
 | 2026-10-10 | minor | RAW measured model by model; RAW decode and colour as explicit rows: full 59% → 61%, mainstream 51% → 49%, essentials 63% → 64%; beta ~14 points |
 | 2026-10-10 | minor | Full ready restored to the additive weighted sum (~59%; method aligned with the standard, no new evidence); hours per audience; beta ~16 points away |

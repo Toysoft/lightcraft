@@ -73,6 +73,10 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("view.autoAdvance", "Auto Advance", None, "Photo"),
     ("view.filmstrip", "Filmstrip", Some("/"), "View"),
     ("view.leftPanel", "My Photos Panel", Some("Cmd+Shift+L"), "View"),
+    // F8 / Shift+Tab as in Lightroom Classic (F7 and F6 are PR #1078; Tab toggles the side panels there).
+    // On a Mac keyboard F8 is Play/Pause unless fn is held or "Use F1, F2, … as standard function keys" is on.
+    ("view.rightPanel", "Right Panel", Some("F8"), "View"),
+    ("view.allPanels", "Hide All Panels", Some("Shift+Tab"), "View"),
     ("view.beforeAfter", "Compare Before and After", Some("Y"), "View"),
     ("view.beforeAfterSplit", "Before/After Split", Some("Shift+Y"), "View"),
     ("view.beforeAfterTopBottom", "Before/After Top/Bottom", Some("Alt+Y"), "View"),
@@ -202,11 +206,14 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("app.about", "About LightCraft", None, "Help"),
     ("app.systemInfo", "System Info…", None, "Help"),
     ("app.openLogFolder", "Open Log Folder", None, "Help"),
+    // the frame-rate display (`frame_rate`): a debugging aid, never saved
+    ("view.frameRate", "Show Frame Rate", None, "Help>Debug"),
     ("app.whatsNew", "What's New", None, "Help"),
     ("dialog.cull", "Assisted Culling…", None, "Photo"),
     ("app.help", "LightCraft Help", Some("F1"), "Help"),
     ("app.discord", "Join the ArtCraft Discord…", None, "Help"),
     ("app.feedback", "Send Feedback…", None, "Help"),
+    ("app.reportBug", "Report a Bug…", None, "Help"),
     ("app.website", "LightCraft Website", None, "Help"),
     ("app.github", "LightCraft on GitHub", None, "Help"),
     ("app.artcraft", "ArtCraft Website", None, "Help"),
@@ -221,6 +228,14 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("photo.tagFromTracklog", "Auto-Tag from Tracklog…", None, "Photo"),
     ("app.exportPrevious", "Export with Previous", Some("Cmd+Alt+Shift+E"), "File"),
 ];
+
+/// A tool panel going away ends its gesture, as closing it from its own key does.
+fn end_panel_tool(app: &mut LightcraftApp) {
+    if app.ui.tool != "wbPicker" {
+        app.ui.tool.clear();
+    }
+    let _ = app.session.end_interaction();
+}
 
 fn panel(app: &mut LightcraftApp, ctx: &egui::Context, p: RightPanel, name: &str) {
     if app.ui.right == p && crate::docking::exposed(app, crate::docking::Panel::Tools) {
@@ -672,9 +687,32 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             app.ui.filmstrip = !app.ui.filmstrip;
             Ok(Value::Null)
         }
+        "view.frameRate" => {
+            // {show?: bool} (toggles when omitted)
+            app.ui.frame_rate = p.get("show").and_then(Value::as_bool).unwrap_or(!app.ui.frame_rate);
+            Ok(json!({"show": app.ui.frame_rate}))
+        }
         "view.leftPanel" => {
             app.ui.left_panel = !app.ui.left_panel;
             Ok(Value::Null)
+        }
+        // F8: `show` (true / false) says which; without it the panel toggles
+        "view.rightPanel" => {
+            let was = app.ui.right;
+            let shown = app.ui.toggle_right_panel(p.get("show").and_then(Value::as_bool));
+            if was != RightPanel::None && !shown {
+                end_panel_tool(app);
+            }
+            Ok(json!({"shown": shown, "right": app.ui.right}))
+        }
+        // Shift+Tab: `hide` (true / false) says which; without it the panels hide, then come back
+        "view.allPanels" => {
+            let was = app.ui.right;
+            let hidden = app.ui.toggle_all_panels(p.get("hide").and_then(Value::as_bool));
+            if was != RightPanel::None && app.ui.right == RightPanel::None {
+                end_panel_tool(app);
+            }
+            Ok(json!({"hidden": hidden}))
         }
         "view.beforeAfter" => {
             app.ui.before_after = if app.ui.before_after == BeforeAfter::SideBySide { BeforeAfter::Off } else { BeforeAfter::SideBySide };
@@ -1257,50 +1295,14 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             Ok(json!({"text": crate::panels::dialogs::WHATS_NEW}))
         }
         "app.systemInfo" => {
-            let info = app.session.execute("library.info", &json!({})).unwrap_or_default();
-            let gpu = (lightcraft_engine::gpu::ready() && lightcraft_engine::gpu::available()).then(lightcraft_engine::gpu::adapter_name).flatten();
-            let mb = |b: u64| format!("{:.0} MB", b as f64 / (1u64 << 20) as f64);
-            let mut rows = vec![
-                ("Version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
-                ("System".to_string(), format!("{} ({})", std::env::consts::OS, std::env::consts::ARCH)),
-                ("CPU threads".to_string(), std::thread::available_parallelism().map(|n| n.get().to_string()).unwrap_or_else(|_| "?".into())),
-                (
-                    "GPU".to_string(),
-                    gpu.unwrap_or_else(|| match lightcraft_engine::gpu::unavailable_reason() {
-                        Some(why) => crate::i18n::tr_format!("none (CPU rendering): {why}", why = why),
-                        None => "none (CPU rendering)".into(),
-                    }),
-                ),
-                ("GPU rendering".to_string(), if app.ui.settings.gpu { "on".into() } else { "off".into() }),
-                ("Memory budget".to_string(), mb(lightcraft_engine::memory::default_budget() as u64)),
-                (
-                    "Preview size".to_string(),
-                    match app.ui.settings.preview_limit {
-                        0 => "automatic".to_string(),
-                        n => format!("{n} px"),
-                    },
-                ),
-                ("Photos".to_string(), info["photos"].to_string()),
-                ("Albums".to_string(), info["albums"].to_string()),
-            ];
-            if let Some(dir) = info["dir"].as_str().or(info["path"].as_str()) {
-                rows.push(("Library".into(), dir.to_string()));
-            }
-            rows.push(("Frame time".into(), format!("{:.1} ms ({:.0} fps)", app.perf.frame_ms, app.perf.fps)));
-            rows.push((
-                "Frame update".into(),
-                format!("{:.1} ms (logic {:.1} ms; slowest {:.0} ms)", app.perf.update_ms, app.perf.logic_ms, app.perf.max_update_ms),
-            ));
-            rows.push(("Last loupe render".into(), format!("{:.0} ms", app.renderer.last_main_ms)));
-            if let Some(f) = lightcraft_engine::gpu::last_fallback() {
-                rows.push(("Last GPU fallback".into(), f));
-            }
+            let rows = crate::bug_report::system_rows(app);
             let r = json!(rows.iter().map(|(k, v)| json!({"label": k, "value": v})).collect::<Vec<_>>());
             if p.get("open").and_then(Value::as_bool).unwrap_or(true) {
                 app.ui.dialog = Some(Dialog::SystemInfo { rows });
             }
             Ok(r)
         }
+        "app.reportBug" => crate::bug_report::command(app, p),
         "app.shortcuts" => {
             app.ui.dialog = Some(Dialog::Shortcuts);
             Ok(Value::Null)
@@ -1824,6 +1826,7 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             return Some(r);
         }
         "app.export" => crate::control::export_active(app, p),
+        "photo.renderToDng" => return crate::render_dng_task::start(app, p),
         "app.showInFinder" => show_in_finder(app),
         "app.openLogFolder" => open_log_folder(app),
         "app.discord" | "app.website" | "app.github" | "app.artcraft" | "app.help" | "app.feedback" => {

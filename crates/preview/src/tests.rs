@@ -123,6 +123,32 @@ fn disk_cache_roundtrip_and_prune() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A missing cache folder is made when its parent exists, never with missing parents; a folder
+/// the user chose is never made again (issue #903: an unplugged drive's folder stays missing).
+#[test]
+fn disk_cache_creates_only_its_own_missing_folder() {
+    let root = temp_dir("mkdir");
+    std::fs::create_dir_all(&root).unwrap();
+    let img = gradient(16, 16, 3);
+    let k = hash_bytes(b"mk");
+    let own = root.join("thumbs");
+    DiskCache::new(&own, 1 << 20).put(k, &img);
+    assert!(DiskCache::new(&own, 1 << 20).get(k).is_some(), "the library's own folder is made");
+    let deep = root.join("unplugged/thumbs");
+    DiskCache::new(&deep, 1 << 20).put(k, &img);
+    assert!(!root.join("unplugged").exists(), "no missing parents");
+    let chosen = root.join("chosen");
+    let d = DiskCache::chosen(&chosen, 1 << 20);
+    d.put(k, &img);
+    assert!(!chosen.exists(), "a chosen folder is not made");
+    assert!(d.get(k).is_none());
+    std::fs::create_dir(&chosen).unwrap();
+    d.put(k, &img);
+    assert!(d.get(k).is_some(), "written once it is back");
+    assert_eq!(super::disk::cache_stats(&chosen).0, 1);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn disk_cache_overwrite_accounts_for_replaced_jpeg_only_once() {
     let dir = temp_dir("overwrite");

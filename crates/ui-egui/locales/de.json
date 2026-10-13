@@ -733,7 +733,7 @@
   "Join the ArtCraft Discord…": "ArtCraft auf Discord beitreten…",
   "Join the ArtCraft community on Discord": "Der ArtCraft-Community auf Discord beitreten",
   "Keep in Local": "In „Lokal“ behalten",
-  "Keep it on a drive with room: smart previews are about 1 MB per photo. The thumbnail cache stays in the library.": "Wähle ein Laufwerk mit genügend Platz: Smart-Vorschauen benötigen etwa 1 MB pro Foto. Der Miniaturbild-Cache bleibt in der Bibliothek.",
+  "Keep it on a drive with room: smart previews are about 1 MB per photo.": "Wähle ein Laufwerk mit genügend Platz: Smart-Vorschauen benötigen etwa 1 MB pro Foto.",
   "Keyboard Shortcuts": "Tastenkürzel",
   "Keyboard shortcuts": "Tastenkürzel",
   "Keyword": "Stichwort",
@@ -1051,6 +1051,7 @@
   "Photos per bracket (0 = auto)": "Fotos pro Belichtungsreihe (0 = automatisch)",
   "Photos seen in Local but never added or changed leave the catalog when their folder hasn't been browsed for this long (checked when the library opens). Files stay on disk; browsing the folder shows them again.": "Fotos, die unter „Lokal“ angezeigt, aber nie hinzugefügt oder geändert wurden, verlassen den Katalog, wenn ihr Ordner so lange nicht durchsucht wurde (Prüfung beim Öffnen der Bibliothek). Dateien bleiben auf dem Datenträger; beim Durchsuchen erscheinen sie wieder.",
   "Photos that arrive in this folder (tethering, a scanner, a sync app) are added as soon as they're complete.": "Fotos, die in diesem Ordner ankommen (Tethering, Scanner, Synchronisierungs-App), werden hinzugefügt, sobald sie vollständig sind.",
+  "Photos in folders inside the watched folder are added too (hidden folders and the library's own folder are skipped).": "Fotos in Ordnern innerhalb des überwachten Ordners werden ebenfalls hinzugefügt (ausgeblendete Ordner und der Ordner der Bibliothek selbst werden übersprungen).",
   "Photos); importing (also by drag and drop), Find Missing Photos, Build / Discard Smart Previews, the Rename preview,": "Auch Import einschließlich Drag-and-drop, Suche fehlender Fotos, Erstellen und Verwerfen von Smart-Vorschauen, Umbenennungsvorschau,",
   "Pick": "Auswahl",
   "Pick Flag": "Auswahlmarkierung",
@@ -2116,5 +2117,14 @@
   "Adding to Apple Photos": "Wird zu Apple Fotos hinzugefügt",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Kein Grafikprozessor gefunden: LightCraft rendert auf der CPU, was viel langsamer ist. Details unter Hilfe → Systeminformationen.",
   "On NixOS, start it from `nix develop`.": "Unter NixOS starten Sie es aus `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Dateien mit demselben Inhalt wie eine andere Datei dieses Imports: Nur die erste wird importiert."
+  "Files with the same content as another file in this import: only the first is imported.": "Dateien mit demselben Inhalt wie eine andere Datei dieses Imports: Nur die erste wird importiert.",
+  "Continue in Background": "Im Hintergrund fortsetzen",
+  "Folder not found": "Ordner nicht gefunden",
+  "Dismiss": "Verwerfen",
+  "Review…": "Ansehen…",
+  "Open Synchronize Folder with what the scan found": "„Ordner synchronisieren“ mit dem Ergebnis der Suche öffnen",
+  "You can go on working: a notice at the top left says when the scan is done.": "Sie können weiterarbeiten: Ein Hinweis oben links meldet, wenn die Suche abgeschlossen ist.",
+  "Render to DNG": "Als DNG rendern",
+  "Rendering to DNG": "Als DNG rendern",
+  "Render to DNG stopped unexpectedly": "Rendern als DNG unerwartet angehalten"
 }

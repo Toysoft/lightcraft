@@ -692,7 +692,7 @@
   "Join the ArtCraft Discord…": "Rejoindre le Discord d'ArtCraft…",
   "Join the ArtCraft community on Discord": "Rejoindre la communauté ArtCraft sur Discord",
   "Keep in Local": "Conserver dans Local",
-  "Keep it on a drive with room: smart previews are about 1 MB per photo. The thumbnail cache stays in the library.": "Choisissez un disque avec de la place : les aperçus dynamiques font environ 1 Mo par photo. Le cache des miniatures reste dans la bibliothèque.",
+  "Keep it on a drive with room: smart previews are about 1 MB per photo.": "Choisissez un disque avec de la place : les aperçus dynamiques font environ 1 Mo par photo.",
   "Keyboard Shortcuts": "Raccourcis clavier",
   "Keyboard shortcuts": "Raccourcis clavier",
   "Keyword": "Mot-clé",
@@ -999,6 +999,7 @@
   "Photos per bracket (0 = auto)": "Photos par bracketing (0 = auto)",
   "Photos seen in Local but never added or changed leave the catalog when their folder hasn't been browsed for this long (checked when the library opens). Files stay on disk; browsing the folder shows them again.": "Les photos vues dans Local mais jamais ajoutées ni modifiées quittent le catalogue lorsque leur dossier n'a pas été parcouru depuis cette durée (vérifié à l'ouverture de la bibliothèque). Les fichiers restent sur le disque ; parcourir le dossier les fait réapparaître.",
   "Photos that arrive in this folder (tethering, a scanner, a sync app) are added as soon as they're complete.": "Les photos qui arrivent dans ce dossier (capture connectée, scanner, application de synchronisation) sont ajoutées dès qu'elles sont complètes.",
+  "Photos in folders inside the watched folder are added too (hidden folders and the library's own folder are skipped).": "Les photos des dossiers situés dans le dossier surveillé sont aussi ajoutées (les dossiers masqués et le dossier de la bibliothèque elle-même sont ignorés).",
   "Pick": "Sélectionnée",
   "Pick Flag": "Drapeau de sélection",
   "Pick a colour on the photo with the eyedropper.": "Choisissez une couleur sur la photo avec la pipette.",
@@ -1955,5 +1956,14 @@
   "Adding to Apple Photos": "Ajout à Apple Photos",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Aucun processeur graphique trouvé : LightCraft effectue le rendu sur le processeur, ce qui est beaucoup plus lent. Détails dans Aide → Informations système.",
   "On NixOS, start it from `nix develop`.": "Sous NixOS, lancez-le depuis `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Fichiers au contenu identique à un autre fichier de cette importation : seul le premier est importé."
+  "Files with the same content as another file in this import: only the first is imported.": "Fichiers au contenu identique à un autre fichier de cette importation : seul le premier est importé.",
+  "Continue in Background": "Continuer en arrière-plan",
+  "Folder not found": "Dossier introuvable",
+  "Dismiss": "Ignorer",
+  "Review…": "Examiner…",
+  "Open Synchronize Folder with what the scan found": "Ouvrir Synchroniser le dossier avec ce que l'analyse a trouvé",
+  "You can go on working: a notice at the top left says when the scan is done.": "Vous pouvez continuer à travailler : un avis en haut à gauche signale la fin de l'analyse.",
+  "Render to DNG": "Rendre en DNG",
+  "Rendering to DNG": "Rendu en DNG",
+  "Render to DNG stopped unexpectedly": "Le rendu en DNG s’est arrêté de façon inattendue"
 }

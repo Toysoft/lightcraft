@@ -33,21 +33,10 @@ const CACHE_SIZES: [u32; 5] = [512, 1024, 2048, 4096, 8192];
 
 const LABEL_W: f32 = 150.0;
 
-/// The dialog body for `tab` (the tab bar switches `tab`).
-pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String) {
+/// The page of `tab` (the tab bar in [`window`] switches `tab`).
+pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.set_width((ui.ctx().content_rect().width() - 64.0).clamp(240.0, 560.0));
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        for (id, label) in TABS {
-            if crate::widgets::text_button(ui, &format!("settingsTab-{id}"), label, tab == id).clicked() {
-                *tab = id.to_string();
-            }
-        }
-    });
-    ui.separator();
-    ui.add_space(2.0);
-    match tab.as_str() {
+    match tab {
         "import" => import_tab(app, ui, &t),
         "performance" => performance_tab(app, ui, &t),
         "display" => display_tab(app, ui, &t),
@@ -55,6 +44,109 @@ pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String) {
         "faces" => super::faces::settings_tab(app, ui, &t),
         "denoise" => super::denoise::settings_tab(app, ui, &t),
         _ => general_tab(app, ui, &t),
+    }
+}
+
+/// The widest the Settings window's content gets, and the tallest its pages get: the window is
+/// one size on every tab, so it stays where it is as the tabs are gone through.
+const PAGE_SIZE: egui::Vec2 = egui::vec2(560.0, 640.0);
+
+/// The least room in which a page scrolls by itself. In a window with less (far below the
+/// desktop minimum), the tabs and the page scroll together in the dialog's own scroll area.
+const PAGE_MIN_HEIGHT: f32 = 120.0;
+
+/// The Settings window's content: the tab bar, which stays put, above the page of `tab`
+/// ([`body`]), which scrolls when it is taller than the room for it, with a scroll handle that
+/// shows without the pointer on it. `max_height` is the room the app window leaves for both: the
+/// two together never take more, so the scroll area every dialog is drawn in has nothing to
+/// scroll (but for a window with less than [`PAGE_MIN_HEIGHT`] for the page, where that area
+/// scrolls the two together). Every page gets the same room whatever it holds, and each keeps a
+/// scroll position of its own. Nothing here is wider than the window from 640 pt of app window
+/// up: a row's controls wrap ([`row`]) and paths are shortened ([`path_label`]).
+pub fn window(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String, max_height: f32) {
+    ui.set_width((ui.ctx().content_rect().width() - 64.0).clamp(240.0, PAGE_SIZE.x));
+    let top = ui.cursor().top();
+    // Each line of tabs stands on a line of its own the width of the window, so the open tab's
+    // line always has the bar's under it: in a narrow window, or a language with long names, the
+    // tabs take two lines or more.
+    let mut lines: Vec<f32> = Vec::new();
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 5.0);
+        for (id, label) in TABS {
+            let r = crate::widgets::tab_button(ui, &format!("settingsTab-{id}"), label, tab == id);
+            let bottom = egui::emath::GuiRounding::round_to_pixels(r.rect.bottom(), ui.pixels_per_point());
+            if !lines.iter().any(|line| (line - bottom).abs() < 0.5) {
+                lines.push(bottom);
+            }
+            if r.clicked() {
+                *tab = id.to_string();
+            }
+        }
+    });
+    let divider = Tokens::get(ui.ctx()).divider;
+    for bottom in lines {
+        let line = egui::Rect::from_min_max(egui::pos2(ui.min_rect().left(), bottom), egui::pos2(ui.min_rect().right(), bottom + 1.0));
+        ui.painter().rect_filled(line, egui::CornerRadius::ZERO, divider);
+    }
+    ui.add_space(1.0);
+    // (a point less than the room left, so rounding never makes the dialog's own scroll area scroll)
+    let room = max_height - (ui.cursor().top() - top) - 1.0;
+    if room < PAGE_MIN_HEIGHT {
+        body(app, ui, tab.as_str());
+        register(ui.ctx(), "settings:page", ui.min_rect());
+        return;
+    }
+    let height = room.min(PAGE_SIZE.y);
+    // A page that goes on below shows its scroll handle all the time: without it, a page a line
+    // or two too long looks cut off, not scrollable.
+    ui.spacing_mut().scroll.dormant_handle_opacity = 0.6;
+    let page = egui::ScrollArea::vertical()
+        .id_salt(("settings-page", tab.as_str()))
+        .max_height(height)
+        .min_scrolled_height(height)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.add_space(2.0);
+            body(app, ui, tab.as_str());
+            // (what the page took: wider than the room for it would mean a control is cut off)
+            register(ui.ctx(), "settings:page", ui.min_rect());
+        });
+    register(ui.ctx(), "settings:pageRoom", page.inner_rect);
+}
+
+/// `path` shortened to fit `max` (as `width` measures it) by dropping leading folders, after
+/// either kind of separator, so that its end stays (`…/Pictures/Library`,
+/// `…\Pictures\Library`): the end says which folder it is. A last folder too long by itself
+/// loses its end ([`crate::widgets::elide_head`]).
+fn elide_path(path: &str, max: f32, width: impl Fn(&str) -> f32) -> String {
+    if width(path) <= max {
+        return path.to_string();
+    }
+    // (a separator at the very end is not where a name starts: `…/` alone would say nothing)
+    let end = path.trim_end_matches(['/', '\\']).len();
+    let mut rest = path;
+    while let Some(i) = rest.find(['/', '\\']).filter(|i| path.len() - rest.len() + i + 1 < end) {
+        let separator = if rest.get(i..).is_some_and(|r| r.starts_with('\\')) { '\\' } else { '/' };
+        rest = rest.get(i + 1..).unwrap_or("");
+        let shorter = format!("…{separator}{rest}");
+        if width(&shorter) <= max {
+            return shorter;
+        }
+    }
+    let name = rest.trim_end_matches(['/', '\\']);
+    // (nothing but separators: never an empty label)
+    if name.is_empty() { "…".to_string() } else { crate::widgets::elide_head(name, max, width) }
+}
+
+/// A folder or file path on one line in the room left in its row (`text:{id}`): shortened from
+/// the front when it is too long ([`elide_path`]), with all of it in a tooltip then.
+fn path_label(ui: &mut egui::Ui, id: &str, path: &str, font: egui::FontId, color: egui::Color32) {
+    let shown = elide_path(path, ui.available_width(), |s| ui.painter().layout_no_wrap(s.to_string(), font.clone(), color).size().x);
+    // (`truncate` is the last resort, for a room narrower than "…")
+    let r = ui.add(egui::Label::new(RichText::new(&shown).font(font).color(color)).truncate().show_tooltip_when_elided(false));
+    register(ui.ctx(), format!("text:{id}"), r.rect);
+    if shown != path {
+        r.on_hover_text(path);
     }
 }
 
@@ -67,9 +159,17 @@ fn row<R>(ui: &mut egui::Ui, t: &Tokens, label: &str, add: impl FnOnce(&mut egui
     ui.horizontal(|ui| {
         ui.allocate_ui_with_layout(egui::vec2(LABEL_W, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.set_min_width(LABEL_W);
-            ui.label(RichText::new(crate::i18n::tr(label)).color(t.text_label));
+            // (a label longer than its column wraps in it; it does not push the controls along)
+            ui.add(egui::Label::new(RichText::new(crate::i18n::tr(label)).color(t.text_label)).wrap());
         });
-        add(ui)
+        // The controls wrap in the room beside the label, each further line starting under the
+        // first control, so a row with many choices grows down and never widens the window.
+        let wrapped = egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true);
+        ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 24.0), wrapped, |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            add(ui)
+        })
+        .inner
     })
     .inner
 }
@@ -90,7 +190,7 @@ pub(super) fn choices<V: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, options:
     let mut changed = false;
     ui.spacing_mut().item_spacing.x = 4.0;
     for (i, (v, l)) in options.iter().enumerate() {
-        if crate::widgets::text_button(ui, &format!("{id}-{i}"), l, *value == *v).clicked() && *value != *v {
+        if crate::widgets::choice_button(ui, &format!("{id}-{i}"), l, *value == *v).clicked() && *value != *v {
             *value = *v;
             changed = true;
         }
@@ -112,7 +212,7 @@ fn general_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
         None => crate::i18n::tr("In memory — nothing is saved").to_string(),
     };
     row(ui, t, crate::i18n::tr("Location"), |ui| {
-        ui.label(RichText::new(location).color(t.text));
+        path_label(ui, "settingsLocation", &location, egui::TextStyle::Body.resolve(ui.style()), t.text);
     });
     row(ui, t, "", |ui| {
         let can = app.services.pick_folder.is_some();
@@ -210,15 +310,8 @@ fn preset_combo(app: &LightcraftApp, ui: &mut egui::Ui, id: &str, current: Optio
         if ui.selectable_label(current.is_none(), crate::i18n::tr(none_label)).clicked() {
             out = Some(None);
         }
-        let mut group = "";
-        for p in &app.session.presets {
-            if p.group != group {
-                group = &p.group;
-                ui.label(RichText::new(crate::i18n::builtin_label(group, p.builtin)).size(10.5).weak());
-            }
-            if ui.selectable_label(current == Some(p.id.as_str()), crate::i18n::builtin_label(&p.name, p.builtin)).clicked() {
-                out = Some(Some(p.id.clone()));
-            }
+        if let Some(pid) = crate::panels::presets::picker_rows(ui, id, &app.session.presets, current) {
+            out = Some(Some(pid));
         }
     });
     register(ui.ctx(), format!("combo:{id}"), r.response.rect);
@@ -290,10 +383,8 @@ fn import_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
                         if ui.selectable_label(current.is_none(), crate::i18n::tr("LightCraft Default")).clicked() {
                             pick = Some(json!({"camera": cam, "preset": null}));
                         }
-                        for p in &app.session.presets {
-                            if ui.selectable_label(current == Some(p.id.as_str()), crate::i18n::builtin_label(&p.name, p.builtin)).clicked() {
-                                pick = Some(json!({"camera": cam, "preset": p.id}));
-                            }
+                        if let Some(pid) = crate::panels::presets::picker_rows(ui, &id, &app.session.presets, current) {
+                            pick = Some(json!({"camera": cam, "preset": pid}));
                         }
                     });
                     register(ui.ctx(), format!("combo:{id}"), r.response.rect);
@@ -370,7 +461,10 @@ fn import_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
         heading(ui, t, crate::i18n::tr("Auto Import"));
         hint(ui, t, crate::i18n::tr("Photos that arrive in this folder (tethering, a scanner, a sync app) are added as soon as they're complete."));
         row(ui, t, crate::i18n::tr("Watched folder"), |ui| {
-            ui.label(RichText::new(d.auto_folder.clone().unwrap_or_else(|| crate::i18n::tr("Off").into())).color(t.text));
+            match &d.auto_folder {
+                Some(folder) => path_label(ui, "settingsAutoFolder", folder, egui::TextStyle::Body.resolve(ui.style()), t.text),
+                None => drop(ui.label(RichText::new(crate::i18n::tr("Off")).color(t.text))),
+            }
             let can = app.services.pick_folder.is_some();
             let r = ui.add_enabled(can, egui::Button::new(crate::i18n::tr("Choose…")));
             register(ui.ctx(), "button:settingsAutoFolder", r.rect);
@@ -385,6 +479,16 @@ fn import_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             }
         });
         if d.auto_folder.is_some() {
+            row(ui, t, "", |ui| {
+                let mut sub = d.auto_subfolders;
+                let r = ui.checkbox(&mut sub, crate::i18n::tr("Include subfolders")).on_hover_text(crate::i18n::tr(
+                    "Photos in folders inside the watched folder are added too (hidden folders and the library's own folder are skipped).",
+                ));
+                register(ui.ctx(), "check:settings.autoImportSubfolders", r.rect);
+                if r.changed() {
+                    let _ = app.run("library.autoImport", json!({"subfolders": sub}));
+                }
+            });
             row(ui, t, "", |ui| {
                 let mut copy = d.auto_copy;
                 if ui.checkbox(&mut copy, crate::i18n::tr("Copy into the library (else use the files where they are)")).changed() {
@@ -458,6 +562,8 @@ fn performance_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             let _ = app.run("library.clearPreviews", json!({}));
         }
     });
+    #[cfg(not(target_arch = "wasm32"))]
+    thumb_cache_folder(app, ui, t);
     heading(ui, t, crate::i18n::tr("Local folders"));
     row(ui, t, crate::i18n::tr("Forget unchanged photos"), |ui| {
         let opts = [(0u32, "Never"), (7, "After 7 days"), (30, "After 30 days"), (90, "After 90 days"), (365, "After a year")];
@@ -475,6 +581,87 @@ fn performance_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     );
     #[cfg(not(target_arch = "wasm32"))]
     smart_previews(app, ui, t);
+}
+
+/// Where this library keeps its thumbnail cache (issue #903): the effective folder, and choosing
+/// another one, like the smart previews folder below.
+#[cfg(not(target_arch = "wasm32"))]
+fn thumb_cache_folder(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    // listing a big cache every frame would be slow: refresh every 2 s and after a change
+    let cache = egui::Id::new("thumbs-location");
+    let now = ui.input(|i| i.time);
+    let loc: Value = match ui.data(|d| d.get_temp::<(f64, Value)>(cache)) {
+        Some((at, v)) if now - at < 2.0 => v,
+        _ => {
+            let v = app.run("library.thumbnailCacheLocation", json!({})).unwrap_or(Value::Null);
+            ui.data_mut(|d| d.insert_temp(cache, (now, v.clone())));
+            v
+        }
+    };
+    if loc.is_null() {
+        return;
+    }
+    let path = loc["path"].as_str().unwrap_or_default().to_string();
+    let available = loc["available"].as_bool().unwrap_or(true);
+    let custom = loc["custom"].as_bool().unwrap_or(false);
+    row(ui, t, crate::i18n::tr("Folder"), |ui| {
+        let text = format!("{path}{}", if custom { "" } else { "  (library default)" });
+        ui.add(egui::Label::new(RichText::new(text.clone()).color(if available { t.text } else { t.reject })).truncate()).on_hover_text(text);
+    });
+    if !available {
+        hint(
+            ui,
+            t,
+            crate::i18n::tr(
+                "This folder is not available (drive disconnected?). Thumbnails are kept in memory only until it is back or you choose another folder.",
+            ),
+        );
+    }
+    // what happens to the thumbnails already cached when the folder changes
+    let mode_id = egui::Id::new("thumbs-existing");
+    let mut mode: u8 = ui.data(|d| d.get_temp(mode_id)).unwrap_or(0);
+    if loc["count"].as_u64().unwrap_or(0) > 0 {
+        row(ui, t, crate::i18n::tr("Existing thumbnails"), |ui| {
+            if choices(ui, "settingsThumbsExisting", &[(0u8, "Move them"), (1, "Leave them"), (2, "Delete them")], &mut mode) {
+                ui.data_mut(|d| d.insert_temp(mode_id, mode));
+            }
+        });
+    }
+    let existing = ["move", "leave", "discard"][mode.min(2) as usize];
+    let mut result = None;
+    ui.horizontal(|ui| {
+        ui.add_space(LABEL_W);
+        if app.services.pick_folder.is_some() {
+            let r = ui.button(crate::i18n::tr("Choose Folder…"));
+            register(ui.ctx(), "button:settingsThumbsChoose", r.rect);
+            if r.clicked()
+                && let Some(dir) = app.services.pick_folder.as_mut().and_then(|f| f())
+            {
+                result = Some(app.run("library.thumbnailCacheLocation", json!({"path": dir, "existing": existing})));
+            }
+        }
+        let r = ui.add_enabled(custom, egui::Button::new(crate::i18n::tr("Use Library Folder")));
+        register(ui.ctx(), "button:settingsThumbsReset", r.rect);
+        if r.clicked() {
+            result = Some(app.run("library.thumbnailCacheLocation", json!({"reset": true, "existing": existing})));
+        }
+    });
+    if let Some(r) = result {
+        ui.data_mut(|d| d.remove::<(f64, Value)>(cache));
+        match r {
+            Ok(v) => {
+                let failed = v["failed"].as_array().map_or(0, Vec::len);
+                let msg = match (existing, v["handled"].as_u64().unwrap_or(0)) {
+                    ("move", n) if n > 0 => format!("Thumbnail cache folder changed; moved {n}"),
+                    ("discard", n) if n > 0 => format!("Thumbnail cache folder changed; deleted {n}"),
+                    _ => "Thumbnail cache folder changed".to_string(),
+                };
+                app.toast(ui.ctx(), if failed > 0 { crate::i18n::tr_format!("{msg} ({failed} failed)", failed = failed, msg = msg) } else { msg });
+            }
+            Err(e) => app.toast(ui.ctx(), e),
+        }
+    }
+    hint(ui, t, crate::i18n::tr("A fast local drive keeps the grid quick when the library itself is on a network or slow drive."));
 }
 
 /// Where this library keeps its smart previews (the offline-editing proxies, which can be large):
@@ -500,8 +687,10 @@ fn smart_previews(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     let available = loc["available"].as_bool().unwrap_or(true);
     let custom = loc["custom"].as_bool().unwrap_or(false);
     row(ui, t, crate::i18n::tr("Folder"), |ui| {
-        let text = format!("{path}{}", if custom { "" } else { "  (library default)" });
-        ui.add(egui::Label::new(RichText::new(text.clone()).color(if available { t.text } else { t.reject })).truncate()).on_hover_text(text);
+        path_label(ui, "settingsSmartFolder", &path, egui::TextStyle::Body.resolve(ui.style()), if available { t.text } else { t.reject });
+        if !custom {
+            ui.label(RichText::new("(library default)").color(t.text));
+        }
     });
     let (count, bytes) = (loc["count"].as_u64().unwrap_or(0), loc["bytes"].as_u64().unwrap_or(0));
     if available {
@@ -569,7 +758,7 @@ fn smart_previews(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             Err(e) => app.toast(ui.ctx(), e),
         }
     }
-    hint(ui, t, crate::i18n::tr("Keep it on a drive with room: smart previews are about 1 MB per photo. The thumbnail cache stays in the library."));
+    hint(ui, t, crate::i18n::tr("Keep it on a drive with room: smart previews are about 1 MB per photo."));
 }
 
 // ---------------------------------------------------------------------------------- Interface
@@ -617,7 +806,7 @@ fn display_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
         let info = d.describe();
         if !screen {
             row(ui, t, crate::i18n::tr("File"), |ui| {
-                ui.label(RichText::new(&d.path).size(11.0).color(t.text_dim));
+                path_label(ui, "settingsDisplayFile", &d.path, egui::FontId::proportional(11.0), t.text_dim);
             });
         }
         row(ui, t, crate::i18n::tr("Type"), |ui| {
@@ -1129,4 +1318,49 @@ pub fn display_profile(app: &mut LightcraftApp, p: &Value) -> Result<Value, Stri
         Some(d) => d.describe(),
         None => json!({"path": null, "description": "sRGB (no display profile)"}),
     })
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::elide_path;
+
+    /// Width = characters, so a limit of 20 is "20 characters".
+    fn fit(path: &str, max: usize) -> String {
+        elide_path(path, max as f32, |s| s.chars().count() as f32)
+    }
+
+    #[test]
+    fn a_path_that_fits_is_left_alone() {
+        assert_eq!(fit("/Users/me/Pictures", 18), "/Users/me/Pictures");
+        assert_eq!(fit("", 5), "");
+    }
+
+    #[test]
+    fn leading_folders_go_first_and_the_end_stays() {
+        assert_eq!(fit("/Users/me/Pictures/Library", 20), "…/Pictures/Library");
+        assert_eq!(fit("/Users/me/Pictures/Library", 10), "…/Library");
+    }
+
+    /// Windows paths: `Path::display` gives backslashes there.
+    #[test]
+    fn a_path_with_backslashes_keeps_its_end_too() {
+        assert_eq!(fit(r"C:\Users\me\Pictures\Library", 20), r"…\Pictures\Library");
+        assert_eq!(fit(r"C:\Users\me/Pictures\Library", 10), r"…\Library");
+    }
+
+    #[test]
+    fn a_last_folder_too_long_by_itself_loses_its_end() {
+        assert_eq!(fit("/Users/me/a-very-long-folder-name", 8), "a-very-…");
+        assert_eq!(fit("no-separator-at-all", 8), "no-sepa…");
+        assert_eq!(fit("/Users/Фотографии-из-отпуска", 8), "Фотогра…");
+    }
+
+    #[test]
+    fn a_separator_at_the_end_is_not_where_the_name_starts() {
+        assert_eq!(fit("/Users/me/Pictures/Library/", 11), "…/Library/");
+        assert_eq!(fit("/Users/me/a-very-long-folder-name/", 8), "a-very-…");
+        assert_eq!(fit(r"C:\Users\me\Library\", 11), r"…\Library\");
+        assert_eq!(fit("///", 2), "…");
+        assert_eq!(fit(r"\\server\share\folder", 15), r"…\share\folder");
+    }
 }

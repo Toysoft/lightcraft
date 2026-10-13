@@ -805,7 +805,7 @@
   "Join the ArtCraft Discord": "加入 ArtCraft Discord",
   "Join the ArtCraft Discord…": "加入 ArtCraft Discord…",
   "Keep in Local": "保留在本地",
-  "Keep it on a drive with room: smart previews are about 1 MB per photo. The thumbnail cache stays in the library.": "请选择空间充足的驱动器：智能预览每张照片约 1 MB。缩略图缓存仍保留在图库中。",
+  "Keep it on a drive with room: smart previews are about 1 MB per photo.": "请选择空间充足的驱动器：智能预览每张照片约 1 MB。",
   "Keyboard Shortcuts": "键盘快捷键",
   "Keyboard shortcuts": "键盘快捷键",
   "Keyword": "关键字",
@@ -1055,6 +1055,7 @@
   "Photos": "照片",
   "Photos seen in Local but never added or changed leave the catalog when their folder hasn't been browsed for this long (checked when the library opens). Files stay on disk; browsing the folder shows them again.": "仅在“本地”中查看过、从未添加或更改的照片，若其文件夹在此时长内未被浏览，将移出目录（打开图库时检查）。文件保留在磁盘上；浏览该文件夹即可再次显示。",
   "Photos that arrive in this folder (tethering, a scanner, a sync app) are added as soon as they're complete.": "进入此文件夹的照片（联机拍摄、扫描仪、同步应用）在传输完成后即被添加。",
+  "Photos in folders inside the watched folder are added too (hidden folders and the library's own folder are skipped).": "监视文件夹内各文件夹中的照片也会添加（跳过隐藏文件夹和图库本身的文件夹）。",
   "Pick": "留用",
   "Pick a colour on the photo with the eyedropper.": "用吸管在照片上取色。",
   "Pick the sharpest photo of each burst": "为每组连拍选取最清晰的照片",
@@ -1995,5 +1996,14 @@
   "Adding to Apple Photos": "正在添加到 Apple 照片",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "未找到图形处理器：LightCraft 改用 CPU 渲染，速度会慢很多。详情见“帮助 → 系统信息”。",
   "On NixOS, start it from `nix develop`.": "在 NixOS 上，请从 `nix develop` 启动。",
-  "Files with the same content as another file in this import: only the first is imported.": "与本次导入中另一个文件内容相同的文件：只导入第一个。"
+  "Files with the same content as another file in this import: only the first is imported.": "与本次导入中另一个文件内容相同的文件：只导入第一个。",
+  "Continue in Background": "在后台继续",
+  "Folder not found": "未找到文件夹",
+  "Dismiss": "忽略",
+  "Review…": "查看…",
+  "Open Synchronize Folder with what the scan found": "用扫描结果打开“同步文件夹”",
+  "You can go on working: a notice at the top left says when the scan is done.": "你可以继续工作：扫描完成时左上角会出现通知。",
+  "Render to DNG": "渲染为 DNG",
+  "Rendering to DNG": "正在渲染为 DNG",
+  "Render to DNG stopped unexpectedly": "渲染为 DNG 意外停止"
 }
