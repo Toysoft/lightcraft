@@ -63,16 +63,16 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             let search_left = full.center().x - sw / 2.0;
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                if icon_button(ui, "sidebar", Icon::Sidebar, vec2(30.0, 30.0), app.ui.left_panel, true, crate::i18n::tr("Show/hide My Photos panel"))
+                if icon_button(ui, "sidebar", Icon::Sidebar, vec2(22.0, 22.0), app.ui.left_panel, true, crate::i18n::tr("Show/hide My Photos panel"))
                     .clicked()
                 {
                     let _ = app.run("view.leftPanel", json!({}));
                 }
                 ui.add_space(8.0);
-                if icon_button(ui, "back", Icon::Back, vec2(30.0, 30.0), false, true, crate::i18n::tr("Back")).clicked() {
+                if icon_button(ui, "back", Icon::Back, vec2(22.0, 22.0), false, true, crate::i18n::tr("Back")).clicked() {
                     let _ = app.run("view.back", json!({}));
                 }
-                icon_button(ui, "forward", Icon::Forward, vec2(30.0, 30.0), false, false, crate::i18n::tr("Forward"));
+                icon_button(ui, "forward", Icon::Forward, vec2(22.0, 22.0), false, false, crate::i18n::tr("Forward"));
                 if !app.native_menu {
                     // no native menu bar (web, Windows, Linux): menus in the top bar
                     ui.add_space(10.0);
@@ -81,7 +81,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 }
             });
             // search field (centred on the window)
-            let sr = Rect::from_center_size(pos2(full.center().x, full.center().y), vec2(sw, 28.0));
+            let sr = Rect::from_center_size(pos2(full.center().x, full.center().y), vec2(sw, 22.0));
             let id = crate::text_field::id("field:search");
             if std::mem::take(&mut app.ui.focus_search) {
                 ui.memory_mut(|m| m.request_focus(id));
@@ -98,7 +98,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 ui.new_child(egui::UiBuilder::new().max_rect(sr.shrink2(vec2(10.0, 4.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
             let empty = app.ui.search.is_empty();
             if empty && !focused {
-                let g = child.painter().layout_no_wrap(crate::i18n::tr("Search Photos").into(), t.font(13.5), t.text_dim);
+                let g = child.painter().layout_no_wrap(crate::i18n::tr("Search Photos").into(), t.font(12.0), t.text_dim);
                 let w = g.size().x + 24.0;
                 let x0 = sr.center().x - w / 2.0;
                 paint(child.painter(), Rect::from_min_size(pos2(x0, sr.center().y - 8.0), vec2(16.0, 16.0)), Icon::Search, t.text_dim);
@@ -108,7 +108,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 .label(crate::i18n::tr("Search Photos"))
                 .frame(false)
                 .width(sr.width() - 20.0)
-                .font(t.font(13.5))
+                .font(t.font(12.0))
                 .text_color(t.text)
                 .show(&mut child)
                 .response;
@@ -117,7 +117,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 let _ = app.run("library.filter", json!({"text": q}));
             }
             // filter icon right of the search field
-            let fr = Rect::from_center_size(pos2(sr.right() + 22.0, sr.center().y), vec2(28.0, 28.0));
+            let fr = Rect::from_center_size(pos2(sr.right() + 18.0, sr.center().y), vec2(22.0, 22.0));
             let fresp = ui.interact(fr, egui::Id::new("filter-btn"), Sense::click());
             register(ui.ctx(), "icon:filter", fr);
             let filtering = app.session.filter != Default::default() || app.ui.filter_bar;
@@ -168,7 +168,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 ("share", Icon::Share, "Export", "dialog.export"),
                 ("bell", Icon::Bell, "Activity", "panel.activity"),
             ] {
-                let r = Rect::from_center_size(pos2(x, full.center().y), vec2(28.0, 28.0));
+                let r = Rect::from_center_size(pos2(x, full.center().y), vec2(22.0, 22.0));
                 let resp = ui.interact(r, egui::Id::new(("top", id)), Sense::click()).on_hover_text(crate::i18n::tr(tip));
                 register(ui.ctx(), format!("icon:{id}"), r);
                 let warn = id == "cloud" && unsaved.is_some();
@@ -189,11 +189,11 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 if resp.clicked() && !cmd.is_empty() {
                     let _ = app.run(cmd, json!({}));
                 }
-                x -= 40.0;
+                x -= 30.0;
             }
             // Appearance Mode: a click steps Auto → Light → Dark → Auto; the icon shows the mode
             let (icon, mode) = appearance_icon(app.ui.settings.appearance_mode);
-            let r = Rect::from_center_size(pos2(x, full.center().y), vec2(28.0, 28.0));
+            let r = Rect::from_center_size(pos2(x, full.center().y), vec2(22.0, 22.0));
             let tip = format!("{}: {}", crate::i18n::tr("Appearance Mode"), crate::i18n::tr(mode));
             let resp = ui.interact(r, egui::Id::new(("top", "appearance")), Sense::click()).on_hover_text(tip);
             register(ui.ctx(), "icon:appearance", r);

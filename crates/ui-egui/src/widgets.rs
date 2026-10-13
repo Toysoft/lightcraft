@@ -126,12 +126,11 @@ fn track_stops(track: &Track) -> Option<Vec<Color32>> {
     })
 }
 
-fn paint_track(ui: &Ui, rect: Rect, track: &Track, t: &Tokens, thumb_x: f32, ring: f32) {
+fn paint_track(ui: &Ui, rect: Rect, track: &Track, t: &Tokens, thumb_x: f32) {
     let p = ui.painter();
-    let y = rect.center().y;
-    let h = 1.0;
+    let h = if track_stops(track).is_some() { 2.5 } else { 1.5 };
+    let rail = Rect::from_center_size(rect.center(), vec2(rect.width(), h * 2.0));
     if let Some(stops) = track_stops(track) {
-        // gradient: segments between stops
         let n = stops.len().max(2) - 1;
         let steps = 48;
         for i in 0..steps {
@@ -139,15 +138,15 @@ fn paint_track(ui: &Ui, rect: Rect, track: &Track, t: &Tokens, thumb_x: f32, rin
             let seg = (a * n as f32).floor() as usize;
             let local = a * n as f32 - seg as f32;
             let c = lerp(stops[seg.min(n)], stops[(seg + 1).min(n)], local);
-            let x0 = rect.left() + rect.width() * a;
-            let x1 = rect.left() + rect.width() * b;
-            p.rect_filled(Rect::from_min_max(pos2(x0, y - h - 0.5), pos2(x1 + 0.5, y + h + 0.5)), 0.0, c);
+            let x0 = rail.left() + rail.width() * a;
+            let x1 = rail.left() + rail.width() * b;
+            p.rect_filled(Rect::from_min_max(pos2(x0, rail.top()), pos2(x1 + 0.5, rail.bottom())), 2.0, c);
         }
     } else {
-        p.rect_filled(Rect::from_min_max(pos2(rect.left(), y - h), pos2(rect.right(), y + h)), 1.0, t.track);
+        p.rect_filled(rail, 2.0, t.field_border);
+        let filled = Rect::from_min_max(rail.min, pos2(thumb_x.clamp(rail.left(), rail.right()), rail.max.y));
+        p.rect_filled(filled, 2.0, t.text_dim);
     }
-    // gap around the hollow thumb
-    p.rect_filled(Rect::from_center_size(pos2(thumb_x, y), vec2(ring * 2.0 + 4.0, 6.0)), 0.0, t.chrome);
 }
 
 /// Result of a slider interaction this frame.
@@ -176,17 +175,18 @@ pub(crate) fn shown_value(spec: &ControlSpec, v: f64) -> String {
     if shown == "+0" || shown == "-0" { "0".to_string() } else { shown }
 }
 
-/// A Lightroom slider row (label + value above a track with a hollow ring thumb).
+/// PhotoCraft-style slider: label and value on one row, thin filled track and a small knob under it.
 /// Double-click the label or thumb to reset. Shift-drag = fine adjustment. Click the value to
 /// type one: Return or clicking away applies it, Esc keeps the old one.
 pub fn slider(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool, label_override: Option<&str>) -> SliderOut {
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (row, _) = ui.allocate_exact_size(vec2(w, t.slider_row_h), Sense::hover());
-    let pad_l = 24.0;
-    let pad_r = 22.0;
-    let label_rect = Rect::from_min_size(pos2(row.left() + pad_l, row.top() + 4.0), vec2(w - pad_l - pad_r, 18.0));
-    let track_rect = Rect::from_min_max(pos2(row.left() + pad_l, row.top() + 22.0), pos2(row.right() - pad_r, row.top() + 40.0));
+    let pad_l = 10.0;
+    let pad_r = 10.0;
+    let label_rect = Rect::from_min_max(pos2(row.left() + pad_l, row.top()), pos2(row.right() - pad_r - 52.0, row.top() + 14.0));
+    let value_rect = Rect::from_min_max(pos2(row.right() - pad_r - 52.0, row.top()), pos2(row.right() - pad_r, row.top() + 14.0));
+    let track_rect = Rect::from_min_max(pos2(row.left() + pad_l, row.top() + 14.0), pos2(row.right() - pad_r, row.bottom()));
     let id = ui.id().with(spec.id);
     let resp = ui.interact(track_rect.expand2(vec2(8.0, 2.0)), id, if enabled { Sense::click_and_drag() } else { Sense::hover() });
     // A click selects the slider for arrow/wheel adjustments. Keep scroll-to-adjust
@@ -217,7 +217,6 @@ pub fn slider(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool, label_
     let label_resp = ui.interact(label_rect, id.with("label"), Sense::click());
     register(ui.ctx(), format!("slider:{}", spec.id), track_rect);
     // the value: click it to type an exact one (over the label, so it takes the click)
-    let value_rect = Rect::from_min_max(pos2(label_rect.right() - 64.0, label_rect.top()), label_rect.max);
     let value_resp = ui.interact(value_rect, id.with("value"), if enabled { Sense::click() } else { Sense::hover() });
     register(ui.ctx(), format!("sliderValue:{}", spec.id), value_rect);
     // say that an exact value can be typed here (issue #534: an exact crop angle was hard to find)
@@ -255,7 +254,7 @@ pub fn slider(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool, label_
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(value_rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
         // the old value is selected when the field takes the focus, so typing replaces it
         let field = crate::text_field::TextField::singleline(&format!("sliderField:{}", spec.id), &mut text)
-            .font(t.font(12.5))
+            .font(t.font(12.0))
             .horizontal_align(egui::Align::RIGHT)
             .width(value_rect.width())
             .margin(egui::Margin::ZERO)
@@ -384,26 +383,24 @@ pub fn slider(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool, label_
     let hovered = resp.hovered() || resp.dragged();
     let text_c = if enabled { t.text_label } else { t.text_disabled };
     let p = ui.painter();
-    p.text(label_rect.left_center(), Align2::LEFT_CENTER, crate::i18n::tr(label_override.unwrap_or(spec.label)), t.font(12.5), text_c);
+    p.text(label_rect.left_center(), Align2::LEFT_CENTER, crate::i18n::tr(label_override.unwrap_or(spec.label)), t.font(11.0), text_c);
     if typing.is_none() {
-        p.text(label_rect.right_center(), Align2::RIGHT_CENTER, shown_value(spec, v), t.font(12.5), text_c);
+        p.text(value_rect.right_center(), Align2::RIGHT_CENTER, shown_value(spec, v), t.font(11.0), text_c);
         if enabled && value_resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
         }
     }
-    let ring = 7.0;
     let tx = to_x(v);
-    paint_track(ui, track_rect, &spec.track, &t, tx, ring);
+    paint_track(ui, track_rect, &spec.track, &t, tx);
     let p = ui.painter();
-    let ring_c = if !enabled {
-        t.text_disabled
-    } else if hovered {
-        t.thumb_hover
-    } else {
-        t.thumb
-    };
-    p.circle_filled(pos2(tx, track_rect.center().y), ring, t.chrome);
-    p.circle_stroke(pos2(tx, track_rect.center().y), ring, Stroke::new(2.0, ring_c));
+    let knob = pos2(tx, track_rect.center().y);
+    let kr = 6.0;
+    p.circle_filled(knob + vec2(0.0, 1.0), kr + 0.5, Color32::from_black_alpha(90));
+    p.circle_filled(knob, kr, Color32::from_gray(236));
+    p.circle_stroke(knob, kr, Stroke::new(1.0, Color32::from_gray(40)));
+    if hovered {
+        p.circle_stroke(knob, 8.5, Stroke::new(2.0, t.accent.gamma_multiply(0.7)));
+    }
     if hovered {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
@@ -434,16 +431,16 @@ pub fn section_header(ui: &mut Ui, id: &str, title: &str, open: bool, enabled: O
     let title = crate::i18n::tr(title);
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
-    let (r, resp) = ui.allocate_exact_size(vec2(w, 52.0), Sense::click());
+    let (r, resp) = ui.allocate_exact_size(vec2(w, t.section_h), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, true, open, title));
     register(ui.ctx(), format!("section:{id}"), r);
     let p = ui.painter();
     if ui.rect_contains_pointer(r) {
         p.rect_filled(r, 0.0, t.chrome.gamma_multiply(1.06));
     }
-    let chev = Rect::from_center_size(pos2(r.left() + 30.0, r.center().y), vec2(14.0, 14.0));
+    let chev = Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(12.0, 12.0));
     paint(p, chev, if open { Icon::ChevronDown } else { Icon::ChevronRight }, t.text_label);
-    p.text(pos2(r.left() + 44.0, r.center().y), Align2::LEFT_CENTER, title, t.semibold(14.0), t.text);
+    p.text(pos2(r.left() + 28.0, r.center().y), Align2::LEFT_CENTER, title, t.semibold(12.0), t.text);
     let mut toggled = None;
     // shown while the pointer is anywhere on the header: `resp.hovered()` turns false as soon as the
     // pointer is over the eye itself (the eye is on top), which hid the eye before it could be
@@ -451,7 +448,7 @@ pub fn section_header(ui: &mut Ui, id: &str, title: &str, open: bool, enabled: O
     if let Some(on) = enabled
         && (ui.rect_contains_pointer(r) || !on)
     {
-        let eye = Rect::from_center_size(pos2(r.right() - 34.0, r.center().y), vec2(18.0, 18.0));
+        let eye = Rect::from_center_size(pos2(r.right() - 20.0, r.center().y), vec2(14.0, 14.0));
         let er = ui.interact(eye, ui.id().with(("eye", id)), Sense::click());
         register(ui.ctx(), format!("sectionEye:{id}"), eye);
         paint(ui.painter(), eye, Icon::Eye, if on { t.icon } else { t.text_disabled });
@@ -478,8 +475,8 @@ pub fn flyout_row(ui: &mut Ui, id: &str, title: &str, icon: Icon, open: bool) ->
     let title = crate::i18n::tr(title);
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
-    let (outer, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
-    let r = Rect::from_min_max(pos2(outer.left() + 16.0, outer.top() + 4.0), pos2(outer.right() - 16.0, outer.bottom() - 4.0));
+    let (outer, _) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
+    let r = Rect::from_min_max(pos2(outer.left() + 10.0, outer.top() + 3.0), pos2(outer.right() - 10.0, outer.bottom() - 3.0));
     let resp = ui.interact(r, ui.id().with(("flyout", id)), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, true, open, title));
     register(ui.ctx(), format!("flyout:{id}"), r);
@@ -488,7 +485,7 @@ pub fn flyout_row(ui: &mut Ui, id: &str, title: &str, icon: Icon, open: bool) ->
     let tile = Rect::from_min_size(pos2(r.left() + 4.0, r.top() + 4.0), vec2(r.height() - 8.0, r.height() - 8.0));
     p.rect_filled(tile, 3.0, t.chrome.gamma_multiply(1.15));
     paint(p, tile.shrink(3.0), icon, t.text_label);
-    p.text(pos2(tile.right() + 10.0, r.center().y), Align2::LEFT_CENTER, title, t.semibold(13.0), t.text_label);
+    p.text(pos2(tile.right() + 8.0, r.center().y), Align2::LEFT_CENTER, title, t.semibold(11.0), t.text_label);
     paint(
         p,
         Rect::from_center_size(pos2(r.right() - 14.0, r.center().y), vec2(12.0, 12.0)),
@@ -504,7 +501,7 @@ pub fn text_button(ui: &mut Ui, id: &str, label: &str, active: bool) -> Response
     let t = Tokens::get(ui.ctx());
     let font = t.semibold(11.5);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
-    let size = vec2((galley.size().x + 18.0).max(37.0), 24.0);
+    let size = vec2((galley.size().x + 14.0).max(32.0), 20.0);
     let (r, resp) = ui.allocate_exact_size(size, Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label));
     register(ui.ctx(), format!("button:{id}"), r);
@@ -536,7 +533,7 @@ pub fn segmented(ui: &mut Ui, id: &str, items: &[(&str, &str)], active: Option<u
             for (j, (label, key)) in row.iter().enumerate() {
                 let label = crate::i18n::tr(label);
                 let i = row_i * per_row + j;
-                let (r, resp) = ui.allocate_exact_size(vec2(seg_w, 24.0), Sense::click());
+                let (r, resp) = ui.allocate_exact_size(vec2(seg_w, 20.0), Sense::click());
                 register(ui.ctx(), format!("button:{id}-{key}"), r);
                 let fill = if active == Some(i) {
                     t.pressed
@@ -547,7 +544,7 @@ pub fn segmented(ui: &mut Ui, id: &str, items: &[(&str, &str)], active: Option<u
                 };
                 let p = ui.painter();
                 p.rect(r, CornerRadius::same(4), fill, Stroke::new(1.0, t.button_border), StrokeKind::Inside);
-                p.text(r.center(), Align2::CENTER_CENTER, label, t.semibold(11.5), t.text);
+                p.text(r.center(), Align2::CENTER_CENTER, label, t.semibold(11.0), t.text);
                 if resp.clicked() {
                     clicked = Some(i);
                 }

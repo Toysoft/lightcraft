@@ -59,7 +59,7 @@ fn kind_label(s: &MaskShape) -> (&'static str, Icon) {
     }
 }
 
-const TILE: f32 = 52.0;
+const TILE: f32 = 40.0;
 const TILE_GAP: f32 = 6.0;
 /// Room left and right of a tile's label.
 const TILE_PAD: f32 = 3.0;

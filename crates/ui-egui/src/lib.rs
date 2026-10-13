@@ -35,6 +35,7 @@ pub mod state;
 pub mod sync;
 pub mod tasks;
 pub mod text_field;
+pub mod system_ui_font;
 pub mod theme;
 pub mod titlebar;
 pub mod widgets;

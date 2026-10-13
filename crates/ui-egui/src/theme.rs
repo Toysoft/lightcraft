@@ -120,41 +120,43 @@ impl ThemeKind {
 impl Default for Tokens {
     fn default() -> Self {
         Tokens {
-            chrome: Color32::from_rgb(0x2d, 0x2d, 0x2d),
-            canvas: Color32::from_rgb(0x1c, 0x1c, 0x1c),
-            grid_bg: Color32::from_rgb(0x0f, 0x0f, 0x0f),
-            cell: Color32::from_rgb(0x1c, 0x1c, 0x1c),
-            cell_selected: Color32::from_rgb(0x2d, 0x2d, 0x2d),
-            divider: Color32::from_rgb(0x1c, 0x1c, 0x1c),
-            inset: Color32::from_rgb(0x23, 0x23, 0x23),
-            field: Color32::from_rgb(0x22, 0x22, 0x22),
-            field_border: Color32::from_rgb(0x3c, 0x3c, 0x3c),
-            button: Color32::from_rgb(0x24, 0x24, 0x24),
-            button_border: Color32::from_rgb(0x4c, 0x4c, 0x4c),
-            hover: Color32::from_rgb(0x3a, 0x3a, 0x3a),
+            // Charcoal = shared ArtCraft Medium Dark (#535353), matching PhotoCraft Pro Medium
+            // and VectorCraft Medium Dark. The photo canvas stays darker than the chrome.
+            chrome: Color32::from_rgb(0x53, 0x53, 0x53),
+            canvas: Color32::from_rgb(0x28, 0x28, 0x28),
+            grid_bg: Color32::from_rgb(0x1e, 0x1e, 0x1e),
+            cell: Color32::from_rgb(0x28, 0x28, 0x28),
+            cell_selected: Color32::from_rgb(0x42, 0x42, 0x42),
+            divider: Color32::from_rgb(0x4b, 0x4b, 0x4b),
+            inset: Color32::from_rgb(0x42, 0x42, 0x42),
+            field: Color32::from_rgb(0x45, 0x45, 0x45),
+            field_border: Color32::from_rgb(0x5f, 0x5f, 0x5f),
+            button: Color32::from_rgb(0x53, 0x53, 0x53),
+            button_border: Color32::from_rgb(0x74, 0x74, 0x74),
+            hover: Color32::from_rgb(0x60, 0x60, 0x60),
             pressed: Color32::from_rgb(0x3f, 0x3f, 0x3f),
-            tool_active: Color32::from_rgb(0x3f, 0x3f, 0x3f),
-            text: Color32::from_rgb(0xe2, 0xe2, 0xe2),
-            text_label: Color32::from_rgb(0xbc, 0xbc, 0xbc),
-            text_dim: Color32::from_rgb(0x8e, 0x8e, 0x8e),
-            text_disabled: Color32::from_rgb(0x5c, 0x5c, 0x5c),
-            icon: Color32::from_rgb(0x9a, 0x9a, 0x9a),
-            track: Color32::from_rgb(0x5a, 0x5a, 0x5a),
+            tool_active: Color32::from_rgb(0x30, 0x30, 0x30),
+            text: Color32::from_rgb(0xff, 0xff, 0xff),
+            text_label: Color32::from_rgb(0xd1, 0xd1, 0xd1),
+            text_dim: Color32::from_rgb(0xb0, 0xb0, 0xb0),
+            text_disabled: Color32::from_rgb(0x7a, 0x7a, 0x7a),
+            icon: Color32::from_rgb(0xc2, 0xc2, 0xc2),
+            track: Color32::from_rgb(0x6a, 0x6a, 0x6a),
             thumb: Color32::from_rgb(0xa0, 0xa0, 0xa0),
             thumb_hover: Color32::from_rgb(0xe0, 0xe0, 0xe0),
-            accent: Color32::from_rgb(0x01, 0x65, 0xdd),
+            accent: Color32::from_rgb(0x37, 0x8e, 0xf0),
             star: Color32::from_rgb(0xd8, 0xd8, 0xd8),
             pick: Color32::from_rgb(0xf0, 0xf0, 0xf0),
             reject: Color32::from_rgb(0xe0, 0x4a, 0x4a),
             caution: Color32::from_rgb(0xe3, 0xa8, 0x3c),
             mask_overlay: Color32::from_rgba_unmultiplied(0xe0, 0x20, 0x30, 110),
-            top_bar_h: 42.0,
-            bottom_bar_h: 48.0,
-            panel_w: 270.0,
-            strip_w: 48.0,
-            slider_row_h: 45.0,
-            section_h: 57.0,
-            film_h: 142.0,
+            top_bar_h: 28.0,
+            bottom_bar_h: 36.0,
+            panel_w: 240.0,
+            strip_w: 36.0,
+            slider_row_h: 32.0,
+            section_h: 26.0,
+            film_h: 84.0,
         }
     }
 }
@@ -167,46 +169,50 @@ impl Tokens {
         match kind {
             ThemeKind::Charcoal => base,
             ThemeKind::Midnight => Tokens {
-                chrome: rgb(0x1e1e1e),
-                canvas: rgb(0x121212),
-                grid_bg: rgb(0x080808),
-                cell: rgb(0x121212),
-                cell_selected: rgb(0x262626),
-                divider: rgb(0x0e0e0e),
-                inset: rgb(0x181818),
-                field: rgb(0x161616),
-                field_border: rgb(0x333333),
-                button: rgb(0x191919),
-                button_border: rgb(0x404040),
-                hover: rgb(0x2e2e2e),
-                pressed: rgb(0x343434),
-                tool_active: rgb(0x343434),
+                chrome: rgb(0x262626),
+                canvas: rgb(0x1e1e1e),
+                grid_bg: rgb(0x121212),
+                cell: rgb(0x1e1e1e),
+                cell_selected: rgb(0x323232),
+                divider: rgb(0x1b1b1b),
+                inset: rgb(0x282828),
+                field: rgb(0x1f1f1f),
+                field_border: rgb(0x464646),
+                button: rgb(0x323232),
+                button_border: rgb(0x6a6a6a),
+                hover: rgb(0x444444),
+                pressed: rgb(0x3f3f3f),
+                tool_active: rgb(0x1d1d1d),
+                text: rgb(0xd8d8d8),
+                text_label: rgb(0xcfcfcf),
+                text_dim: rgb(0xa8a8a8),
+                icon: rgb(0xcfcfcf),
                 ..base
             },
             ThemeKind::Silver => Tokens {
-                chrome: rgb(0xe6e6e6),
-                canvas: rgb(0xcfcfcf),
-                grid_bg: rgb(0xd9d9d9),
-                cell: rgb(0xcbcbcb),
-                cell_selected: rgb(0xb4b4b4),
-                divider: rgb(0xc4c4c4),
-                inset: rgb(0xdcdcdc),
-                field: rgb(0xf6f6f6),
-                field_border: rgb(0xb8b8b8),
-                button: rgb(0xf2f2f2),
-                button_border: rgb(0xb0b0b0),
-                hover: rgb(0xd2d2d2),
-                pressed: rgb(0xc4c4c4),
-                tool_active: rgb(0xcacaca),
-                text: rgb(0x1c1c1c),
-                text_label: rgb(0x383838),
-                text_dim: rgb(0x6a6a6a),
-                text_disabled: rgb(0xa2a2a2),
-                icon: rgb(0x555555),
-                track: rgb(0xa8a8a8),
+                chrome: rgb(0xb8b8b8),
+                canvas: rgb(0xa0a0a0),
+                grid_bg: rgb(0xa8a8a8),
+                cell: rgb(0xa0a0a0),
+                cell_selected: rgb(0x9fb4d6),
+                divider: rgb(0x9e9e9e),
+                inset: rgb(0xaaaaaa),
+                field: rgb(0xd6d6d6),
+                field_border: rgb(0x8c8c8c),
+                button: rgb(0xcacaca),
+                button_border: rgb(0x7a7a7a),
+                hover: rgb(0xc8c8c8),
+                pressed: rgb(0x969696),
+                tool_active: rgb(0x969696),
+                text: rgb(0x1f1f1f),
+                text_label: rgb(0x3c3c3c),
+                text_dim: rgb(0x3c3c3c),
+                text_disabled: rgb(0x7c7c7c),
+                icon: rgb(0x2a2a2a),
+                track: rgb(0x8c8c8c),
                 thumb: rgb(0x5e5e5e),
                 thumb_hover: rgb(0x262626),
-                accent: rgb(0x0a62d0),
+                accent: rgb(0x378ef0),
                 star: rgb(0x3a3a3a),
                 pick: rgb(0x2a2a2a),
                 reject: rgb(0xc83434),
@@ -214,21 +220,21 @@ impl Tokens {
                 ..base
             },
             ThemeKind::Paper => Tokens {
-                chrome: rgb(0xfafafa),
-                canvas: rgb(0xececec),
-                grid_bg: rgb(0xf2f2f2),
-                cell: rgb(0xe8e8e8),
-                cell_selected: rgb(0xd2d2d2),
-                divider: rgb(0xe0e0e0),
-                inset: rgb(0xf0f0f0),
+                chrome: rgb(0xf0f0f0),
+                canvas: rgb(0xdcdcdc),
+                grid_bg: rgb(0xe4e4e4),
+                cell: rgb(0xdcdcdc),
+                cell_selected: rgb(0xc8daf7),
+                divider: rgb(0xd6d6d6),
+                inset: rgb(0xe2e2e2),
                 field: rgb(0xffffff),
-                field_border: rgb(0xcccccc),
-                button: rgb(0xffffff),
-                button_border: rgb(0xc6c6c6),
-                hover: rgb(0xebebeb),
-                pressed: rgb(0xdedede),
-                tool_active: rgb(0xe2e2e2),
-                text: rgb(0x161616),
+                field_border: rgb(0xb4b4b4),
+                button: rgb(0xe0e0e0),
+                button_border: rgb(0x9a9a9a),
+                hover: rgb(0xdddddd),
+                pressed: rgb(0xcdcdcd),
+                tool_active: rgb(0xcdcdcd),
+                text: rgb(0x1f1f1f),
                 text_label: rgb(0x343434),
                 text_dim: rgb(0x707070),
                 text_disabled: rgb(0xababab),
@@ -250,10 +256,10 @@ impl Tokens {
         ctx.data(|d| d.get_temp::<Tokens>(egui::Id::NULL)).unwrap_or_default()
     }
     pub fn font(&self, size: f32) -> FontId {
-        FontId::proportional(size)
+        FontId::proportional(size.min(11.0))
     }
     pub fn semibold(&self, size: f32) -> FontId {
-        FontId::new(size, FontFamily::Name(FONT_SEMIBOLD.into()))
+        FontId::new(size.min(11.0), FontFamily::Name(FONT_SEMIBOLD.into()))
     }
 }
 
@@ -330,6 +336,7 @@ pub fn font_definitions_with_chinese(craft: &'static [lightcraft_engine::CraftFo
         mono_fallback.push(WEB_CHINESE_FONT.into());
     }
     mono.extend(mono_fallback);
+    crate::system_ui_font::prepend(&mut fonts);
     fonts
 }
 
@@ -436,10 +443,10 @@ pub fn apply_kind(ctx: &egui::Context, kind: ThemeKind) {
         s.spacing.item_spacing = egui::vec2(6.0, 4.0);
         s.spacing.button_padding = egui::vec2(8.0, 3.0);
         s.spacing.interact_size.y = 22.0;
-        s.text_styles.insert(egui::TextStyle::Body, FontId::proportional(13.0));
-        s.text_styles.insert(egui::TextStyle::Button, FontId::proportional(13.0));
-        s.text_styles.insert(egui::TextStyle::Small, FontId::proportional(11.0));
-        s.text_styles.insert(egui::TextStyle::Heading, FontId::new(16.0, FontFamily::Name(FONT_SEMIBOLD.into())));
+        s.text_styles.insert(egui::TextStyle::Body, FontId::proportional(11.0));
+        s.text_styles.insert(egui::TextStyle::Button, FontId::proportional(11.0));
+        s.text_styles.insert(egui::TextStyle::Small, FontId::proportional(10.0));
+        s.text_styles.insert(egui::TextStyle::Heading, FontId::new(13.0, FontFamily::Name(FONT_SEMIBOLD.into())));
         s.animation_time = 0.08;
     });
 }
@@ -451,6 +458,17 @@ mod tests {
 
     /// Every theme scrolls 100 points a wheel notch, and a zoom notch stays egui's stock ~1.22x
     /// (`exp(40 / 200)`) instead of growing with the longer scroll.
+    #[test]
+    fn chrome_matches_the_shared_artcraft_brightness_steps() {
+        assert_eq!(Tokens::for_kind(ThemeKind::Charcoal).chrome, Color32::from_rgb(0x53, 0x53, 0x53));
+        assert_eq!(Tokens::for_kind(ThemeKind::Midnight).chrome, Color32::from_rgb(0x26, 0x26, 0x26));
+        assert_eq!(Tokens::for_kind(ThemeKind::Silver).chrome, Color32::from_rgb(0xb8, 0xb8, 0xb8));
+        assert_eq!(Tokens::for_kind(ThemeKind::Paper).chrome, Color32::from_rgb(0xf0, 0xf0, 0xf0));
+        assert_eq!(Tokens::default().slider_row_h, 32.0);
+        assert_eq!(Tokens::default().section_h, 26.0);
+        assert_eq!(Tokens::default().top_bar_h, 28.0);
+    }
+
     #[test]
     fn a_wheel_notch_scrolls_further_but_zooms_as_before_in_every_theme() {
         for kind in [ThemeKind::Charcoal, ThemeKind::Midnight, ThemeKind::Silver, ThemeKind::Paper] {

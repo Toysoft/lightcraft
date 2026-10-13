@@ -13,7 +13,7 @@ use crate::theme::Tokens;
 use crate::widgets::register;
 
 const PAD: f32 = 20.0;
-const SECTION_H: f32 = 56.0;
+const SECTION_H: f32 = 40.0;
 
 /// One face: which photo, which of its regions, the box to show it by, and (for the "More" faces) how alike.
 #[derive(Clone, Debug, PartialEq)]

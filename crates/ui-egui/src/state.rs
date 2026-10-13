@@ -465,9 +465,9 @@ impl PanelWidth {
 }
 
 /// The left sidebar (sources, albums, folders).
-pub const LEFT_WIDTH: PanelWidth = PanelWidth { min: 200.0, default: 268.0, max: 480.0 };
+pub const LEFT_WIDTH: PanelWidth = PanelWidth { min: 180.0, default: 220.0, max: 480.0 };
 /// The right panel (Edit, Masking, Info, …).
-pub const RIGHT_WIDTH: PanelWidth = PanelWidth { min: 250.0, default: 270.0, max: 520.0 };
+pub const RIGHT_WIDTH: PanelWidth = PanelWidth { min: 220.0, default: 240.0, max: 520.0 };
 /// The photo area the side panels always leave free (as far as their minimum widths allow).
 pub const MIN_PHOTO_WIDTH: f32 = 360.0;
 
@@ -1046,7 +1046,7 @@ impl Default for UiState {
             click_zoom: 100,
             zoom_anim: false,
             before_after: BeforeAfter::Off,
-            thumb_size: 220.0,
+            thumb_size: 140.0,
             open_sections: vec!["light".into()],
             open_flyouts: vec![],
             single_panel: false,
