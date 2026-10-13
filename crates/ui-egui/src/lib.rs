@@ -347,6 +347,8 @@ pub struct LightcraftApp {
     pub(crate) size_hold: region::SizeHold,
     /// (photo, look, window frame size) a window was refused for: it reads more than one render holds.
     pub(crate) window_refused: Option<(lightcraft_catalog::PhotoId, u64, usize)>,
+    /// The background decode of the Detail photo's original, for a zoom.
+    pub(crate) original_prefetch: panels::detail::OriginalPrefetch,
     pub(crate) region_tiles: std::collections::HashMap<(bool, u64), region::RegionView>,
     /// The window render each pane of Compare / Reference asked for last (left, right), as
     /// [`Self::region_view`] is for the loupe.
@@ -452,6 +454,7 @@ impl LightcraftApp {
             region_before_view: None,
             size_hold: Default::default(),
             window_refused: None,
+            original_prefetch: Default::default(),
             region_tiles: Default::default(),
             compare_windows: [None; 2],
             compare_tiles: Default::default(),
