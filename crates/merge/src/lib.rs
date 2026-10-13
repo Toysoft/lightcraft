@@ -6,7 +6,9 @@
 //! - [`pano`]: overlapping photos → one panorama (features, matching, RANSAC, rotation bundle
 //!   adjustment, spherical/cylindrical/perspective projection, exposure compensation, seams,
 //!   multi-band blending, boundary warp, auto crop, fill edges).
-//! - [`output`]: results as linear DNGs (16-bit float for HDR) with the source's colour tags.
+//! - [stack]: a burst of same-exposure frames -> one image (statistical / robust stacking and
+//!   multi-frame burst denoise, which are the same operation).
+//! - [output]: results as linear DNGs (16-bit float for HDR) with the source's colour tags.
 //!
 //! Every algorithm here is our own implementation from published papers (cited in each module);
 //! no code from GPL projects was consulted.
@@ -21,12 +23,14 @@ pub mod linalg;
 pub mod output;
 pub mod pano;
 pub mod ransac;
+pub mod stack;
 pub mod synth;
 
 pub use frame::{Frame, FrameColor, load_frame};
 pub use hdr::{Deghost, HdrOptions, HdrResult, merge_hdr};
 pub use output::{DngSamples, write_linear_dng};
 pub use pano::{PanoOptions, PanoResult, Projection, stitch};
+pub use stack::{StackMode, StackOptions, StackResult, stack_burst};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum MergeError {
