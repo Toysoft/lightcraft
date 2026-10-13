@@ -89,10 +89,18 @@ fn generate() -> Result<String, Box<dyn std::error::Error>> {
     for english in all {
         let en = serde_json::to_string(english)?;
         source.push_str(&format!("    ({en} $(, $($args:tt)*)?) => {{\n        match $crate::i18n::language() {{\n"));
-        for (_, variant, messages) in &catalogs {
+        for (code, variant, messages) in &catalogs {
             if let Some(translated) = messages.get(english) {
                 let translated = serde_json::to_string(translated)?;
-                source.push_str(&format!("            $crate::i18n::Locale::{variant} => format!({translated} $(, $($args)*)?),\n"));
+                // A right-to-left language's message is reordered after the placeholders are
+                // filled, so their values take their place in the reading order (i18n visual_rtl).
+                if matches!(code.as_str(), "ar" | "he" | "fa" | "ur") {
+                    source.push_str(&format!(
+                        "            $crate::i18n::Locale::{variant} => $crate::i18n::visual_rtl(&format!({translated} $(, $($args)*)?)),\n"
+                    ));
+                } else {
+                    source.push_str(&format!("            $crate::i18n::Locale::{variant} => format!({translated} $(, $($args)*)?),\n"));
+                }
             }
         }
         source.push_str(&format!("            _ => format!({en} $(, $($args)*)?),\n        }}\n    }};\n"));
