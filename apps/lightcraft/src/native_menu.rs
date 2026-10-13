@@ -26,8 +26,10 @@ const QUIT: &str = "app.quit";
 const SETTINGS: &str = "app.settings";
 const SETTINGS_KEY: &str = "Cmd+,";
 /// Keys whose meaning depends on the panel (X = reject or swap crop aspect, ⌫ = delete the photo
-/// or the active mask): left to the egui handler, which knows the context.
-const CONTEXTUAL: &[&str] = &["X", "Delete"];
+/// or the active mask): left to the egui handler, which knows the context. Shift+Tab (Hide All
+/// Panels) stays there too: it has no native accelerator, and the egui handler cancels egui's own
+/// Shift+Tab focus traversal when it fires.
+const CONTEXTUAL: &[&str] = &["X", "Delete", "Shift+Tab"];
 /// Shortcuts text fields need while they have focus.
 const TEXT_EDIT: &[&str] = &["Cmd+A", "Cmd+C", "Cmd+V", "Cmd+X", "Cmd+Z", "Cmd+Shift+Z"];
 

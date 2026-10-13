@@ -100,6 +100,8 @@ mod tests_offline;
 #[cfg(test)]
 mod tests_open_lightroom;
 #[cfg(test)]
+mod tests_panel_keys;
+#[cfg(test)]
 mod tests_panels;
 #[cfg(test)]
 mod tests_preset_import;

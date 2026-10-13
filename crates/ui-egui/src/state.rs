@@ -43,6 +43,26 @@ impl RightPanel {
     pub fn is_edit_tool(self) -> bool {
         matches!(self, RightPanel::Edit | RightPanel::Profiles | RightPanel::Crop | RightPanel::Remove | RightPanel::Masking | RightPanel::RedEye)
     }
+
+    /// What comes back when the panel is shown again (F8, Shift+Tab). The tools that work on the
+    /// photo (crop, remove, masking, red eye) end when their panel is hidden, so they return as
+    /// Edit; every other panel returns as it was.
+    pub fn restored(self) -> RightPanel {
+        match self {
+            RightPanel::None | RightPanel::Crop | RightPanel::Remove | RightPanel::Masking | RightPanel::RedEye => RightPanel::Edit,
+            other => other,
+        }
+    }
+}
+
+/// The panels Shift+Tab (Hide All Panels) hid, to bring back exactly those.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HiddenPanels {
+    pub left_panel: bool,
+    pub right: RightPanel,
+    pub presets: bool,
+    pub filmstrip: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -499,6 +519,11 @@ pub struct UiState {
     pub view: ViewMode,
     pub left_panel: bool,
     pub right: RightPanel,
+    /// The panel the right side showed before F8 (or Hide All Panels) hid it; F8 brings it back.
+    pub right_hidden: RightPanel,
+    /// Set while Hide All Panels (Shift+Tab) is in effect: what to bring back. Showing any panel
+    /// by hand makes it stale (see [`UiState::all_panels_hidden`]).
+    pub hidden_panels: Option<HiddenPanels>,
     /// Widths of the left sidebar and of the right panel in points (dragging their inner edge
     /// resizes them; within [`LEFT_WIDTH`] / [`RIGHT_WIDTH`]).
     pub left_width: f32,
@@ -1038,6 +1063,8 @@ impl Default for UiState {
             left_width: LEFT_WIDTH.default,
             right_width: RIGHT_WIDTH.default,
             right: RightPanel::Edit,
+            right_hidden: RightPanel::None,
+            hidden_panels: None,
             presets: false,
             preset_thumbs: false,
             filmstrip: true,
@@ -1221,4 +1248,71 @@ fn deserialize_favorite_themes<'de, D: serde::Deserializer<'de>>(d: D) -> Result
         }
     }
     Ok(values)
+}
+
+impl UiState {
+    /// Every side panel and the filmstrip are hidden.
+    fn no_panel_shown(&self) -> bool {
+        !self.left_panel && self.right == RightPanel::None && !self.presets && !self.filmstrip
+    }
+
+    /// Hide All Panels is in effect: its snapshot is kept and nothing has been shown since. (Showing
+    /// a panel by hand drops it out of this state, so the next Shift+Tab hides again instead of
+    /// bringing back panels the user had put away.)
+    pub fn all_panels_hidden(&self) -> bool {
+        self.hidden_panels.is_some() && self.no_panel_shown()
+    }
+
+    /// F8: hide the right panel, or show the one that was there (Edit when there was none).
+    /// `show` forces the state. Returns whether the panel is shown now.
+    pub fn toggle_right_panel(&mut self, show: Option<bool>) -> bool {
+        let show = show.unwrap_or(self.right == RightPanel::None);
+        if show && self.right == RightPanel::None {
+            self.right = self.right_hidden.restored();
+        } else if !show && self.right != RightPanel::None {
+            self.right_hidden = self.right.restored();
+            self.right = RightPanel::None;
+        }
+        self.right != RightPanel::None
+    }
+
+    /// Shift+Tab: hide the side panels, the Presets column and the filmstrip, remembering what was
+    /// shown; again, bring back exactly that. When nothing is shown and nothing was remembered, it
+    /// shows the usual panels (left sidebar, the last right panel, filmstrip). `hide` forces the
+    /// direction. Returns whether the panels are hidden now.
+    pub fn toggle_all_panels(&mut self, hide: Option<bool>) -> bool {
+        let hide = hide.unwrap_or_else(|| !self.all_panels_hidden() && !(self.no_panel_shown() && self.hidden_panels.is_none()));
+        if hide {
+            if self.no_panel_shown() {
+                return true;
+            }
+            self.hidden_panels =
+                Some(HiddenPanels { left_panel: self.left_panel, right: self.right, presets: self.presets, filmstrip: self.filmstrip });
+            if self.right != RightPanel::None {
+                self.right_hidden = self.right.restored();
+            }
+            self.left_panel = false;
+            self.right = RightPanel::None;
+            self.presets = false;
+            self.filmstrip = false;
+        } else {
+            match self.hidden_panels.take() {
+                Some(was) if self.no_panel_shown() => {
+                    self.left_panel = was.left_panel;
+                    self.right = if was.right == RightPanel::None { RightPanel::None } else { was.right.restored() };
+                    self.presets = was.presets;
+                    self.filmstrip = was.filmstrip;
+                }
+                _ => {
+                    self.hidden_panels = None;
+                    self.left_panel = true;
+                    if self.right == RightPanel::None {
+                        self.right = self.right_hidden.restored();
+                    }
+                    self.filmstrip = true;
+                }
+            }
+        }
+        self.all_panels_hidden()
+    }
 }

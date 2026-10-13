@@ -73,6 +73,10 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("view.autoAdvance", "Auto Advance", None, "Photo"),
     ("view.filmstrip", "Filmstrip", Some("/"), "View"),
     ("view.leftPanel", "My Photos Panel", Some("Cmd+Shift+L"), "View"),
+    // F8 / Shift+Tab as in Lightroom Classic (F6 and F7 are aliases in shortcuts.rs; Tab toggles the side panels there).
+    // On a Mac keyboard F8 is Play/Pause unless fn is held or "Use F1, F2, … as standard function keys" is on.
+    ("view.rightPanel", "Right Panel", Some("F8"), "View"),
+    ("view.allPanels", "Hide All Panels", Some("Shift+Tab"), "View"),
     ("view.beforeAfter", "Compare Before and After", Some("Y"), "View"),
     ("view.beforeAfterSplit", "Before/After Split", Some("Shift+Y"), "View"),
     ("view.beforeAfterTopBottom", "Before/After Top/Bottom", Some("Alt+Y"), "View"),
@@ -223,6 +227,14 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("photo.tagFromTracklog", "Auto-Tag from Tracklog…", None, "Photo"),
     ("app.exportPrevious", "Export with Previous", Some("Cmd+Alt+Shift+E"), "File"),
 ];
+
+/// A tool panel going away ends its gesture, as closing it from its own key does.
+fn end_panel_tool(app: &mut LightcraftApp) {
+    if app.ui.tool != "wbPicker" {
+        app.ui.tool.clear();
+    }
+    let _ = app.session.end_interaction();
+}
 
 fn panel(app: &mut LightcraftApp, ctx: &egui::Context, p: RightPanel, name: &str) {
     if app.ui.right == p && crate::docking::exposed(app, crate::docking::Panel::Tools) {
@@ -677,6 +689,24 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
         "view.leftPanel" => {
             app.ui.left_panel = !app.ui.left_panel;
             Ok(Value::Null)
+        }
+        // F8: `show` (true / false) says which; without it the panel toggles
+        "view.rightPanel" => {
+            let was = app.ui.right;
+            let shown = app.ui.toggle_right_panel(p.get("show").and_then(Value::as_bool));
+            if was != RightPanel::None && !shown {
+                end_panel_tool(app);
+            }
+            Ok(json!({"shown": shown, "right": app.ui.right}))
+        }
+        // Shift+Tab: `hide` (true / false) says which; without it the panels hide, then come back
+        "view.allPanels" => {
+            let was = app.ui.right;
+            let hidden = app.ui.toggle_all_panels(p.get("hide").and_then(Value::as_bool));
+            if was != RightPanel::None && app.ui.right == RightPanel::None {
+                end_panel_tool(app);
+            }
+            Ok(json!({"hidden": hidden}))
         }
         "view.beforeAfter" => {
             app.ui.before_after = if app.ui.before_after == BeforeAfter::SideBySide { BeforeAfter::Off } else { BeforeAfter::SideBySide };
