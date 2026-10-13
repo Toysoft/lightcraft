@@ -65,10 +65,10 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 | Create Version | ⌘⇧S (+ ⇧M) | ⇧M (Windows: Ctrl+⇧S) | — |
 | Select None | ⌘⇧A (+ ⌘D) | ⌘D | — |
 
-**Library culling (KEYC-RATING):** `0–5`, `6–9` and `P/X/U` reach egui on macOS even when displayed in the native menu (adapted from PR #261; issue #283). `Shift+0–9` applies and advances once; `Shift+P` picks and advances in Photo Grid / Square Grid and retains Presets elsewhere. See [library shortcuts](library-shortcuts.md) for the verified Classic mapping and regression coverage. Remaining Classic gaps: rating `[` / `]`, flag cycling and filter-bar keys.
+**Library culling (KEYC-RATING):** `0–5`, `6–9` and `P/X/U` reach egui on macOS even when displayed in the native menu (adapted from PR #261; issue #283). `Shift+0–9` applies and advances once; `Shift+P` picks and advances in Photo Grid / Square Grid and retains Presets elsewhere. See [library shortcuts](library-shortcuts.md) for the verified Classic mapping and regression coverage. Remaining Classic gaps: flag cycling and filter-bar keys. (`[` / `]` rating shipped in #509.)
 
 **Still missing / broken:**
-- No command yet: F1 help (verify the rest of the old list: full screen, settings, stacks,
+- F1 opens the keyboard-shortcuts dialog (the Classic ⌘/ surface); an in-app help page beyond it remains open (verify the rest of the old list: full screen, settings, stacks,
   visualize spots and merges have commands now).
 - `H` opens Remove; Lightroom also uses it (Classic) to hide pins — pins toggle from View → Show Mask Pins.
 - ⌘M / ⌘H / ⌘Q / ⌘W rely on the platform window defaults (unverified).
