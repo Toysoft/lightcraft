@@ -675,3 +675,48 @@ fn what_was_cut_is_forgotten_when_another_library_opens() {
     h.settle(SETTLE);
     assert!(h.app.ui.side.clip.is_none() && h.app.ui.side.keys.is_none());
 }
+
+/// The menus and questions for several rows: in the nine languages LightCraft had when this was written, none of the words stay
+/// English. (A string with no entry in a language's catalog is shown as written, so nothing else fails when
+/// one is forgotten. A language added later is not asked for them here: it shows them in English until it
+/// is translated.)
+#[test]
+fn the_words_of_several_rows_at_once_are_in_every_language() {
+    let words = [
+        "A folder can't go inside itself",
+        "A keyword can't go inside itself",
+        "Choose one album to rename it",
+        "Choose one folder to rename it",
+        "Choose one folder to synchronize it",
+        "Choose one keyword to create a keyword inside it",
+        "Choose one keyword to edit it",
+        "Choose one keyword to rename it",
+        "Copied as text: paste it in a keyword box to give the keywords to photos",
+        "Copied: Paste is in a folder's menu, and in the Albums + menu for the top level",
+        "Create Keyword Tag Inside…",
+        "Cut: Paste is in a folder's menu, and in the Albums + menu for the top level",
+        "Cut: Paste is in the menu of the keyword they go inside",
+        "Delete Albums",
+        "Delete Folder",
+        "Delete Keywords",
+        "Duplicate Album",
+        "Moves the photos imported from these folders to Recently Deleted; no file is touched",
+        "No photo has them; the keywords below them go too.",
+        "One of them is a whole disk: remove a disk by itself",
+        "Paste Inside This Keyword",
+        "Paste Into This Folder",
+        "Paste at Top Level",
+        "Photos stay in All Photos. Deleting a folder also deletes its albums. You can undo this.",
+        "Remove Folder Color Label",
+        "Remove Folders from Library",
+        "Set Folder Color Label",
+        "That includes the photos in the folders inside them.",
+        "The photos stay in All Photos. Undo brings the albums back.",
+    ];
+    use crate::i18n::Locale::{De, Es, Fr, Ja, PtBr, Ru, Uk, ZhHans, ZhHant};
+    for language in [De, Es, Fr, Ja, PtBr, Ru, Uk, ZhHans, ZhHant] {
+        for word in words {
+            assert_ne!(language.tr(word), word, "{language:?} has no entry for {word:?}");
+        }
+    }
+}
