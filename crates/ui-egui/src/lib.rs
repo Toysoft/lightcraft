@@ -24,6 +24,7 @@ pub mod menubar;
 pub mod menus;
 pub mod merge;
 mod model_setup;
+mod navigation;
 pub mod panels;
 pub mod pick;
 pub mod region;

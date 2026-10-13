@@ -170,26 +170,48 @@ fn wheel_notches(events: &[egui::Event]) -> f32 {
 
 /// Native pinch (also modifier-wheel zoom) and two-finger scroll, scoped to this image view.
 pub(crate) fn navigate_gesture(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response, area: Rect, img: Rect, native: [usize; 2]) -> bool {
-    if !resp.hovered() {
+    if app.ui.dialog.is_some() {
         return false;
     }
-    let (mut factor, mut delta, anchor) =
-        ui.input(|i| (i.zoom_delta(), i.translation_delta(), i.multi_touch().map(|t| t.center_pos).or(i.pointer.hover_pos())));
-    // A notched mouse wheel (line/page units, no modifier) zooms around the pointer, through egui's smoothed wheel
-    // delta like Ctrl+wheel (so it glides instead of jumping); trackpads report points and still pan.
-    let wheel_id = egui::Id::new("loupe-wheel-zoom");
-    if ui.input(|i| wheel_notches(&i.events)) != 0.0 {
-        ui.data_mut(|d| d.insert_temp(wheel_id, true));
+    let tool = matches!(app.ui.right, RightPanel::Crop | RightPanel::Masking | RightPanel::Remove | RightPanel::RedEye) || !app.ui.tool.is_empty();
+    if crate::navigation::pan_requested(ui.ctx(), resp, &app.ui.settings.navigation, tool)
+        && ui.input(|i| i.pointer.press_origin().is_some_and(|p| area.contains(p)))
+    {
+        pan_image(app, area, img, resp.drag_delta());
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        return true;
     }
-    if ui.data(|d| d.get_temp::<bool>(wheel_id)).unwrap_or(false) {
-        let smooth = ui.input(|i| i.smooth_scroll_delta.y);
-        let speed = ui.ctx().options(|o| o.input_options.scroll_zoom_speed);
-        if smooth == 0.0 {
-            ui.data_mut(|d| d.remove_temp::<bool>(wheel_id));
-        } else {
-            factor *= (speed * smooth).exp();
-            delta = egui::Vec2::ZERO;
+    if !resp.hovered() && !(resp.contains_pointer() && ui.input(|i| i.multi_touch().is_some())) {
+        return false;
+    }
+    let wheel = crate::navigation::wheel(ui.ctx(), area, app.ui.settings.navigation.wheel_modifier);
+    let (mut factor, mut delta, anchor) = ui.input(|i| {
+        let pinch = i
+            .multi_touch()
+            .map_or_else(|| i.events.iter().filter_map(|e| if let egui::Event::Zoom(f) = e { Some(*f) } else { None }).product(), |t| t.zoom_delta);
+        let delta =
+            if wheel.is_some() || i.modifiers.ctrl || i.modifiers.command || i.modifiers.alt { egui::Vec2::ZERO } else { i.translation_delta() };
+        (wheel.map_or(pinch, |(_, f)| f), delta, wheel.map(|(p, _)| p).or_else(|| i.multi_touch().map(|t| t.center_pos).or(i.pointer.hover_pos())))
+    });
+    // Keep upstream's smooth unmodified mouse-wheel zoom with the default bindings;
+    // explicit alternative/disabled modifiers still control the gesture.
+    let wheel_id = egui::Id::new("loupe-wheel-zoom");
+    if matches!(app.ui.settings.navigation.wheel_modifier, crate::state::WheelModifier::Ctrl | crate::state::WheelModifier::None) {
+        if ui.input(|i| wheel_notches(&i.events)) != 0.0 {
+            ui.data_mut(|d| d.insert_temp(wheel_id, true));
         }
+        if ui.data(|d| d.get_temp::<bool>(wheel_id)).unwrap_or(false) {
+            let smooth = ui.input(|i| i.smooth_scroll_delta.y);
+            let speed = ui.ctx().options(|o| o.input_options.scroll_zoom_speed);
+            if smooth == 0.0 {
+                ui.data_mut(|d| d.remove_temp::<bool>(wheel_id));
+            } else {
+                factor = (speed * smooth).exp();
+                delta = egui::Vec2::ZERO;
+            }
+        }
+    } else {
+        ui.data_mut(|d| d.remove_temp::<bool>(wheel_id));
     }
     if !factor.is_finite() || factor <= 0.0 || !delta.is_finite() || (factor == 1.0 && delta == egui::Vec2::ZERO) {
         return false;
@@ -1362,9 +1384,6 @@ fn general_interaction(
     } else if resp.clicked() && zoomed {
         app.ui.zoom = Zoom::Fit;
         app.ui.zoom_anim = true;
-    }
-    if zoomed && resp.dragged() {
-        pan_image(app, canvas, img, resp.drag_delta());
     }
     let _ = (native, aspect);
 }
