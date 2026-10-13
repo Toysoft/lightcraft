@@ -800,7 +800,9 @@ impl Session {
             .filter_map(|(x, d)| {
                 let mut synced = lightcraft_develop::apply_partial(&d, &delta, 1.0);
                 for &(section, enabled) in &section_changes {
-                    synced.set_section_enabled(section, enabled);
+                    if synced.section_enabled(section) != enabled {
+                        synced.set_section_enabled(section, enabled);
+                    }
                 }
                 (synced != *d).then(|| self.develop_op(x, synced, label)).flatten()
             })

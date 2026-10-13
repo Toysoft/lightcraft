@@ -1253,3 +1253,39 @@ fn auto_sync_section_changes_combine_with_sliders_and_ignore_list_order() {
     assert_eq!(s.develop_of(PhotoId(ids[1])).unwrap(), b, "list order is not a section-state edit");
     assert_eq!(s.catalog.photo(PhotoId(ids[1])).unwrap().history.len(), history_len, "unchanged target gets no history entry");
 }
+
+#[test]
+fn auto_sync_section_eyes_preserve_already_disabled_target_history() {
+    use lightcraft_catalog::PhotoId;
+    let mut s = demo();
+    let ids: Vec<u64> = s.catalog.photos().take(2).map(|p| p.id.0).collect();
+    assert_eq!(ids.len(), 2);
+    let (a, b) = (PhotoId(ids[0]), PhotoId(ids[1]));
+    s.execute("library.select", &json!({"ids": [ids[1]]})).unwrap();
+    for section in ["light", "color"] {
+        s.execute("develop.sectionEnabled", &json!({"section": section, "enabled": false})).unwrap();
+    }
+    s.execute("library.select", &json!({"ids": ids, "active": ids[0]})).unwrap();
+    s.execute("develop.autoSync", &json!({"on": true})).unwrap();
+    let saved_a = s.develop_of(a).unwrap();
+    let saved_b = s.develop_of(b).unwrap();
+    let history_a_len = s.catalog.photo(a).unwrap().history.len();
+    let history_b = s.catalog.photo(b).unwrap().history.clone();
+    let undo = s.undo.len();
+    assert_eq!(s.active(), Some(a));
+    assert!(saved_a.section_enabled("light"));
+    assert_eq!(saved_b.disabled_sections, vec!["light".to_string(), "color".to_string()]);
+
+    s.execute("develop.sectionEnabled", &json!({"section": "light", "enabled": false})).unwrap();
+    assert!(!s.develop_of(a).unwrap().section_enabled("light"));
+    assert_eq!(s.catalog.photo(a).unwrap().history.len(), history_a_len + 1);
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.catalog.photo(b).unwrap().history, history_b, "an already-disabled target must not gain history");
+    assert_eq!(s.develop_of(b).unwrap(), saved_b, "the target's full saved settings must remain unchanged");
+
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.develop_of(a).unwrap(), saved_a);
+    assert_eq!(s.develop_of(b).unwrap(), saved_b);
+    assert_eq!(s.catalog.photo(b).unwrap().history, history_b);
+    assert_eq!(s.undo.len(), undo);
+}
