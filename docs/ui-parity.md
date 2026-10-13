@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (shortcuts: F8 and ⇧Tab panel keys, F1 help and `[` `]` were already done, command counts recounted; zoom row: Compare and Reference sharp at 1:1) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (accessibility audit: test over the AccessKit tree; fields, sliders and dialogs named; shortcuts: F6 / F7 (#1078), F8 and ⇧Tab panel keys, F1 help and `[` `]` were already done, command counts recounted; zoom row: Compare and Reference sharp at 1:1) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 How LightCraft's interaction compares with Lightroom's: views, panels, tools and handles, modifier
 keys, shortcuts, zoom, context menus and feel. Rows for individual menu items and shortcuts live in
@@ -32,11 +32,11 @@ assessment and the notes that don't fit a row. Visual reference for agents: `pla
 | Shortcuts | Lightroom desktop and Classic keymaps | Lightroom-desktop keymap with Classic additions, editable | 85% | deliberate differences below; no Classic keymap layer |
 | Context menus | everywhere | 26 sites (grid, filmstrip, albums, folders, keywords, masks, presets…) | 70% | unaudited against Lightroom's menus item by item |
 | Text fields | native editing behaviour | custom text field (LR-BEHAV-TEXTFIELD) | 70% | IME and selection edge cases |
-| Accessibility | VoiceOver / Narrator, keyboard navigation | AccessKit: sliders, buttons, dropdowns, section headers announce | 30% | canvas tools pointer-only; not audited with a screen reader |
+| Accessibility | VoiceOver / Narrator, keyboard navigation | AccessKit tree audited by a test in every view, Develop tool and the main dialogs: every control named, sliders with value, range and Increment / Decrement, dialogs titled, tool sliders reachable with Tab | 55% | crop handles, spot and mask placement on the canvas still need the pointer; not tried with a real screen reader ([audit](#accessibility-audit)) |
 | Feel and responsiveness | GPU-interactive sliders (15.3) | ≤ 16 ms slider budget on GPU; background renders | 75% | colour NR at half resolution, 100k-photo grid test |
 | **UI/UX overall** | | | **~70%** | estimated, weighted by use (develop and library 60%, tools 25%, rest 15%) |
 
-Remaining: **40–70 h** (zoom detail 8–15 h, brush and masking feel 8–12 h, accessibility audit 10–20
+Remaining: **34–58 h** (zoom detail 8–15 h, brush and masking feel 8–12 h, accessibility 4–8
 h, Classic keymap layer 4–8 h, context-menu audit 4–8 h, text-field and IME polish 4–8 h). Output
 modules and AI tools are counted with their features in [target-app-parity.md](target-app-parity.md).
 
@@ -68,17 +68,45 @@ under the UI command that wraps it (a no-op error); the UI command now wins.
 **Library culling (KEYC-RATING):** `0–5`, `6–9` and `P/X/U` reach egui on macOS even when displayed in the native menu (adapted from PR #261; issue #283). `Shift+0–9` applies and advances once; `Shift+P` picks and advances in Photo Grid / Square Grid and retains Presets elsewhere. See [library shortcuts](library-shortcuts.md) for the verified Classic mapping and regression coverage. Remaining Classic gaps: flag cycling (backtick), the filter-bar `\` key, Tab and F5.
 
 **Still missing / broken:**
-- No Tab (side panels) or F5 yet; F6 and F7 are in PR #1078. F8 (right panel) and ⇧Tab (hide / show all
+- No Tab (side panels), T or F5 yet. F6 (filmstrip), F7 (left panel), F8 (right panel) and ⇧Tab (hide / show all
   panels) work: ⇧Tab hides the side panels, Presets and filmstrip and brings back exactly those; on a Mac
   keyboard F8 is Play/Pause unless fn is held.
 - `H` opens Remove; Lightroom also uses it (Classic) to hide pins — pins toggle from View → Show Mask Pins.
 - ⌘M / ⌘H / ⌘Q / ⌘W rely on the platform window defaults (unverified).
 
 
+## Accessibility audit
+
+`crates/ui-egui/tests/accessibility.rs` walks the AccessKit tree egui hands to VoiceOver, Narrator and
+AT-SPI, headless, in Photo Grid, Square Grid, Detail, Compare, Survey and Reference, in each right
+panel (Edit, Profiles, Crop, Remove, Masking, Red Eye, Versions, Activity, Keywords, Info) and in 13
+dialogs (Export, Copy / Paste Settings, Create Preset, Rename, New Album, New Smart Album, Capture
+Time, Label Names, All Metadata, Save Metadata Preset, Auto Stack, Contact Sheet). It fails on a
+button, check box, slider, text field, dropdown, tab, link or menu item without a name, on a slider
+without its value and range, and on a dialog window without a title.
+
+Found and fixed (2026-10-12): 47 problems in the views and tools, 11 more in the dialogs.
+- Every text field announced only its contents: the top search box, the Info panel's metadata fields
+  and GPS, the keyword fields, Crop's custom aspect, and plain egui fields in the dialogs (export file
+  name, folder, subfolder, watermark, preset names, label names, rename template, metadata filter).
+  `TextField` now names itself by its caption (`.label`) or hint; plain egui fields are named with
+  `widgets::named`.
+- Develop sliders announced a value but no range: they now carry min, max, step, the value as shown
+  ("+0.50"), and answer a screen reader's Increment / Decrement (VoiceOver Ctrl-Option-Up / Down) by
+  one step, as the arrow keys do. A slider reached with Tab takes the arrow keys as a clicked one does.
+- Auto Stack's time slider had no name.
+
+Keyboard reach: Crop (angle, offsets, scale, aspect) and Remove (size, feather, opacity) settings
+are reached with Tab and adjusted with the arrow keys (tested). Still pointer-only: dragging crop
+handles, placing a spot or a brush stroke, and moving a mask pin on the canvas. Not done: a session
+with a real screen reader on each platform, and focus order (egui follows drawing order: top bar,
+left panel, canvas, right panel, which is sensible but not tuned).
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-12 | minor | Shortcuts: F8 and Shift+Tab panel keys; F1 help and `[` `]` rating were already implemented; UI command counts recounted |
+| 2026-10-12 | minor | Accessibility: an AccessKit tree audit test over every view, Develop tool and 13 dialogs; unnamed fields, slider ranges and the Auto Stack slider fixed; 30% → 55%; UI remaining 40–70 h → 34–58 h |
+| 2026-10-12 | minor | Shortcuts: F6 / F7 (#1078), F8 and Shift+Tab panel keys; F1 help and `[` `]` rating were already implemented; UI command counts recounted |
 | 2026-10-11 | minor | Zoom row: Compare and Reference get zoom windows; what remains of LR-VIEW-ZOOM is overlays and soft proofing |
 | 2026-10-10 | major | Created: measured command and shortcut counts, assessment by area, estimates; moved the shortcut conflicts section here from the checklist |
