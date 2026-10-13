@@ -73,6 +73,30 @@ jobs:
           EOF
       - name: FreeBSD tarball layout (stub binaries)
         run: bash packaging/freebsd/package.sh --dry-run
+      - name: Winget release workflow
+        run: |
+          python3 - <<'EOF'
+          import re
+          import yaml
+
+          path = ".github/workflows/winget.yml"
+          with open(path, encoding="utf-8") as f:
+              text = f.read()
+          wf = yaml.safe_load(text)
+          trigger = wf.get("on") or wf.get(True)  # PyYAML parses `on:` as the boolean True
+          assert trigger and set(trigger["release"]["types"]) == {"released"}, \
+              "winget must publish stable releases only (no prereleases, no drafts)", trigger
+          step = wf["jobs"]["winget"]["steps"][-1]
+          uses = step["uses"]
+          # Third-party action: pinned by commit, never a moving tag.
+          assert re.fullmatch(r"vedantmgoyal9/winget-releaser@[0-9a-f]{40}", uses), uses
+          assert re.search(r"winget-releaser@[0-9a-f]{40} # v\d+$", text, re.M), "pin comment"
+          assert step["with"]["identifier"] == "ArtCraft.LightCraft", step["with"]
+          assert step["with"]["token"] == "${{ secrets.WINGET_TOKEN }}", step["with"]
+          # Only the Windows MSI installers are winget installers (no portable zips, DMGs, ...).
+          assert step["with"]["installers-regex"] == r"\.msi$", step["with"]
+          print("winget workflow ok:", uses)
+          EOF
 
   windows-install-folder:
     runs-on: windows-latest
