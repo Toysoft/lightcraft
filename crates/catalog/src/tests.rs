@@ -771,3 +771,46 @@ fn contents_words_are_split_off_quoted_or_not() {
     let a = photo(&mut c, "big trip.jpg", "2026-04-01");
     assert_eq!(c.query(&Filter { text: "name:\"big trip\"".into(), ..Default::default() }, &Sort::default()), vec![a]);
 }
+
+/// Photos with one import time and capture time, as one import batch or a burst gives them, added
+/// with ids that run opposite to their names.
+fn batch_with_reversed_ids(c: &mut Catalog) -> Vec<PhotoId> {
+    let names = ["DSC_0001.ARW", "DSC_0002.ARW", "DSC_0003.ARW", "DSC_0004.ARW"];
+    let mut ids = Vec::new();
+    for (n, name) in names.iter().enumerate() {
+        let id = PhotoId(1000 - n as u64);
+        let mut p = Photo::new(id, Source::Demo { scene: 1 }, name, "ARW", 10, 10, "2026-10-10T09:00:00");
+        p.captured = Some("2026-10-01T12:00:00".into());
+        c.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
+        ids.push(id);
+    }
+    ids // in name order
+}
+
+#[test]
+fn one_import_batch_sorts_by_file_name_not_id() {
+    let mut c = Catalog::new();
+    let by_name = batch_with_reversed_ids(&mut c);
+    let sort = Sort { key: SortKey::ImportDate, ascending: true, ..Default::default() };
+    assert_eq!(c.query(&Filter::default(), &sort), by_name);
+}
+
+#[test]
+fn burst_in_one_second_sorts_by_file_name_not_id() {
+    let mut c = Catalog::new();
+    let by_name = batch_with_reversed_ids(&mut c);
+    let sort = Sort { key: SortKey::CaptureDate, ascending: true, ..Default::default() };
+    assert_eq!(c.query(&Filter::default(), &sort), by_name);
+}
+
+#[test]
+fn cmp_name_ignores_case_without_allocating() {
+    use crate::query::cmp_name;
+    use std::cmp::Ordering::*;
+    assert_eq!(cmp_name("IMG_1.JPG", "img_1.jpg"), Equal);
+    assert_eq!(cmp_name("Ärger.jpg", "ärger.jpg"), Equal);
+    assert_eq!(cmp_name("a", "B"), Less);
+    assert_eq!(cmp_name("B", "a"), Greater);
+    assert_eq!(cmp_name("DSC_0001", "DSC_0002"), Less);
+    assert_eq!(cmp_name("a", "ab"), Less);
+}

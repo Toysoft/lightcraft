@@ -250,7 +250,7 @@ fn show_inner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         d.insert_temp(key, ask.clone());
         ask.is_some() && was.is_some_and(|w| w != ask)
     });
-    let follow = follow_active(ui.ctx(), egui::Id::new("grid-follow-active"), active);
+    let follow = follow_active(ui.ctx(), egui::Id::new("grid-follow-active"), active, app.session.source);
     let scroll_to: Option<Rect> = if new_ask {
         lay.cells.first().copied()
     } else if follow {
@@ -319,14 +319,27 @@ fn show_inner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
 /// the strip was not drawn on the previous pass (view switch, panel shown again). Otherwise the
 /// scroll position is the user's: time passing, finished renders, edits to the photo or a released
 /// scroll bar never move it (issue #11).
-pub(crate) fn follow_active(ctx: &egui::Context, key: egui::Id, active: Option<PhotoId>) -> bool {
+pub(crate) fn follow_active(ctx: &egui::Context, key: egui::Id, active: Option<PhotoId>, source: lightcraft_engine::LibrarySource) -> bool {
     let pass = ctx.cumulative_pass_nr();
-    let last: Option<(Option<PhotoId>, u64)> = ctx.data(|d| d.get_temp(key));
-    ctx.data_mut(|d| d.insert_temp(key, (active, pass)));
+    let last: Option<(Option<PhotoId>, lightcraft_engine::LibrarySource, u64)> = ctx.data(|d| d.get_temp(key));
+    ctx.data_mut(|d| d.insert_temp(key, (active, source, pass)));
     match last {
-        Some((was, drawn)) => was != active || drawn + 1 < pass,
+        Some((was, where_, drawn)) => follow_changed(was, where_, drawn, active, source, pass),
         None => true,
     }
+}
+
+/// Scroll when the active photo changes, the strip was not drawn last pass, or the same photo
+/// sits in a different library source (another album) (#1142).
+pub(crate) fn follow_changed(
+    was: Option<PhotoId>,
+    where_was: lightcraft_engine::LibrarySource,
+    drawn: u64,
+    active: Option<PhotoId>,
+    source: lightcraft_engine::LibrarySource,
+    pass: u64,
+) -> bool {
+    was != active || where_was != source || drawn + 1 < pass
 }
 
 /// Height of a date header row (points).
@@ -341,6 +354,36 @@ pub struct GridLayout {
     pub headers: Vec<Rect>,
     pub rows: Vec<GridRow>,
     pub height: f32,
+}
+
+/// The cell straight above (`down` false) or below cell `i`: in the adjacent row, the one whose
+/// centre is nearest horizontally (justified rows don't line up in columns). None in the first /
+/// last row or for an index outside the layout.
+pub fn vertical_neighbor(lay: &GridLayout, i: usize, down: bool) -> Option<usize> {
+    let row = lay.rows.iter().position(|r| (r.start..r.end).contains(&i))?;
+    let next = if down { row.checked_add(1)? } else { row.checked_sub(1)? };
+    let target = lay.rows.get(next)?;
+    let x = lay.cells.get(i)?.center().x;
+    (target.start..target.end).filter_map(|k| Some((k, (lay.cells.get(k)?.center().x - x).abs()))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(k, _)| k)
+}
+
+/// Up / Down in the grids: how many photos `library.up` / `library.down` move to reach the cell
+/// above / below the active one in the grid as last laid out; None when the grid isn't laid out
+/// for the current photos (the filmstrip then steps one photo).
+pub fn row_distance(app: &mut LightcraftApp, down: bool) -> Option<u64> {
+    if !matches!(app.ui.view, ViewMode::PhotoGrid | ViewMode::SquareGrid) {
+        return None;
+    }
+    let active = app.session.selection.active?;
+    let (generation, ids) = app.session.visible_shared();
+    let i = ids.iter().position(|x| *x == active)?;
+    let (key, lay) = app.caches.grid.layout.as_ref()?;
+    if key.0.0 != generation {
+        return None;
+    }
+    // at the top / bottom row there's no cell to go to: stay put rather than step sideways
+    let j = vertical_neighbor(lay, i, down).unwrap_or(i);
+    Some(j.abs_diff(i) as u64)
 }
 
 /// One row of cells: `cells[start..end]`, between `top` and `bottom`.
@@ -473,6 +516,11 @@ fn group_header(app: &mut LightcraftApp, ui: &mut egui::Ui, run: &DateRun, ids: 
 /// [`lightcraft_engine::media::Session::embedded_thumb_is_final`]), which for a folder of raws on a
 /// network share is the difference between reading every file whole and reading a preview each.
 pub fn request_thumb(app: &mut LightcraftApp, id: PhotoId, size: usize, priority: u32) {
+    // A slider drag changes the photo every frame: its thumbnail follows once the drag ends, so its
+    // renders (a raw decode the first time) don't compete with the loupe's drafts.
+    if app.session.interaction.as_ref().is_some_and(|i| i.photo == id) && app.renderer.thumb(id).is_some() {
+        return;
+    }
     let bucket = lightcraft_engine::media::thumb_bucket(size);
     if let Some(photo) = app.session.catalog.photo(id)
         && app.renderer.thumb_current(photo, bucket, priority)
@@ -987,6 +1035,16 @@ pub fn context_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             if ui.button(crate::i18n::tr("Edit in Other Editor")).clicked() {
                 let _ = app.run("photo.editInExternal", json!({}));
             }
+            // the raw itself, unrendered: for a raw developer set as the other editor
+            if ui
+                .add_enabled(
+                    crate::menus::ui_enabled(app, "photo.openOriginalInExternal"),
+                    egui::Button::new(crate::i18n::tr("Open Original in Other Editor (RAW, no copy)")),
+                )
+                .clicked()
+            {
+                let _ = app.run("photo.openOriginalInExternal", json!({}));
+            }
         });
     });
     if ui.button(crate::i18n::tr("Find Similar Photos")).clicked() {
@@ -1023,7 +1081,7 @@ pub fn context_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
     });
     ui.menu_button(crate::i18n::tr("Set Flag"), |ui| {
         for (l, f) in [("Pick", "pick"), ("Reject", "reject"), ("Unflagged", "none")] {
-            if ui.button(l).clicked() {
+            if ui.button(crate::i18n::tr(l)).clicked() {
                 let _ = app.run("photo.flag", json!({"flag": f}));
             }
         }
@@ -1112,7 +1170,7 @@ pub fn context_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             ("Split Stack", "stack.split", stacked),
             ("Expand/Collapse Stack", "stack.toggle", stacked),
         ] {
-            if ui.add_enabled(on, egui::Button::new(label)).clicked() {
+            if ui.add_enabled(on, egui::Button::new(crate::i18n::tr(label))).clicked() {
                 let _ = app.run(cmd, json!({}));
             }
         }
@@ -1137,7 +1195,7 @@ pub fn context_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
     ui.menu_button(crate::i18n::tr("Photo Merge"), |ui| {
         let n = app.session.targets(&json!({})).len();
         for (id, label) in [("dialog.mergeHdr", "HDR…"), ("dialog.mergePanorama", "Panorama…"), ("dialog.mergeHdrPanorama", "HDR Panorama…")] {
-            if ui.add_enabled(n >= 2, egui::Button::new(label)).clicked() {
+            if ui.add_enabled(n >= 2, egui::Button::new(crate::i18n::tr(label))).clicked() {
                 let _ = app.run(id, json!({}));
             }
         }
@@ -1184,14 +1242,27 @@ pub fn context_menu(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         if ui.button(crate::i18n::tr("Delete Permanently")).clicked() {
             let _ = app.run("photo.deletePermanently", json!({}));
         }
-    } else if ui.button(crate::i18n::tr("Delete Photo")).clicked() {
-        let _ = app.run("photo.delete", json!({}));
+    } else {
+        let delete = ui.button(crate::i18n::tr("Delete Photo"));
+        register(ui.ctx(), "button:contextDeletePhoto", delete.rect);
+        if delete.clicked() {
+            let _ = crate::menubar::run_item(app, "photo.delete", json!({}));
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_same_photo_in_another_source_scrolls_into_view() {
+        let id = PhotoId(3);
+        let all = lightcraft_engine::LibrarySource::All;
+        let album = lightcraft_engine::LibrarySource::Album(lightcraft_catalog::AlbumId(9));
+        assert!(!follow_changed(Some(id), all, 4, Some(id), all, 5));
+        assert!(follow_changed(Some(id), all, 4, Some(id), album, 5));
+    }
 
     #[test]
     fn ungrouped_justified_rows_fill_the_width() {
@@ -1268,6 +1339,18 @@ mod tests {
                 assert_eq!(got, want, "square {square} {top}..{bottom}");
             }
         }
+    }
+
+    #[test]
+    fn library_context_menu_labels_have_french_translations() {
+        let saved = crate::i18n::language();
+        crate::i18n::set_language(crate::i18n::Locale::Fr);
+        for (label, expected) in
+            [("Pick", "Sélectionnée"), ("Reject", "Rejeter"), ("Group into Stack", "Regrouper en pile"), ("HDR Panorama…", "Panorama HDR…")]
+        {
+            assert_eq!(crate::i18n::tr(label), expected);
+        }
+        crate::i18n::set_language(saved);
     }
 
     #[test]
