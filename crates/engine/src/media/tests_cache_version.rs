@@ -11,6 +11,7 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 const LEGACY_V42: u64 = 42;
 const LEGACY_V50: u64 = 50;
 const LEGACY_V61: u64 = 61;
+const LEGACY_V62: u64 = 62;
 const EDGE: usize = 128;
 
 struct RuntimeDir(PathBuf);
@@ -160,4 +161,9 @@ fn legacy_v50_disk_previews_do_not_bypass_corrected_landscape_rendering() -> Tes
 #[test]
 fn legacy_v61_disk_previews_do_not_bypass_corrected_landscape_rendering() -> TestResult {
     legacy_disk_previews_do_not_bypass_corrected_landscape_rendering(LEGACY_V61)
+}
+
+#[test]
+fn legacy_v62_disk_previews_do_not_bypass_corrected_landscape_rendering() -> TestResult {
+    legacy_disk_previews_do_not_bypass_corrected_landscape_rendering(LEGACY_V62)
 }
