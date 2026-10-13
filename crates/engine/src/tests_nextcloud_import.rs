@@ -181,9 +181,11 @@ fn import_without_memories_probes_headers() {
 fn metadata_gives_local_capture_times_and_missing_sizes() {
     let (mut s, fake, _d) = signed_in("import-local-times");
     fake.enable_memories();
-    // on the timeline: Memories' `datetaken`
+    // on the timeline at its UTC instant (2023-11-14 22:13:20); Memories' `datetaken` is the camera's
+    // local time, two hours ahead (UTC+2)
     fake.add_file("/Photos/a.ARW", raw_blob(3000));
     fake.set_photo("/Photos/a.ARW", 19675, 6000, 4000, 1_700_000_000, json!({"Make": "Sony", "Model": "ILCE-7RM6"}));
+    fake.set_datetaken("/Photos/a.ARW", 1_700_000_000 + 2 * 3600);
     // not on it, and past the first window: the header's EXIF
     let meta = lightcraft_meta::Metadata {
         make: Some("Sony".into()),
@@ -196,17 +198,14 @@ fn metadata_gives_local_capture_times_and_missing_sizes() {
     for f in ["/Photos/b.dng", "/Photos/c.dng"] {
         fake.add_file(f, dng.clone());
     }
-    // a and b are in the library already, as a timeline listing left them: an hour or two early (the
-    // fake serves one time for the timeline and `datetaken`), and sized
-    for (id, name, captured) in [(1, "a.ARW", "2023-11-14T21:13:20"), (2, "b.dng", "2025-01-02T01:04:05")] {
-        let mut p = Photo::new(PhotoId(id), Source::File { path: remote(&fake, &format!("Photos/{name}")) }, name, "", 4000, 6000, "2026-10-13");
-        p.kind = MediaKind::Raw;
-        p.captured = Some(captured.into());
-        s.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
-    }
+    // b is in the library already, as a timeline listing left it: two hours early, and sized
+    let mut p = Photo::new(PhotoId(2), Source::File { path: remote(&fake, "Photos/b.dng") }, "b.dng", "", 4000, 6000, "2026-10-13");
+    p.kind = MediaKind::Raw;
+    p.captured = Some("2025-01-02T01:04:05".into());
+    s.catalog.apply(Op::AddPhoto { photo: Box::new(p) }).unwrap();
     import(&mut s, &[remote(&fake, "Photos")]);
     let a = photo(&s, &remote(&fake, "Photos/a.ARW"));
-    assert_eq!((a.captured.as_deref(), a.meta.camera.as_str()), (Some("2023-11-14T22:13:20"), "Sony ILCE-7RM6"), "Memories' datetaken");
+    assert_eq!((a.captured.as_deref(), a.meta.camera.as_str()), (Some("2023-11-15T00:13:20"), "Sony ILCE-7RM6"), "Memories' datetaken");
     let b = photo(&s, &remote(&fake, "Photos/b.dng"));
     assert_eq!((b.captured.as_deref(), b.width, b.height), (Some("2025-01-02T03:04:05"), 4000, 6000), "the header's time; its size kept");
     let c = photo(&s, &remote(&fake, "Photos/c.dng"));

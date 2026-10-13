@@ -215,14 +215,6 @@ fn no_store() -> String {
     "Nextcloud sign-in isn't available in this window".into()
 }
 
-/// What a failed sign-in or client says to the user: craft's text, naming LightCraft where craft says "Craft".
-fn message(e: &Error) -> String {
-    match e {
-        Error::InvalidAddress(d) => format!("That isn't a Nextcloud address LightCraft can use ({d}); check what you typed"),
-        e => e.to_string(),
-    }
-}
-
 /// A sign-in that ended other than signed in: how, and why in words for the user.
 type SignInEnd = (SignInProgress, String);
 
@@ -291,9 +283,6 @@ pub struct Remote {
     held: Mutex<Option<(String, Hold, Option<Arc<AtomicBool>>)>>,
     /// The path last prefetched (or found on disk) and what cancels its prefetch ([`Remote::prefetch`]).
     prefetching: Mutex<Option<(String, Arc<AtomicBool>)>>,
-    /// The etag of each original on this computer, by path (as in the cache folder's `etags.json`,
-    /// loaded by [`Remote::configure`]): copies are found without asking the server, after a restart too.
-    copies: Mutex<HashMap<String, String>>,
     /// The last [`MAX_SIGN_INS`] sign-ins, oldest first. Kept across [`Remote::configure`]: they are
     /// this session's.
     sign_ins: Mutex<VecDeque<SignInOutcome>>,
@@ -323,7 +312,6 @@ impl Remote {
             loads_waiting: AtomicUsize::new(0),
             held: Mutex::default(),
             prefetching: Mutex::default(),
-            copies: Mutex::default(),
             sign_ins: Mutex::default(),
             events: Mutex::default(),
             imports: Mutex::default(),
@@ -350,10 +338,9 @@ impl Remote {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Use `config` from now on: reads its settings file and the etags of the originals in its cache
-    /// folder, and forgets clients, account states and what it knew about remote files.
+    /// Use `config` from now on: reads its settings file and forgets clients, account states and what
+    /// it knew about remote files.
     pub fn configure(&self, config: RemoteConfig) {
-        *self.copies.lock().unwrap_or_else(PoisonError::into_inner) = config.cache_dir.as_deref().map(originals::load_copies).unwrap_or_default();
         let mut settings: Settings = config
             .settings_file
             .as_deref()
@@ -406,9 +393,9 @@ impl Remote {
             self.note_error(account_key, &Error::Unauthorized);
             return Err(sign_in_again(account_key));
         };
-        let mut client = Client::new(account, password, provider()).map_err(|e| message(&e))?;
+        let mut client = Client::new(account, password, provider()).map_err(|e| e.to_string())?;
         if let Some(limit) = stall_limit {
-            client = client.with_stall_limit(limit).map_err(|e| message(&e))?;
+            client = client.with_stall_limit(limit).map_err(|e| e.to_string())?;
         }
         let mut inner = self.lock();
         usable(&inner)?;
@@ -507,7 +494,7 @@ impl Remote {
         }
         let login_url = match sign_in.state() {
             SignInState::Waiting { login_url } => login_url.clone(),
-            SignInState::Failed(e) => return Err(message(e)),
+            SignInState::Failed(e) => return Err(e.to_string()),
             // the start ends waiting or failed once trust is answered
             SignInState::NeedsTrust { .. } | SignInState::Done { .. } => return Err(Error::Malformed("unexpected sign-in state".into()).to_string()),
         };
@@ -570,7 +557,7 @@ impl Remote {
                 SignInState::Failed(Error::Cancelled) => {
                     break Err((SignInProgress::TimedOut, "The sign-in wasn't approved in time; start it again".into()));
                 }
-                SignInState::Failed(e) => break Err((SignInProgress::Failed, message(e))),
+                SignInState::Failed(e) => break Err((SignInProgress::Failed, e.to_string())),
                 SignInState::NeedsTrust { .. } => {
                     break Err((SignInProgress::Failed, Error::Malformed("unexpected sign-in state".into()).to_string()));
                 }

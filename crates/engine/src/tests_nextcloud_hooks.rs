@@ -598,9 +598,8 @@ fn all_metadata_reads_the_header_of_a_photo_not_here() {
 }
 
 /// R30/R33: while the server can't be reached nothing waits for it, after a restart too: a photo
-/// downloaded before opens from its copy (no request) and counts as there (edits render from the
-/// original, not the smart preview); one never downloaded fails at once. A corrupt etags file only
-/// loses the copies.
+/// downloaded before opens from the cache's newest copy (no etag known, no request) and counts as
+/// there (edits render from the original, not the smart preview); one never downloaded fails at once.
 #[test]
 fn offline_copies_open_at_once_after_a_restart() {
     let (s, fake, d) = signed_in("offline-restart");
@@ -625,12 +624,6 @@ fn offline_copies_open_at_once_after_a_restart() {
     assert!(!s.remote.exists(&z));
     assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
     assert_eq!(fake.requests(), before, "nothing asked the server");
-    // a corrupt etags file: the copy isn't found without the server (and nothing breaks)
-    std::fs::write(d.join("cache").join("etags.json"), b"{not json").unwrap();
-    let s = offline();
-    assert!((s.media.file_loader.clone().unwrap())(&y, 512).is_err());
-    assert!(!s.remote.exists(&y));
-    assert_eq!(fake.requests(), before);
 }
 
 /// R32: a raw the server has no preview of (no preview provider for its format: all CR3s on a live

@@ -95,17 +95,16 @@ the Info panel open doesn't.
   Above it, the least recently used originals are deleted, except offline copies (pinned) and the photo open in
   Develop (held).
 - **A file changed on the server** (new etag) is downloaded again when next needed; the old copy goes.
-- **`etags.json`** in the same folder remembers which version of each file a copy is, so copies are found while the
-  server can't be asked, after a restart too. A damaged or deleted one only means that copies are found once the
-  server answers again.
+- **Copies are found without the server,** after a restart too: with no etag seen this session for a file, its
+  newest copy in the cache is used (craft's `OriginalsCache::newest`; no request).
 - **Thumbnails** made from server previews go to the usual thumbnail disk cache, keyed by path and size (Nextcloud
   photos have no content hash).
 - **Accounts** are in `<settings folder>/nextcloud.json` (`{accounts: [{server, user, trust}], cacheBudgetMb}`); no
   password is ever written there.
 - The desktop app, `lightcraft-cli` and the MCP server share both folders, but **one process at a time uses the
-  download cache**: the first to need it keeps it (a lock on `<cache>/nextcloud/.lock`) until it quits. Meanwhile the
-  others can't download ("Another LightCraft window or lightcraft-cli is using the Nextcloud download cache; close it
-  and try again") and show no cache sizes; browsing with server previews still works there.
+  download cache**: the first to need it keeps it (craft's lock on `<cache>/nextcloud/.lock`) until it quits.
+  Meanwhile the others can't download ("Another LightCraft window or lightcraft-cli is using the Nextcloud download
+  cache; close it and try again") and show no cache sizes; browsing with server previews still works there.
 - A desktop-app window started with `--memory` or `LIGHTCRAFT_NO_PREFS` (tests, scripts) leaves this computer's
   Nextcloud settings, cache and keyring alone: it can't sign in ("Nextcloud sign-in isn't available in this window").
 
@@ -182,8 +181,7 @@ Trust on first use, with no silent changes:
   Fit on a screen wider than that is a little soft outside Develop.
 - **Offline, LightCraft can't tell whether a copy on disk is the latest version:** it is used as it is, and a newer
   version is downloaded once the server answers again (a copy older than a version a listing showed this session isn't
-  used). An original downloaded by an older LightCraft (before `etags.json`) is found offline only after the server
-  has answered once.
+  used).
 - **Labels in the Nextcloud dialogs and Settings tab are English only** so far.
 - One account per import; a login name that differs from the user id (e-mail or LDAP logins) isn't supported by the
   client.
@@ -279,9 +277,9 @@ MiB; CR3s that Memories hasn't indexed get their size from the file's header.
    smart preview as the fallback when the server is unreachable.
 7. **Folders are full paths.** `library.importNextcloud {dirs}` and `nextcloud.browse {dir}` take `nextcloud://` paths
    and the account comes from the path, so there is no separate `account` param to get out of step.
-8. **The cache is keyed by etag.** LightCraft remembers etags from listings and downloads, and each copy's in
-   `etags.json` (so copies are found offline); a lookup with no known etag costs one `stat` (skipped while the
-   account is unreachable).
+8. **The cache is keyed by etag.** LightCraft remembers etags from listings and `stat`s this session; a lookup with no
+   known etag costs one `stat`. Where nothing is asked (the account unreachable, a prefetch or All Metadata checking
+   for a copy), a file with no known etag uses the cache's newest copy, so copies are found offline after a restart.
 9. **One download at a time,** behind one lock, interactive loads first. Per-path downloads can come if measurements
    show a waiting loupe.
 10. **Local-only actions refuse.** Merge, Convert to DNG, Duplicate, Edit In, file renames and moves, folder

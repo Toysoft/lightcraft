@@ -1,6 +1,6 @@
 //! Remote originals on this computer: the [`OriginalsCache`] (one per folder in the process), the
-//! etags and sizes listings and `stat`s told us, the etag of each copy downloaded (kept in the cache
-//! folder, so copies are found while the server can't be asked), which files the server no longer
+//! etags and sizes listings and `stat`s told us (with none, the cache's newest copy of a file is the
+//! one used, so copies are found while the server can't be asked), which files the server no longer
 //! has, and whether a remote photo counts as there ([`Remote::exists`]). Downloads (interactive,
 //! prefetched, made available offline) and what a finished one tells the catalog ([`complete`]).
 
@@ -31,46 +31,28 @@ pub(crate) fn budget_bytes(mb: u64) -> u64 {
     mb.max(MIN_CACHE_BUDGET_MB).saturating_mul(1_000_000)
 }
 
-/// In the cache folder: the etag of each original downloaded, by path ([`Remote::note_copy`]).
-const ETAGS: &str = "etags.json";
-/// Largest [`ETAGS`] file read; a bigger one is ignored.
-const MAX_ETAGS: usize = 16 << 20;
-
-/// The etags of the originals in cache folder `dir` ([`ETAGS`]). Hostile input: a missing, corrupt or
-/// oversized file means none.
-pub(super) fn load_copies(dir: &Path) -> HashMap<String, String> {
-    crate::denoise::read_capped(&dir.join(ETAGS), MAX_ETAGS).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
-}
-
 /// Why the originals cache can't be used: another process has it ([`open_cache`]).
 pub(crate) const CACHE_IN_USE: &str = "Another LightCraft window or lightcraft-cli is using the Nextcloud download cache; close it and try again";
 
-/// The cache in `dir` with `budget` bytes, opened once per process and per computer (craft's caches
-/// race when one folder is opened twice): the first open locks `<dir>/.lock` for the process's
-/// lifetime, and while another process holds it the cache isn't available here ([`CACHE_IN_USE`];
-/// asked again on the next use). A cache opened before with another budget takes this one,
-/// evicting down to it.
+/// The cache in `dir` with `budget` bytes, opened once per process (a second open of one folder
+/// fails: craft locks `<dir>/.lock` while the cache is open). While another process has it, the
+/// cache isn't available here ([`CACHE_IN_USE`]; asked again on the next use). A cache opened before
+/// with another budget takes this one, evicting down to it.
 fn open_cache(dir: &Path, budget: u64) -> Result<OriginalsCache, String> {
-    static OPEN: Mutex<Vec<(PathBuf, OriginalsCache, u64, std::fs::File)>> = Mutex::new(Vec::new());
+    static OPEN: Mutex<Vec<(PathBuf, OriginalsCache, u64)>> = Mutex::new(Vec::new());
     let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some((_, cache, had, _)) = open.iter_mut().find(|(d, ..)| d == dir) {
+    if let Some((_, cache, had)) = open.iter_mut().find(|(d, ..)| d == dir) {
         if *had != budget {
             cache.set_budget(budget);
             *had = budget;
         }
         return Ok(cache.clone());
     }
-    let failed = |e: std::io::Error| format!("The Nextcloud download cache {} can't be used: {e}", dir.display());
-    std::fs::create_dir_all(dir).map_err(failed)?;
-    let lock = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(dir.join(".lock")).map_err(failed)?;
-    match lock.try_lock() {
-        Ok(()) => {}
-        Err(std::fs::TryLockError::WouldBlock) => return Err(CACHE_IN_USE.into()),
-        // a file system without locks: go on unlocked rather than without downloads
-        Err(std::fs::TryLockError::Error(e)) => log::warn!("Nextcloud download cache {}: no lock ({e})", dir.display()),
-    }
-    let cache = OriginalsCache::open(dir, budget).map_err(|e| e.to_string())?;
-    open.push((dir.to_path_buf(), cache.clone(), budget, lock));
+    let cache = OriginalsCache::open(dir, budget).map_err(|e| match e {
+        Error::Io(e) if e.kind() == std::io::ErrorKind::WouldBlock => CACHE_IN_USE.to_string(),
+        e => format!("The Nextcloud download cache {} can't be used: {e}", dir.display()),
+    })?;
+    open.push((dir.to_path_buf(), cache.clone(), budget));
     Ok(cache)
 }
 
@@ -132,7 +114,6 @@ impl Remote {
         if let Some((etag, _)) = &known
             && let Some(local) = cache.cached(&rp, etag)
         {
-            self.note_copy(&rp, etag);
             return Ok(local);
         }
         if state == AccountState::Unreachable {
@@ -155,7 +136,6 @@ impl Remote {
             match self.stat(&client, &rp) {
                 Ok(entry) => {
                     if let Some(local) = cache.cached(&rp, &entry.etag) {
-                        self.note_copy(&rp, &entry.etag);
                         return Ok(local);
                     }
                     size = Some(entry.size);
@@ -204,13 +184,6 @@ impl Remote {
         };
         match fetched {
             Ok(fetched) => {
-                // (the copy's etag, when it is the one last seen: kept for when the server can't be asked)
-                let etag = self.lock().known.get(&rp).map(|(etag, _)| etag.clone());
-                if let Some(etag) = etag
-                    && cache.cached(&rp, &etag).is_some_and(|p| p == fetched.path)
-                {
-                    self.note_copy(&rp, &etag);
-                }
                 if downloaded {
                     // (the next download needn't wait for this)
                     let info = describe_copy(&cache, &rp, &fetched.path, want).map_err(|e| log::warn!("Nextcloud: {path}: {e}")).ok();
@@ -257,27 +230,15 @@ impl Remote {
         }
     }
 
-    /// The copy of `path` on this computer: at the etag last seen, else (none seen yet) at the one it
-    /// was downloaded at, which may be out of date; no request.
+    /// The copy of `path` on this computer, no request: at the etag last seen, else (none seen yet, as
+    /// after a restart) the cache's newest one, which may be out of date. A load holds `path` first
+    /// (`hooks::with_original`), so the copy stays on disk until it is read.
     fn cached_copy(&self, path: &RemotePath) -> Option<PathBuf> {
         let known = self.lock().known.get(path).map(|(etag, _)| etag.clone());
-        let etag = known.or_else(|| self.copies.lock().unwrap_or_else(PoisonError::into_inner).get(&path.to_string()).cloned())?;
-        self.cache().ok()?.cached(path, &etag)
-    }
-
-    /// Remember that the copy of `path` on this computer is at `etag`, in the cache folder's [`ETAGS`]
-    /// too (rewritten when it changes), so it is found without the server, after a restart too.
-    fn note_copy(&self, path: &RemotePath, etag: &str) {
-        let Some(dir) = self.lock().config.cache_dir.clone() else { return };
-        let mut copies = self.copies.lock().unwrap_or_else(PoisonError::into_inner);
-        if copies.get(&path.to_string()).is_some_and(|e| e == etag) {
-            return;
-        }
-        copies.insert(path.to_string(), etag.to_string());
-        // ponytail: one entry per original ever downloaded, rewritten whole; drop evicted copies' entries if it grows big
-        let written = serde_json::to_vec(&*copies).map_err(|e| e.to_string()).and_then(|b| crate::denoise::write_atomic(&dir.join(ETAGS), &b));
-        if let Err(e) = written {
-            log::warn!("Nextcloud download cache: {e}");
+        let cache = self.cache().ok()?;
+        match known {
+            Some(etag) => cache.cached(path, &etag),
+            None => cache.newest(path),
         }
     }
 
