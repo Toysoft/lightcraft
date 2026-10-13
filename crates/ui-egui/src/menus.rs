@@ -175,6 +175,8 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("file.addPhotos", "Import Photos…", Some("Cmd+Shift+I"), "File"),
     ("file.addFolder", "Import from Folder…", None, "File"),
     ("file.importLightroom", "Import Lightroom Catalog…", None, "File"),
+    ("file.addNextcloudAccount", "Add Nextcloud Account…", None, "File"),
+    ("file.importNextcloud", "Import from Nextcloud…", None, "File"),
     ("file.addFromDevice", "Import from Device", None, ""),
     ("file.findMissing", "Find Missing Photos…", None, "File"),
     ("file.backupLibrary", "Back Up Library…", None, "File"),
@@ -346,6 +348,10 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
         // the app's own context: a fresh one's repaints reach no window and its clock starts at zero
         let ctx = app.tasks.repaint.clone().unwrap_or_default();
         return Some(crate::lightroom_import::command(app, id, p, &ctx));
+    }
+    // their first request waits for the server: on a worker, never on the UI thread
+    if crate::nextcloud::OFF_UI_THREAD.contains(&id) {
+        return Some(crate::nextcloud::run(app, id, p));
     }
     if let Some(language) = language_from_command(id) {
         app.ui.language = language;
@@ -1326,6 +1332,11 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                 None => Ok(Value::Null),
             }
         }
+        "file.addNextcloudAccount" => {
+            app.ui.dialog = Some(crate::nextcloud::sign_in_dialog(None));
+            Ok(Value::Null)
+        }
+        "file.importNextcloud" => crate::nextcloud::open_import(app, &ctx),
         "app.quit" => {
             app.ui.quit = true;
             Ok(Value::Null)
@@ -1814,8 +1825,9 @@ pub fn ui_enabled(app: &LightcraftApp, id: &str) -> bool {
                     .session
                     .active()
                     .and_then(|id| app.session.catalog.photo(id))
-                    .is_some_and(|p| matches!(p.source, lightcraft_engine::catalog::Source::File { .. }))
+                    .is_some_and(|p| matches!(&p.source, lightcraft_engine::catalog::Source::File { path } if !lightcraft_catalog::is_remote(path)))
         }
+        "file.addNextcloudAccount" | "file.importNextcloud" => !cfg!(target_arch = "wasm32"),
         "file.exportPresets" => app.session.presets.iter().any(|p| !p.builtin),
         "file.exportCurvePresets" => !app.session.curve_presets.is_empty(),
         "view.compare" => app.session.catalog.len() > 1,
@@ -1909,6 +1921,7 @@ fn show_in_finder(app: &mut LightcraftApp) -> Result<Value, String> {
         Some(lightcraft_engine::catalog::Source::File { path }) => path,
         _ => return Err("this photo has no file (demo scene)".into()),
     };
+    lightcraft_engine::cmd::local_only(&path, reveal_label()).map_err(|e| e.to_string())?;
     let reveal = app.services.reveal.as_mut().ok_or("not available here")?;
     reveal(&path)?;
     Ok(json!({"path": path}))

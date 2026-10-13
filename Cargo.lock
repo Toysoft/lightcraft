@@ -3534,6 +3534,7 @@ dependencies = [
 name = "lightcraft-ui-egui"
 version = "0.7.1"
 dependencies = [
+ "craft-nextcloud",
  "craft-ui",
  "egui",
  "egui_kittest",

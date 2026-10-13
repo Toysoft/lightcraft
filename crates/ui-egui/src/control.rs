@@ -37,7 +37,12 @@ impl ControlRequest {
 
 pub enum Outcome {
     Done(Value),
-    Screenshot { path: Option<String>, headless: bool },
+    /// The request's work runs off the UI thread and replies when done.
+    Later,
+    Screenshot {
+        path: Option<String>,
+        headless: bool,
+    },
 }
 
 fn ok(v: Value) -> Outcome {
@@ -177,6 +182,18 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context, req: &ControlRequest
         "engine.execute" | "ui.menu.invoke" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             let params = p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}));
+            // a command whose first request waits for a Nextcloud server: its own reply, from a worker
+            if crate::nextcloud::OFF_UI_THREAD.contains(&id) {
+                let reply = req.reply.clone();
+                let started = crate::nextcloud::query(app, id, params, move |_, _, r| {
+                    let Outcome::Done(v) = wrap(r) else { return };
+                    let _ = reply.send(v);
+                });
+                return match started {
+                    Ok(()) => Outcome::Later,
+                    Err(e) => err(e),
+                };
+            }
             let r = app.run(id, params);
             ctx.request_repaint();
             wrap(r)
@@ -364,7 +381,11 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context, req: &ControlRequest
                 if (r.is_err()
                     && matches!(
                         d,
-                        crate::state::Dialog::Import { .. } | crate::state::Dialog::SamModel { .. } | crate::state::Dialog::SmartRules { .. }
+                        crate::state::Dialog::Import { .. }
+                            | crate::state::Dialog::SamModel { .. }
+                            | crate::state::Dialog::SmartRules { .. }
+                            | crate::state::Dialog::NextcloudSignIn { .. }
+                            | crate::state::Dialog::NextcloudImport { .. }
                     ))
                     || (r.is_ok() && crate::panels::dialogs::keeps_open(app, &d))
                 {
@@ -375,7 +396,9 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context, req: &ControlRequest
             None => err("no dialog open"),
         },
         "ui.dialog.cancel" => {
-            app.ui.dialog = None;
+            if let Some(d) = app.ui.dialog.take() {
+                crate::nextcloud::closed(app, &d);
+            }
             ok(Value::Null)
         }
         "ui.resize" => {

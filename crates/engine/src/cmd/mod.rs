@@ -29,7 +29,7 @@ mod merge;
 pub mod metadata;
 pub mod missing;
 #[cfg(not(target_arch = "wasm32"))]
-mod nextcloud;
+pub mod nextcloud;
 mod organize;
 mod prefs;
 mod preset_files;
@@ -186,8 +186,8 @@ pub(crate) fn names_photos(p: &Value) -> bool {
 }
 
 /// Refuse `action` for a Nextcloud photo: it reads or writes beside the original, which stays on
-/// the server.
-pub(crate) fn local_only(path: &str, action: &str) -> Result<()> {
+/// the server. Hosts give their own local-only actions (Show in Finder) the same refusal.
+pub fn local_only(path: &str, action: &str) -> Result<()> {
     if lightcraft_catalog::is_remote(path) { Err(EngineError::Other(format!("{action} isn't available for Nextcloud photos"))) } else { Ok(()) }
 }
 

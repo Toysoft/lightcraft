@@ -33,6 +33,10 @@ lightcraft-codecs = { workspace = true }
 lightcraft-faces = { workspace = true }
 lightcraft-merge = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# `FakeServer`, a scripted in-process Nextcloud
+craft-nextcloud = { workspace = true, features = ["testing"] }
+
 [build-dependencies]
 serde_json = { workspace = true }
 toml = "1"

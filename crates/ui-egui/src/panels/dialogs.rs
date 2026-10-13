@@ -258,6 +258,9 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         Dialog::RemoveFolder { disk: true, .. } => "Remove Disk from Library",
         Dialog::RemoveFolder { .. } => "Remove Folder from Library",
         Dialog::SynchronizeFolder { .. } => "Synchronize Folder",
+        Dialog::NextcloudSignIn { account: Some(_), .. } => "Sign In to Nextcloud",
+        Dialog::NextcloudSignIn { .. } => "Add Nextcloud Account",
+        Dialog::NextcloudImport { .. } => "Import from Nextcloud",
         // (nothing to download from in this build: the dialog explains the manual install)
         Dialog::SamModel { .. } if sam_by_hand(&app.session.segmenter) => "Install the SAM 3 Model",
         Dialog::SamModel { .. } => "Download the SAM 3 Model?",
@@ -290,7 +293,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
             Dialog::SmartRules { .. } => 680.0,
             Dialog::AllMetadata { .. } => 620.0,
             Dialog::FaceModel { .. } => 460.0,
-            Dialog::LightroomCatalog { .. } => 440.0,
+            Dialog::LightroomCatalog { .. } | Dialog::NextcloudSignIn { .. } | Dialog::NextcloudImport { .. } => 440.0,
             _ => 380.0,
         })
         .show(ctx, |ui| {
@@ -1094,6 +1097,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     ui.label(egui::RichText::new(crate::i18n::tr("They can be restored from Recently Deleted until it is emptied.")).color(t.text_dim));
                 }
                 d @ Dialog::SynchronizeFolder { .. } => crate::sync::body(app, ui, d),
+                d @ (Dialog::NextcloudSignIn { .. } | Dialog::NextcloudImport { .. }) => confirm |= crate::nextcloud::body(app, ui, d),
                 Dialog::LightroomCatalog { folder, catalog } => {
                     ui.label(crate::i18n::tr("This is a Lightroom catalog, not a LightCraft library. Import it into a LightCraft library instead?"));
                     ui.label(egui::RichText::new(catalog.as_deref().unwrap_or(folder.as_str())).color(t.text_dim));
@@ -1217,6 +1221,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     Dialog::RemoveFolder { .. } => "Remove",
                     Dialog::LightroomCatalog { .. } => "Import Lightroom Catalog…",
                     Dialog::SynchronizeFolder { .. } => "Synchronize",
+                    d @ (Dialog::NextcloudSignIn { .. } | Dialog::NextcloudImport { .. }) => crate::nextcloud::ok_label(app, d),
                     Dialog::SamModel { then: Some(_), .. } if sam_installed => "Continue",
                     Dialog::SamModel { .. } if sam_installed || sam_running || sam_nowhere => "",
                     Dialog::SamModel { error, .. } if error.is_some() || sam_failed => "Try Again",
@@ -1232,7 +1237,8 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         Dialog::DenoiseModel { accepted: false, .. } | Dialog::FaceModel { accepted: false, .. } | Dialog::SynchronizeFolder { counts: None, .. }
                     )
                         // smart-album rules that can't mean anything wait to be fixed
-                        && !matches!(&dlg, Dialog::SmartRules { id, rules, .. } if !rules.check_for(&app.session.catalog, id.map(lightcraft_catalog::AlbumId)).is_empty());
+                        && !matches!(&dlg, Dialog::SmartRules { id, rules, .. } if !rules.check_for(&app.session.catalog, id.map(lightcraft_catalog::AlbumId)).is_empty())
+                        && crate::nextcloud::can_confirm(app, &dlg);
                 let r = (!ok.is_empty()).then(|| ui.add_enabled(can_confirm, egui::Button::new(crate::i18n::tr(ok))));
                 if let Some(r) = &r {
                     crate::widgets::register(ui.ctx(), "button:dialogOk", r.rect);
@@ -1282,6 +1288,8 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         | Dialog::KeywordTag { .. }
                         | Dialog::KeywordSet { .. }
                         | Dialog::SynchronizeFolder { .. }
+                        | Dialog::NextcloudSignIn { .. }
+                        | Dialog::NextcloudImport { .. }
                 ) =>
             {
                 app.toast(ctx, e)
@@ -1308,6 +1316,9 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
     // a dialog opened from inside this one (a button in Settings that shows a licence) takes its place
     if app.ui.dialog.as_ref().is_some_and(|now| *now != at_start) {
         return;
+    }
+    if close {
+        crate::nextcloud::closed(app, &dlg);
     }
     app.ui.dialog = if close { None } else { Some(dlg) };
 }
@@ -1387,9 +1398,9 @@ pub fn fmt_gap(v: f64) -> String {
 }
 
 /// Whether a dialog stays open after its action succeeded (the SAM 3 dialog while the model
-/// downloads).
+/// downloads, the Nextcloud sign-in until the browser approves it).
 pub fn keeps_open(app: &LightcraftApp, dlg: &Dialog) -> bool {
-    matches!(dlg, Dialog::SamModel { .. }) && !app.session.segmenter.installed()
+    (matches!(dlg, Dialog::SamModel { .. }) && !app.session.segmenter.installed()) || matches!(dlg, Dialog::NextcloudSignIn { .. })
 }
 
 /// No SAM 3 model, no download running and nowhere to download it from: installing it by hand is
@@ -1682,6 +1693,7 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
         }
         Dialog::RemoveFolder { path, disk, .. } => app.run("library.removeFolder", json!({"path": path, "disk": disk})),
         d @ Dialog::SynchronizeFolder { .. } => crate::sync::confirm(app, d),
+        d @ (Dialog::NextcloudSignIn { .. } | Dialog::NextcloudImport { .. }) => crate::nextcloud::confirm(app, d),
         Dialog::About | Dialog::Shortcuts | Dialog::Settings { .. } => Ok(serde_json::Value::Null),
     }
 }
@@ -1887,7 +1899,7 @@ fn return_confirms(dlg: &Dialog) -> bool {
 /// with its text selected, so typing replaces it. True when Return confirms the dialog; Esc
 /// cancels the dialog (`show`). Taking the focus back with a bare `TextEdit` every frame hid the
 /// focus Return gives up, and Return did nothing.
-fn dialog_field(ui: &mut egui::Ui, widget: &str, text: &mut String, hint: &str) -> bool {
+pub(crate) fn dialog_field(ui: &mut egui::Ui, widget: &str, text: &mut String, hint: &str) -> bool {
     let r = crate::text_field::TextField::singleline(widget, text).hint(crate::i18n::tr(hint)).width(f32::INFINITY).select_on_focus(true).show(ui);
     if !r.editing {
         r.response.request_focus();

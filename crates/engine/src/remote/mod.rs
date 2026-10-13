@@ -636,8 +636,9 @@ impl Remote {
     }
 }
 
-/// The TLS crypto provider (pure Rust, like `lightcraft-fetch`).
-pub(crate) fn provider() -> Arc<CryptoProvider> {
+/// The TLS crypto provider (pure Rust, like `lightcraft-fetch`); hosts' tests start craft's TLS
+/// `FakeServer` with it.
+pub fn provider() -> Arc<CryptoProvider> {
     Arc::new(rustls_rustcrypto::provider())
 }
 

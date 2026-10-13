@@ -742,8 +742,10 @@ fn missing_count(app: &mut LightcraftApp, ui: &mut egui::Ui) -> usize {
         job.at = now;
         job.rev = rev;
         let (n, running, ctx) = (job.n.clone(), job.running.clone(), ui.ctx().clone());
+        // (the session's own check: a Nextcloud photo is there when its server says so)
+        let exists = app.session.media.availability.probe();
         let work = move || {
-            let missing = if cfg!(target_arch = "wasm32") { 0 } else { paths.iter().filter(|p| !std::path::Path::new(p).exists()).count() };
+            let missing = if cfg!(target_arch = "wasm32") { 0 } else { paths.iter().filter(|p| !exists(p)).count() };
             n.store(missing, Relaxed);
             running.store(false, Relaxed);
             ctx.request_repaint();

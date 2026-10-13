@@ -447,6 +447,17 @@ impl Renderer {
         );
     }
 
+    /// Stop wanting `slot` (a no-op when nothing is pending): its queued job is dropped, and a
+    /// running one's result ignored.
+    pub fn cancel(&mut self, slot: Slot) {
+        if self.pending.remove(&slot).is_none() {
+            return;
+        }
+        self.request_ids.remove(&slot);
+        self.queue.retain(|q| q.slot != slot);
+        self.pool.reprioritize(|s, p| (*s != slot).then_some(p));
+    }
+
     /// Request a stand-in for `slot` (once per job key).
     pub fn request_quick(&mut self, slot: Slot, mut job: QuickJob, priority: u32) {
         if self.quick_tried.get(&slot) == Some(&job.key) {

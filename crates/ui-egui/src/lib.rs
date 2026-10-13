@@ -24,6 +24,7 @@ pub mod menubar;
 pub mod menus;
 pub mod merge;
 mod model_setup;
+pub mod nextcloud;
 pub mod panels;
 pub mod pick;
 pub mod region;
@@ -93,6 +94,8 @@ mod tests_masking;
 mod tests_masking_layout;
 #[cfg(test)]
 mod tests_menubar;
+#[cfg(test)]
+mod tests_nextcloud;
 #[cfg(test)]
 mod tests_offline;
 #[cfg(test)]
@@ -392,6 +395,8 @@ pub struct LightcraftApp {
     pub library_problem: Option<panels::library_problem::LibraryProblem>,
     /// The activity stack shows every task, not just the first few ("+N more" was clicked).
     pub activity_expanded: bool,
+    /// Nextcloud sign-ins and imports to tell the end of, and the accounts as last read.
+    pub nextcloud: nextcloud::Nextcloud,
 }
 
 impl LightcraftApp {
@@ -466,6 +471,7 @@ impl LightcraftApp {
             screen_profile_read: None,
             library_problem: None,
             activity_expanded: false,
+            nextcloud: Default::default(),
             model_setup: Default::default(),
         }
     }
@@ -794,6 +800,8 @@ impl LightcraftApp {
                 control::Outcome::Done(v) => {
                     let _ = reply.send(v);
                 }
+                // (answered by the work it started)
+                control::Outcome::Later => {}
                 control::Outcome::Screenshot { path, headless } => {
                     self.screenshot_token += 1;
                     let now = now_ms();
@@ -1001,6 +1009,7 @@ impl LightcraftApp {
         sync::poll(self, ctx);
         sync::poll_run(self, ctx);
         import::tick(self, ctx);
+        nextcloud::tick(self, ctx);
         lightroom_import::tick(self, ctx);
         tasks::poll(self, ctx);
         self.preview_build_status(ctx);

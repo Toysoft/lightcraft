@@ -993,6 +993,30 @@ pub enum Dialog {
         remove_missing: bool,
         read_metadata: bool,
     },
+    /// File ▸ Add Nextcloud Account… (or signing `account` in again): the server's address, then its
+    /// certificate's `fingerprint` to trust (`changed`: not the one trusted before), then the wait
+    /// for approval in the browser (`login_url`, activity row `task`); `error`: why it stopped.
+    NextcloudSignIn {
+        server: String,
+        #[serde(default)]
+        account: Option<String>,
+        fingerprint: Option<String>,
+        #[serde(default)]
+        changed: bool,
+        login_url: Option<String>,
+        #[serde(default)]
+        task: Option<u64>,
+        error: Option<String>,
+    },
+    /// File ▸ Import from Nextcloud…: the folders in `dir` (empty: choose an account), one level at a
+    /// time as (name, path); `chosen`: the folders to import; `loading` while `dir` is read.
+    NextcloudImport {
+        dir: String,
+        folders: Vec<(String, String)>,
+        chosen: Vec<String>,
+        loading: bool,
+        error: Option<String>,
+    },
     About,
     Shortcuts,
 }

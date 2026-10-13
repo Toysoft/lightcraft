@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use super::{CommandSpec, always, bad, bool_or, cmd, str_param};
 use crate::activity::Cancel;
-use crate::remote::{Fingerprint, RemotePath};
+use crate::remote::{Fingerprint, Remote, RemotePath};
 use crate::{EngineError, Result, Session};
 
 /// Why the offline commands are off.
@@ -50,16 +50,16 @@ fn trust(c: &str, p: &Value) -> Result<Option<Fingerprint>> {
     str_param(p, "trust").map(|t| t.parse().map_err(|_| bad(c, "`trust` must be the certificate's SHA-256 fingerprint (AB:CD:…)"))).transpose()
 }
 
-fn add_account(s: &mut Session, p: &Value) -> Result<Value> {
+fn add_account(remote: &Arc<Remote>, p: &Value) -> Result<Value> {
     const C: &str = "nextcloud.addAccount";
     let server = str_param(p, "server").ok_or_else(|| bad(C, "missing `server` (the Nextcloud address)"))?;
-    s.remote.sign_in(server, trust(C, p)?, bool_or(p, "wait", false)).map_err(EngineError::Other)
+    remote.sign_in(server, trust(C, p)?, bool_or(p, "wait", false)).map_err(EngineError::Other)
 }
 
-fn sign_in(s: &mut Session, p: &Value) -> Result<Value> {
+fn sign_in(remote: &Arc<Remote>, p: &Value) -> Result<Value> {
     const C: &str = "nextcloud.signIn";
     let key = str_param(p, "account").ok_or_else(|| bad(C, "missing `account` (user@host)"))?;
-    s.remote.sign_in_again(key, trust(C, p)?, bool_or(p, "wait", false)).map_err(EngineError::Other)
+    remote.sign_in_again(key, trust(C, p)?, bool_or(p, "wait", false)).map_err(EngineError::Other)
 }
 
 /// The `nextcloud://` folder in `v`.
@@ -68,9 +68,21 @@ fn folder(c: &str, v: Option<&Value>) -> Result<RemotePath> {
     RemotePath::parse(path).map_err(|e| bad(c, format!("{path} isn't a Nextcloud folder: {e}")))
 }
 
-fn browse(s: &mut Session, p: &Value) -> Result<Value> {
+fn browse(remote: &Arc<Remote>, p: &Value) -> Result<Value> {
     let dir = folder("nextcloud.browse", p.get("dir"))?;
-    crate::remote::import::browse(&s.remote, &dir).map_err(EngineError::Other)
+    crate::remote::import::browse(remote, &dir).map_err(EngineError::Other)
+}
+
+/// `nextcloud.addAccount`, `nextcloud.signIn` and `nextcloud.browse` without the session (`None` for
+/// any other id): their first request waits for the server, up to its connect and stall limits, so a
+/// host whose session lives on its UI thread runs them on a worker with the session's `remote`.
+pub fn off_session(remote: &Arc<Remote>, id: &str, p: &Value) -> Option<Result<Value>> {
+    Some(match id {
+        "nextcloud.addAccount" => add_account(remote, p),
+        "nextcloud.signIn" => sign_in(remote, p),
+        "nextcloud.browse" => browse(remote, p),
+        _ => return None,
+    })
 }
 
 fn import(s: &mut Session, p: &Value) -> Result<Value> {
@@ -159,7 +171,7 @@ fn remove_offline(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(super) fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(query "nextcloud.browse", "Browse Nextcloud Folder", [], None, "{dir: nextcloud://user@host/folder/} → {dir, folders: [{name, path}], photos} — one level of a Nextcloud folder: its subfolders (sorted by name) and how many photos it holds itself (hidden files left out)", always, browse),
+        cmd!(query "nextcloud.browse", "Browse Nextcloud Folder", [], None, "{dir: nextcloud://user@host/folder/} → {dir, folders: [{name, path}], photos} — one level of a Nextcloud folder: its subfolders (sorted by name) and how many photos it holds itself (hidden files left out)", always, |s, p| browse(&s.remote, p)),
         cmd!(
             "library.importNextcloud",
             "Import from Nextcloud",
@@ -169,8 +181,8 @@ pub(super) fn specs() -> Vec<CommandSpec> {
             always,
             import
         ),
-        cmd!(query "nextcloud.addAccount", "Add Nextcloud Account…", [], None, "{server, trust?: fingerprint, wait?: false} → {state: needsTrust, fingerprint} | {state: waiting, loginUrl, task} | {state: signedIn, account} — sign in through the browser: open `loginUrl` and approve; the app password goes to the OS keyring. An untrusted certificate answers needsTrust: check the fingerprint with the server's admin and run again with `trust`. Waiting shows a cancellable activity row (id `task`); how it ends shows in nextcloud.preferences → signIns; `wait: true` blocks until approved", always, add_account),
-        cmd!(query "nextcloud.signIn", "Sign In to Nextcloud", [], None, "{account: user@host, trust?: fingerprint, wait?: false} → like nextcloud.addAccount — sign the account in again (after its app password was revoked or its certificate changed), with its server and pinned certificate. A certificate other than the pinned one answers {state: needsTrust, fingerprint, changed: true}: check it with the server's admin and run again with `trust` to pin it", always, sign_in),
+        cmd!(query "nextcloud.addAccount", "Add Nextcloud Account…", [], None, "{server, trust?: fingerprint, wait?: false} → {state: needsTrust, fingerprint} | {state: waiting, loginUrl, task} | {state: signedIn, account} — sign in through the browser: open `loginUrl` and approve; the app password goes to the OS keyring. An untrusted certificate answers needsTrust: check the fingerprint with the server's admin and run again with `trust`. Waiting shows a cancellable activity row (id `task`); how it ends shows in nextcloud.preferences → signIns; `wait: true` blocks until approved", always, |s, p| add_account(&s.remote, p)),
+        cmd!(query "nextcloud.signIn", "Sign In to Nextcloud", [], None, "{account: user@host, trust?: fingerprint, wait?: false} → like nextcloud.addAccount — sign the account in again (after its app password was revoked or its certificate changed), with its server and pinned certificate. A certificate other than the pinned one answers {state: needsTrust, fingerprint, changed: true}: check it with the server's admin and run again with `trust` to pin it", always, |s, p| sign_in(&s.remote, p)),
         cmd!(query "nextcloud.preferences", "Nextcloud Preferences", [], None, "{cacheBudgetMb?} → {accounts: [{account, server, user, root, state: signedIn | signedOut | unreachable | signingIn}], cacheBudgetMb, cachedBytes, pinnedBytes, signIns: [{task, state: waiting | signedIn | failed | cancelled | timedOut, account?, error?}], imports: [{task, state: running | done | failed | cancelled, added, failedFolders, error?}]} — the Nextcloud accounts on this computer, the last 8 sign-ins and the last 8 imports (library.importNextcloud); `cacheBudgetMb` (at least 1000) sets the disk budget for downloaded originals", always, preferences),
         cmd!(query "nextcloud.removeAccount", "Remove Nextcloud Account", [], None, "{account: user@host} → {removed} — forget the account on this computer (its app password and settings); its photos stay in the library, offline", always, remove_account),
         CommandSpec {

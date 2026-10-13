@@ -26,6 +26,7 @@ pub const TABS: &[(&str, &str)] = &[
     ("interface", "Interface"),
     ("faces", "Faces"),
     ("denoise", "AI Denoise"),
+    ("nextcloud", "Nextcloud"),
 ];
 
 /// Thumbnail cache sizes offered (MB).
@@ -54,6 +55,7 @@ pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String) {
         "interface" => interface_tab(app, ui, &t),
         "faces" => super::faces::settings_tab(app, ui, &t),
         "denoise" => super::denoise::settings_tab(app, ui, &t),
+        "nextcloud" => nextcloud_tab(app, ui, &t),
         _ => general_tab(app, ui, &t),
     }
 }
@@ -563,6 +565,63 @@ fn smart_previews(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
         }
     }
     hint(ui, t, crate::i18n::tr("Keep it on a drive with room: smart previews are about 1 MB per photo. The thumbnail cache stays in the library."));
+}
+
+// ---------------------------------------------------------------------------------- Nextcloud
+
+/// The originals cache sizes offered (MB, as `nextcloud.preferences` takes them).
+const NEXTCLOUD_CACHE: [(u64, &str); 5] = [(5_000, "5 GB"), (10_000, "10 GB"), (20_000, "20 GB"), (50_000, "50 GB"), (100_000, "100 GB")];
+
+/// The accounts on this computer (signed in or not, sign in again, remove) and the disk the
+/// downloaded originals may take (settings of this computer, not of the library).
+fn nextcloud_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    let prefs = crate::nextcloud::prefs(app, ui.input(|i| i.time));
+    // (accounts sign in and out, and the cache fills, without a click here)
+    ui.ctx().request_repaint_after(std::time::Duration::from_secs(2));
+    heading(ui, t, "Accounts");
+    let accounts = prefs["accounts"].as_array().cloned().unwrap_or_default();
+    if accounts.is_empty() {
+        hint(ui, t, "No Nextcloud account on this computer. Add one with File > Add Nextcloud Account…");
+    }
+    for (i, a) in accounts.iter().enumerate() {
+        let key = a["account"].as_str().unwrap_or_default().to_string();
+        row(ui, t, &key, |ui| {
+            let state = match a["state"].as_str() {
+                Some("signedIn") => "Signed In",
+                Some("unreachable") => "Unreachable",
+                Some("signingIn") => "Signing In…",
+                _ => "Signed Out",
+            };
+            ui.label(RichText::new(crate::i18n::tr(state)).color(t.text));
+            let r = ui.add_enabled(a["state"] != "signingIn", egui::Button::new(crate::i18n::tr("Sign In Again")));
+            register(ui.ctx(), format!("button:nextcloudSignInAgain-{i}"), r.rect);
+            if r.clicked() {
+                let _ = app.run("nextcloud.signIn", json!({"account": key}));
+            }
+            let r = ui.button(crate::i18n::tr("Remove"));
+            register(ui.ctx(), format!("button:nextcloudRemove-{i}"), r.rect);
+            if r.clicked() {
+                let _ = app.run("nextcloud.removeAccount", json!({"account": key}));
+                crate::nextcloud::refresh(app);
+            }
+        });
+    }
+    heading(ui, t, "Downloaded originals");
+    row(ui, t, "Cache size", |ui| {
+        let mut v = prefs["cacheBudgetMb"].as_u64().unwrap_or(20_000);
+        if choices(ui, "settingsNextcloudCache", &NEXTCLOUD_CACHE, &mut v) {
+            let _ = app.run("nextcloud.preferences", json!({"cacheBudgetMb": v}));
+            crate::nextcloud::refresh(app);
+        }
+    });
+    let gb = |key: &str| format!("{:.1}", prefs[key].as_u64().unwrap_or(0) as f64 / 1e9);
+    let usage = format!("{}: {} GB · {}: {} GB", crate::i18n::tr("Cached"), gb("cachedBytes"), crate::i18n::tr("Offline copies"), gb("pinnedBytes"));
+    ui.label(RichText::new(usage).color(t.text));
+    hint(
+        ui,
+        t,
+        "Photos stay on the server until you edit them: then their originals are downloaded here, and the oldest go once this size is reached. Offline copies (Photo > Make Available Offline) stay.",
+    );
 }
 
 // ---------------------------------------------------------------------------------- Interface
