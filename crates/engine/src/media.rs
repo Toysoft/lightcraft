@@ -22,7 +22,7 @@ use std::sync::{Arc, Weak};
 use lightcraft_catalog::{MediaKind, Op, Photo, PhotoId, Source};
 use lightcraft_develop::DevelopSettings;
 use lightcraft_pipeline::{Quality, RenderRequest, Rendered, SourceInfo, StageCache};
-use lightcraft_preview::{Hash128, Hasher128, Lru, PreviewCache};
+use lightcraft_preview::{DiskCache, Hash128, Hasher128, Lru, PreviewCache};
 use lightcraft_raster::{Histogram, Rgb32f, Rgba8};
 use serde::{Deserialize, Serialize};
 
@@ -431,19 +431,22 @@ fn rendered_budget(share: usize) -> usize {
 impl MediaCache {
     /// Keep rendered thumbnails on disk in `dir` as well. The cache this replaces is retired
     /// (its files stay): render jobs still holding it can't write through it any more, even
-    /// into a directory a later clear emptied (`dir` may be the same one).
-    pub fn attach_disk_cache(&mut self, dir: &std::path::Path, disk_bytes: u64) {
+    /// into a directory a later clear emptied (`dir` may be the same one). A `chosen` folder
+    /// (the user's, not the library's own) is never created: while it is missing, thumbnails
+    /// are kept in memory only.
+    pub fn attach_disk_cache(&mut self, dir: &std::path::Path, disk_bytes: u64, chosen: bool) {
         self.rendered.retire();
-        self.rendered = Arc::new(PreviewCache::with_disk(rendered_budget(self.budget), dir, disk_bytes));
+        let disk = if chosen { DiskCache::chosen(dir, disk_bytes) } else { DiskCache::new(dir, disk_bytes) };
+        self.rendered = Arc::new(PreviewCache::with_disk_cache(rendered_budget(self.budget), disk));
     }
 
     /// Change the disk budget of the cache in `dir`: in place when that cache is attached (its
     /// thumbnails are keyed by content, so they and the textures shown from them stay valid,
     /// and the same cache object keeps its generation), else attach it.
-    pub fn set_disk_cache_bytes(&mut self, dir: &std::path::Path, disk_bytes: u64) {
+    pub fn set_disk_cache_bytes(&mut self, dir: &std::path::Path, disk_bytes: u64, chosen: bool) {
         match self.rendered.disk().filter(|d| d.dir() == dir) {
             Some(d) => d.set_budget(disk_bytes),
-            None => self.attach_disk_cache(dir, disk_bytes),
+            None => self.attach_disk_cache(dir, disk_bytes, chosen),
         }
     }
 

@@ -889,6 +889,82 @@ fn smart_previews_folder_is_chosen_per_library() {
     assert_eq!(r["path"], lib.join("Smart Previews").to_string_lossy().as_ref());
 }
 
+/// The thumbnail cache can live outside the library, like smart previews (issue #903): the
+/// folder is saved per library, relative paths and missing drives are refused, the thumbnails
+/// already cached need an explicit choice, and a chosen folder that is gone when the library
+/// opens is reported (never a silent fallback to the library drive, nothing created there).
+#[test]
+fn thumbnail_cache_folder_is_chosen_per_library() {
+    let lib = temp_dir("thumbloc-lib");
+    let away = temp_dir("thumbloc-away");
+    let mut s = Session::new().with_fs();
+    s.open_library(&lib, false).unwrap();
+    const C: &str = "library.thumbnailCacheLocation";
+    let loc = s.execute(C, &json!({})).unwrap();
+    assert_eq!((loc["custom"].clone(), loc["available"].clone()), (json!(false), json!(true)), "{loc}");
+    assert_eq!(loc["path"], lib.join("thumbs").to_string_lossy().as_ref());
+    assert_eq!(loc["default"], lib.join("thumbs").to_string_lossy().as_ref());
+    // a cached thumbnail in the library's folder
+    let key = lightcraft_preview::hash_bytes(b"thumb");
+    let img = lightcraft_raster::Rgba8 { width: 4, height: 4, data: vec![[90, 120, 200, 255]; 16] };
+    s.media.rendered.disk().unwrap().put(key, &img);
+    assert_eq!(s.execute(C, &json!({})).unwrap()["count"], 1);
+
+    // relative paths and missing drives are refused, and nothing is created on this drive
+    let err = s.execute(C, &json!({"path": "rel/thumbs"})).unwrap_err().to_string();
+    assert!(err.contains("absolute"), "{err}");
+    let gone = away.join("unplugged/thumbs");
+    let err = s.execute(C, &json!({"path": gone.to_string_lossy()})).unwrap_err().to_string();
+    assert!(err.contains("not available"), "{err}");
+    assert!(!away.join("unplugged").exists());
+    // the thumbnails already cached need an explicit choice
+    let to = away.join("thumbs");
+    let err = s.execute(C, &json!({"path": to.to_string_lossy()})).unwrap_err().to_string();
+    assert!(err.contains("existing"), "{err}");
+    assert_eq!(s.execute(C, &json!({})).unwrap()["custom"], false);
+
+    let r = s.execute(C, &json!({"path": to.to_string_lossy(), "existing": "move"})).unwrap();
+    assert_eq!((r["custom"].clone(), r["handled"].clone(), r["count"].clone()), (json!(true), json!(1), json!(1)), "{r}");
+    assert_eq!(s.media.rendered.disk().unwrap().dir(), to.as_path(), "new thumbnails go to the chosen folder");
+    assert!(s.media.rendered.disk().unwrap().get(key).is_some(), "the moved thumbnail is used");
+    assert_eq!(lightcraft_preview::disk::cache_stats(&lib.join("thumbs")).0, 0);
+
+    // the setting is saved with the library
+    drop(s); // one session per library (issue #99)
+    let mut again = Session::new().with_fs();
+    again.open_library(&lib, false).unwrap();
+    assert!(again.take_library_warnings().is_empty());
+    assert_eq!(again.execute(C, &json!({})).unwrap()["path"], to.to_string_lossy().as_ref());
+    assert_eq!(again.media.rendered.disk().unwrap().dir(), to.as_path());
+
+    // leaving the old thumbnails keeps them where they are; the new folder fills as the grid renders
+    let drive = away.join("drive");
+    std::fs::create_dir_all(&drive).unwrap();
+    let on_drive = drive.join("thumbs");
+    let r = again.execute(C, &json!({"path": on_drive.to_string_lossy(), "existing": "leave"})).unwrap();
+    assert_eq!((r["handled"].clone(), r["count"].clone()), (json!(0), json!(0)), "{r}");
+    assert_eq!(lightcraft_preview::disk::cache_stats(&to).0, 1, "left in the old folder");
+
+    // the chosen folder is gone when the library opens (its drive's mount point is still
+    // there): reported, and the folder is not created again
+    drop(again);
+    std::fs::remove_dir_all(&on_drive).unwrap();
+    let mut third = Session::new().with_fs();
+    third.open_library(&lib, false).unwrap();
+    let warnings = third.take_library_warnings();
+    assert!(warnings.iter().any(|w| w.contains("not available") && w.contains("thumbs")), "{warnings:?}");
+    let loc = third.execute(C, &json!({})).unwrap();
+    assert_eq!((loc["available"].clone(), loc["path"].clone()), (json!(false), json!(on_drive.to_string_lossy())), "{loc}");
+    third.media.rendered.disk().unwrap().put(key, &img);
+    assert!(!on_drive.exists(), "the missing chosen folder is not recreated");
+
+    // back to the library's own folder
+    let r = third.execute(C, &json!({"reset": true})).unwrap();
+    assert_eq!((r["custom"].clone(), r["available"].clone()), (json!(false), json!(true)), "{r}");
+    assert_eq!(r["path"], lib.join("thumbs").to_string_lossy().as_ref());
+    assert_eq!(third.media.rendered.disk().unwrap().dir(), lib.join("thumbs").as_path());
+}
+
 /// Missing Photos covers library photos only: a small library next to many Local browse
 /// records (and a deleted photo) checks — and lists, and counts — the library files alone.
 #[test]

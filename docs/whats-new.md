@@ -111,6 +111,17 @@
 - Lossy JPEG XL files in Display P3 or Rec. 2020 now open in their real colours; saturated colours used to come in
   noticeably duller.
 
+### Thumbnail cache folder
+- The thumbnail cache can live outside the library (issue #903): Settings ▸ Performance ▸ Thumbnail cache ▸ Choose
+  Folder…, next to the size limit. Useful when the library sits on a network share or a slow disk and the grid
+  waits on it. The choice is saved per library, like the smart previews folder.
+- Thumbnails already cached can be moved, left where they are or deleted; the new folder fills as the grid renders.
+  Use Library Folder goes back to `thumbs` in the library.
+- The folder must be an absolute path on a drive that is there. If it is missing when the library opens (drive
+  disconnected), LightCraft says so and keeps thumbnails in memory only; nothing is written to the library drive
+  instead.
+- Agents use `library.thumbnailCacheLocation {path?, reset?, existing?: move|leave|discard}`.
+
 ### Open Library knows a Lightroom catalog
 - Choosing a Lightroom Classic catalog folder in File → Open Library… (or one of its `Previews.lrdata` /
   `.lrcat-data` folders, or the `.lrcat`) no longer makes an empty LightCraft library inside it (issue #891). The

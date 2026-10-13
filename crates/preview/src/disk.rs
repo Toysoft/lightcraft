@@ -22,6 +22,9 @@ const QUALITY: u8 = 90;
 
 pub struct DiskCache {
     dir: PathBuf,
+    /// Whether a missing `dir` may be created (when its parent exists). Not for a folder the user
+    /// chose: see [`DiskCache::chosen`].
+    create_dir: bool,
     /// Bytes the cache may hold (changed in place by [`DiskCache::set_budget`]).
     budget: AtomicU64,
     /// Bytes on disk (`None` until first scanned).
@@ -35,12 +38,19 @@ impl DiskCache {
     pub fn new(dir: &Path, budget: u64) -> DiskCache {
         DiskCache {
             dir: dir.to_path_buf(),
+            create_dir: true,
             budget: AtomicU64::new(budget),
             total: Mutex::new(None),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             writes: AtomicU64::new(0),
         }
+    }
+
+    /// A cache in a folder the user chose (on another drive, perhaps): it is never created, so
+    /// while it is missing (drive unplugged) nothing is written and every read misses.
+    pub fn chosen(dir: &Path, budget: u64) -> DiskCache {
+        DiskCache { create_dir: false, ..DiskCache::new(dir, budget) }
     }
 
     pub fn dir(&self) -> &Path {
@@ -91,7 +101,7 @@ impl DiskCache {
         let Some(bytes) = encode_jpeg(img) else { return };
         let p = self.path(key);
         let Some(parent) = p.parent() else { return };
-        if std::fs::create_dir_all(parent).is_err() {
+        if !parent.is_dir() && !self.make_shard(parent) {
             return;
         }
         // Serialize the file replacement and its size accounting. A repeated render of
@@ -113,33 +123,26 @@ impl DiskCache {
         }
     }
 
-    /// All cache files (only names of the cache's own shape, see [`is_cache_file`]):
-    /// (path, size, modified).
-    fn scan(&self) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
-        let mut out = Vec::new();
-        let Ok(rd) = std::fs::read_dir(&self.dir) else { return out };
-        for sub in rd.flatten() {
-            let sub_name = sub.file_name();
-            let Some(sub_name) = sub_name.to_str() else { continue };
-            if !is_shard_name(sub_name) {
-                continue;
+    /// Create the shard directory `shard` for a write, and the cache directory itself when its
+    /// parent exists and it wasn't [`DiskCache::chosen`]. Never creates missing parents: a cache
+    /// folder on an unplugged drive is not silently recreated on the system drive (its mount
+    /// point), the write is just skipped.
+    fn make_shard(&self, shard: &Path) -> bool {
+        if !self.dir.is_dir() {
+            if !self.create_dir || !self.dir.parent().is_some_and(Path::is_dir) {
+                return false;
             }
-            let Ok(files) = std::fs::read_dir(sub.path()) else { continue };
-            for f in files.flatten() {
-                let name = f.file_name();
-                let Some(name) = name.to_str() else { continue };
-                if !is_cache_file(sub_name, name) {
-                    continue;
-                }
-                // `DirEntry::metadata` does not follow symlinks: a link is never a cache file
-                if let Ok(m) = f.metadata()
-                    && m.is_file()
-                {
-                    out.push((f.path(), m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
-                }
+            // another writer may have just made it
+            if std::fs::create_dir(&self.dir).is_err() && !self.dir.is_dir() {
+                return false;
             }
         }
-        out
+        std::fs::create_dir(shard).is_ok() || shard.is_dir()
+    }
+
+    /// All cache files: see [`cache_files`].
+    fn scan(&self) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+        cache_files(&self.dir)
     }
 
     /// Remove least recently used files until the cache is at most 80 % of its budget.
@@ -171,6 +174,40 @@ impl DiskCache {
         }
         *self.total.lock().unwrap_or_else(|e| e.into_inner()) = Some(0);
     }
+}
+
+/// All files of a thumbnail cache in `dir` (only names of the cache's own shape, see
+/// [`is_cache_file`]; symlinks are never followed): (path, size, modified).
+pub fn cache_files(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    for sub in rd.flatten() {
+        let sub_name = sub.file_name();
+        let Some(sub_name) = sub_name.to_str() else { continue };
+        if !is_shard_name(sub_name) {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(sub.path()) else { continue };
+        for f in files.flatten() {
+            let name = f.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if !is_cache_file(sub_name, name) {
+                continue;
+            }
+            // `DirEntry::metadata` does not follow symlinks: a link is never a cache file
+            if let Ok(m) = f.metadata()
+                && m.is_file()
+            {
+                out.push((f.path(), m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
+            }
+        }
+    }
+    out
+}
+
+/// The number of cached thumbnails in `dir` and their total size in bytes.
+pub fn cache_stats(dir: &Path) -> (usize, u64) {
+    cache_files(dir).iter().fold((0usize, 0u64), |(n, bytes), f| (n.saturating_add(1), bytes.saturating_add(f.1)))
 }
 
 fn is_lower_hex(s: &str) -> bool {

@@ -449,6 +449,8 @@ fn performance_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             let _ = app.run("library.clearPreviews", json!({}));
         }
     });
+    #[cfg(not(target_arch = "wasm32"))]
+    thumb_cache_folder(app, ui, t);
     heading(ui, t, crate::i18n::tr("Local folders"));
     row(ui, t, crate::i18n::tr("Forget unchanged photos"), |ui| {
         let opts = [(0u32, "Never"), (7, "After 7 days"), (30, "After 30 days"), (90, "After 90 days"), (365, "After a year")];
@@ -466,6 +468,87 @@ fn performance_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     );
     #[cfg(not(target_arch = "wasm32"))]
     smart_previews(app, ui, t);
+}
+
+/// Where this library keeps its thumbnail cache (issue #903): the effective folder, and choosing
+/// another one, like the smart previews folder below.
+#[cfg(not(target_arch = "wasm32"))]
+fn thumb_cache_folder(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    // listing a big cache every frame would be slow: refresh every 2 s and after a change
+    let cache = egui::Id::new("thumbs-location");
+    let now = ui.input(|i| i.time);
+    let loc: Value = match ui.data(|d| d.get_temp::<(f64, Value)>(cache)) {
+        Some((at, v)) if now - at < 2.0 => v,
+        _ => {
+            let v = app.run("library.thumbnailCacheLocation", json!({})).unwrap_or(Value::Null);
+            ui.data_mut(|d| d.insert_temp(cache, (now, v.clone())));
+            v
+        }
+    };
+    if loc.is_null() {
+        return;
+    }
+    let path = loc["path"].as_str().unwrap_or_default().to_string();
+    let available = loc["available"].as_bool().unwrap_or(true);
+    let custom = loc["custom"].as_bool().unwrap_or(false);
+    row(ui, t, crate::i18n::tr("Folder"), |ui| {
+        let text = format!("{path}{}", if custom { "" } else { "  (library default)" });
+        ui.add(egui::Label::new(RichText::new(text.clone()).color(if available { t.text } else { t.reject })).truncate()).on_hover_text(text);
+    });
+    if !available {
+        hint(
+            ui,
+            t,
+            crate::i18n::tr(
+                "This folder is not available (drive disconnected?). Thumbnails are kept in memory only until it is back or you choose another folder.",
+            ),
+        );
+    }
+    // what happens to the thumbnails already cached when the folder changes
+    let mode_id = egui::Id::new("thumbs-existing");
+    let mut mode: u8 = ui.data(|d| d.get_temp(mode_id)).unwrap_or(0);
+    if loc["count"].as_u64().unwrap_or(0) > 0 {
+        row(ui, t, crate::i18n::tr("Existing thumbnails"), |ui| {
+            if choices(ui, "settingsThumbsExisting", &[(0u8, "Move them"), (1, "Leave them"), (2, "Delete them")], &mut mode) {
+                ui.data_mut(|d| d.insert_temp(mode_id, mode));
+            }
+        });
+    }
+    let existing = ["move", "leave", "discard"][mode.min(2) as usize];
+    let mut result = None;
+    ui.horizontal(|ui| {
+        ui.add_space(LABEL_W);
+        if app.services.pick_folder.is_some() {
+            let r = ui.button(crate::i18n::tr("Choose Folder…"));
+            register(ui.ctx(), "button:settingsThumbsChoose", r.rect);
+            if r.clicked()
+                && let Some(dir) = app.services.pick_folder.as_mut().and_then(|f| f())
+            {
+                result = Some(app.run("library.thumbnailCacheLocation", json!({"path": dir, "existing": existing})));
+            }
+        }
+        let r = ui.add_enabled(custom, egui::Button::new(crate::i18n::tr("Use Library Folder")));
+        register(ui.ctx(), "button:settingsThumbsReset", r.rect);
+        if r.clicked() {
+            result = Some(app.run("library.thumbnailCacheLocation", json!({"reset": true, "existing": existing})));
+        }
+    });
+    if let Some(r) = result {
+        ui.data_mut(|d| d.remove::<(f64, Value)>(cache));
+        match r {
+            Ok(v) => {
+                let failed = v["failed"].as_array().map_or(0, Vec::len);
+                let msg = match (existing, v["handled"].as_u64().unwrap_or(0)) {
+                    ("move", n) if n > 0 => format!("Thumbnail cache folder changed; moved {n}"),
+                    ("discard", n) if n > 0 => format!("Thumbnail cache folder changed; deleted {n}"),
+                    _ => "Thumbnail cache folder changed".to_string(),
+                };
+                app.toast(ui.ctx(), if failed > 0 { crate::i18n::tr_format!("{msg} ({failed} failed)", failed = failed, msg = msg) } else { msg });
+            }
+            Err(e) => app.toast(ui.ctx(), e),
+        }
+    }
+    hint(ui, t, crate::i18n::tr("A fast local drive keeps the grid quick when the library itself is on a network or slow drive."));
 }
 
 /// Where this library keeps its smart previews (the offline-editing proxies, which can be large):
@@ -560,7 +643,7 @@ fn smart_previews(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             Err(e) => app.toast(ui.ctx(), e),
         }
     }
-    hint(ui, t, crate::i18n::tr("Keep it on a drive with room: smart previews are about 1 MB per photo. The thumbnail cache stays in the library."));
+    hint(ui, t, crate::i18n::tr("Keep it on a drive with room: smart previews are about 1 MB per photo."));
 }
 
 // ---------------------------------------------------------------------------------- Interface

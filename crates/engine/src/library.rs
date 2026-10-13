@@ -6,7 +6,7 @@
 //!   catalog.snap   catalog.log      (lightcraft-catalog journal)
 //!   presets.json   view.json        (user presets + favourites; last source/sort/selection)
 //!   prefs.json     (library preferences: XMP sidecars, import defaults, cache size, last export)
-//!   thumbs/        (rendered thumbnail cache, safe to delete)
+//!   thumbs/        (rendered thumbnail cache, safe to delete; prefs.json may name another folder)
 //!   Originals/     (photos imported with "copy into library")
 //! ```
 //!
@@ -192,6 +192,7 @@ impl Library {
     pub(crate) fn journal_mut(&mut self) -> &mut Journal {
         &mut self.journal
     }
+    /// The library's own thumbnail cache folder (the default; see [`Session::thumb_cache_dir`]).
     pub fn thumbs_dir(&self) -> PathBuf {
         self.dir.join("thumbs")
     }
@@ -229,6 +230,8 @@ struct PrefsFile {
     cache_mb: u32,
     /// Folder for smart previews (default: `Smart Previews` in the library).
     smart_previews_dir: Option<String>,
+    /// Folder for the thumbnail cache (default: `thumbs` in the library).
+    thumbs_dir: Option<String>,
     /// Days after which untouched Local records of unbrowsed folders are forgotten (missing =
     /// the default, 0 = never).
     forget_local_days: Option<u32>,
@@ -459,6 +462,15 @@ impl Session {
         if let Some(d) = &self.smart_previews_dir {
             self.media.smart_dir = Some(d.clone());
         }
+        self.thumbs_dir = prefs.thumbs_dir.filter(|_| on_disk).map(PathBuf::from);
+        // a chosen folder that is gone is reported, and stays the cache folder: thumbnails are
+        // then kept in memory only (nothing is written to the library drive instead)
+        if let Some(d) = self.thumbs_dir.as_ref().filter(|d| !d.is_dir()) {
+            settings.warnings.push(format!(
+                "The thumbnail cache folder {} is not available (drive disconnected?): thumbnails are kept in memory only until it is back or you choose another folder in Settings",
+                d.display()
+            ));
+        }
         // presets
         if let Some(f) = settings.read::<PresetsFile>(files.as_mut(), "presets.json") {
             for p in &mut self.presets {
@@ -503,7 +515,8 @@ impl Session {
         // photo ids are per library: drop decoded sources of the previous one
         self.media.clear_sources();
         if on_disk {
-            self.media.attach_disk_cache(&dir.join("thumbs"), self.cache_bytes());
+            let thumbs = self.thumbs_dir.clone().unwrap_or_else(|| dir.join("thumbs"));
+            self.media.attach_disk_cache(&thumbs, self.cache_bytes(), self.thumbs_dir.is_some());
         }
         let view_written = self.view_json();
         self.library = Some(Library {
@@ -698,6 +711,7 @@ impl Session {
             import: self.import_defaults.clone(),
             cache_mb: self.cache_mb,
             smart_previews_dir: self.smart_previews_dir.as_ref().map(|d| d.to_string_lossy().to_string()),
+            thumbs_dir: self.thumbs_dir.as_ref().map(|d| d.to_string_lossy().to_string()),
             forget_local_days: Some(self.forget_local_days),
         })
         .unwrap_or_default();
@@ -719,6 +733,14 @@ impl Session {
         new
     }
 
+    /// Where the open library keeps its thumbnail cache: the chosen folder
+    /// ([`Session::thumbs_dir`], which may be unavailable), else `thumbs` in the library. `None`
+    /// without a library on disk.
+    pub fn thumb_cache_dir(&self) -> Option<PathBuf> {
+        let lib = self.library.as_ref().filter(|l| l.on_disk)?;
+        Some(self.thumbs_dir.clone().unwrap_or_else(|| lib.thumbs_dir()))
+    }
+
     /// The thumbnail disk cache budget in bytes ([`Session::cache_mb`], else the default).
     pub fn cache_bytes(&self) -> u64 {
         if self.cache_mb == 0 { crate::media::DISK_CACHE_BYTES } else { u64::from(self.cache_mb) << 20 }
@@ -729,9 +751,8 @@ impl Session {
     /// Saved with the library preferences.
     pub fn set_cache_mb(&mut self, mb: u32) -> Result<()> {
         self.cache_mb = mb;
-        if let Some(lib) = self.library.as_ref().filter(|l| l.on_disk) {
-            let dir = lib.thumbs_dir();
-            self.media.set_disk_cache_bytes(&dir, self.cache_bytes());
+        if let Some(dir) = self.thumb_cache_dir() {
+            self.media.set_disk_cache_bytes(&dir, self.cache_bytes(), self.thumbs_dir.is_some());
         }
         self.save_prefs()
     }
