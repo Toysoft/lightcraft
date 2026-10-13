@@ -32,7 +32,11 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             super::empty_message(ui, r, "No photo selected", "Select a photo to edit");
             return;
         };
-        egui::ScrollArea::vertical().id_salt("right-scroll").auto_shrink([false, false]).show(ui, |ui| {
+        let mut scroll = egui::ScrollArea::vertical().id_salt("right-scroll").auto_shrink([false, false]);
+        if let Some(y) = super::edit::take_scroll_to(ui.ctx()) {
+            scroll = scroll.vertical_scroll_offset(y);
+        }
+        let out = scroll.show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             match app.ui.right {
                 RightPanel::Edit => super::edit::show(app, ui, id),
@@ -48,6 +52,10 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 RightPanel::None => {}
             }
         });
+        // the Edit panel keeps the header of the section it's scrolled into at the top
+        if app.ui.right == RightPanel::Edit {
+            super::edit::pinned_header(app, ui, out.inner_rect, out.state.offset.y);
+        }
     });
 }
 
@@ -65,7 +73,7 @@ pub fn label_row(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 fn padded(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::NONE.inner_margin(egui::Margin { left: 24, right: 22, top: 6, bottom: 6 }).show(ui, add);
+    egui::Frame::NONE.inner_margin(crate::widgets::pad_margin(ui, 6, 6)).show(ui, add);
 }
 
 /// The aspect presets of the Crop panel: (menu label, `crop.aspect` value).

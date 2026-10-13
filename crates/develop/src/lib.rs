@@ -18,6 +18,19 @@ pub use settings::*;
 
 use serde_json::Value;
 
+/// The settings sections behind an Edit-panel section (its eye switches them all off).
+pub fn panel_sections(panel: &str) -> &'static [Section] {
+    match panel {
+        "light" => &[Section::Light, Section::Curve],
+        "color" => &[Section::Color, Section::Mixer, Section::BwMix, Section::Grading, Section::PointColor],
+        "effects" => &[Section::Effects, Section::Vignette, Section::Grain],
+        "detail" => &[Section::Detail],
+        "optics" => &[Section::Optics],
+        "calibration" => &[Section::Calibration],
+        _ => &[],
+    }
+}
+
 impl DevelopSettings {
     /// Settings for a freshly imported raw file (Lightroom applies capture sharpening and colour
     /// noise reduction by default to raw files).
@@ -90,20 +103,45 @@ impl DevelopSettings {
             return std::borrow::Cow::Borrowed(self);
         }
         let mut d = self.clone();
-        if off("light") {
-            d.reset_section(Section::Light);
-            d.reset_section(Section::Curve);
+        for panel in ["light", "color", "detail"] {
+            if off(panel) {
+                for &section in panel_sections(panel) {
+                    d.reset_section(section);
+                }
+            }
         }
         if off("color") {
-            for section in [Section::Color, Section::Mixer, Section::BwMix, Section::Grading, Section::PointColor] {
-                d.reset_section(section);
-            }
             d.point_colors.clear();
         }
-        if off("detail") {
-            d.reset_section(Section::Detail);
-        }
         std::borrow::Cow::Owned(d)
+    }
+
+    /// Does the Edit-panel section `panel` (`"light"`, `"color"`, …) differ from `base`, the
+    /// photo's starting settings ([`panel_sections`])? An unknown name differs in nothing.
+    pub fn panel_differs(&self, base: &DevelopSettings, panel: &str) -> bool {
+        panel_sections(panel).iter().any(|&s| self.section_differs(base, s))
+    }
+
+    /// Does any setting of `section` differ from `base`: its sliders, and the settings that
+    /// aren't sliders (the tone curve, white balance mode, point colours, lens switches…)? An
+    /// As Shot white balance on both sides is the same whatever numbers each holds: those are
+    /// the file's, read again when it renders.
+    pub fn section_differs(&self, base: &DevelopSettings, section: Section) -> bool {
+        let as_shot = self.wb.mode == WbMode::AsShot && base.wb.mode == WbMode::AsShot;
+        let sliders = controls::in_section(section)
+            .filter(|c| !(as_shot && c.id.starts_with("wb.")))
+            .any(|c| matches!((controls::get(self, c.id), controls::get(base, c.id)), (Some(a), Some(b)) if (a - b).abs() > 1e-9));
+        sliders
+            || match section {
+                Section::Light => self.hdr.enabled != base.hdr.enabled,
+                Section::Curve => self.curve != base.curve,
+                Section::Color => self.wb.mode != base.wb.mode,
+                Section::PointColor => self.point_colors != base.point_colors,
+                Section::Vignette => self.vignette.amount != 0.0 && self.vignette.style != base.vignette.style,
+                Section::Detail => self.enhance.denoise_on != base.enhance.denoise_on,
+                Section::Optics => self.optics.remove_ca != base.optics.remove_ca || self.optics.lens_profile != base.optics.lens_profile,
+                _ => false,
+            }
     }
 
     /// How much of the AI-denoised picture to mix in, 0 (none) to 1 (all of it): the Denoise amount, unless the Detail
@@ -175,6 +213,28 @@ mod tests {
         let back = DevelopSettings::from_json(&v).unwrap();
         assert_eq!(back, s);
         assert_ne!(back.hash64(), DevelopSettings::default().hash64());
+    }
+
+    #[test]
+    fn a_panel_differs_only_where_it_was_edited() {
+        let base = DevelopSettings::for_raw(5200.0, 4.0);
+        // a raw's own defaults (sharpening 40, colour noise reduction 25) are no edit
+        assert!(["light", "color", "effects", "detail", "optics", "calibration"].iter().all(|p| !base.panel_differs(&base, p)));
+        let mut s = base.clone();
+        controls::set(&mut s, "light.exposure", 0.35);
+        assert!(s.panel_differs(&base, "light"));
+        assert!(!s.panel_differs(&base, "color"));
+        // a tone curve edit is Light's
+        let mut c = base.clone();
+        c.curve.darks = -12.0;
+        assert!(c.section_differs(&base, Section::Curve) && c.panel_differs(&base, "light"));
+        // As Shot reads the file again: the stored numbers don't count, a mode change does
+        let mut w = base.clone();
+        w.wb.temp = 5600.0;
+        assert!(!w.panel_differs(&base, "color"));
+        w.wb.mode = WbMode::Custom;
+        assert!(w.panel_differs(&base, "color"));
+        assert!(!s.panel_differs(&base, "nonsense"));
     }
 
     #[test]
