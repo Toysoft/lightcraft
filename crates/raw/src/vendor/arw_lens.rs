@@ -11,13 +11,13 @@ const DISTORTION: u16 = 0x7037;
 const SAMPLES: usize = 1024;
 const MAX_ERROR: f64 = 0.0005;
 
-/// Only independently validated camera models and the 16-entry layout. Unknown models/layouts
-/// and implausible/non-smooth maps are left uncorrected. See docs/sony-lens-corrections.md.
+/// Only independently validated camera models (ILCE-7RM4A, ILCE-7M3) and the 16-entry layout.
+/// Unknown models/layouts and implausible/non-smooth maps are left uncorrected. See docs/sony-lens-corrections.md.
 /// A camera setting of Off does not remove the lens data: the user can enable it in the developer.
 pub(super) fn distortion(model: &str, ifd: &Ifd, active: Rect, crop: Rect) -> Option<Opcode> {
     // A matching table shape does not establish its scale or radial normalization on another body.
     // Keep this exact: ILCE-7RM4 and ILCE-7RM4A are distinct models, not interchangeable aliases.
-    if model != "ILCE-7RM4A" {
+    if !matches!(model, "ILCE-7RM4A" | "ILCE-7M3") {
         return None;
     }
     let Value::SShort(values) = &ifd.get(DISTORTION)?.value else { return None };
@@ -147,6 +147,47 @@ mod tests {
         }
     }
 
+    // ILCE-7M3 raw-IFD tables (FE 16-35mm F4 ZA OSS at 16 and 35 mm, FE 28-70mm F3.5-5.6 OSS at 70 mm) and the
+    // geometry of the camera's own JPEG of the same exposure (Lens Comp. Distortion: Auto): checkerboard corners of
+    // that JPEG matched with the uncorrected raw and fitted with the warp's polynomial over the 6000×4000 frame (rms
+    // 0.11–0.25 px). See docs/sony-lens-corrections.md.
+    const A7M3: [([i16; 16], [f64; 4]); 3] = [
+        (
+            [32, 2, -38, -83, -138, -199, -270, -336, -402, -462, -519, -568, -611, -643, -670, -690],
+            [1.0247000859, -0.1092847508, 0.1061422243, -0.0397989678],
+        ),
+        ([2, 2, 4, 9, 18, 29, 45, 65, 92, 124, 164, 210, 264, 329, 403, 489], [0.9708150714, 0.0157256288, 0.0175613359, -0.004107544]),
+        ([4, 7, 18, 40, 68, 108, 155, 212, 280, 359, 453, 557, 679, 819, 978, 1161], [0.9342002611, 0.0560486347, 0.0076184603, 0.0021497933]),
+    ];
+
+    #[test]
+    fn ilce_7m3_matches_the_cameras_own_jpeg_geometry() {
+        let frame = Rect::new(0, 0, 6000, 4000);
+        let evaluate = |k: &[f64], r: f64| r * (k[0] + r * r * (k[1] + r * r * (k[2] + r * r * k[3])));
+        for (values, reference) in A7M3 {
+            let Opcode::WarpRectilinear { planes, center } = distortion("ILCE-7M3", &table(&values), frame, frame).unwrap() else { panic!("warp") };
+            assert_eq!(center, [0.5, 0.5]);
+            // The camera fills its frame with its own zoom; compare the shape over the measured radii (to 0.97).
+            let radii: Vec<f64> = (1..=97).map(|i| i as f64 / 100.0).collect();
+            let (ours, camera): (Vec<f64>, Vec<f64>) = radii.iter().map(|&r| (evaluate(&planes[0], r), evaluate(&reference, r))).unzip();
+            let worst = |ours: &[f64]| {
+                let zoom = ours.iter().zip(&camera).map(|(a, b)| a * b).sum::<f64>() / ours.iter().map(|a| a * a).sum::<f64>();
+                ours.iter().zip(&camera).map(|(a, b)| (a * zoom - b).abs()).fold(0.0, f64::max)
+            };
+            // 0.0008 of the half diagonal is 2.9 px on the 6000 px frame (measured: 0.4–2.4 px); uncorrected is 10×+ off.
+            let (corrected, uncorrected) = (worst(&ours), worst(&radii));
+            assert!(corrected < 0.0008 && uncorrected > 10.0 * corrected, "{values:?}: {corrected} vs {uncorrected}");
+        }
+        // Sony's crop and the default crop agree on this body (12, 12, 6000×4000 of 6048×4024), so the warp sits on
+        // the image centre.
+        let Opcode::WarpRectilinear { center, .. } =
+            distortion("ILCE-7M3", &table(&A7M3[0].0), Rect::new(0, 0, 6048, 4024), Rect::new(12, 12, 6000, 4000)).unwrap()
+        else {
+            panic!("warp")
+        };
+        assert!((center[0] * 6047.0 - 3011.5).abs() < 1e-9 && (center[1] * 4023.0 - 2011.5).abs() < 1e-9, "{center:?}");
+    }
+
     #[test]
     fn barrel_framing_and_offset_crop_keep_the_same_geometry() {
         let crop = Rect::new(32, 20, 9504, 6336);
@@ -185,7 +226,8 @@ mod tests {
     fn refuses_unvalidated_models_even_with_a_valid_table() {
         let valid = table(&TELE);
         assert!(distortion("ILCE-7RM4A", &valid, AREA, AREA).is_some());
-        for model in ["", "ILCE-7M3", "ILCE-7M4", "ILCE-7RM4", "ILCE-7RM5", "ILCE-9M2", "DSC-RX100M3", "ILCE-7RM4A unknown"] {
+        assert!(distortion("ILCE-7M3", &valid, AREA, AREA).is_some());
+        for model in ["", "ILCE-7M4", "ILCE-7RM4", "ILCE-7RM5", "ILCE-9M2", "DSC-RX100M3", "ILCE-7RM4A unknown", "ILCE-7M3 ", "ILCE-7SM3"] {
             assert!(distortion(model, &valid, AREA, AREA).is_none(), "{model}");
         }
     }
@@ -193,7 +235,7 @@ mod tests {
     #[test]
     fn header_and_full_decode_preserve_correction_through_dng() {
         use lightcraft_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, tags as t};
-        for (model, expected) in [("ILCE-7RM4A", 1), ("ILCE-7RM4", 0), ("ILCE-7M3", 0), ("", 0)] {
+        for (model, expected) in [("ILCE-7RM4A", 1), ("ILCE-7RM4", 0), ("ILCE-7M3", 1), ("ILCE-7M4", 0), ("", 0)] {
             for (height, expected) in [(20, expected), (16, 0)] {
                 for order in [ByteOrder::Little, ByteOrder::Big] {
                     let mut raw = IfdBuilder::new();

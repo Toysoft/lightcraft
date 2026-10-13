@@ -980,8 +980,8 @@ fn sony_embedded_distortion_is_limited_to_validated_models() {
     for (name, model, expected) in [
         ("arw-sony-a7rm4a-compressed.arw", "ILCE-7RM4A", 1),
         ("arw-sony-a9m2-compressed.arw", "ILCE-9M2", 0),
-        ("arw-sony-a7m3-compressed.arw", "ILCE-7M3", 0),
-        ("arw-sony-a7m3-uncompressed.arw", "ILCE-7M3", 0),
+        ("arw-sony-a7m3-compressed.arw", "ILCE-7M3", 1),
+        ("arw-sony-a7m3-uncompressed.arw", "ILCE-7M3", 1),
         ("arw-sony-a7m4-14bit.arw", "ILCE-7M4", 0),
         ("arw-sony-a7m4-lossless-l.arw", "ILCE-7M4", 0),
         ("arw-sony-a7m4-lossless-m.arw", "ILCE-7M4", 0),
