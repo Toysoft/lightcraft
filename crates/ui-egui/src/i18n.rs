@@ -126,6 +126,7 @@ language_table! {
     Ru, "ru", "Русский", "Cyrl", include_str!("../locales/ru.json");
     Fr, "fr", "Français", "Latn", include_str!("../locales/fr.json");
     Uk, "uk", "Українська", "Cyrl", include_str!("../locales/uk.json");
+    Pl, "pl", "Polski", "Latn", include_str!("../locales/pl.json");
 }
 
 // The settings file stores the BCP-47 code (`"zh-hans"`), never the Rust variant name, so a
@@ -667,6 +668,7 @@ mod tests {
             ("app.language.german", Locale::De),
             ("app.language.russian", Locale::Ru),
             ("app.language.ukrainian", Locale::Uk),
+            ("app.language.polish", Locale::Pl),
         ];
         // One command per language, and every command reachable from the menu table.
         assert_eq!(commands.len(), Locale::ALL.len());
@@ -1347,6 +1349,30 @@ mod tests {
         assert_eq!(history_label("Exposure", &app.session.presets), "曝光");
         assert_eq!(history_label("Preset: Warm Film", &app.session.presets), "預設集：暖調底片");
         assert_eq!(history_label("Preset: Warm Glow", &app.session.presets), "預設集：Warm Glow");
+        set_language(Locale::En);
+    }
+
+    /// Polish: every `pl-*` tag reaches it, the menu command selects it, dates read day.month.year and
+    /// counts are written count-neutral ("Zaimportowano zdjęcia: 5"), so no English plural suffix and no
+    /// wrong Polish plural form shows for any number.
+    #[test]
+    fn polish_switches_formats_dates_and_counts() {
+        for tag in ["pl", "pl-PL", "pl_PL.UTF-8", "PL-pl"] {
+            assert_eq!(Locale::parse_tag(tag), Some(Locale::Pl), "{tag}");
+        }
+        let mut app = crate::LightcraftApp::new(lightcraft_engine::Session::with_demo(), Default::default());
+        app.run("app.language.polish", serde_json::json!({})).unwrap();
+        assert_eq!(app.ui.language, Locale::Pl);
+        assert_eq!(crate::menubar::checked(&app, "app.language.polish"), Some(true));
+        assert_eq!(tr("Exposure"), "Ekspozycja");
+        assert_eq!(tr("White Balance"), "Balans bieli");
+        assert_eq!(date_group_label("2026-09-20", false), "Niedziela, 20.09.2026");
+        for n in [0, 1, 2, 5, 12, 21, 22, 25, 111] {
+            assert_eq!(tr_format!("Imported {} photo{}", n, if n == 1 { "" } else { "s" }), format!("Zaimportowano zdjęcia: {n}"));
+            let noun = tr(if n == 1 { "cached picture" } else { "cached pictures" });
+            assert_eq!(tr_format!("{n} {noun}", n = n, noun = noun), format!("Obrazy w pamięci podręcznej: {n}"));
+        }
+        app.run("app.language.english", serde_json::json!({})).unwrap();
         set_language(Locale::En);
     }
 }
