@@ -94,6 +94,8 @@ pub fn files_in_with(root: &Path, skip: Option<&Path>, limits: Limits, mut optio
     if let Some(c) = &canonical {
         linked.insert(c.clone());
     }
+    // Include aliases to the library in the exclusion, not just its lexical path.
+    let skip_canonical = skip.and_then(|p| std::fs::canonicalize(p).ok());
     // (path, depth of the folder it is in, is a folder, canonical folder identity)
     let mut stack = vec![(root.to_path_buf(), 0usize, true, canonical.filter(|_| identities))];
     while let Some((path, depth, is_dir, canonical)) = stack.pop() {
@@ -106,7 +108,10 @@ pub fn files_in_with(root: &Path, skip: Option<&Path>, limits: Limits, mut optio
             }
             continue;
         }
-        if (depth > 0 && !options.subfolders) || skip.is_some_and(|s| path == s) {
+        if (depth > 0 && !options.subfolders)
+            || skip.is_some_and(|s| path == s)
+            || skip_canonical.as_ref().is_some_and(|s| std::fs::canonicalize(&path).is_ok_and(|p| p.starts_with(s)))
+        {
             continue;
         }
         if identities {
@@ -225,6 +230,31 @@ mod tests {
         assert_eq!((w.files.len(), w.entries, w.truncated), (20, 20, true));
         let w = files_in(&wide, None, Limits::default(), all);
         assert_eq!((w.files.len(), w.truncated), (50, false));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Folder imports must not revisit the user's own library through symlinks
+    /// or through an alias to the library's parent.
+    #[cfg(unix)]
+    #[test]
+    fn skipped_library_stays_skipped_through_symlinks_and_ancestors() {
+        let d = tmp("skip-alias");
+        let root = d.join("incoming");
+        let library = d.join("library");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(library.join("Originals")).unwrap();
+        std::fs::write(root.join("ordinary.jpg"), b"photo").unwrap();
+        std::fs::write(library.join("Originals").join("library-only.jpg"), b"original").unwrap();
+        std::os::unix::fs::symlink(&library, root.join("library-link")).unwrap();
+        std::os::unix::fs::symlink(&d, root.join("parent-link")).unwrap();
+
+        let photos = files_in(&root, Some(&library), Limits::default(), |p| p.extension().is_some_and(|e| e == "jpg"));
+        assert!(photos.files.contains(&root.join("ordinary.jpg")));
+        assert!(!photos.files.iter().any(|p| p.ends_with("library-only.jpg")), "{photos:?}");
+
+        // Scanning a subfolder already inside the excluded library is also forbidden.
+        let inside = files_in(&library.join("Originals"), Some(&library), Limits::default(), |_| true);
+        assert!(inside.files.is_empty(), "{inside:?}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
