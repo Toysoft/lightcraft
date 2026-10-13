@@ -1044,6 +1044,9 @@ mod tests_nextcloud_hooks;
 #[cfg(not(target_arch = "wasm32"))]
 mod tests_nextcloud_import;
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod tests_nextcloud_originals;
+#[cfg(test)]
 mod tests_organize;
 #[cfg(test)]
 mod tests_persist;

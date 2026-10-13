@@ -546,8 +546,9 @@ pub(crate) struct Tally {
     pub metadata: usize,
 }
 
-/// Apply the queued [`Event`]s of imports into the open library (others are dropped): photos found
-/// join the catalog (one undoable step per import), metadata fills what photos lack (not an undo step).
+/// Apply the queued [`Event`]s: an import's into the open library (others are dropped): photos found
+/// join the catalog (one undoable step per import), metadata fills what photos lack (not an undo
+/// step); then downloaded originals complete their photos ([`super::originals::complete`]).
 pub(crate) fn apply_events(s: &mut Session, tally: &mut Tally) {
     let events = s.remote.take_events();
     if events.is_empty() {
@@ -556,6 +557,7 @@ pub(crate) fn apply_events(s: &mut Session, tally: &mut Tally) {
     let library = s.library_generation();
     let mut found: Vec<(u64, Vec<(String, ProbeInfo)>)> = Vec::new();
     let mut reads = Vec::new();
+    let mut downloaded = Vec::new();
     for e in events {
         match e {
             // (sent into a library that is no longer open)
@@ -565,6 +567,7 @@ pub(crate) fn apply_events(s: &mut Session, tally: &mut Tally) {
                 _ => found.push((task, photos)),
             },
             Event::Meta { reads: r, .. } => reads.extend(r),
+            Event::Downloaded { path, local } => downloaded.push((path, local)),
         }
     }
     // (the photos first: a photo's metadata never comes before the photo)
@@ -573,6 +576,9 @@ pub(crate) fn apply_events(s: &mut Session, tally: &mut Tally) {
     }
     if !reads.is_empty() {
         fill(s, reads, tally);
+    }
+    if !downloaded.is_empty() {
+        super::originals::complete(s, downloaded);
     }
 }
 

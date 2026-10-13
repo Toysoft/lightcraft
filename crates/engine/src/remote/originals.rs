@@ -1,17 +1,22 @@
 //! Remote originals on this computer: the [`OriginalsCache`] (one per folder in the process), the
 //! etags and sizes listings and `stat`s told us, which files the server no longer has, and whether
-//! a remote photo counts as there ([`Remote::exists`]).
+//! a remote photo counts as there ([`Remote::exists`]). Downloads (interactive, prefetched, made
+//! available offline) and what a finished one tells the catalog ([`complete`]).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use craft_nextcloud::{Client, Entry, Error, OriginalsCache, RemotePath};
+use lightcraft_catalog::{Op, Source};
+use serde_json::json;
 
-use super::{AccountState, REACHABLE_FOR, Remote};
-use crate::activity::{Cancel, Unit};
+use super::{AccountState, Event, REACHABLE_FOR, Remote};
+use crate::Session;
+use crate::activity::{Cancel, TaskGuard, Unit};
+use crate::media::ProbeInfo;
 
 /// A background load (grid thumbnail, prefetch, batch job) found no local copy of the original.
 pub const NOT_DOWNLOADED: &str = "The original isn't downloaded yet";
@@ -51,6 +56,18 @@ fn offline() -> String {
     Error::Unreachable("it didn't answer in the last 30 s".into()).to_string()
 }
 
+/// Who a download is for ([`Remote::original`]).
+#[derive(Clone, Copy)]
+enum Want<'a> {
+    /// An interactive load: a `Downloading` row of its own, cancelled from there.
+    Load,
+    /// [`Remote::prefetch`]: a `Prefetching` row, cancelled by moving on.
+    Prefetch(&'a Arc<AtomicBool>),
+    /// [`Remote::make_available_offline`]: a `Downloading` row, cancelled with the command's.
+    Offline(&'a Arc<AtomicBool>),
+    // (neither of the last two asks a server that didn't answer a moment ago: nobody waits for them)
+}
+
 impl Remote {
     /// The originals cache in the configured folder, with the budget from the settings (opened on first use).
     pub(crate) fn cache(&self) -> Result<OriginalsCache, String> {
@@ -67,6 +84,12 @@ impl Remote {
     /// activity row. Background work gets [`NOT_DOWNLOADED`] instead. While the server doesn't answer, an
     /// interactive load gets the newest copy on disk (it may be out of date).
     pub fn local_original(&self, path: &str) -> Result<PathBuf, String> {
+        self.original(path, Want::Load)
+    }
+
+    /// [`Remote::local_original`] for `want`. A real download (not a copy on disk, not a stale one)
+    /// queues [`Event::Downloaded`], which completes the photo's record.
+    fn original(&self, path: &str, want: Want<'_>) -> Result<PathBuf, String> {
         let rp = RemotePath::parse(path).map_err(|e| e.to_string())?;
         let key = rp.account_key();
         let cache = self.cache()?;
@@ -78,6 +101,9 @@ impl Remote {
             && let Some(local) = cache.cached(&rp, etag)
         {
             return Ok(local);
+        }
+        if !matches!(want, Want::Load) && state == AccountState::Unreachable {
+            return Err(offline());
         }
         let client = self.client(&key)?;
         let mut size = known.map(|(_, size)| size);
@@ -99,21 +125,123 @@ impl Remote {
         if !may_download {
             return Err(if state == AccountState::Unreachable { offline() } else { NOT_DOWNLOADED.into() });
         }
+        let cancel = match want {
+            Want::Load => Arc::new(AtomicBool::new(false)),
+            Want::Prefetch(cancel) | Want::Offline(cancel) => cancel.clone(),
+        };
         // ponytail: one download at a time; track downloads per path if a loupe waiting behind another shows up
         let _one = self.downloads.lock().unwrap_or_else(PoisonError::into_inner);
+        // (moved on while another download ran)
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::Cancelled.to_string());
+        }
         let name = rp.name().unwrap_or_default();
-        let label = match size {
-            Some(size) => format!("Downloading {name} ({})", megabytes(size)),
-            None => format!("Downloading {name}"),
+        let label = match (want, size) {
+            (Want::Prefetch(_), _) => format!("Prefetching {name}"),
+            (_, Some(size)) => format!("Downloading {name} ({})", megabytes(size)),
+            (_, None) => format!("Downloading {name}"),
         };
-        let cancel = Arc::new(AtomicBool::new(false));
         let task = self.activity.start("download", &label, Cancel::Flag(cancel.clone()));
         task.set_unit(Unit::Bytes);
+        #[cfg(test)]
+        self.download_step();
         let total = size.unwrap_or(0);
-        match cache.fetch(&client, &rp, &cancel, &mut |done, of| task.progress(done, of.unwrap_or(total))) {
-            Ok(fetched) => Ok(fetched.path),
+        // (bytes came: neither a copy on disk nor a stale one)
+        let mut downloaded = false;
+        let fetched = cache.fetch(&client, &rp, &cancel, &mut |done, of| {
+            downloaded = true;
+            task.progress(done, of.unwrap_or(total));
+        });
+        match fetched {
+            Ok(fetched) => {
+                if downloaded {
+                    self.push_event(Event::Downloaded { path: path.to_string(), local: fetched.path.clone() });
+                }
+                Ok(fetched.path)
+            }
+            // a cancelled download says nothing about the server (a stalled one ends in its error)
+            Err(_) if cancel.load(Ordering::Relaxed) => Err(Error::Cancelled.to_string()),
             Err(e) => Err(self.failed(&rp, &e)),
         }
+    }
+
+    /// Tests: wait for the next message on [`Remote::download_steps`], if set (at most 10 s).
+    #[cfg(test)]
+    fn download_step(&self) {
+        if let Some(steps) = &*self.download_steps.lock().unwrap_or_else(PoisonError::into_inner) {
+            let _ = steps.recv_timeout(std::time::Duration::from_secs(10));
+        }
+    }
+
+    /// The copy of `path` on this computer at the etag last seen; no request.
+    fn cached_copy(&self, path: &RemotePath) -> Option<PathBuf> {
+        let etag = self.lock().known.get(path)?.0.clone();
+        self.cache().ok()?.cached(path, &etag)
+    }
+
+    /// Keep the original of `path` (the photo open in Develop) on disk until the next call; `None`, or
+    /// a photo that isn't on Nextcloud, keeps none.
+    pub fn hold(&self, path: Option<&str>) {
+        let hold = path.and_then(|p| RemotePath::parse(p).ok()).and_then(|rp| Some(self.cache().ok()?.hold(&rp)));
+        *self.held.lock().unwrap_or_else(PoisonError::into_inner) = hold;
+    }
+
+    /// Download the original of `path` (the photo Develop shows next) on a thread of its own, behind
+    /// a cancellable `Prefetching {name}` row, one at a time with every other download. Another path,
+    /// or `None`, cancels the one running; the one already asked for, or a photo whose original is on
+    /// this computer, is left alone. A server that didn't answer a moment ago isn't asked.
+    pub fn prefetch(self: &Arc<Self>, path: Option<&str>) {
+        let mut running = self.prefetching.lock().unwrap_or_else(PoisonError::into_inner);
+        if running.as_ref().is_some_and(|(p, _)| Some(p.as_str()) == path) {
+            return;
+        }
+        if let Some((_, cancel)) = running.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        let Some(path) = path.filter(|p| RemotePath::parse(p).is_ok_and(|rp| self.cached_copy(&rp).is_none())) else { return };
+        let cancel = Arc::new(AtomicBool::new(false));
+        *running = Some((path.to_string(), cancel.clone()));
+        drop(running);
+        let (remote, path) = (self.clone(), path.to_string());
+        let spawned = std::thread::Builder::new().name("nextcloud-prefetch".into()).spawn(move || {
+            // last-resort guard: a prefetch never takes the app down
+            match crate::guard::catch("Prefetching a Nextcloud original", || remote.original(&path, Want::Prefetch(&cancel))) {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) | Err(e) => log::debug!("Nextcloud prefetch of {path}: {e}"),
+            }
+        });
+        if let Err(e) = spawned {
+            log::warn!("could not start a Nextcloud prefetch: {e}");
+        }
+    }
+
+    /// "Make Available Offline": pin each of `paths`, then download it unless it is on this computer
+    /// (pinned first, so the run's own downloads can't evict the copies it made). A photo that fails
+    /// doesn't stop the rest (nor waits on a server that didn't answer a moment ago); `cancel` (the
+    /// command's row, or the download's own) stops the run.
+    /// Progress (photos done of all) goes to `row`. Returns (photos on this computer and pinned,
+    /// photos that failed).
+    pub(crate) fn make_available_offline(&self, paths: &[String], cancel: &Arc<AtomicBool>, row: &TaskGuard) -> (usize, usize) {
+        let (mut made, mut failed) = (0, 0);
+        for (i, path) in paths.iter().enumerate() {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            let pinned = RemotePath::parse(path).map_err(|e| e.to_string()).and_then(|rp| {
+                row.detail(rp.name().unwrap_or_default());
+                self.cache()?.pin(&rp).map_err(|e| e.to_string())
+            });
+            match pinned.and_then(|()| self.original(path, Want::Offline(cancel))) {
+                Ok(_) => made += 1,
+                Err(_) if cancel.load(Ordering::Relaxed) => break,
+                Err(e) => {
+                    log::warn!("Make Available Offline: {path}: {e}");
+                    failed += 1;
+                }
+            }
+            row.progress(i.saturating_add(1) as u64, paths.len() as u64);
+        }
+        (made, failed)
     }
 
     /// Whether the photo at `path` counts as there: its account is on this computer and signed in, its
@@ -254,6 +382,72 @@ impl Remote {
         let mut inner = self.lock();
         if matches!(inner.state(key), AccountState::SignedIn | AccountState::Unreachable) {
             inner.states.insert(key.to_string(), (AccountState::SignedIn, Instant::now()));
+        }
+    }
+}
+
+/// What the whole downloaded copy `local` of `path` says about it: [`crate::files::probe_bytes`]
+/// with the remote name (the copy's extension is the cache's), no content hash (keys stay
+/// `file:{path}:{size}`).
+fn probe_copy(remote: &Remote, path: &str, local: &Path) -> Result<ProbeInfo, String> {
+    let rp = RemotePath::parse(path).map_err(|e| e.to_string())?;
+    let _hold = remote.cache().ok().map(|c| c.hold(&rp));
+    let len = std::fs::metadata(local).map(|m| usize::try_from(m.len()).unwrap_or(usize::MAX)).unwrap_or(0);
+    // (on the session's thread: counted, never waiting)
+    let _permit = crate::memory::work_gate().acquire_urgent(len);
+    let bytes = std::fs::read(local).map_err(|e| format!("{}: {e}", local.display()))?;
+    let info = crate::files::probe_bytes(rp.name().unwrap_or_default(), &bytes)?;
+    Ok(ProbeInfo { content_hash: None, ..info })
+}
+
+/// Complete the photos whose originals were `downloaded` (path, local copy) from the whole file:
+/// dimensions, the camera fields they lack, lens data and as-shot white balance, as Reload does, but
+/// not as an undo step. Their decoded sources go (a thumbnail may be the server's preview standing
+/// in, see `hooks`), and their smart previews are built in the background when the library has a
+/// folder for them (from the copy on disk: that build never downloads).
+// ponytail: the probe reads the whole copy on the session's thread (tens of ms for a big raw, once
+// per download); probe on the downloading thread and send the result if that shows up as a hitch.
+pub(crate) fn complete(s: &mut Session, downloaded: Vec<(String, PathBuf)>) {
+    let local: HashMap<String, PathBuf> = downloaded.into_iter().collect();
+    let photos: Vec<_> = s
+        .catalog
+        .photos()
+        .filter_map(|p| match &p.source {
+            Source::File { path } if local.contains_key(path) => Some((p.id, path.clone())),
+            _ => None,
+        })
+        .collect();
+    // (only the copies of photos in this library are read)
+    let wanted: HashSet<&str> = photos.iter().map(|(_, path)| path.as_str()).collect();
+    let probes: HashMap<&str, ProbeInfo> = wanted
+        .into_iter()
+        .filter_map(|path| {
+            let info = probe_copy(&s.remote, path, local.get(path)?);
+            info.map_err(|e| log::warn!("Nextcloud: {path}: {e}")).ok().map(|info| (path, info))
+        })
+        .collect();
+    for (id, path) in &photos {
+        let id = *id;
+        s.media.forget(id);
+        let (Some(ph), Some(info)) = (s.catalog.photo(id), probes.get(path.as_str())) else { continue };
+        // (a virtual copy's camera fields are its own, as in Reload)
+        let meta = if ph.copy_of.is_none() { crate::cmd::convert::fill_missing_meta(id, ph, info) } else { Vec::new() };
+        let ops: Vec<Op> = crate::cmd::convert::content_op(id, ph, info.clone())
+            .into_iter()
+            .chain(meta)
+            .chain(crate::cmd::convert::lens_ops(id, ph, info))
+            .chain(crate::cmd::convert::as_shot_wb_op(id, ph, info))
+            .collect();
+        if !ops.is_empty()
+            && let Err(e) = s.apply_system(Op::Batch { ops })
+        {
+            log::warn!("Nextcloud: completing photo {}: {e}", id.0);
+        }
+    }
+    if !photos.is_empty() && s.media.smart_dir.is_some() {
+        let p = json!({"ids": photos.iter().map(|(id, _)| id.0).collect::<Vec<_>>(), "background": true});
+        if let Err(e) = crate::cmd::previews::smart(s, &p) {
+            log::warn!("Nextcloud: smart previews of downloaded originals: {e}");
         }
     }
 }

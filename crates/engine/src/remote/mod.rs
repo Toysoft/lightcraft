@@ -13,8 +13,11 @@
 //! Photos load through the engine's file hooks ([`hooks`]): from the originals downloaded to this
 //! computer ([`Remote::local_original`]), the server's previews and a Range read of the file's start.
 //!
-//! Work done off the session (an import's listing and metadata, see [`import`]) comes back as
-//! [`Event`]s, which [`crate::Session::drain_remote`] applies to the catalog.
+//! Develop holds the open photo's original on disk ([`Remote::hold`]) and downloads the next one ahead
+//! ([`Remote::prefetch`]); "Make Available Offline" pins copies ([`Remote::make_available_offline`]).
+//!
+//! Work done off the session (an import's listing and metadata, see [`import`]; a finished download)
+//! comes back as [`Event`]s, which [`crate::Session::drain_remote`] applies to the catalog.
 
 pub(crate) mod hooks;
 pub(crate) mod import;
@@ -28,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use craft_nextcloud::rustls::crypto::CryptoProvider;
 pub use craft_nextcloud::{Account, Fingerprint, RemotePath};
-use craft_nextcloud::{Client, Error, SignIn, SignInState};
+use craft_nextcloud::{Client, Error, Hold, SignIn, SignInState};
 pub use originals::NOT_DOWNLOADED;
 #[cfg(test)]
 pub(crate) use originals::budget_bytes;
@@ -205,8 +208,8 @@ fn message(e: &Error) -> String {
 /// A sign-in that ended other than signed in: how, and why in words for the user.
 type SignInEnd = (SignInProgress, String);
 
-/// What work off the session found, for [`crate::Session::drain_remote`] to apply. Each comes from
-/// import `task` (its activity row's id) into the library of `generation`
+/// What work off the session found, for [`crate::Session::drain_remote`] to apply. `Found` and `Meta`
+/// come from import `task` (its activity row's id) into the library of `generation`
 /// ([`crate::Session::library_generation`]); another library's are dropped.
 pub enum Event {
     /// Photos an import listed, to add (path, what the listing and Memories told: size, kind,
@@ -214,6 +217,9 @@ pub enum Event {
     Found { task: u64, generation: u64, photos: Vec<(String, crate::media::ProbeInfo)> },
     /// Metadata an import read, filling what the photos lack.
     Meta { task: u64, generation: u64, reads: Vec<MetaRead> },
+    /// The original at `path` was downloaded to `local`: the photos with that path (in whatever
+    /// library is open) are completed from the whole file.
+    Downloaded { path: String, local: PathBuf },
 }
 
 /// The metadata read for the photo at `path`. With `described`, `info` describes the whole file
@@ -258,6 +264,10 @@ pub struct Remote {
     inner: Mutex<Inner>,
     /// Held while an original downloads: one at a time.
     downloads: Mutex<()>,
+    /// The original of the photo open in Develop, kept from eviction ([`Remote::hold`]).
+    held: Mutex<Option<Hold>>,
+    /// The path being prefetched and what cancels it ([`Remote::prefetch`]).
+    prefetching: Mutex<Option<(String, Arc<AtomicBool>)>>,
     /// The last [`MAX_SIGN_INS`] sign-ins, oldest first. Kept across [`Remote::configure`]: they are
     /// this session's.
     sign_ins: Mutex<VecDeque<SignInOutcome>>,
@@ -272,6 +282,9 @@ pub struct Remote {
     /// (tests of its activity rows).
     #[cfg(test)]
     pub(crate) import_steps: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// When set, a download waits for a message here once its row is up (tests of the rows).
+    #[cfg(test)]
+    pub(crate) download_steps: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
 impl Remote {
@@ -281,6 +294,8 @@ impl Remote {
             activity,
             inner: Mutex::default(),
             downloads: Mutex::default(),
+            held: Mutex::default(),
+            prefetching: Mutex::default(),
             sign_ins: Mutex::default(),
             events: Mutex::default(),
             imports: Mutex::default(),
@@ -288,6 +303,8 @@ impl Remote {
             expire_sign_ins: AtomicBool::new(false),
             #[cfg(test)]
             import_steps: Mutex::default(),
+            #[cfg(test)]
+            download_steps: Mutex::default(),
         }
     }
 

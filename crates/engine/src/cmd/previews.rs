@@ -318,7 +318,7 @@ fn smart_run(
 /// photos editable while their originals are offline. With `background` (the app) the files are
 /// read and written on a worker thread; progress like Build Previews (`library.previewProgress`).
 #[cfg(not(target_arch = "wasm32"))]
-fn smart(s: &mut Session, p: &Value) -> Result<Value> {
+pub(crate) fn smart(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "library.smartPreviews";
     let dir = s.media.smart_dir.clone().ok_or_else(|| bad(C, "smart previews need a library on disk"))?;
     let discard = p.get("discard").and_then(Value::as_bool).unwrap_or(false);
