@@ -330,7 +330,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             // process V3 (`finish::dehaze_v3_pixel`)
             let k0 = clamp(dz, 0.0, 1.0);
             let k = k0 * (0.4 + 0.6 * k0);
-            let t = max(1.0 - 0.95 * k * d, 0.15);
+            let t = max(1.0 - 0.95 * k * d, 0.3);
             let veil = min(air * (1.0 - t), 0.9 * max(min(c.x, min(c.y, c.z)), 0.0));
             c = max((c - veil) / t, vec3<f32>(0.0));
         } else if (dz > 0.0) {

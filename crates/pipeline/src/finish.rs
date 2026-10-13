@@ -114,7 +114,8 @@ pub const MASK_SUMS: usize = 17;
 /// Positive dehaze from process V3 (#1237) of scene-linear `c`: `dz` the strength (0..1, with a
 /// local adjustment's added), `d` the dark channel over the airlight (0..1), `air` the airlight.
 /// The strength eases in (`dz·(0.4 + 0.6·dz)`: +10 acts at about half V1's), the transmission is
-/// floored at 0.15, and the veil removed never exceeds 90 % of the pixel's darkest channel, so no
+/// floored at 0.3 (channel differences grow at most ~3x, so +100 adds no colour casts), and the
+/// veil removed never exceeds 90 % of the pixel's darkest channel, so no
 /// pixel is pushed to black (V1 clipped shadows next to bright sky from +10). The GPU mirrors it in
 /// `finish.wgsl`. Sources: He, Sun, Tang, "Single Image Haze Removal Using Dark Channel Prior"
 /// (CVPR 2009), with own easing and veil limit.
@@ -122,7 +123,7 @@ pub const MASK_SUMS: usize = 17;
 pub fn dehaze_v3_pixel(c: [f32; 3], dz: f32, d: f32, air: f32) -> [f32; 3] {
     let k = dz.clamp(0.0, 1.0);
     let k = k * (0.4 + 0.6 * k);
-    let t = (1.0 - 0.95 * k * d).max(0.15);
+    let t = (1.0 - 0.95 * k * d).max(0.3);
     let veil = (air * (1.0 - t)).min(0.9 * c[0].min(c[1]).min(c[2]).max(0.0));
     c.map(|v| ((v - veil) / t).max(0.0))
 }
