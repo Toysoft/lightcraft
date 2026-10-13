@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (LR-MERGE-HDR: merges of raws without colour matrices keep their colour (#965); rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (KEY-HELP, KEYC-HELP, KEY-HIDEPINS: F1 opens the shortcuts dialog, H toggles mask pins while masking; LR-MERGE-HDR: merges of raws without colour matrices keep their colour (#965); rapid slider entry; LR-PROF-CAMERACOLOR: tone curve from black-and-white camera JPEGs; LR-VIEW-ZOOM, LR-VIEW-COMPARE: Compare and Reference zoom windows; LR-IMP-FORMATS, LR-IMP-CAMERA-COVERAGE: EOS R5 Mark II CR3 decodes; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md; filesystem history retry/Undo/Redo evidence; renamed from `parity.md`; Top gaps moved to gaps.md, shortcut notes to ui-parity.md) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -51,11 +51,11 @@ cited here still exists. Formerly docs/parity.md.
 | W. Cloud & AI infrastructure (CLOUD / AI) | 1 | 0 | 1 | 2 | — | — |
 | X. Cross-cutting behaviours (BEHAV) | 23 | 6 | 1 | 1 | 8/8 (100%) | 7/10 (70%) |
 | Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
-| Z. Keyboard shortcuts (desktop) | 76 | 3 | 3 | 1 | 49/52 (94%) | 23/24 (96%) |
+| Z. Keyboard shortcuts (desktop) | 76 | 4 | 2 | 1 | 49/52 (94%) | 23/24 (96%) |
 | Lightroom Classic extras | 34 | 16 | 35 | 8 | — | 24/26 (92%) |
-| **Total** | 408 | 52 | 72 | 35 | 193/201 (96%) | 145/157 (92%) |
+| **Total** | 408 | 53 | 71 | 35 | 193/201 (96%) | 145/157 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.6%** of 532 in-scope rows — P0 98.0% of 201 · P1 95.2% of 157 · P2 50.0% of 173.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.7%** of 532 in-scope rows — P0 98.0% of 201 · P1 95.2% of 157 · P2 50.3% of 173.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -670,12 +670,12 @@ From `06-shortcuts.md` part 1. Evidence is our binding; conflicts are explained 
 | KEY-SLIDER-NUDGE | Nudge slider — ↑/↓ | P1 | ✅ | `crates/ui-egui/src/widgets.rs` (`nudged`), `cmd:develop.adjust` | ↑/↓ over any slider: ≈ 1/200 of its range (exposure 0.05, most sliders 1, temperature 50 K); ⇧ ×5; one undo step each |
 | KEY-SLIDER-TYPE | Type a slider value | P1 | ✅ | `crates/ui-egui/src/widgets.rs` (`typed_value`), `crates/ui-egui/src/text_field.rs`, `crates/ui-egui/src/widgets/tests_numeric_entry.rs` (`opening_release_honors_return_and_escape_immediately`), `crates/ui-egui/src/tests_keymap.rs` (`opening_numeric_release_keeps_keys_in_the_editor`) | click the value next to any slider's name and type one (`1.5`, `+0,25`, `-20`, `5600 K`): Return or clicking away applies it on the control's steps and range as one undo step, Esc keeps the old value; issue #322; Return/Escape take effect on the opening release, retaining the stored value on Escape; typing stays in the editor without triggering global shortcuts |
 | KEY-SHORTCUTS | Shortcut list — ⌘/ | P1 | ✅ | `cmd:app.shortcuts` | |
-| KEY-HELP | Help — F1 | P2 | ✅ | `cmd:app.help` | |
+| KEY-HELP | Help — F1 (opens the keyboard-shortcuts dialog) | P2 | ✅ | `cmd:app.shortcuts`, `cmd:app.help`, `crates/ui-egui/src/tests_keymap.rs` (`f1_opens_the_shortcuts_dialog`, `f1_does_not_open_the_docs_page_but_the_help_menu_item_does`) | F1 is a second key for Keyboard Shortcuts (⌘/); it no longer opens the docs page, which stays in Help ▸ LightCraft Help without a shortcut; no in-app help page beyond the shortcut list |
 | KEY-VIDEO-PLAY | Play/pause video — Space | P1 | ⬜ | | |
 | KEY-ESC | Leave tool / view — Esc | P0 | ✅ | `cmd:view.back`, `crates/ui-egui/src/icons.rs` (`navigation_arrowheads_have_both_halves`), `crates/ui-egui/src/tests_crop_tool.rs` | top-bar navigation arrowheads render both halves at 1× and 2× scale; in the crop tool Esc closes the tool first (the crop stays), the next Esc goes back to the grid; Esc that ends an edit in a text field does nothing else |
 | KEY-COMMIT | Commit tool — Return | P1 | ✅ | `cmd:tool.done` | Return closes Crop / Remove / Red Eye / Masking back to Edit (edits apply live, as in Lightroom) |
 | KEY-DELETE-PIN | Delete selected pin — ⌫ | P0 | ✅ | `cmd:mask.delete`, `cmd:spot.delete` | ⌫ deletes the active mask (Masking) or the selected spot (Remove), never the photo while retouching |
-| KEY-HIDEPINS | Hide pins — H | P2 | ⬜ | | H = Remove panel |
+| KEY-HIDEPINS | Hide pins — H | P2 | 🟡 | `cmd:view.maskPins`, `cmd:panel.remove`, `crates/ui-egui/src/shortcuts.rs`, `crates/ui-egui/src/tests_keymap.rs` (`h_toggles_the_mask_pins_while_masking`, `h_while_masking_does_not_open_remove`, `h_opens_remove_when_another_panel_is_active`) | H toggles the mask pins (same switch as View ▸ Show Mask Pins) while the Masking panel is open; elsewhere H still opens Remove. Remove's spot pins have no hide toggle |
 
 ## Lightroom Classic extras
 
@@ -770,12 +770,12 @@ From `08-lightroom-classic-extras.md` (Classic-only features) and part 2 of `06-
 | KEYC-SECONDWINDOW | Classic secondary-window keys | P2 | ⬜ | | |
 | KEYC-CATALOG | Classic photo/catalog keys (⇧⌘I, ⌘', ⌘R, F2, ⌫, ⇧⌘E…) | P2 | ✅ | `cmd:library.import`, `cmd:photo.delete`, `cmd:photo.virtualCopy`, `cmd:app.showInFinder`, `cmd:dialog.rename`, `cmd:photo.editInExternal` | ⇧⌘I add, ⌘' virtual copy, ⌘R show in Finder, F2 rename, ⌫ delete, ⇧⌘E external editor |
 | KEYC-COMPARE | Classic grid/compare keys (Z, Home/End, =/−, ⌘⇧D, S…) | P2 | 🟡 | `cmd:view.zoomToggle` | Z toggles zoom; no compare, stacks, thumbnail-size keys |
-| KEYC-RATING | Classic rating/flag keys (1–5, ⇧1–5, 6–9, P, X, U, ⇧X, ⇧U, `[` `]`, \`) | P2 | 🟡 | `cmd:photo.rate`, `cmd:photo.pick`, `cmd:photo.flag` | 0–5 / Shift+0–5 and 6–9 / Shift+6–9; P/X/U, Shift+X/U and grid Shift+P work; tests cover batch/undo, active Compare candidate and text focus. Missing: Shift+P outside grids (Presets), rating `[` / `]`, flag cycle and filter-bar keys |
+| KEYC-RATING | Classic rating/flag keys (1–5, ⇧1–5, 6–9, P, X, U, ⇧X, ⇧U, `[` `]`, \`) | P2 | 🟡 | `cmd:photo.rate`, `cmd:photo.pick`, `cmd:photo.flag` | 0–5 / Shift+0–5 and 6–9 / Shift+6–9; P/X/U, Shift+X/U and grid Shift+P work; tests cover batch/undo, active Compare candidate and text focus. Missing: Shift+P outside grids (Presets), flag cycle and filter-bar keys |
 | KEYC-COLLECTIONS | Classic collection keys (⌘N, B…) | P2 | 🟡 | `cmd:dialog.newAlbum` | ⌘N new album; no quick collection |
 | KEYC-METADATA | Classic keyword/metadata keys (⌘K, ⌘S, ⌘⌥⇧C/V…) | P2 | 🟡 | `cmd:photo.saveMetadataToFile` | ⌘S saves metadata; no keyword sets, metadata copy/paste |
 | KEYC-DEVELOP | Classic develop keys (V, ⌘U, ⇧⌘U, R, Q, K, M, ⇧M, ⇧W, ⇧J, ⇧Q…) | P2 | 🟡 | `cmd:develop.treatment`, `cmd:develop.reset`, `cmd:crop.reset` | V, ⇧⌘R, ⌥⌘R, W, J, Y, ⇧Y, \ match; R/K/M/⇧M differ; no Classic keymap layer |
 | KEYC-MODULE-OUTPUT | Book / slideshow / print / map / web keys | P2 | ⬜ | | modules not implemented |
-| KEYC-HELP | Classic help keys (⌘/, F1) | P2 | 🟡 | `cmd:app.shortcuts` | ⌘/ only |
+| KEYC-HELP | Classic help keys (⌘/, F1) | P2 | 🟡 | `cmd:app.shortcuts` | ⌘/ and F1 both open the keyboard-shortcuts dialog; no in-app help page (Help ▸ LightCraft Help opens the docs on GitHub) |
 
 ### Japanese text watermarks
 
@@ -789,6 +789,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | KEY-HELP and KEYC-HELP: F1 opens the keyboard-shortcuts dialog and no longer the docs page, with regression references; KEY-HIDEPINS ⬜ → 🟡: H toggles the mask pins while the Masking panel is open |
 | 2026-10-11 | minor | LR-MERGE-HDR: HDR and panorama merges of raws without colour matrices (CR2, NEF, ARW…) write the colour they open with as DNG tags (issue #965); status unchanged |
 | 2026-10-12 | minor | LR-META-XMP: Read Metadata from File no longer auto-writes the sidecar it has just read, which added `lc:settings` and hid another app's later `crs:` edits (#934); status unchanged (✅) |
 | 2026-10-12 | patch | LR-IMP-CAMERA-COVERAGE: CR2 white level from the active area, not the saturated masked rows above it (issue #1272); status unchanged (🟡) |
