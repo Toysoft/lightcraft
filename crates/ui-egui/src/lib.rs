@@ -30,6 +30,7 @@ pub mod region;
 pub mod render;
 pub mod shortcuts;
 pub mod sidebar;
+mod smart_previews;
 pub mod softpaint;
 pub mod state;
 pub mod sync;
@@ -363,6 +364,7 @@ pub struct LightcraftApp {
     pub scan: Option<import::ScanTask>,
     /// A Synchronize Folder scan in progress (feeds its dialog).
     pub sync: Option<sync::SyncTask>,
+    pub(crate) smart_preview_space: Option<smart_previews::SpaceCheck>,
     /// `session.folder_changes` came from the Synchronize Folder dialog (and goes with it).
     pub sync_owns_changes: bool,
     /// A Synchronize Folder at work in the background.
@@ -460,6 +462,7 @@ impl LightcraftApp {
             import: None,
             scan: None,
             sync: None,
+            smart_preview_space: None,
             sync_owns_changes: false,
             sync_run: None,
             lightroom: None,
@@ -500,6 +503,9 @@ impl LightcraftApp {
 
     /// Run a UI or engine command by id. The single entry point for every frontend path.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if let Some(result) = smart_previews::intercept(self, id, &params) {
+            return result;
+        }
         if let Some(result) = model_setup::intercept(self, id, &params) {
             return result;
         }
@@ -660,6 +666,10 @@ impl LightcraftApp {
                         crate::i18n::tr_format!("Done ({what}): {done} photo{plural}", done = done, plural = plural, what = crate::i18n::tr(what))
                     }
                 };
+                let kept = b.kept.load(Ordering::Relaxed);
+                if kept > 0 {
+                    msg.push_str(&crate::i18n::tr_format!(". {count} existing previews kept unchanged", count = kept));
+                }
                 if failed > 0 {
                     msg.push_str(&crate::i18n::tr_format!(" · {failed} couldn't be rendered", failed = failed));
                 }
@@ -1017,6 +1027,7 @@ impl LightcraftApp {
         merge::poll(self, ctx);
         import::poll_scan(self, ctx);
         sync::poll(self, ctx);
+        smart_previews::poll(self, ctx);
         sync::poll_run(self, ctx);
         import::tick(self, ctx);
         lightroom_import::tick(self, ctx);

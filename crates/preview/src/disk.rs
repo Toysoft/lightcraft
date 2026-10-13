@@ -22,9 +22,11 @@ const QUALITY: u8 = 90;
 
 pub struct DiskCache {
     dir: PathBuf,
+    /// Persisted by the library together with changes to the proxy source folder.
+    namespace: u64,
     /// Bytes the cache may hold (changed in place by [`DiskCache::set_budget`]).
     budget: AtomicU64,
-    /// Bytes on disk (`None` until first scanned).
+    /// Bytes on disk (`None` until scanned, and again after a clear).
     total: Mutex<Option<u64>>,
     pub hits: AtomicU64,
     pub misses: AtomicU64,
@@ -33,8 +35,15 @@ pub struct DiskCache {
 
 impl DiskCache {
     pub fn new(dir: &Path, budget: u64) -> DiskCache {
+        Self::with_namespace(dir, budget, 0)
+    }
+
+    /// Select a persistent cache namespace without scanning or changing any files. Old
+    /// namespaces share this directory and its budget; normal pruning removes their files.
+    pub fn with_namespace(dir: &Path, budget: u64, namespace: u64) -> DiskCache {
         DiskCache {
             dir: dir.to_path_buf(),
+            namespace,
             budget: AtomicU64::new(budget),
             total: Mutex::new(None),
             hits: AtomicU64::new(0),
@@ -45,6 +54,10 @@ impl DiskCache {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    pub fn namespace(&self) -> u64 {
+        self.namespace
     }
 
     /// Bytes the cache may hold.
@@ -59,6 +72,13 @@ impl DiskCache {
     }
 
     fn path(&self, key: Hash128) -> PathBuf {
+        // Namespace zero preserves existing libraries' cache keys. Every committed folder
+        // switch gets a new value, even when returning to a previously used folder.
+        let key = if self.namespace == 0 {
+            key
+        } else {
+            crate::Hasher128::new().str("thumbnail namespace").u64(self.namespace).update(&key.0.to_le_bytes()).finish()
+        };
         let hex = key.to_string();
         self.dir.join(&hex[..2]).join(format!("{hex}.jpg"))
     }
@@ -166,10 +186,17 @@ impl DiskCache {
     }
 
     pub fn clear(&self) {
-        for (p, _, _) in self.scan() {
+        let files = self.scan();
+        #[cfg(test)]
+        crate::tests::during_clear(self);
+        for (p, _, _) in files {
             let _ = std::fs::remove_file(p);
         }
-        *self.total.lock().unwrap_or_else(|e| e.into_inner()) = Some(0);
+        // A thumbnail written while the files go (not in the listing) outlives the clear, so the
+        // size is unknown, not zero: the next check scans the nearly empty folder. A writer
+        // updates the total under the same lock as its file replacement, so none can put back
+        // a total from before this.
+        *self.total.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 

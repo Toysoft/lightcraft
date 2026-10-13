@@ -254,6 +254,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
         Dialog::Merge { opts } => opts.title(),
         Dialog::Settings { .. } => "Settings",
         Dialog::ConfirmDelete { .. } => "Delete Photos",
+        Dialog::BuildSmartPreviews { .. } => "Build Lossless Smart Previews",
         Dialog::LightroomCatalog { .. } => "Lightroom Classic Catalog",
         Dialog::RemoveFolder { disk: true, .. } => "Remove Disk from Library",
         Dialog::RemoveFolder { .. } => "Remove Folder from Library",
@@ -1113,6 +1114,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         .color(t.text_dim),
                     );
                 }
+                Dialog::BuildSmartPreviews { .. } => crate::smart_previews::body(ui, &dlg),
                 Dialog::ConfirmDelete { count } => {
                     let what = if *count == 1 { crate::i18n::tr("this photo").to_string() } else { crate::i18n::tr_format!("these {count} photos", count = count) };
                     ui.label(crate::i18n::tr_format!("Move {what} to Recently Deleted?", what = what));
@@ -1234,6 +1236,8 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     Dialog::FaceModel { info, .. } if !informational && info["download"].is_string() => "Download",
                     Dialog::FaceModel { .. } if !informational => "Install",
                     Dialog::ConfirmDelete { .. } | Dialog::DeleteKeyword { .. } => "Delete",
+                    Dialog::BuildSmartPreviews { .. } if crate::smart_previews::exceeds_free_space(&dlg) => "Build Anyway",
+                    Dialog::BuildSmartPreviews { .. } => "Build",
                     // (not "Merge": that is photo merging, HDR / panorama, in some languages)
                     Dialog::MoveKeyword { .. } => "Merge Keywords",
                     Dialog::KeywordSet { .. } => "Save",
@@ -1254,7 +1258,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                 let can_confirm = informational
                     || !matches!(
                         &dlg,
-                        Dialog::DenoiseModel { accepted: false, .. } | Dialog::FaceModel { accepted: false, .. } | Dialog::SynchronizeFolder { counts: None, .. }
+                        Dialog::DenoiseModel { accepted: false, .. } | Dialog::FaceModel { accepted: false, .. } | Dialog::SynchronizeFolder { counts: None, .. } | Dialog::BuildSmartPreviews { checking: true, .. }
                     )
                         // smart-album rules that can't mean anything wait to be fixed
                         && !matches!(&dlg, Dialog::SmartRules { id, rules, .. } if !rules.check_for(&app.session.catalog, id.map(lightcraft_catalog::AlbumId)).is_empty());
@@ -1307,6 +1311,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         | Dialog::KeywordTag { .. }
                         | Dialog::KeywordSet { .. }
                         | Dialog::SynchronizeFolder { .. }
+                        | Dialog::BuildSmartPreviews { .. }
                 ) =>
             {
                 app.toast(ctx, e)
@@ -1701,6 +1706,7 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
         Dialog::Merge { opts } => crate::merge::start_final(app, opts),
         Dialog::Import { opts } => crate::import::start(app, opts),
         Dialog::ConfirmDelete { .. } => app.run("photo.delete", json!({})),
+        Dialog::BuildSmartPreviews { .. } => crate::smart_previews::confirm(app, dlg),
         // the catalog found: no file dialog; none: File ▸ Import Lightroom Catalog… asks for it
         Dialog::LightroomCatalog { catalog, .. } => {
             app.run("file.importLightroom", catalog.as_ref().map_or_else(|| json!({}), |c| json!({"path": c})))

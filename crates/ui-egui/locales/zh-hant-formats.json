@@ -1,4 +1,13 @@
 {
+  "Photos: {count}": {
+    "one": "照片：{count} 張",
+    "few": "照片：{count} 張",
+    "many": "照片：{count} 張",
+    "other": "照片：{count} 張"
+  },
+  "Estimated total size: {size}": "預估總大小：{size}",
+  "Destination: {path}": "目的地：{path}",
+  "Free space: {size}": "可用空間：{size}",
   " · {skipped} skipped (file exists)": " · 已略過 {skipped} 個（檔案已存在）",
   " · {} duplicate{} skipped": " · 已略過 {} 張重複照片{:.0}",
   " · {} failed: {}": " · {} 個失敗：{}",
@@ -91,7 +100,6 @@
   "the {n} selected photos": "選取的 {n} 張照片",
   "the {} photos in view": "目前顯示的 {} 張照片",
   "these {count} photos": "這 {count} 張照片",
-  "{count} smart preview{} · {:.1} MB": "{count} 張智慧型預覽{:.0} · {:.1} MB",
   "{f} folders (and their subfolders)": "{f} 個資料夾（及其子資料夾）",
   "{label} Grading": "{label}色彩分級",
   "{label} {d:+} on every selected photo": "每張選取照片的{label}調整 {d:+}",
@@ -247,5 +255,26 @@
   "{n} photos opened for editing; each is stacked with its original": "已開啟 {n} 張相片進行編輯；每張都與其原始相片堆疊在一起",
   "{name} opened in the other editor": "已在其他編輯器中開啟 {name}",
   "{n} originals opened in the other editor": "已在其他編輯器中開啟 {n} 個原始檔案",
-  "· {in_source} identical copies": "· {in_source} 個相同副本"
+  "· {in_source} identical copies": "· {in_source} 個相同副本",
+  "Smart preview folder changed. {count} source files could not be removed.": {
+    "one": "智慧型預覽資料夾已變更。有 {count} 個來源檔案無法移除。",
+    "few": "智慧型預覽資料夾已變更。有 {count} 個來源檔案無法移除。",
+    "many": "智慧型預覽資料夾已變更。有 {count} 個來源檔案無法移除。",
+    "other": "智慧型預覽資料夾已變更。有 {count} 個來源檔案無法移除。"
+  },
+  "Smart preview folder change failed: {error}": "變更智慧型預覽資料夾失敗：{error}",
+  "{count} smart previews · {size:.1} MiB": {
+    "one": "{count} 個智慧型預覽 · {size:.1} MiB",
+    "few": "{count} 個智慧型預覽 · {size:.1} MiB",
+    "many": "{count} 個智慧型預覽 · {size:.1} MiB",
+    "other": "{count} 個智慧型預覽 · {size:.1} MiB"
+  },
+  ". {count} existing previews kept unchanged": {
+    "one": "。已保留 {count} 個現有預覽，未做變更",
+    "few": "。已保留 {count} 個現有預覽，未做變更",
+    "many": "。已保留 {count} 個現有預覽，未做變更",
+    "other": "。已保留 {count} 個現有預覽，未做變更"
+  },
+  "could not check smart preview storage: {e}": "無法檢查智慧型預覽儲存空間：{e}",
+  "free space is unavailable for {path} on this platform": "此平台無法取得 {path} 的可用空間。"
 }
