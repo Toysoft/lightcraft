@@ -18,6 +18,7 @@
 pub mod align;
 pub mod features;
 pub mod frame;
+pub mod fuse;
 pub mod hdr;
 pub mod linalg;
 pub mod output;
@@ -27,6 +28,7 @@ pub mod stack;
 pub mod synth;
 
 pub use frame::{Frame, FrameColor, load_frame};
+pub use fuse::{FuseOptions, FuseResult, fuse_exposures};
 pub use hdr::{Deghost, HdrOptions, HdrResult, merge_hdr};
 pub use output::{DngSamples, write_linear_dng};
 pub use pano::{PanoOptions, PanoResult, Projection, stitch};
