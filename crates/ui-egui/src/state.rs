@@ -608,6 +608,10 @@ pub struct UiState {
     /// The develop control whose slider is being dragged (geometry sliders show a grid).
     #[serde(skip)]
     pub dragging_control: Option<String>,
+    /// The sharpening slider (Amount or Masking) being dragged with Option (Alt) held: the loupe shows
+    /// its diagnostic view (`panels::detail::view_overlay`) until Option is released or the drag ends.
+    #[serde(skip)]
+    pub option_preview: Option<&'static str>,
     pub search: String,
     /// Focus the search field on the next frame (Edit → Find…).
     #[serde(skip)]
@@ -1083,6 +1087,7 @@ impl Default for UiState {
             unnamed_focus: false,
             hidden_locations: Vec::new(),
             dragging_control: None,
+            option_preview: None,
             external_edits: Vec::new(),
             was_focused: true,
             auto_import_at: 0.0,

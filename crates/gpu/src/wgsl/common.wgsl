@@ -65,3 +65,63 @@ fn oklab_inv(lab: vec3<f32>) -> vec3<f32> {
     let l = mul3(OK_FROM_LAB, lab);
     return mul3(OK_FROM_LMS, l * l * l);
 }
+
+// Process V3's Masking weight (`sharpen::mask_weight`): edge gradient `e` of scene `q`
+// (`qs` the pixel's) at display `qd`, tone slope `st`, threshold `t` (0: no Masking).
+fn sharp_mask(e: f32, qs: f32, qd: f32, st: f32, t: f32) -> f32 {
+    if (!(t > 0.0)) {
+        return 1.0;
+    }
+    if (!(qs > 0.0)) {
+        return 0.0;
+    }
+    let ed = e / qs * qd * st;
+    let e2 = ed * ed;
+    let t2 = t * t;
+    if (e2 + t2 > 0.0) {
+        return e2 / (e2 + t2);
+    }
+    return 0.0;
+}
+
+// The change process V3's sharpening makes to display `qd` (`sharpen::delta`).
+fn sharp_delta(b: f32, l: f32, qd: f32, st: f32, k: f32, limit: f32, wm: f32) -> f32 {
+    let ws = clamp((qd - SHARPEN_Q0) / SHARPEN_QW, 0.0, 1.0);
+    let qs = exp2(0.5 * l);
+    if (!(ws > 0.0) || !(qs > 0.0) || qs > 3.0e38 || !(limit > 0.0)) {
+        return 0.0;
+    }
+    let dq0 = qd * st * k * b / qs;
+    if (!(abs(dq0) < 3.0e38)) {
+        return 0.0;
+    }
+    let dq = limit * tanh(clamp(dq0 / limit, -10.0, 10.0));
+    return ws * wm * dq;
+}
+
+// Process V3's sharpening factor on display luminance (`sharpen::gain`).
+fn sharp_gain(b: f32, l: f32, o: f32, st: f32, k: f32, limit: f32, wm: f32) -> f32 {
+    let qd = sqrt(max(o, 0.0));
+    let d = sharp_delta(b, l, qd, st, k, limit, wm);
+    if (d == 0.0) {
+        return 1.0;
+    }
+    let q2 = max(qd + d, 0.0);
+    let g = q2 / qd;
+    if (!(abs(g) < 3.0e38)) {
+        return 1.0;
+    }
+    return g * g;
+}
+
+// The tone curve's slope (`sharpen::tone_slope`) from its values a quarter stop above (`up`) and
+// below (`down`) the pixel's.
+fn sharp_slope(y: f32, up: f32, down: f32) -> f32 {
+    if (!(y > 0.0)) {
+        return 0.0;
+    }
+    if (up > 0.0 && down > 0.0) {
+        return clamp((log2(up) - log2(down)) * 2.0, 0.0, 4.0);
+    }
+    return 0.0;
+}

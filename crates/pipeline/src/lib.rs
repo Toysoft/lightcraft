@@ -25,6 +25,7 @@
 
 pub mod auto;
 pub mod blemish;
+pub mod chroma_noise;
 pub mod colorops;
 pub mod cull;
 pub mod dust;
@@ -38,6 +39,7 @@ pub mod optics;
 pub mod output;
 pub mod profiles;
 pub mod redeye;
+pub mod sharpen;
 pub mod spots;
 pub mod tone;
 pub mod transform;
@@ -92,6 +94,9 @@ pub struct SourceInfo {
     /// The raw's own local tone mapping (DNG `ProfileGainTableMap`), rendered only when the
     /// photo's Profile option asks for it ([`local_tone`]).
     pub local_tone: Option<Arc<local_tone::LocalTone>>,
+    /// Long edge (px) of the photo at its own resolution when the buffer rendered is a smaller
+    /// level of it (a preview), 0 when it is the photo itself: sharpening's Radius is in its pixels.
+    pub native_long: usize,
 }
 
 impl Default for SourceInfo {
@@ -107,6 +112,7 @@ impl Default for SourceInfo {
             camera_tone: None,
             mattes: None,
             local_tone: None,
+            native_long: 0,
         }
     }
 }
@@ -205,6 +211,9 @@ pub(crate) struct Prepared {
     pub dark: Option<Arc<Plane>>,
     /// Blurred chromaticity (`rgb / Y`) for local Moiré / Noise.
     pub chroma_blur: Option<Arc<Rgb32f>>,
+    /// Process V3's sharpening band and, with Masking on, its edge map (`local::sharpen_band`).
+    pub sharpen_det: Option<Arc<Plane>>,
+    pub sharpen_edge: Option<Arc<Plane>>,
     /// Airlight of `dark` (before exposure).
     pub air: f32,
     pub masks: Vec<masks::Evaluated>,
@@ -343,7 +352,7 @@ struct CacheEntry {
     planes: local::Planes,
 }
 
-fn hash_of(parts: impl std::hash::Hash) -> u64 {
+pub(crate) fn hash_of(parts: impl std::hash::Hash) -> u64 {
     use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
     BuildHasherDefault::<DefaultHasher>::default().hash_one(parts)
 }
@@ -358,6 +367,8 @@ pub struct Plan<'a> {
     pub h: usize,
     /// Output pixels per unit of the oriented source's long edge.
     pub px_per_long: f64,
+    /// Output pixels per pixel of the photo at its own resolution ([`SourceInfo::native_long`]).
+    pub px_per_native: f64,
     /// Long edge of the source buffer (px).
     pub src_long: usize,
     /// Key of the resampled source (together with the source buffer's identity).
@@ -371,6 +382,8 @@ pub struct Plan<'a> {
     pub eyes: Vec<redeye::EyeK>,
     /// The whole frame's dehaze airlight, for a windowed render (which can't see the whole frame).
     pub fixed_air: Option<f32>,
+    /// For a windowed render: the whole frame and its output size (what [`chroma_noise`] measures).
+    pub whole: Option<(geometry::Frame, usize, usize)>,
     /// A windowed render works on a larger window when spots reach into it (see
     /// [`spots::window_for_reads`]); this is the requested window inside the rendered one, which
     /// the result is cut to.
@@ -405,8 +418,10 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
     let px_per_long = frame.px_per_long(full_w);
     let mut fixed_air = None;
     let mut keep = None;
+    let mut whole = None;
     let (frame, w, h) = match req.window {
         Some(win) => {
+            whole = Some((frame.clone(), full_w, full_h));
             let win = win.clamped(full_w, full_h);
             if s.section_enabled("effects") && (s.effects.dehaze != 0.0 || s.masks.iter().any(|m| m.adjust.dehaze != 0.0)) {
                 let k = (AIRLIGHT_PROXY_EDGE as f64 / full_w.max(full_h) as f64).min(1.0);
@@ -438,8 +453,28 @@ pub fn plan<'a>(src: &Rgb32f, info: &SourceInfo, s: &'a DevelopSettings, req: &R
         local_tone::enabled(info, s),
         src_long,
     ));
-    let lin_key = hash_of((pre_nr_key, [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits)));
-    Plan { settings, frame, w, h, px_per_long, src_long, geo, lin_key, pre_nr_key, eyes, fixed_air, keep, mattes: info.mattes.clone() }
+    // (the process decides how colour noise reduction reads its sliders, `local::nr_params`)
+    let nr = [d.nr_luminance, d.nr_detail, d.nr_color, d.nr_color_detail, d.nr_color_smoothness].map(f64::to_bits);
+    let lin_key = hash_of((pre_nr_key, nr, s.process.process().version().0));
+    let native_long = if info.native_long > 0 { info.native_long } else { src_long };
+    let px_per_native = px_per_long / native_long.max(1) as f64;
+    Plan {
+        settings,
+        frame,
+        w,
+        h,
+        px_per_long,
+        px_per_native,
+        src_long,
+        geo,
+        lin_key,
+        pre_nr_key,
+        eyes,
+        fixed_air,
+        whole,
+        keep,
+        mattes: info.mattes.clone(),
+    }
 }
 
 /// Whether the scene-linear stage needs work only the CPU does (defringe, spot removal).
@@ -552,14 +587,17 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
     };
     lap("sample", &mut t);
 
-    let lin = match cached.as_ref().and_then(|e| e.lin.clone()).filter(|(k, _)| *k == lin_key) {
-        Some((_, img)) => img,
+    // the colour noise (for colour noise reduction), measured on the whole frame (cached); a draft
+    // standing in another measurement caches its image under a key of its own
+    let noise = chroma_noise::for_plan(src_img, info, &plan, req.quality == Quality::Draft);
+    let (lin, lin_key) = match cached.as_ref().and_then(|e| e.lin.clone()).filter(|(k, _)| *k == lin_key) {
+        Some((_, img)) => (img, lin_key),
         None => {
             // Without a cache the resampled buffer is ours: work on it in place.
             let mut img = if shared.is_some() { (*sampled).clone() } else { Arc::unwrap_or_clone(sampled.clone()) };
             lin_cpu(&mut img, info, &plan);
-            local::denoise(&mut img, s, src_long, frame.output_long(w, h));
-            Arc::new(img)
+            local::denoise(&mut img, s, src_long, frame.output_long(w, h), noise.as_ref().map(|m| &m.noise));
+            (Arc::new(img), chroma_noise::Measured::lin_key(noise.as_ref(), lin_key))
         }
     };
     lap("wb/spots/nr", &mut t);
@@ -572,7 +610,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
         Some(p) if req.quality == Quality::Draft && p.pre_nr == plan.pre_nr_key => p.for_other_nr(),
         _ => local::Planes { key: lin_key, pre_nr: plan.pre_nr_key, ..Default::default() },
     };
-    let mut prep = local::prepare(lin.clone(), s, frame, px_per_long, req.quality, &mut planes, plan.mattes.as_deref());
+    let mut prep = local::prepare(lin.clone(), s, frame, px_per_long, plan.px_per_native, req.quality, &mut planes, plan.mattes.as_deref());
     if let Some(a) = plan.fixed_air {
         prep.air = a;
     }
@@ -599,7 +637,7 @@ fn render_impl(src: Src<'_>, info: &SourceInfo, s: &DevelopSettings, req: &Rende
     };
     lap("histogram", &mut t);
     let mut image = image;
-    let mask = overlay_alpha(req.overlay, &plan, &prep);
+    let mask = overlay_alpha(req.overlay, &plan, info, &prep);
     let masks = overlay_alphas_all(req.overlay, &plan, &prep);
     visualize::apply(&mut image, req.overlay, &plan, mask.as_ref(), masks.as_deref());
     let mut image = if plan.keep.is_some() { cut(&image) } else { image };
@@ -644,7 +682,25 @@ pub fn color_range_sample(src: &Rgb32f, info: &SourceInfo, s: &DevelopSettings, 
 
 /// The alpha plane a mask overlay shows: the one the render evaluated, or (for a hidden mask) a
 /// fresh evaluation.
-fn overlay_alpha(o: Overlay, plan: &Plan<'_>, prep: &Prepared) -> Option<Plane> {
+fn overlay_alpha(o: Overlay, plan: &Plan<'_>, info: &SourceInfo, prep: &Prepared) -> Option<Plane> {
+    if o == Overlay::SharpenMask {
+        // process V3: Masking's weight at the photo's tones, as the render applies it
+        if prep.sharpen_det.is_some() {
+            let tone = finish::base_tone(&plan.settings, info, plan.settings.hdr.peak());
+            return Some(finish::sharpen_view(prep, &plan.settings, &tone));
+        }
+        let band = prep.texture_blur.as_ref()?;
+        let masking = (plan.settings.detail.sharpen_masking / 100.0) as f32;
+        return Some(visualize::sharpen_mask(&prep.log_l, band, masking));
+    }
+    if o == Overlay::SharpenDetail {
+        // process V3: the change sharpening makes; before, the Texture band it sharpened
+        if prep.sharpen_det.is_some() {
+            let tone = finish::base_tone(&plan.settings, info, plan.settings.hdr.peak());
+            return Some(finish::sharpen_detail_view(prep, &plan.settings, &tone));
+        }
+        return prep.texture_blur.as_ref().map(|b| visualize::sharpen_detail(&prep.log_l, b));
+    }
     let m = o.mask(&plan.settings)?;
     if let Some(e) = prep.masks.iter().find(|e| e.id == m.id) {
         return Some(e.alpha.clone());
@@ -712,6 +768,8 @@ mod tests_geometry;
 mod tests_hdr;
 #[cfg(test)]
 mod tests_local;
+#[cfg(test)]
+mod tests_sharpen;
 #[cfg(test)]
 mod tests_tone;
 #[cfg(test)]

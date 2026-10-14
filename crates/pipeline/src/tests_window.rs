@@ -187,6 +187,16 @@ fn noise_reduction_does_not_depend_on_the_window() {
     }
 }
 
+// Given V3 sharpening with Masking, a window sharpens as the whole render does
+#[test]
+fn sharpening_does_not_depend_on_the_window() {
+    let mut s = DevelopSettings::default();
+    for (id, v) in [("detail.sharpenAmount", 120.0), ("detail.sharpenRadius", 2.0), ("detail.sharpenDetail", 60.0), ("detail.sharpenMasking", 40.0)] {
+        controls::set(&mut s, id, v);
+    }
+    check_noisy("sharpening", &s, MID, 2, 0.1);
+}
+
 // Given a mask with Refine Edges, the refinement width follows the whole frame's size
 #[test]
 fn mask_edge_refinement_does_not_depend_on_the_window() {
@@ -235,6 +245,21 @@ fn a_mask_overlay_window_matches_the_whole_render() {
             // (refine edges differs by a rounding step, as in `mask_edge_refinement_does_not_depend_on_the_window`)
             assert!(max <= 3 && mean <= 0.25, "{name} {view:?}: max {max} (≤ 3), mean {mean:.3} (≤ 0.25)");
         }
+    }
+}
+
+/// The Option-drag sharpening previews (the Masking mask, grayscale) render in a window as in the
+/// whole frame: they are per pixel, from the planes the window makes with the frame's radii.
+#[test]
+fn sharpening_previews_match_in_a_window() {
+    let mut s = DevelopSettings::default();
+    s.detail.sharpen_amount = 60.0;
+    s.detail.sharpen_masking = 45.0;
+    for overlay in [crate::Overlay::SharpenMask, crate::Overlay::Luminance] {
+        let f = render(&noisy_scene(), &SourceInfo::default(), &s, &RenderRequest { overlay, ..RenderRequest::fit(W, H) }).image;
+        let w = render(&noisy_scene(), &SourceInfo::default(), &s, &RenderRequest { overlay, window: Some(MID), ..RenderRequest::fit(W, H) }).image;
+        let (max, mean) = compare(&f, &w, MID);
+        assert!(max <= 3 && mean <= 0.25, "{overlay:?}: max {max} (≤ 3), mean {mean:.3} (≤ 0.25)");
     }
 }
 
@@ -374,4 +399,51 @@ fn auto_mask_strokes_match_the_whole_render() {
         ..Default::default()
     };
     check_noisy("auto mask", &s, PixelWindow { x: 400, y: 300, w: 300, h: 250 }, 2, 0.1);
+}
+
+/// A source with colour noise everywhere and fine warm and cool strands (hair, fabric) in its right
+/// third: what V3's colour noise reduction measures the noise of and keeps the strands of.
+fn strands_scene() -> Rgb32f {
+    use lightcraft_color::luminance_2020;
+    let (w, h) = (W, H);
+    let warm = [0.42f32, 0.24, 0.14];
+    let cool = {
+        let c = [0.20f32, 0.26, 0.34];
+        let k = luminance_2020(warm) / luminance_2020(c);
+        c.map(|v| v * k)
+    };
+    Rgb32f::from_fn(w, h, |x, y| {
+        let c = if x < w * 2 / 3 {
+            [0.30, 0.25, 0.20]
+        } else if (x / 3).is_multiple_of(2) {
+            warm
+        } else {
+            cool
+        };
+        let n = [0u32, 1, 2].map(|k| {
+            let mut v = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841) ^ k.wrapping_mul(0xcb1a_b31f);
+            v ^= v >> 13;
+            v = v.wrapping_mul(0x5bd1_e995);
+            v ^= v >> 15;
+            (v & 0xffff) as f32 / 32768.0 - 1.0
+        });
+        let p = [0, 1, 2].map(|k| c[k] * (1.0 + 0.06 * n[k]));
+        let k = luminance_2020(c) / luminance_2020(p);
+        p.map(|v| v * k)
+    })
+}
+
+// Given V3 colour noise reduction, a window holding nothing but colour detail keeps it as the whole
+// render does: both measure the colour noise on the same patches of the whole frame, so the window
+// doesn't take its strands for noise
+#[test]
+fn colour_noise_reduction_measures_the_whole_frame_in_a_window() {
+    let src = strands_scene();
+    let mut s = DevelopSettings::default();
+    controls::set(&mut s, "detail.nrColor", 25.0);
+    let strands = PixelWindow { x: W * 2 / 3 + 40, y: 200, w: 220, h: 200 };
+    let f = render(&src, &SourceInfo::default(), &s, &RenderRequest::fit(W, H)).image;
+    let w = render(&src, &SourceInfo::default(), &s, &RenderRequest { window: Some(strands), ..RenderRequest::fit(W, H) }).image;
+    let (max, mean) = compare_inset(&f, &w, strands, 24);
+    assert!(max <= 2 && mean <= 0.1, "max {max}, mean {mean:.3}");
 }

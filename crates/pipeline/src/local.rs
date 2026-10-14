@@ -4,11 +4,12 @@
 use lightcraft_color::cct::{temp_tint_to_xy, wb_matrix, xy_to_temp_tint};
 use lightcraft_color::{REC2020, luminance_2020};
 use lightcraft_develop::{DevelopSettings, Process};
-use lightcraft_raster::blur::gaussian;
+use lightcraft_raster::blur::{gaussian, gaussian_exact};
 use std::sync::Arc;
 
 use lightcraft_raster::{Plane, Rgb32f, par_join};
 
+use crate::chroma_noise::ChromaNoise;
 use crate::geometry::Frame;
 use crate::{Prepared, Quality, SourceInfo, for_rows, masks, timed};
 
@@ -273,7 +274,7 @@ pub fn base_detail_radius(px_per_long: f64) -> usize {
 pub fn tone_base_detail(s: &DevelopSettings, px_per_long: f64) -> usize {
     match s.process.process() {
         Process::V1 => 0,
-        Process::V2 => base_detail_radius(px_per_long),
+        Process::V2 | Process::V3 => base_detail_radius(px_per_long),
     }
 }
 
@@ -299,11 +300,31 @@ pub struct NrLum {
     pub k: f32,
 }
 
-/// Colour noise reduction: chromaticity blurred by `sigma` px, mixed in by `t`.
+/// Colour noise reduction: chromaticity blurred by `sigma` px, mixed in by `t`. With `eps` (V3) the
+/// blur is a guided filter steered by luminance ([`nr_guide`]), which keeps colour edges, and what
+/// it takes away is put back where it is `keep` times the image's colour noise or more
+/// ([`crate::chroma_noise`]); `keep` is 0 before V3.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NrColor {
     pub sigma: f32,
     pub t: f32,
+    pub eps: Option<f32>,
+    pub keep: f32,
+}
+
+/// Guided colour noise reduction's regularisation at Detail 50, in squared [`nr_guide`] units:
+/// above the guide's noise (σ ≈ 0.005–0.02 on high-ISO raws) and well below a colour edge's
+/// (a yellow light on dark blue: ≈ 0.06), so flat colour is smoothed and edges are kept.
+pub const NR_COLOR_EPS: f32 = 4e-4;
+
+/// How far above the colour noise (in local energy, [`crate::chroma_noise`]) what V3's colour noise
+/// reduction takes away must be for it to be colour detail and stay, at Detail 50 and Amount 25.
+pub const NR_COLOR_KEEP: f32 = 8.0;
+
+/// The guide of colour noise reduction: the cube root of luminance (like L*: a fixed step at
+/// every brightness), which, unlike log luminance, doesn't blow shadow noise up into edges.
+pub fn nr_guide(c: [f32; 3]) -> f32 {
+    luminance_2020(c).max(0.0).cbrt()
 }
 
 /// Noise-reduction parameters at an output long edge of `out_long` px (see [`denoise`]).
@@ -315,10 +336,21 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
         let detail = (s.detail.nr_detail / 100.0) as f32;
         NrLum { sigma: (1.0 + 2.5 * lum) * scale.max(0.4), eps: 0.002 + lum * lum * 0.25 * (1.0 - 0.7 * detail), k: lum.sqrt() }
     });
-    let c = (col > 0.0).then(|| {
-        let sigma = (1.5 + 6.0 * col) * scale.max(0.35) * (1.0 + (s.detail.nr_color_smoothness / 100.0) as f32);
-        let keep = (s.detail.nr_color_detail / 100.0) as f32 * 0.5;
-        NrColor { sigma, t: col * (1.0 - keep) }
+    let smooth = (s.detail.nr_color_smoothness / 100.0) as f32;
+    let detail = (s.detail.nr_color_detail / 100.0) as f32;
+    let c = (col > 0.0).then(|| match s.process.process() {
+        Process::V1 | Process::V2 => {
+            let sigma = (1.5 + 6.0 * col) * scale.max(0.35) * (1.0 + smooth);
+            NrColor { sigma, t: col * (1.0 - detail * 0.5), eps: None, keep: 0.0 }
+        }
+        // full strength from 25, the default; Amount and Smoothness widen the filter;
+        // Detail tightens its edge test and lowers the bar for colour detail (×4 at 0, ÷4 at
+        // 100), Amount raises that bar above 25
+        Process::V3 => {
+            let sigma = (4.0 + 16.0 * col) * scale.max(0.35) * (0.5 + smooth);
+            let detail = 4f32.powf(1.0 - 2.0 * detail);
+            NrColor { sigma, t: (col * 4.0).min(1.0), eps: Some(NR_COLOR_EPS * detail), keep: NR_COLOR_KEEP * detail * (col * 4.0).max(1.0) }
+        }
     });
     (l, c)
 }
@@ -326,31 +358,28 @@ pub fn nr_params(s: &DevelopSettings, src_long: usize, out_long: usize) -> (Opti
 /// Noise reduction at output resolution: luminance via an edge-aware self-guided filter on
 /// log-luminance, colour by blurring chromaticity (rgb / Y) and re-applying the original luminance.
 /// Radii scale with how much the source was downsampled (preview noise is already averaged out).
-pub fn denoise(img: &mut Rgb32f, s: &DevelopSettings, src_long: usize, out_long: usize) {
+/// V3's colour noise reduction keeps colour detail above `noise` (the render's, measured by
+/// [`crate::chroma_noise::for_plan`]); without it, it measures `img`'s own.
+pub fn denoise(img: &mut Rgb32f, s: &DevelopSettings, src_long: usize, out_long: usize, noise: Option<&ChromaNoise>) {
     let (lum, col) = nr_params(s, src_long, out_long);
     let w = img.width;
     if let Some(nr) = lum {
         let _t = crate::profiling().then(std::time::Instant::now);
-        let l = img.map(log_lum);
-        let f = guided(&l, nr.sigma, nr.eps);
-        for_rows(&mut img.data, w, |y, row| {
-            for (x, p) in row.iter_mut().enumerate() {
-                let i = y * w + x;
-                let d = (f.data[i] - l.data[i]) * nr.k;
-                let g = d.exp2();
-                *p = p.map(|v| v * g);
-            }
-        });
+        nr_luminance(img, &nr);
         if let Some(t) = _t {
             eprintln!("    nr luminance: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
         }
     }
     if let Some(nr) = col {
         let _t = crate::profiling().then(std::time::Instant::now);
-        let chroma = img.map(|c| {
-            let y = luminance_2020(c).max(1e-6);
-            [c[0] / y, c[1] / y, c[2] / y]
-        });
+        let chroma = img.map(chromaticity);
+        if let Some(eps) = nr.eps {
+            nr_color_guided(img, &chroma, nr.sigma, eps, nr.t, nr.keep, noise);
+            if let Some(t) = _t {
+                eprintln!("    nr colour (guided): {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
+            }
+            return;
+        }
         let b = gaussian(&chroma, nr.sigma);
         for_rows(&mut img.data, w, |y, row| {
             for (x, p) in row.iter_mut().enumerate() {
@@ -365,6 +394,111 @@ pub fn denoise(img: &mut Rgb32f, s: &DevelopSettings, src_long: usize, out_long:
             eprintln!("    nr colour: {:.1} ms", t.elapsed().as_secs_f64() * 1e3);
         }
     }
+}
+
+/// Luminance noise reduction ([`NrLum`]) in place.
+pub(crate) fn nr_luminance(img: &mut Rgb32f, nr: &NrLum) {
+    let w = img.width;
+    let l = img.map(log_lum);
+    let f = guided(&l, nr.sigma, nr.eps);
+    for_rows(&mut img.data, w, |y, row| {
+        for (x, p) in row.iter_mut().enumerate() {
+            let i = y * w + x;
+            let d = (f.data[i] - l.data[i]) * nr.k;
+            let g = d.exp2();
+            *p = p.map(|v| v * g);
+        }
+    });
+}
+
+/// Chromaticity `rgb / Y` (colour noise reduction works on it and re-applies luminance).
+pub fn chromaticity(c: [f32; 3]) -> [f32; 3] {
+    let y = luminance_2020(c).max(1e-6);
+    [c[0] / y, c[1] / y, c[2] / y]
+}
+
+/// V3 colour noise reduction: each channel of `chroma` (of `img`) through a guided filter steered
+/// by [`nr_guide`] (He et al.: per window `p ≈ a·g + b`, coefficients averaged), with what it takes
+/// away put back where that is colour detail rather than noise ([`keep_weight`]), mixed in by `t`,
+/// with `img`'s luminance re-applied. Where the guide is flat (var ≪ `eps`) colour is averaged;
+/// across a luminance edge the colour follows the edge. The GPU's `nrx_*` kernels mirror this.
+#[allow(clippy::too_many_arguments)]
+fn nr_color_guided(img: &mut Rgb32f, chroma: &Rgb32f, sigma: f32, eps: f32, t: f32, keep: f32, noise: Option<&ChromaNoise>) {
+    let w = img.width;
+    let q = nr_color_filtered(img, chroma, sigma, eps);
+    let e = removed_energy(chroma, &q);
+    let own;
+    let noise = match noise {
+        Some(n) => n,
+        None => {
+            let samples: Vec<(f32, f32)> = img.data.iter().zip(&e.data).map(|(p, e)| (nr_guide(*p), *e)).collect();
+            own = ChromaNoise::from_samples(&samples);
+            &own
+        }
+    };
+    for_rows(&mut img.data, w, |y, row| {
+        for (x, p) in row.iter_mut().enumerate() {
+            let i = y * w + x;
+            let yl = luminance_2020(*p);
+            let k = keep_weight(e.data[i], keep * noise.at(nr_guide(*p)));
+            let (c0, q) = (chroma.data[i], q.data[i]);
+            // near strong edges the filter can overshoot below 0 (`q` is clamped); then the
+            // pixel's luminance is restored exactly (colour noise reduction changes colour, never
+            // brightness)
+            let n = [0, 1, 2].map(|j| c0[j] + (q[j] + (c0[j] - q[j]) * k - c0[j]) * t);
+            let ln = luminance_2020(n);
+            let s = if ln > 1e-6 { yl / ln } else { 0.0 };
+            *p = if ln > 1e-6 { n.map(|v| (v * s).max(0.0)) } else { c0.map(|v| (v * yl).max(0.0)) };
+        }
+    });
+}
+
+/// V3's guided filter of chromaticity `chroma` (of `img`) at `sigma` px, `eps`, clamped at 0.
+pub(crate) fn nr_color_filtered(img: &Rgb32f, chroma: &Rgb32f, sigma: f32, eps: f32) -> Rgb32f {
+    let w = img.width;
+    let g = img.map(|c| {
+        let v = nr_guide(c);
+        [v, v * v, 0.0]
+    });
+    let gp = Rgb32f { width: w, height: img.height, data: chroma.data.iter().zip(&g.data).map(|(c, g)| c.map(|v| v * g[0])).collect() };
+    let ((m_g, m_p), m_gp) = par_join(|| par_join(|| gaussian(&g, sigma), || gaussian(chroma, sigma)), || gaussian(&gp, sigma));
+    drop(gp);
+    let n = m_g.data.len();
+    let (mut a, mut b) = (Rgb32f::new(w, img.height), Rgb32f::new(w, img.height));
+    for i in 0..n {
+        let [mg, mgg, _] = m_g.data[i];
+        let var = (mgg - mg * mg).max(0.0);
+        for k in 0..3 {
+            let ak = (m_gp.data[i][k] - mg * m_p.data[i][k]) / (var + eps);
+            a.data[i][k] = ak;
+            b.data[i][k] = m_p.data[i][k] - ak * mg;
+        }
+    }
+    drop((m_g, m_p, m_gp));
+    let (ma, mb) = par_join(|| gaussian(&a, sigma), || gaussian(&b, sigma));
+    let mut q = ma;
+    for ((q, b), g) in q.data.iter_mut().zip(&mb.data).zip(&g.data) {
+        *q = [0, 1, 2].map(|k| (q[k] * g[0] + b[k]).max(0.0));
+    }
+    q
+}
+
+/// Local energy of what V3's colour noise reduction takes away (`chroma` − its filtered `q`): a
+/// Gaussian of `|chroma − q|²` over [`crate::chroma_noise::KEEP_WINDOW`] px.
+pub(crate) fn removed_energy(chroma: &Rgb32f, q: &Rgb32f) -> Plane {
+    let e = Plane {
+        width: chroma.width,
+        height: chroma.height,
+        data: chroma.data.iter().zip(&q.data).map(|(c, q)| (c[0] - q[0]).powi(2) + (c[1] - q[1]).powi(2) + (c[2] - q[2]).powi(2)).collect(),
+    };
+    gaussian(&e, crate::chroma_noise::KEEP_WINDOW)
+}
+
+/// How much of what V3's colour noise reduction takes away stays: the local Wiener weight
+/// `1 − bar / energy` (0 where the removed energy is no more than `bar`, the colour noise's energy
+/// times [`NrColor::keep`]; towards 1 where it is far above it).
+pub fn keep_weight(energy: f32, bar: f32) -> f32 {
+    if energy > 0.0 && energy.is_finite() { (1.0 - bar / energy).clamp(0.0, 1.0) } else { 0.0 }
 }
 
 pub fn log_lum(c: [f32; 3]) -> f32 {
@@ -387,14 +521,18 @@ pub(crate) struct Planes {
     pub dark: Option<(u32, Arc<Plane>, f32)>,
     /// Blurred chromaticity (local Moiré / Noise).
     pub chroma: Option<(u32, Arc<Rgb32f>)>,
+    /// Process V3's sharpening band ([`SharpenBand::key`]) and its edge map ([`SharpenEdge::key`]).
+    pub sharpen: Option<(u64, Arc<Plane>)>,
+    pub sharpen_edge: Option<(u64, Arc<Plane>)>,
 }
 
 impl Planes {
     /// The planes that still fit an image differing from this one only in noise reduction, close
-    /// enough for a draft: the wide blurs (base, clarity, dehaze, chromaticity). Its `key` matches
-    /// no image, so only another draft takes them.
+    /// enough for a draft: the wide blurs of luminance (base, clarity). Dehaze's dark channel and
+    /// the chromaticity blur follow colour, which colour noise reduction moves (from V3 by a lot),
+    /// so they are redone. Its `key` matches no image, so only another draft takes them.
     pub fn for_other_nr(self) -> Planes {
-        Planes { key: 0, pre_nr: self.pre_nr, log_l: None, texture: None, ..self }
+        Planes { key: 0, pre_nr: self.pre_nr, log_l: None, texture: None, dark: None, chroma: None, sharpen: None, sharpen_edge: None, ..self }
     }
 }
 
@@ -434,6 +572,114 @@ pub fn dark_of(c: [f32; 3]) -> f32 {
 /// Radius of the local Moiré / colour-noise chromaticity blur, as a fraction of the long edge.
 pub const CHROMA_SIGMA: f32 = 0.004;
 
+/// Process V3's sharpening ([`crate::sharpen`]): the filter of the square root of luminance designed
+/// for the settings at the output scale and, with Masking on, the edge map Masking reads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SharpenBand {
+    pub filter: crate::sharpen::Filter,
+    pub edge: Option<SharpenEdge>,
+}
+
+impl SharpenBand {
+    /// Cache key of the band plane.
+    pub fn key(&self) -> u64 {
+        self.filter.key()
+    }
+}
+
+/// Masking's edge map ([`sharpen_edge_plane`]): the gradient of the square root of luminance after a
+/// Gaussian of `pre`, averaged over `post` (output px), per pixel of the photo (`scale` output px
+/// each).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SharpenEdge {
+    pub pre: f32,
+    pub post: f32,
+    pub scale: f32,
+}
+
+impl SharpenEdge {
+    /// Cache key of the edge plane.
+    pub fn key(&self) -> u64 {
+        ((u64::from(self.pre.to_bits()) << 32) | u64::from(self.post.to_bits())).rotate_left(7) ^ u64::from(self.scale.to_bits()) ^ 0x5157_5254
+    }
+}
+
+/// The least Gaussian and average (output px) of Masking's edge map: a preview's are never finer
+/// than a pixel.
+pub const SHARPEN_EDGE_MIN_PX: f32 = 1.0;
+
+/// [`SharpenBand`] of `s` at `px_per_native` output pixels per pixel of the photo's own (Radius is
+/// in those: a preview scales it down with the photo), or `None` (no sharpening,
+/// or a process before V3, which sharpens with the Texture band).
+pub fn sharpen_band(s: &DevelopSettings, px_per_native: f64) -> Option<SharpenBand> {
+    if s.process.process() < Process::V3 {
+        return None;
+    }
+    if s.detail.sharpen_amount == 0.0 && !s.masks.iter().any(|m| m.adjust.sharpness != 0.0) {
+        return None;
+    }
+    let num = |v: f64, lo: f64, hi: f64, def: f64| if v.is_finite() { v.clamp(lo, hi) as f32 } else { def as f32 };
+    let scale = num(px_per_native, 0.01, 4.0, 1.0);
+    let radius = num(s.detail.sharpen_radius, 0.5, 3.0, 1.0);
+    let detail = num(s.detail.sharpen_detail / 100.0, 0.0, 1.0, 0.25);
+    // local Sharpness alone (Amount 0) scales a filter designed at the default
+    let amount = num(s.detail.sharpen_amount, 0.0, 150.0, 40.0);
+    let at = if amount > 0.0 { amount } else { 40.0 };
+    let filter = crate::sharpen::design(at, radius, detail * 100.0, scale)?;
+    let edge = (s.detail.sharpen_masking > 0.0).then(|| SharpenEdge {
+        pre: (crate::sharpen::EDGE_PRE * scale).max(SHARPEN_EDGE_MIN_PX),
+        post: (crate::sharpen::EDGE_POST * scale).max(SHARPEN_EDGE_MIN_PX),
+        scale,
+    });
+    Some(SharpenBand { filter, edge })
+}
+
+/// Process V3's sharpening band of log luminance `l`: the square root of luminance (`2^(l/2)`,
+/// relative to middle grey's) through the filter's separable passes, summed in order, plus its
+/// centre term. The GPU mirrors it.
+pub fn sharpen_band_plane(l: &Plane, f: &crate::sharpen::Filter) -> Plane {
+    let q = sqrt_lum_plane(l);
+    let mut out: Option<Plane> = None;
+    for i in 0..f.n {
+        let Some((h, v)) = f.pass(i) else { continue };
+        let p = lightcraft_raster::blur::convolve_separable(&q, h, v);
+        out = Some(match out {
+            None => p,
+            Some(o) => o.zip_map(&p, |a, b| a + b),
+        });
+    }
+    let out = out.unwrap_or_else(|| Plane::new(l.width, l.height));
+    let c = f.centre;
+    out.zip_map(&q, |a, b| a + c * b)
+}
+
+/// The square root of luminance relative to middle grey's, `2^(l/2)`, of log luminance `l`.
+pub fn sqrt_lum_plane(l: &Plane) -> Plane {
+    l.map(|v| (0.5 * v).exp2())
+}
+
+/// Masking's edge map of log luminance `l` ([`SharpenEdge`]): the gradient (per pixel of the photo)
+/// of the square root of luminance after a Gaussian of `pre`, averaged over `post` (output px). The
+/// GPU mirrors it.
+pub fn sharpen_edge_plane(l: &Plane, e: &SharpenEdge) -> Plane {
+    let (w, h) = (l.width, l.height);
+    if w == 0 || h == 0 {
+        return l.clone();
+    }
+    let g = gaussian_exact(&sqrt_lum_plane(l), e.pre);
+    let k = 0.5 * e.scale;
+    let mut mag = Plane::new(w, h);
+    for_rows(&mut mag.data, w, |y, row| {
+        let (up, down) = (y.saturating_sub(1) * w, (y + 1).min(h - 1) * w);
+        for (x, o) in row.iter_mut().enumerate() {
+            let gx = g.data[y * w + (x + 1).min(w - 1)] - g.data[y * w + x.saturating_sub(1)];
+            let gy = g.data[down + x] - g.data[up + x];
+            *o = gx.hypot(gy) * k;
+        }
+    });
+    gaussian_exact(&mag, e.post)
+}
+
 /// Radii (px) of the spatial planes the settings need (`None` = not needed).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PlaneSigmas {
@@ -450,9 +696,13 @@ pub struct PlaneSigmas {
     pub dark: Option<f32>,
     /// Chromaticity blur for local Moiré / colour noise (Gaussian).
     pub chroma: Option<f32>,
+    /// Process V3's sharpening band ([`sharpen_band`]).
+    pub sharpen: Option<SharpenBand>,
 }
 
-pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneSigmas {
+/// The planes a render of `s` needs at `px_per_long` output px per unit of the source's long edge
+/// (`px_per_native` per pixel of the photo's own).
+pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, px_per_native: f64, q: Quality) -> PlaneSigmas {
     let ppl = px_per_long as f32;
     let local_any = |f: fn(&lightcraft_develop::LocalAdjustments) -> f64| s.masks.iter().any(|m| f(&m.adjust) != 0.0);
     let tone_active =
@@ -465,18 +715,18 @@ pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneS
         if q == Quality::Draft { sigma.min(24.0) } else { sigma }
     });
     let clarity = (s.effects.clarity != 0.0 || local_any(|a| a.clarity)).then(|| (0.012 * ppl).max(1.0));
-    // local Noise and Defringe read the fine detail band too
+    // local Noise and Defringe read the fine detail band too; before V3 sharpening did
+    let sharpen = sharpen_band(s, px_per_native);
     let texture = (s.effects.texture != 0.0
-        || s.detail.sharpen_amount != 0.0
+        || (s.process.process() < Process::V3 && (s.detail.sharpen_amount != 0.0 || local_any(|a| a.sharpness)))
         || local_any(|a| a.texture)
-        || local_any(|a| a.sharpness)
         || local_any(|a| a.noise)
         || s.masks.iter().any(|m| m.adjust.defringe > 0.0))
     .then(|| (0.0018 * ppl).max(0.6));
     let dark = (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze)).then(|| (0.02 * ppl).max(1.0));
     let chroma = (local_any(|a| a.moire) || s.masks.iter().any(|m| m.adjust.noise > 0.0)).then(|| (CHROMA_SIGMA * ppl).max(1.0));
     let base_detail = if base.is_some() { tone_base_detail(s, px_per_long) } else { 0 };
-    PlaneSigmas { base, base_detail, clarity, texture, dark, chroma }
+    PlaneSigmas { base, base_detail, clarity, texture, dark, chroma, sharpen }
 }
 
 /// The spatial planes the per-pixel stage needs for `img` (white-balanced, before exposure),
@@ -488,15 +738,26 @@ pub(crate) fn prepare(
     s: &DevelopSettings,
     frame: &Frame,
     px_per_long: f64,
+    px_per_native: f64,
     q: Quality,
     planes: &mut Planes,
     mattes: Option<&masks::Mattes>,
 ) -> Prepared {
     let log_l = planes.log_l.get_or_insert_with(|| Arc::new(timed("log_l", || img.map(log_lum)))).clone();
-    let PlaneSigmas { base: base_sigma, base_detail, clarity: clarity_sigma, texture: texture_sigma, dark: dark_sigma, chroma: chroma_sigma } =
-        plane_sigmas(s, px_per_long, q);
+    let PlaneSigmas {
+        base: base_sigma,
+        base_detail,
+        clarity: clarity_sigma,
+        texture: texture_sigma,
+        dark: dark_sigma,
+        chroma: chroma_sigma,
+        sharpen: sharpen_band,
+    } = plane_sigmas(s, px_per_long, px_per_native, q);
 
-    let Planes { base: sb, clarity: sc, texture: st, dark: sd, chroma: sch, .. } = planes;
+    let Planes { base: sb, clarity: sc, texture: st, dark: sd, chroma: sch, sharpen: ssh, sharpen_edge: sse, .. } = planes;
+    let sharpen_det = sharpen_band.map(|b| plane_at(ssh, b.key(), || timed("sharpen band", || sharpen_band_plane(&log_l, &b.filter))));
+    let sharpen_edge =
+        sharpen_band.and_then(|b| b.edge).map(|e| plane_at(sse, e.key(), || timed("sharpen edges", || sharpen_edge_plane(&log_l, &e))));
     let chroma_blur = chroma_sigma.map(|sg| match sch {
         Some((k, c)) if *k == sg.to_bits() => c.clone(),
         _ => {
@@ -537,7 +798,7 @@ pub(crate) fn prepare(
     };
     let ev = s.light.exposure as f32;
     let masks = timed("masks", || masks::evaluate(&s.masks, frame, img.width, img.height, &img, &log_l, ev, mattes));
-    Prepared { img, log_l, base, clarity_blur, texture_blur, dark, chroma_blur, air, masks, px_per_long }
+    Prepared { img, log_l, base, clarity_blur, texture_blur, dark, chroma_blur, sharpen_det, sharpen_edge, air, masks, px_per_long }
 }
 
 /// The airlight of the whole output frame, estimated on a small render of it (`proxy_w` px wide):
@@ -641,7 +902,7 @@ mod nr_tests {
         let (v0, m0) = var(&img);
         let mut s = DevelopSettings::default();
         s.detail.nr_luminance = 80.0;
-        denoise(&mut img, &s, 64, 64);
+        denoise(&mut img, &s, 64, 64, None);
         let (v1, m1) = var(&img);
         assert!(v1 < v0 * 0.5, "{v0} -> {v1}");
         assert!((m1 - m0).abs() < 0.01);

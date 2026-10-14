@@ -857,3 +857,130 @@ fn windows_of_a_big_photo_share_one_uploaded_source() {
     lightcraft_gpu::render(&src, &info, &s, &at(1000), Some(&after)).expect("gpu render");
     assert_eq!(lightcraft_gpu::source_uploads() - start, 2);
 }
+
+/// Colour noise reduction on every process (V3: the luminance-guided filter of chromaticity) at
+/// several strengths, details and smoothnesses matches the CPU, and a warm cache never hands one
+/// process the other's noise-reduced image.
+#[test]
+fn colour_noise_reduction_matches_on_every_process() {
+    if !gpu() {
+        return;
+    }
+    let raw = SourceInfo { raw: true, ..Default::default() };
+    let src = scene(2, 2400, 1600);
+    for &(w, h) in &[(720, 480), (2400, 1600)] {
+        let req = RenderRequest::fit(w, h);
+        for p in Process::ALL {
+            for (amount, detail, smooth) in [(10.0, 50.0, 50.0), (25.0, 50.0, 50.0), (60.0, 0.0, 100.0), (100.0, 100.0, 0.0)] {
+                let mut s = DevelopSettings { process: p.version(), ..DevelopSettings::default() };
+                s.detail.nr_color = amount;
+                s.detail.nr_color_detail = detail;
+                s.detail.nr_color_smoothness = smooth;
+                check(&format!("{p:?} colour nr {amount}/{detail}/{smooth} {w}"), &src, &raw, &s, &req);
+            }
+        }
+    }
+    // a window measures the whole frame's colour noise on the GPU as on the CPU
+    let mut s = DevelopSettings::default();
+    s.detail.nr_color = 25.0;
+    let win = lightcraft_pipeline::PixelWindow { x: 900, y: 500, w: 600, h: 400 };
+    check("V3 colour nr window", &src, &raw, &s, &RenderRequest { window: Some(win), ..RenderRequest::fit(2400, 1600) });
+    let cache = lightcraft_pipeline::StageCache::default();
+    let req = RenderRequest::fit(720, 480);
+    for p in [Process::V2, Process::V3, Process::V2, Process::V3] {
+        let mut s = DevelopSettings { process: p.version(), ..DevelopSettings::default() };
+        s.detail.nr_color = 25.0;
+        let warm = lightcraft_gpu::render(&src, &raw, &s, &req, Some(&cache)).expect("gpu");
+        let fresh = lightcraft_gpu::render(&src, &raw, &s, &req, None).expect("gpu");
+        assert_eq!(warm.image, fresh.image, "{p:?}, cached");
+    }
+}
+
+/// Process V3's sharpening (the designed passes, the cap, the shadow fade, Masking at the tone
+/// curve's slope, local Sharpness, the Texture band beside it) and its Masking and Detail previews:
+/// GPU = CPU, whole and windowed.
+#[test]
+fn sharpening_matches() {
+    if !gpu() {
+        return;
+    }
+    let raw = SourceInfo { raw: true, ..Default::default() };
+    let src = noisy(&scene(1, 2400, 1600), 0.03);
+    for &(w, h) in &[(720, 480), (2400, 1600)] {
+        for (amount, detail, masking, radius) in [(40.0, 25.0, 0.0, 1.0), (90.0, 0.0, 30.0, 2.0), (60.0, 70.0, 60.0, 0.5), (150.0, 100.0, 0.0, 3.0)] {
+            let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+            s.detail.sharpen_amount = amount;
+            s.detail.sharpen_detail = detail;
+            s.detail.sharpen_masking = masking;
+            s.detail.sharpen_radius = radius;
+            s.light.exposure = 0.4;
+            s.effects.texture = if masking > 50.0 { 20.0 } else { 0.0 };
+            let name = format!("V3 sharpening {amount}/{radius}/{detail}/{masking} {w}");
+            check(&name, &src, &raw, &s, &RenderRequest::fit(w, h));
+            let win = lightcraft_pipeline::PixelWindow { x: w / 3, y: h / 4, w: w / 3, h: h / 3 };
+            check(&format!("{name} window"), &src, &raw, &s, &RenderRequest { window: Some(win), ..RenderRequest::fit(w, h) });
+            for overlay in [lightcraft_pipeline::Overlay::SharpenMask, lightcraft_pipeline::Overlay::SharpenDetail] {
+                let view = RenderRequest { overlay, ..RenderRequest::fit(w, h) };
+                check(&format!("{name} {overlay:?} view"), &src, &raw, &s, &view);
+            }
+        }
+    }
+    // local Sharpness on its own (Amount 0) and against Amount
+    let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+    s.detail.sharpen_amount = 0.0;
+    s.masks = vec![Mask {
+        components: vec![MaskComponent {
+            name: None,
+            op: MaskOp::Add,
+            invert: false,
+            shape: MaskShape::Linear { start: Point::new(0.5, 0.0), end: Point::new(0.5, 0.9) },
+        }],
+        adjust: lightcraft_develop::LocalAdjustments { sharpness: 0.6, ..Default::default() },
+        ..Default::default()
+    }];
+    check("V3 local Sharpness alone", &src, &raw, &s, &RenderRequest::fit(720, 480));
+    s.detail.sharpen_amount = 70.0;
+    check("V3 local Sharpness and Amount", &src, &raw, &s, &RenderRequest::fit(720, 480));
+}
+
+/// `src` with sensor-like noise (deterministic): per channel, σ = `k`·√v plus a floor.
+fn noisy(src: &Rgb32f, k: f32) -> Arc<Rgb32f> {
+    let mut out = src.clone();
+    let mut x: u32 = 0x9e37_79b9;
+    let mut uniform = move || {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        x as f32 / u32::MAX as f32 - 0.5
+    };
+    for v in out.data.iter_mut().flat_map(|p| p.iter_mut()) {
+        // four uniforms: close to a Gaussian of σ 0.577
+        let g = (uniform() + uniform() + uniform() + uniform()) * 1.732;
+        *v = (*v + g * (k * v.max(0.0).sqrt() + 0.002)).max(0.0);
+    }
+    Arc::new(out)
+}
+
+/// The Option-drag sharpening previews render on the GPU (the Masking mask from the GPU's own planes)
+/// as on the CPU, before process V3 (from the Texture band) and from it.
+#[test]
+fn sharpening_previews_match() {
+    if !gpu() {
+        return;
+    }
+    let raw = SourceInfo { raw: true, ..Default::default() };
+    let src = scene(1, 2400, 1600);
+    for &(w, h) in &[(720, 480), (2400, 1600)] {
+        for (p, masking) in [Process::V2, Process::V3].into_iter().flat_map(|p| [0.0, 30.0, 80.0].map(|m| (p, m))) {
+            let mut s = DevelopSettings { process: p.version(), ..DevelopSettings::default() };
+            s.detail.sharpen_amount = 40.0;
+            s.detail.sharpen_masking = masking;
+            for overlay in
+                [lightcraft_pipeline::Overlay::SharpenMask, lightcraft_pipeline::Overlay::Luminance, lightcraft_pipeline::Overlay::SharpenDetail]
+            {
+                let req = RenderRequest { overlay, ..RenderRequest::fit(w, h) };
+                check(&format!("{p:?} {overlay:?} masking {masking} {w}"), &src, &raw, &s, &req);
+            }
+        }
+    }
+}

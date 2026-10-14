@@ -110,6 +110,8 @@ mod tests_quit_unsaved;
 #[cfg(test)]
 mod tests_scroll;
 #[cfg(test)]
+mod tests_sharpen_preview;
+#[cfg(test)]
 mod tests_switch_library;
 #[cfg(test)]
 mod tests_sync;

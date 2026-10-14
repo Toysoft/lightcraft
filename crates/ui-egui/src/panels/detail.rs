@@ -253,7 +253,9 @@ fn animated_rect(ctx: &egui::Context, anim: &mut bool, target: Rect) -> Rect {
 /// Mask overlays are evaluated from the same mask alpha as the full render; the other diagnostic
 /// overlays either need whole-frame context or deliberately replace the loupe.
 pub(crate) fn overlay_supports_window(overlay: lightcraft_pipeline::Overlay) -> bool {
-    matches!(overlay, lightcraft_pipeline::Overlay::None | lightcraft_pipeline::Overlay::Mask { .. })
+    use lightcraft_pipeline::Overlay;
+    // the sharpening previews are per pixel, from the planes the window render makes itself
+    matches!(overlay, Overlay::None | Overlay::Mask { .. } | Overlay::SharpenMask | Overlay::Luminance | Overlay::SharpenDetail)
 }
 
 /// What a window render of the loupe needs to know about the view it belongs to.
@@ -439,13 +441,19 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     app.image_rect = Some(img_rect);
     // request renders: the loupe at display resolution (drafts during drags)
     let interacting = app.session.interaction.is_some();
-    let scale = if interacting { 0.6 } else { 1.0 };
+    let overlay = view_overlay(app, &d);
+    // an Option-drag preview (the sharpening mask, grayscale) is what is being judged while the
+    // slider moves: full size, not the 60 % draft the photo gets during other drags
+    let preview = matches!(
+        overlay,
+        lightcraft_pipeline::Overlay::SharpenMask | lightcraft_pipeline::Overlay::Luminance | lightcraft_pipeline::Overlay::SharpenDetail
+    );
+    let scale = if interacting && !preview { 0.6 } else { 1.0 };
     // render at the final size: a click-zoom animation only changes how the result is drawn
     let native_long = native[0].max(native[1]);
     let drawn_long = target_rect.width().max(target_rect.height()) * ppp;
     // the whole frame at about canvas size; the zoomed part of it is a window render (below)
     let look = d.hash64();
-    let overlay = view_overlay(app, &d);
     // Diagnostic views that need whole-frame context, soft proofing, or reads too far for one
     // window still render the whole frame at the size it is drawn. A mask overlay is window-safe.
     let sizes = crate::region::ViewSizes {
@@ -1267,6 +1275,14 @@ pub(crate) fn view_overlay(app: &LightcraftApp, d: &DevelopSettings) -> lightcra
         return Overlay::Spots(app.ui.spots_threshold.clamp(0.0, 100.0).round() as u8);
     }
     let edit = app.ui.right == RightPanel::Edit;
+    // Option-drag on a sharpening slider (and only while that drag lasts)
+    if edit && let Some(id) = app.ui.option_preview.filter(|id| app.ui.dragging_control.as_deref() == Some(*id)) {
+        return match id {
+            "detail.sharpenMasking" => Overlay::SharpenMask,
+            "detail.sharpenRadius" | "detail.sharpenDetail" => Overlay::SharpenDetail,
+            _ => Overlay::Luminance,
+        };
+    }
     if edit && app.ui.point_color_visualize && app.ui.flyout_open("pointColor") && app.ui.point_color < d.point_colors.len() {
         return Overlay::PointColorRange(app.ui.point_color as u8);
     }

@@ -41,6 +41,28 @@ pub(crate) fn control(app: &mut LightcraftApp, ui: &mut egui::Ui, d: &DevelopSet
     let v = controls::get(d, id).unwrap_or(spec.default);
     let out = slider(ui, spec, v, enabled, None);
     apply_slider_out(app, spec, out, |app, v| app.run("develop.set", json!({"control": id, "value": v})));
+    option_preview(app, ui, spec.id);
+}
+
+/// Sliders that show a diagnostic view in the loupe while dragged with Option (Alt) held: Masking the sharpening mask (white sharpened, black protected), Radius and Detail the
+/// change sharpening makes in grey, Amount the photo in grayscale.
+pub(crate) const OPTION_PREVIEWS: [&str; 4] = ["detail.sharpenAmount", "detail.sharpenRadius", "detail.sharpenDetail", "detail.sharpenMasking"];
+
+/// Keep [`crate::state::UiState::option_preview`] in step with slider `id`: set while it is dragged
+/// with Option held, cleared as soon as Option is released or the drag ends. The develop settings
+/// are untouched, so exports and history never see it.
+fn option_preview(app: &mut LightcraftApp, ui: &egui::Ui, id: &'static str) {
+    let Some(&id) = OPTION_PREVIEWS.iter().find(|p| **p == id) else { return };
+    let held = app.ui.dragging_control.as_deref() == Some(id) && ui.input(|i| i.modifiers.alt);
+    if held {
+        if app.ui.option_preview != Some(id) {
+            app.ui.option_preview = Some(id);
+            ui.ctx().request_repaint();
+        }
+    } else if app.ui.option_preview == Some(id) {
+        app.ui.option_preview = None;
+        ui.ctx().request_repaint();
+    }
 }
 
 /// Relative temperature scale for rendered (non-raw) files: −100..100 ↔ Kelvin via mired shift.

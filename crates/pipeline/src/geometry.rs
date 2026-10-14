@@ -250,10 +250,38 @@ impl Frame {
         let oriented = if self.orient == Orientation::Normal { None } else { Some(src.oriented(self.orient)) };
         let o = oriented.as_ref().unwrap_or(src);
         let plan = self.sample_plan(src.width, src.height, w, h);
-        let base = match plan.prefilter {
-            Some((nw, nh)) => std::borrow::Cow::Owned(resize(o, nw, nh, Filter::Mitchell)),
-            None => std::borrow::Cow::Borrowed(o),
-        };
+        let base = prefiltered(o, &plan);
+        if matches!(plan.mode, SampleMode::Copy) {
+            return base.into_owned();
+        }
+        self.resample(&base, &plan, w, h)
+    }
+
+    /// [`Frame::sample`] of each of `wins` of this frame's `full_w × full_h` output (what a
+    /// render of that window samples), orienting and prefiltering the source once for all.
+    pub fn sample_windows(&self, src: &Rgb32f, full_w: usize, full_h: usize, wins: &[crate::PixelWindow]) -> Vec<Rgb32f> {
+        let oriented = if self.orient == Orientation::Normal { None } else { Some(src.oriented(self.orient)) };
+        let o = oriented.as_ref().unwrap_or(src);
+        let mut base: Option<(Option<(usize, usize)>, std::borrow::Cow<'_, Rgb32f>)> = None;
+        wins.iter()
+            .map(|win| {
+                let f = self.window(full_w, full_h, *win);
+                let plan = f.sample_plan(src.width, src.height, win.w, win.h);
+                // (a window's prefilter is the whole frame's, unless rounding moves it a pixel)
+                if base.as_ref().is_none_or(|(p, _)| *p != plan.prefilter) {
+                    base = Some((plan.prefilter, prefiltered(o, &plan)));
+                }
+                match &base {
+                    Some((_, b)) if matches!(plan.mode, SampleMode::Copy) => b.clone().into_owned(),
+                    Some((_, b)) => f.resample(b, &plan, win.w, win.h),
+                    None => Rgb32f::new(win.w, win.h),
+                }
+            })
+            .collect()
+    }
+
+    /// The bilinear (or warped) resample of [`Frame::sample`] from its prefiltered `base`.
+    fn resample(&self, base: &Rgb32f, plan: &SamplePlan, w: usize, h: usize) -> Rgb32f {
         let affine = |xf: Affine| {
             let mut out = Rgb32f::new(w, h);
             par_rows(&mut out.data, w, |y, row| {
@@ -264,12 +292,12 @@ impl Frame {
             });
             out
         };
-        match (plan.mode, self.warp.as_ref()) {
-            (SampleMode::Copy, _) => base.into_owned(),
-            (SampleMode::Warp(o2t), Some(warp)) => sample_warped(&base, plan.sx, plan.sy, warp, o2t, w, h),
+        match (&plan.mode, self.warp.as_ref()) {
+            (SampleMode::Copy, _) => base.clone(),
+            (SampleMode::Warp(o2t), Some(warp)) => sample_warped(base, plan.sx, plan.sy, warp, *o2t, w, h),
             // `sample_plan` plans a warp only when there is one; without it the same mapping is affine
-            (SampleMode::Warp(o2t), None) => affine(Affine::scale(plan.sx, plan.sy) * o2t),
-            (SampleMode::Affine(xf), _) => affine(xf),
+            (SampleMode::Warp(o2t), None) => affine(Affine::scale(plan.sx, plan.sy) * *o2t),
+            (SampleMode::Affine(xf), _) => affine(*xf),
         }
     }
 
@@ -281,6 +309,14 @@ impl Frame {
             let q = back.apply(p);
             Point::new(q.x / self.ow, q.y / self.oh)
         })
+    }
+}
+
+/// The oriented source `o` area-downscaled as `plan` prefilters it (or `o` itself).
+fn prefiltered<'a>(o: &'a Rgb32f, plan: &SamplePlan) -> std::borrow::Cow<'a, Rgb32f> {
+    match plan.prefilter {
+        Some((nw, nh)) => std::borrow::Cow::Owned(resize(o, nw, nh, Filter::Mitchell)),
+        None => std::borrow::Cow::Borrowed(o),
     }
 }
 

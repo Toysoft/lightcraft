@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use lightcraft_develop::DevelopSettings;
 use lightcraft_geom::Orientation;
+use lightcraft_pipeline::chroma_noise::{self, ChromaNoise};
 use lightcraft_pipeline::finish::{FinishParams, MASK_TERMS, mask_terms};
 use lightcraft_pipeline::geometry::SampleMode;
 use lightcraft_pipeline::local::plane_at;
@@ -46,6 +47,9 @@ struct Planes {
     texture: Option<(u32, Arc<Buf>)>,
     dark: Option<(u32, Arc<Buf>, f32)>,
     chroma: Option<(u32, Arc<Buf>)>,
+    /// Process V3's sharpening band and its edge map (`local::Planes`).
+    sharpen: Option<(u64, Arc<Buf>)>,
+    sharpen_edge: Option<(u64, Arc<Buf>)>,
 }
 
 impl GpuStages {
@@ -106,6 +110,8 @@ impl GpuStages {
             p.clarity.iter().for_each(|(_, b)| add(b));
             p.texture.iter().for_each(|(_, b)| add(b));
             p.dark.iter().for_each(|(_, b, _)| add(b));
+            p.sharpen.iter().for_each(|(_, b)| add(b));
+            p.sharpen_edge.iter().for_each(|(_, b)| add(b));
         }
         if let Some((_, b)) = &*self.source.lock().unwrap_or_else(|e| e.into_inner()) {
             add(b);
@@ -262,6 +268,32 @@ pub(crate) fn gaussian(cx: &mut Cx<'_>, src: &Buf, w: usize, h: usize, nc: usize
     let last = (passes.len() - 1) % 2;
     let [a, b] = std::mem::replace(&mut bufs, [cx.gpu.buffer(0), cx.gpu.buffer(0)]);
     if last == 0 { a } else { b }
+}
+
+/// Exact separable Gaussian of a plane (`lightcraft_raster::blur::gaussian_exact`).
+fn gaussian_exact(cx: &mut Cx<'_>, src: &Buf, w: usize, h: usize, sigma: f32) -> Buf {
+    let taps = lightcraft_raster::blur::gaussian_taps(sigma);
+    convolve_separable(cx, src, w, h, &taps, &taps)
+}
+
+/// A plane through taps `th` along its rows, then `tv` along its columns
+/// (`lightcraft_raster::blur::convolve_separable`).
+fn convolve_separable(cx: &mut Cx<'_>, src: &Buf, w: usize, h: usize, th: &[f32], tv: &[f32]) -> Buf {
+    if w * h == 0 || th.is_empty() || tv.is_empty() {
+        return cx.copy(src);
+    }
+    let odd = |t: &[f32]| t.len() - (1 - t.len() % 2);
+    let (th, tv) = (&th[..odd(th)], &tv[..odd(tv)]);
+    let params = |t: &[f32]| {
+        let mut p = vec![w as u32, h as u32, (t.len() / 2) as u32];
+        p.extend(t.iter().map(|t| t.to_bits()));
+        p
+    };
+    let a = cx.gpu.buffer(w * h);
+    cx.run("conv_h", &params(th), &[Some(src), Some(&a)], groups2(w, h, [16, 16]));
+    let b = cx.gpu.buffer(w * h);
+    cx.run("conv_v", &params(tv), &[Some(&a), Some(&b)], groups2(w, h, [16, 16]));
+    b
 }
 
 /// Resample taps of `lightcraft_raster::resample::resize`, packed for the `resize_*` kernels.
@@ -643,16 +675,22 @@ pub fn render(
     lap("sample", &mut t, &mut cx);
 
     // 2. white balance, defringe, spots, noise reduction
-    let lin = match cached.as_ref().and_then(|e| e.lin.clone()).filter(|(k, _)| *k == plan.lin_key) {
-        Some((_, b)) => b,
-        None => Arc::new(linear(&mut cx, &sampled, info, &plan, &mut host)),
+    // (the colour noise is measured on the whole frame, cached, as on the CPU; a draft standing in
+    // another measurement caches its image under a key of its own)
+    let noise = chroma_noise::for_plan(src, info, &plan, req.quality == lightcraft_pipeline::Quality::Draft);
+    let (lin, lin_key) = match cached.as_ref().and_then(|e| e.lin.clone()).filter(|(k, _)| *k == plan.lin_key) {
+        Some((_, b)) => (b, plan.lin_key),
+        None => {
+            let lin = Arc::new(linear(&mut cx, &sampled, info, &plan, &mut host, noise.map(|m| m.noise)));
+            (lin, chroma_noise::Measured::lin_key(noise.as_ref(), plan.lin_key))
+        }
     };
     lap("wb/nr", &mut t, &mut cx);
 
     // 3. spatial planes
     let mut planes = match cached.map(|e| e.planes) {
-        Some(p) if p.key == plan.lin_key => p,
-        _ => Planes { key: plan.lin_key, ..Default::default() },
+        Some(p) if p.key == lin_key => p,
+        _ => Planes { key: lin_key, ..Default::default() },
     };
     let mut prep = prepare(&mut cx, &lin, &plan, req, &mut planes);
     // a window dehazes with the whole frame's airlight
@@ -661,7 +699,7 @@ pub fn render(
     }
     lap("planes", &mut t, &mut cx);
     if let Some(c) = stages {
-        c.put(Entry { src: src.clone(), geo: plan.geo, sampled, lin: Some((plan.lin_key, lin.clone())), planes });
+        c.put(Entry { src: src.clone(), geo: plan.geo, sampled, lin: Some((lin_key, lin.clone())), planes });
     }
 
     // 4. masks
@@ -678,7 +716,19 @@ pub fn render(
         texture: prep.texture.is_some(),
         dark: prep.dark.is_some(),
         chroma: masks.is_some() && prep.chroma.is_some(),
+        sharpen: prep.sharpen.is_some(),
+        sharpen_edge: prep.sharpen_edge.is_some(),
     };
+    // process V3's sharpening planes ride in the `tex` binding after the Texture band (the kernel has
+    // no binding to spare)
+    let packed = prep.sharpen.as_ref().map(|d| {
+        let stride = present.tex_stride();
+        let out = cx.gpu.buffer(n * stride as usize);
+        let first: &Buf = prep.texture.as_deref().unwrap_or(&prep.log_l);
+        let edge = prep.sharpen_edge.as_deref();
+        map(&mut cx, "pack_tex", n, &[stride, edge.is_some() as u32], [Some(first), Some(d), edge], &out);
+        out
+    });
     let (p, aux) = finish_block(&fp, &terms, &present);
     let aux = gpu.upload(&aux);
     // cleared, so that work which never ran cannot pass for an image (see the check below)
@@ -701,7 +751,7 @@ pub fn render(
                 Some(&prep.log_l),
                 Some(&prep.base),
                 prep.clarity.as_deref(),
-                prep.texture.as_deref(),
+                packed.as_ref().or(prep.texture.as_deref()),
                 prep.dark.as_deref(),
                 masks.as_ref(),
                 Some(&aux),
@@ -739,6 +789,41 @@ pub fn render(
     } else {
         None
     };
+    // the sharpening previews' plane, from the planes this render made (read back with the image)
+    let sharpen_view = match (req.overlay, prep.texture.as_ref()) {
+        // `finish::sharpen_view`: Masking's weight at the photo's tones
+        (lightcraft_pipeline::Overlay::SharpenMask, _) if prep.sharpen.is_some() => match (fp.sharpen_v3, prep.sharpen_edge.as_deref()) {
+            (Some(v3), Some(edge)) => {
+                let m = cx.gpu.buffer(n);
+                let tone = gpu.upload(fp.tone.lut());
+                map(&mut cx, "sharpen_view_k", n, &[v3.mask_t.to_bits(), fp.ev.to_bits()], [Some(edge), Some(&prep.log_l), Some(&tone)], &m);
+                Some(m)
+            }
+            // no Masking: everything is sharpened
+            _ => Some(gpu.upload(&vec![1f32; n])),
+        },
+        // `finish::sharpen_detail_view`
+        (lightcraft_pipeline::Overlay::SharpenDetail, _) if let (Some(b), Some(v3)) = (prep.sharpen.as_deref(), fp.sharpen_v3) => {
+            let m = cx.gpu.buffer(n);
+            let tone = gpu.upload(fp.tone.lut());
+            map(&mut cx, "sharpen_detail_k", n, &[fp.ev.to_bits(), v3.limit.to_bits()], [Some(&prep.log_l), Some(b), Some(&tone)], &m);
+            Some(m)
+        }
+        // before process V3: `visualize::sharpen_detail` and `visualize::sharpen_mask` of the Texture band
+        (lightcraft_pipeline::Overlay::SharpenDetail, Some(band)) => {
+            let m = cx.gpu.buffer(n);
+            let k = lightcraft_pipeline::visualize::SHARPEN_DETAIL_VIEW;
+            map(&mut cx, "detail_view_k", n, &[k.to_bits()], [Some(&prep.log_l), Some(band), None], &m);
+            Some(m)
+        }
+        (lightcraft_pipeline::Overlay::SharpenMask, Some(band)) => {
+            let m = cx.gpu.buffer(n);
+            let k = (plan.settings.detail.sharpen_masking / 100.0) as f32;
+            map(&mut cx, "sharpen_mask_k", n, &[k.to_bits()], [Some(&prep.log_l), Some(band), None], &m);
+            Some(m)
+        }
+        _ => None,
+    };
     let data: Vec<[u8; 4]> = cx.read(&out, n);
     let image = Rgba8 { width: w, height: h, data };
     lap("finish + readback", &mut t, &mut cx);
@@ -774,6 +859,7 @@ pub fn render(
             lightcraft_pipeline::masks::evaluate_one(m, &plan.frame, w, h, &img, &l, s.light.exposure as f32, plan.mattes.as_deref())
         }
     });
+    let overlay_mask = overlay_mask.or_else(|| sharpen_view.map(|b| cx.read_plane(&b, w, h)));
     lightcraft_pipeline::visualize::apply(&mut image, req.overlay, &plan, overlay_mask.as_ref(), all_overlay_alphas.as_deref());
     // spots grew the window the render worked on: cut it back to the request
     if let Some(k) = plan.keep {
@@ -788,7 +874,7 @@ fn unwritten(data: &[[u8; 4]]) -> usize {
 }
 
 /// The white-balanced, retouched, denoised image.
-fn linear(cx: &mut Cx<'_>, sampled: &Buf, info: &SourceInfo, plan: &Plan<'_>, host: &mut Host) -> Buf {
+fn linear(cx: &mut Cx<'_>, sampled: &Buf, info: &SourceInfo, plan: &Plan<'_>, host: &mut Host, noise: Option<ChromaNoise>) -> Buf {
     let (w, h) = (plan.w, plan.h);
     let n = w * h;
     let s = &*plan.settings;
@@ -816,11 +902,13 @@ fn linear(cx: &mut Cx<'_>, sampled: &Buf, info: &SourceInfo, plan: &Plan<'_>, ho
             eyed
         }
     };
-    denoise(cx, img, plan)
+    denoise(cx, img, plan, noise)
 }
 
-/// Noise reduction (`local::denoise`).
-fn denoise(cx: &mut Cx<'_>, img: Buf, plan: &Plan<'_>) -> Buf {
+/// Noise reduction (`local::denoise`), V3's colour noise reduction keeping colour detail above
+/// `noise` (`chroma_noise::for_plan`, which measures it for every V3 render that reduces colour
+/// noise; without it, nothing is kept, as before the measurement).
+fn denoise(cx: &mut Cx<'_>, img: Buf, plan: &Plan<'_>, noise: Option<ChromaNoise>) -> Buf {
     let (w, h) = (plan.w, plan.h);
     let n = w * h;
     let (lum, col) = local::nr_params(&plan.settings, plan.src_long, plan.frame.output_long(w, h));
@@ -836,12 +924,55 @@ fn denoise(cx: &mut Cx<'_>, img: Buf, plan: &Plan<'_>) -> Buf {
     if let Some(nr) = col {
         let chroma = cx.gpu.buffer(n * 3);
         map(cx, "chroma_k", n, &[], [Some(&img), None, None], &chroma);
+        if let Some(eps) = nr.eps {
+            let noise = noise.unwrap_or(ChromaNoise([f32::MAX; chroma_noise::BANDS]));
+            return nr_color_guided(cx, &img, &chroma, w, h, &nr, eps, &noise);
+        }
         let b = gaussian(cx, &chroma, w, h, 3, nr.sigma);
         let out = cx.gpu.buffer(n * 3);
         map(cx, "nr_col", n, &[nr.t.to_bits()], [Some(&img), Some(&chroma), Some(&b)], &out);
         img = out;
     }
     img
+}
+
+/// V3 colour noise reduction (`local::nr_color_guided`): the chromaticity of `img` through a guided
+/// filter steered by `local::nr_guide`, what it takes away kept above `noise`, mixed in by `nr.t`.
+#[allow(clippy::too_many_arguments)]
+fn nr_color_guided(cx: &mut Cx<'_>, img: &Buf, chroma: &Buf, w: usize, h: usize, nr: &local::NrColor, eps: f32, noise: &ChromaNoise) -> Buf {
+    let n = w * h;
+    let sigma = nr.sigma;
+    let (m_g, m_p, m_gp) = {
+        let gg = cx.gpu.buffer(2 * n);
+        map(cx, "nrx_pre", n, &[0], [Some(img), Some(chroma), None], &gg);
+        let gp = cx.gpu.buffer(3 * n);
+        map(cx, "nrx_pre", n, &[1], [Some(img), Some(chroma), None], &gp);
+        (gaussian(cx, &gg, w, h, 2, sigma), gaussian(cx, chroma, w, h, 3, sigma), gaussian(cx, &gp, w, h, 3, sigma))
+    };
+    let coeffs = |cx: &mut Cx<'_>, which: u32| {
+        let out = cx.gpu.buffer(3 * n);
+        map(cx, "nrx_ab", n, &[eps.to_bits(), which], [Some(&m_g), Some(&m_p), Some(&m_gp)], &out);
+        out
+    };
+    let (a, b) = (coeffs(cx, 0), coeffs(cx, 1));
+    drop((m_g, m_p, m_gp));
+    let ma = gaussian(cx, &a, w, h, 3, sigma);
+    drop(a);
+    let mb = gaussian(cx, &b, w, h, 3, sigma);
+    drop(b);
+    let q = cx.gpu.buffer(3 * n);
+    map(cx, "nrx_q", n, &[], [Some(img), Some(&ma), Some(&mb)], &q);
+    drop((ma, mb));
+    let e = {
+        let e0 = cx.gpu.buffer(n);
+        map(cx, "nrx_energy", n, &[], [Some(chroma), Some(&q), None], &e0);
+        gaussian(cx, &e0, w, h, 1, chroma_noise::KEEP_WINDOW)
+    };
+    let mut p = vec![nr.t.to_bits(), nr.keep.to_bits()];
+    p.extend(noise.0.iter().map(|v| v.to_bits()));
+    let out = cx.gpu.buffer(3 * n);
+    map(cx, "nrx_apply", n, &p, [Some(img), Some(&q), Some(&e)], &out);
+    out
 }
 
 /// The planes the per-pixel stage reads.
@@ -853,6 +984,9 @@ struct Prep {
     dark: Option<Arc<Buf>>,
     /// Blurred chromaticity (local Moiré / Noise).
     chroma: Option<Arc<Buf>>,
+    /// Process V3's sharpening band and, with Masking, its edge map.
+    sharpen: Option<Arc<Buf>>,
+    sharpen_edge: Option<Arc<Buf>>,
     air: f32,
 }
 
@@ -860,7 +994,7 @@ struct Prep {
 fn prepare(cx: &mut Cx<'_>, lin: &Buf, plan: &Plan<'_>, req: &RenderRequest, planes: &mut Planes) -> Prep {
     let (w, h) = (plan.w, plan.h);
     let n = w * h;
-    let sig = local::plane_sigmas(&plan.settings, plan.px_per_long, req.quality);
+    let sig = local::plane_sigmas(&plan.settings, plan.px_per_long, plan.px_per_native, req.quality);
     let log_l = match &planes.log_l {
         Some(b) => b.clone(),
         None => {
@@ -880,6 +1014,37 @@ fn prepare(cx: &mut Cx<'_>, lin: &Buf, plan: &Plan<'_>, req: &RenderRequest, pla
     };
     let clarity = sig.clarity.map(|sg| plane_at(&mut planes.clarity, sg.to_bits(), || guided_fast(cx, &log_l, w, h, sg, local::CLARITY_EPS)));
     let texture = sig.texture.map(|sg| plane_at(&mut planes.texture, sg.to_bits(), || gaussian(cx, &log_l, w, h, 1, sg)));
+    // `local::sharpen_band_plane`: the square root of luminance through the filter's passes
+    let sharpen = sig.sharpen.map(|b| {
+        plane_at(&mut planes.sharpen, b.key(), || {
+            let f = &b.filter;
+            let q = cx.gpu.buffer(n);
+            map(cx, "sqrt_lum_k", n, &[], [Some(&log_l), None, None], &q);
+            let mut out: Option<Buf> = None;
+            for i in 0..f.n {
+                let Some((th, tv)) = f.pass(i) else { continue };
+                let p = convolve_separable(cx, &q, w, h, th, tv);
+                match &out {
+                    None => out = Some(p),
+                    Some(o) => map(cx, "axpy_k", n, &[1f32.to_bits()], [Some(&p), None, None], o),
+                }
+            }
+            let out = out.unwrap_or_else(|| cx.zeroed(n));
+            map(cx, "axpy_k", n, &[f.centre.to_bits()], [Some(&q), None, None], &out);
+            out
+        })
+    });
+    // `local::sharpen_edge_plane`
+    let sharpen_edge = sig.sharpen.and_then(|b| b.edge).map(|e| {
+        plane_at(&mut planes.sharpen_edge, e.key(), || {
+            let q = cx.gpu.buffer(n);
+            map(cx, "sqrt_lum_k", n, &[], [Some(&log_l), None, None], &q);
+            let g = gaussian_exact(cx, &q, w, h, e.pre);
+            let m = cx.gpu.buffer(n);
+            cx.run("grad_k", &[w as u32, h as u32, (0.5 * e.scale).to_bits()], &[Some(&g), Some(&m)], groups2(w, h, [16, 16]));
+            gaussian_exact(cx, &m, w, h, e.post)
+        })
+    });
     let (dark, air) = match sig.dark {
         None => (None, 1.0),
         Some(sg) => match &planes.dark {
@@ -907,7 +1072,7 @@ fn prepare(cx: &mut Cx<'_>, lin: &Buf, plan: &Plan<'_>, req: &RenderRequest, pla
             gaussian(cx, &ch, w, h, 3, sg)
         })
     });
-    Prep { log_l, base, clarity, texture, dark, chroma, air }
+    Prep { log_l, base, clarity, texture, dark, chroma, sharpen, sharpen_edge, air }
 }
 
 /// Most brush dabs the mask kernel evaluates per pixel (more: the CPU rasterizes the brush).

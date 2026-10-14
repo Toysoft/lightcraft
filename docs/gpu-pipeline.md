@@ -140,10 +140,15 @@ walks the drive.
   crop/straighten/flip affine or the full lens + perspective warp), `resize` (separable resample
   with the CPU's taps; Mitchell prefilter, box/bilinear for the fast guided filter), `blur` (box
   passes, three each way = the CPU's Gaussian: horizontal ones sum each pixel's window, so adjacent
-  threads read adjacent pixels; vertical ones slide running sums down chunks of a column), `map`
-  (log luminance, dark channel, guided-filter steps, white balance, luminance / colour NR, airlight
-  sampling), `mask` (linear / radial / luminance / colour range / brush shapes, combine, finalize),
-  `finish` (the whole per-pixel stage) — each mirrors a named CPU function.
+  threads read adjacent pixels; vertical ones slide running sums down chunks of a column; `conv_h` /
+  `conv_v` with exact taps, summed in the CPU's order: process V3's sharpening passes and the
+  Gaussians of its edge map, `blur::convolve_separable`; `grad_k`, the edge map's gradient), `map`
+  (log luminance, dark channel, guided-filter steps, white balance, luminance / colour NR (V3's
+  guided colour NR: `nrx_*`), airlight sampling, the sharpening band's square root of luminance and
+  the Option-drag sharpening previews; `pack_tex` puts V3's sharpening band and edge map in the
+  `finish` kernel's `tex` binding after the Texture band, as it has no binding to spare), `mask`
+  (linear / radial / luminance / colour range / brush shapes, combine, finalize), `finish` (the
+  whole per-pixel stage) — each mirrors a named CPU function.
 - Per-stage hybrid: defringe and spot removal (rare, CPU-only for now) download the resampled image,
   run on the CPU and upload; heuristic mask shapes (Sky, Subject, Background, …) and brushes of more
   than 4096 dabs are evaluated on the CPU and uploaded; sources over the buffer limit are resampled

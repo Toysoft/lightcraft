@@ -32,6 +32,15 @@ const FIELDS: &[(&str, usize)] = &[
     ("HAS_TEX", 1),
     ("HAS_DARK", 1),
     ("HAS_CHROMA", 1),
+    // values a pixel of the `tex` binding holds (`Present::tex_stride`)
+    ("TEX_STRIDE", 1),
+    // process V3's sharpening (`finish::SharpenParams`): the render is V3 (the earlier sharpening
+    // never runs), its band (and with Masking, its edge map) is there, and [designed Amount, cap
+    // there, cap at Amount 40, Masking threshold]
+    ("SHARP_V3", 1),
+    ("HAS_SHARP", 1),
+    ("HAS_SHARP_EDGE", 1),
+    ("SHARPEN_V3", 4),
     ("OPS_IDENTITY", 1),
     ("VIBRANCE", 1),
     ("SATURATION", 1),
@@ -136,6 +145,18 @@ pub struct Present {
     pub dark: bool,
     /// The blurred chromaticity follows the mask planes in the `masks` buffer.
     pub chroma: bool,
+    /// Process V3's sharpening band (and, with Masking, its edge map) is packed into the `tex`
+    /// binding after the Texture band (`pack_tex`).
+    pub sharpen: bool,
+    pub sharpen_edge: bool,
+}
+
+impl Present {
+    /// Values a pixel of the `finish` kernel's `tex` binding: the Texture band (or any plane), then
+    /// under V3 sharpening its band and, with Masking, its edge map.
+    pub fn tex_stride(&self) -> u32 {
+        if self.sharpen { 2 + self.sharpen_edge as u32 } else { 1 }
+    }
 }
 
 /// The `finish` kernel's parameter block and auxiliary table (tone LUT | chroma curve | sRGB LUT | curve LUTs |
@@ -181,6 +202,13 @@ pub fn finish_block(fp: &FinishParams, masks: &[[f32; MASK_TERMS]], present: &Pr
     p.b("HAS_TEX", present.texture);
     p.b("HAS_DARK", present.dark);
     p.b("HAS_CHROMA", present.chroma);
+    p.u("TEX_STRIDE", present.tex_stride());
+    p.b("SHARP_V3", fp.sharpen_v3.is_some());
+    if let Some(v3) = fp.sharpen_v3 {
+        p.b("HAS_SHARP", present.sharpen);
+        p.b("HAS_SHARP_EDGE", present.sharpen && present.sharpen_edge);
+        p.fs("SHARPEN_V3", &[v3.amount, v3.limit, v3.limit40, v3.mask_t]);
+    }
 
     let ops = &fp.ops;
     p.b("OPS_IDENTITY", ops.is_identity());

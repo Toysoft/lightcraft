@@ -20,6 +20,82 @@ fn smooth(e0: f32, e1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// How much sharpening a pixel gets (0..1) under Masking `masking` (0..1) from its detail `det` (log
+/// luminance minus the sharpening band's blur): everything at 0, only stronger edges as it rises. The
+/// render and the Masking preview ([`crate::Overlay::SharpenMask`]) both use it.
+#[inline]
+pub(crate) fn sharpen_mask_weight(masking: f32, det: f32) -> f32 {
+    if masking > 0.0 { smooth(masking * 0.25, masking * 0.25 + 0.15, det.abs()) } else { 1.0 }
+}
+
+/// Process V3's Masking preview ([`crate::Overlay::SharpenMask`]): Masking's weight of every pixel
+/// of a render of `s` prepared as `p` at its tone before local adjustments (log luminance plus
+/// exposure, through `tone`; [`crate::sharpen::mask_weight`]): white where sharpening is applied,
+/// black where Masking protects. The GPU's `sharpen_view_k` mirrors it.
+pub(crate) fn sharpen_view(p: &Prepared, s: &DevelopSettings, tone: &ToneMap) -> lightcraft_raster::Plane {
+    let t = crate::sharpen::mask_t(s.detail.sharpen_masking as f32);
+    let ev = s.light.exposure as f32;
+    let (w, h) = (p.img.width, p.img.height);
+    let mut out = lightcraft_raster::Plane::filled(w, h, 1.0);
+    if let Some(e) = p.sharpen_edge.as_ref() {
+        for_rows(&mut out.data, w, |y, row| {
+            for (x, o) in row.iter_mut().enumerate() {
+                let i = y * w + x;
+                if let (Some(&e), Some(&l)) = (e.data.get(i), p.log_l.data.get(i)) {
+                    *o = sharpen_view_at(e, l, ev, t, |y| tone.apply(y));
+                }
+            }
+        });
+    }
+    out
+}
+
+/// Masking's weight at a pixel of edge gradient `e` and log luminance `l` (before exposure `ev`),
+/// threshold `t`, tone map `apply`.
+#[inline]
+pub(crate) fn sharpen_view_at(e: f32, l: f32, ev: f32, t: f32, apply: impl Fn(f32) -> f32) -> f32 {
+    let y = crate::tone::GREY * (l + ev).exp2();
+    let o = apply(y);
+    let st = crate::sharpen::tone_slope(y, apply);
+    crate::sharpen::mask_weight(e, (0.5 * l).exp2(), o.max(0.0).sqrt(), st, t)
+}
+
+/// Process V3's Radius / Detail preview ([`crate::Overlay::SharpenDetail`]): [`sharpen_detail_at`]
+/// of every pixel at its tone before local adjustments (log luminance plus exposure, through
+/// `tone`). The GPU's `sharpen_detail_k` mirrors it.
+pub(crate) fn sharpen_detail_view(p: &Prepared, s: &DevelopSettings, tone: &ToneMap) -> lightcraft_raster::Plane {
+    let limit = SharpenParams::new(s).limit;
+    let ev = s.light.exposure as f32;
+    let (w, h) = (p.img.width, p.img.height);
+    let mut out = lightcraft_raster::Plane::filled(w, h, 0.5);
+    if let Some(b) = p.sharpen_det.as_ref() {
+        for_rows(&mut out.data, w, |y, row| {
+            for (x, o) in row.iter_mut().enumerate() {
+                let i = y * w + x;
+                if let (Some(&b), Some(&l)) = (b.data.get(i), p.log_l.data.get(i)) {
+                    *o = sharpen_detail_at(b, l, ev, limit, |y| tone.apply(y));
+                }
+            }
+        });
+    }
+    out
+}
+
+/// The Radius / Detail preview's grey at a pixel of band value `b` and log luminance `l` (before
+/// exposure `ev`), cap `limit`, tone map `apply`: the change sharpening makes to the pixel's display
+/// √luminance before Masking (deep shadows left alone, the cap included), around mid-grey: white
+/// where it brightens by the whole cap, black where it darkens by it. (Showing the band relative to
+/// the pixel's own `q` instead grew without bound in the shadows: noise there filled the view with
+/// black and white static.)
+#[inline]
+pub(crate) fn sharpen_detail_at(b: f32, l: f32, ev: f32, limit: f32, apply: impl Fn(f32) -> f32) -> f32 {
+    let y = crate::tone::GREY * (l + ev).exp2();
+    let qd = apply(y).max(0.0).sqrt();
+    let st = crate::sharpen::tone_slope(y, apply);
+    let d = crate::sharpen::delta(b, l, qd, st, 1.0, limit, 1.0);
+    if limit > 0.0 { (0.5 + 0.5 * d / limit).clamp(0.0, 1.0) } else { 0.5 }
+}
+
 /// Parametric region curve (encoded domain) composed with the master point curve.
 fn curve_luts(c: &ToneCurve) -> Option<[Lut1; 3]> {
     let parametric = c.highlights != 0.0 || c.lights != 0.0 || c.darks != 0.0 || c.shadows != 0.0;
@@ -147,6 +223,45 @@ pub fn mask_terms(j: &LocalAdjustments) -> [f32; MASK_TERMS] {
     ]
 }
 
+/// Process V3's per-render sharpening values ([`crate::sharpen`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SharpenParams {
+    /// The Amount the band was designed at ([`crate::sharpen::Filter::amount`]: Amount, or 40
+    /// when only local Sharpness sharpens), the cap there and at Amount 40
+    /// ([`crate::sharpen::limit`]), and Masking's threshold.
+    pub amount: f32,
+    pub limit: f32,
+    pub limit40: f32,
+    pub mask_t: f32,
+}
+
+impl SharpenParams {
+    pub fn new(s: &DevelopSettings) -> SharpenParams {
+        let num = |v: f64, lo: f64, hi: f64, def: f64| if v.is_finite() { v.clamp(lo, hi) as f32 } else { def as f32 };
+        let a = num(s.detail.sharpen_amount, 0.0, 150.0, 40.0);
+        let amount = if a > 0.0 { a } else { 40.0 };
+        let limit40 = crate::sharpen::limit40(num(s.detail.sharpen_radius, 0.5, 3.0, 1.0), num(s.detail.sharpen_detail, 0.0, 100.0, 25.0));
+        SharpenParams {
+            amount,
+            limit: crate::sharpen::limit(amount, limit40),
+            limit40,
+            mask_t: crate::sharpen::mask_t(num(s.detail.sharpen_masking, 0.0, 100.0, 0.0)),
+        }
+    }
+
+    /// The band's scale and the cap at Amount `sp · 150` (local Sharpness included): `[1, limit]`
+    /// at the designed Amount. The GPU's `finish` mirrors it.
+    #[inline]
+    pub fn at(&self, sp: f32) -> [f32; 2] {
+        let a = sp * 150.0;
+        if a == self.amount {
+            return [1.0, self.limit];
+        }
+        let k = (a.abs() / self.amount).powf(crate::sharpen::AMOUNT_POW);
+        [if a < 0.0 { -k } else { k }, crate::sharpen::limit(a, self.limit40)]
+    }
+}
+
 /// Everything the per-pixel stage computes once per render: the CPU loop below and the GPU kernel
 /// (`lightcraft-gpu`) both read their parameters from here, so the two cannot drift apart.
 pub struct FinishParams {
@@ -176,6 +291,9 @@ pub struct FinishParams {
     pub dehaze: f32,
     pub sharpen: f32,
     pub sharpen_mask: f32,
+    /// Process V3's sharpening (after the tone map, [`crate::sharpen`]); `None` before V3, which
+    /// sharpens the Texture band.
+    pub sharpen_v3: Option<SharpenParams>,
     /// Airlight after and before exposure, exposure gain and EV (see [`crate::Prepared`]).
     pub air: f32,
     pub air_pre: f32,
@@ -245,6 +363,7 @@ impl FinishParams {
             dehaze,
             sharpen: (s.detail.sharpen_amount / 150.0) as f32,
             sharpen_mask: (s.detail.sharpen_masking / 100.0) as f32,
+            sharpen_v3: (s.process.process() >= Process::V3).then(|| SharpenParams::new(s)),
             air: air_pre * gain,
             air_pre,
             gain,
@@ -280,8 +399,9 @@ impl FinishParams {
 pub fn base_tone(s: &DevelopSettings, info: &SourceInfo, peak: f32) -> ToneMap {
     let l = &s.light;
     match s.process.process() {
-        // V2 changes the Highlights/Shadows base (`local::tone_base`), not the tone map
-        Process::V1 | Process::V2 => match info.camera_tone.as_ref().filter(|_| info.raw) {
+        // V2 changes the Highlights/Shadows base (`local::tone_base`), V3 colour noise reduction
+        // (`local::nr_params`) and sharpening (`crate::sharpen`), neither the tone map
+        Process::V1 | Process::V2 | Process::V3 => match info.camera_tone.as_ref().filter(|_| info.raw) {
             Some(curve) => ToneMap::camera_hdr(curve, l.contrast, l.whites, l.blacks, peak),
             None if info.raw => ToneMap::hdr(l.contrast, l.whites, l.blacks, peak),
             None => ToneMap::display_hdr(l.contrast, l.whites, l.blacks, peak),
@@ -508,8 +628,8 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
                 let det = l_pre - b.data[i];
                 let tame = 1.0 - 0.6 * smooth(0.4, 1.6, det.abs());
                 delta += tx * 1.1 * det.clamp(-1.0, 1.0) * tame;
-                if sp != 0.0 {
-                    let m = if sharpen_mask > 0.0 { smooth(sharpen_mask * 0.25, sharpen_mask * 0.25 + 0.15, det.abs()) } else { 1.0 };
+                if sp != 0.0 && fp.sharpen_v3.is_none() {
+                    let m = sharpen_mask_weight(sharpen_mask, det);
                     delta += sp * 1.3 * det.clamp(-0.8, 0.8) * m;
                 }
             }
@@ -537,6 +657,18 @@ pub(crate) fn finish_with<T: Copy + Default + Send>(
             let k = tone.chroma_scale(o);
             if k != 1.0 {
                 d = d.map(|v| o + (v - o) * k);
+            }
+            // --- process V3's sharpening: display luminance scaled by one factor
+            if let Some(v3) = &fp.sharpen_v3
+                && sp != 0.0
+                && let Some(&b) = p.sharpen_det.as_ref().and_then(|d| d.data.get(i))
+            {
+                let [k, limit] = v3.at(sp);
+                let e = p.sharpen_edge.as_ref().and_then(|e| e.data.get(i)).copied();
+                let g = crate::sharpen::pixel(b, e, l_pre, yl, o, k, limit, v3.mask_t, |y| tone.apply(y));
+                if g != 1.0 {
+                    d = d.map(|v| v * g);
+                }
             }
             let mx = d[0].max(d[1]).max(d[2]);
             if mx > peak {

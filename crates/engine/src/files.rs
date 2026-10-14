@@ -456,6 +456,8 @@ fn load_bytes_now(
             stages.push(("orient", t0.elapsed()));
             (img, stages)
         };
+        // (the photo's own size: sharpening's Radius is in its pixels, whatever level this is)
+        let native_long = img.width.max(img.height).saturating_mul(factor);
         let (img, stages) = finish(img);
         if lightcraft_pipeline::profiling() {
             let mut prev = std::time::Duration::ZERO;
@@ -495,6 +497,7 @@ fn load_bytes_now(
                 camera_tone,
                 mattes,
                 local_tone,
+                native_long,
             },
         ));
     }
@@ -2077,7 +2080,8 @@ mod tests {
         assert_eq!(p.kind, MediaKind::Raw, "still a raw file (filters, Convert to DNG…)");
         assert!(!p.develops_raw());
         // rendered like the JPEG it is: relative white balance, display tone curve, no raw defaults
-        assert_eq!(crate::media::source_info(&p), SourceInfo::default());
+        let native_long = p.width.max(p.height) as usize;
+        assert_eq!(crate::media::source_info(&p), SourceInfo { native_long, ..SourceInfo::default() });
         assert_eq!(*p.develop, lightcraft_develop::DevelopSettings::default());
         assert!(s.render_job(id, 48, 48, false, true).unwrap().run().rendered.is_ok());
         // agents see it

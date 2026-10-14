@@ -95,9 +95,111 @@ pub fn gaussian<T: Pixel>(img: &Image<T>, sigma: f32) -> Image<T> {
     a
 }
 
+/// Longest reach (px) of [`gaussian_taps`]: sigmas above ~10 px belong to [`gaussian`].
+pub const EXACT_MAX_RADIUS: usize = 32;
+
+/// Weights of the discrete Gaussian of `sigma` px (Lindeberg's `e^(−t)·Iₙ(t)`, `t = σ²`) over offsets
+/// `-r..=r` (`r` = ⌈3σ⌉ + 1, at most [`EXACT_MAX_RADIUS`]), summing to 1. Its variance is σ² at any
+/// sigma, where a sampled Gaussian's collapses below half a pixel (σ 0.25 sampled spreads 0.03 px).
+/// A sigma near 0 (or not a number) gives the pixel itself.
+pub fn gaussian_taps(sigma: f32) -> Vec<f32> {
+    let s = if sigma.is_finite() { f64::from(sigma).clamp(0.0, EXACT_MAX_RADIUS as f64 / 3.0) } else { 0.0 };
+    let r = ((3.0 * s).ceil() as usize + 1).min(EXACT_MAX_RADIUS);
+    let t = s * s;
+    // Iₙ(t) by its series Σ (t/2)^(2k+n) / (k! (k+n)!), scaled by e^(−t)
+    let bessel = |n: usize| {
+        let h = t / 2.0;
+        let mut term = (1..=n).fold(1.0f64, |a, k| a * h / k as f64);
+        let mut sum = term;
+        for k in 1..400 {
+            term *= h * h / (k as f64 * (k + n) as f64);
+            sum += term;
+            if term <= sum * 1e-17 {
+                break;
+            }
+        }
+        sum * (-t).exp()
+    };
+    let w: Vec<f64> = (0..=2 * r).map(|i| bessel(i.abs_diff(r))).collect();
+    let sum: f64 = w.iter().sum();
+    if !(sum.is_finite() && sum > 0.0) {
+        let mut one = vec![0.0; 2 * r + 1];
+        one[r] = 1.0;
+        return one;
+    }
+    w.iter().map(|v| (v / sum) as f32).collect()
+}
+
+/// Separable Gaussian of a plane with exact taps ([`gaussian_taps`], clamped edges): right at any
+/// sigma, including the sub-pixel ones the box approximation ([`gaussian`]) skips or gets wrong
+/// (sharpening bands at preview scale). The GPU's `conv_h` / `conv_v` mirror it.
+pub fn gaussian_exact(img: &crate::Plane, sigma: f32) -> crate::Plane {
+    let taps = gaussian_taps(sigma);
+    convolve_separable(img, &taps, &taps)
+}
+
+/// A plane through `h` along its rows, then `v` along its columns (odd numbers of taps, centred;
+/// clamped edges). An even count is taken as one tap shorter; none gives a copy. The GPU's
+/// `conv_h` / `conv_v` mirror it, summing in the same order.
+pub fn convolve_separable(img: &crate::Plane, h: &[f32], v: &[f32]) -> crate::Plane {
+    let (w, ht) = (img.width, img.height);
+    if w == 0 || ht == 0 || h.is_empty() || v.is_empty() {
+        return img.clone();
+    }
+    let h = &h[..h.len() - (1 - h.len() % 2)];
+    let v = &v[..v.len() - (1 - v.len() % 2)];
+    let (rh, rv) = (h.len() / 2, v.len() / 2);
+    let mut a = crate::Plane::new(w, ht);
+    par_rows(&mut a.data, w, |y, row| {
+        let src = &img.data[y * w..(y + 1) * w];
+        for (x, o) in row.iter_mut().enumerate() {
+            let mut acc = 0.0;
+            for (k, t) in h.iter().enumerate() {
+                let sx = (x + k).saturating_sub(rh).min(w - 1);
+                acc += t * src[sx];
+            }
+            *o = acc;
+        }
+    });
+    let mut b = crate::Plane::new(w, ht);
+    par_rows(&mut b.data, w, |y, row| {
+        for (k, t) in v.iter().enumerate() {
+            let sy = (y + k).saturating_sub(rv).min(ht - 1);
+            let src = &a.data[sy * w..(sy + 1) * w];
+            for (o, v) in row.iter_mut().zip(src) {
+                *o += t * v;
+            }
+        }
+    });
+    b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The exact Gaussian keeps a constant, moves no mass, has the variance it is asked for at
+    /// any sigma (where the box approximation is a copy below 0.3 px), and is the pixel itself at 0.
+    #[test]
+    fn exact_gaussian_is_right_at_small_sigmas() {
+        let flat = crate::Plane::filled(9, 7, 0.3);
+        assert!(gaussian_exact(&flat, 0.7).data.iter().all(|v| (v - 0.3).abs() < 1e-6));
+        for sigma in [0.25f32, 0.5, 1.0, 2.5] {
+            let mut imp = crate::Plane::new(41, 41);
+            imp.set(20, 20, 1.0);
+            let b = gaussian_exact(&imp, sigma);
+            let sum: f32 = b.data.iter().sum();
+            let var: f32 = b.data.iter().enumerate().map(|(i, v)| v * ((i % 41) as f32 - 20.0).powi(2)).sum();
+            assert!((sum - 1.0).abs() < 1e-4, "{sigma}: {sum}");
+            assert!((var.sqrt() - sigma).abs() < 0.002 + 0.002 * sigma, "{sigma}: {}", var.sqrt());
+        }
+        let mut imp = crate::Plane::new(5, 5);
+        imp.set(2, 2, 1.0);
+        assert!((gaussian_exact(&imp, 0.0).get(2, 2) - 1.0).abs() < 1e-6);
+        assert!((gaussian_exact(&imp, f32::NAN).get(2, 2) - 1.0).abs() < 1e-6);
+        assert_eq!(gaussian_taps(1e9).len(), 2 * EXACT_MAX_RADIUS + 1);
+        assert!(gaussian_taps(1e9).iter().all(|v| v.is_finite()));
+    }
 
     #[test]
     fn preserves_constant_and_mass() {

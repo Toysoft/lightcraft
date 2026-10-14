@@ -1,6 +1,7 @@
 // The per-pixel stage: a straight port of `lightcraft_pipeline::finish` (keep in step with it).
-// Bindings: img (rgb, pre-exposure), log_l, base, clar, tex, dark, masks (NMASK planes, then the
-// blurred chromaticity when HAS_CHROMA), aux
+// Bindings: img (rgb, pre-exposure), log_l, base, clar, tex (TEX_STRIDE values a pixel: the Texture
+// band, then under process V3 the sharpening band and its edge map), dark, masks (NMASK planes, then
+// the blurred chromaticity when HAS_CHROMA), aux
 // (tone LUT | chroma curve | sRGB LUT | curve LUTs | mask terms), out (packed RGBA8).
 
 fn tone_apply(y: f32) -> f32 {
@@ -314,7 +315,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let yd = max(lum2020(c), 1e-6);
         let purple = (min(c.x, c.z) - c.y) / yd;
         let green = (c.y - max(c.x, c.z)) / yd;
-        let k = df * sstep(0.04, 0.3, abs(l_pre - tex[i])) * max(sstep(0.02, 0.2, purple), sstep(0.02, 0.2, green));
+        let k = df * sstep(0.04, 0.3, abs(l_pre - tex[i * pu(F_TEX_STRIDE)])) * max(sstep(0.02, 0.2, purple), sstep(0.02, 0.2, green));
         if (k > 0.0) {
             let y = lum2020(c);
             c = c + (y - c) * k;
@@ -380,10 +381,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let tx = pf(F_TEX) + lt[8];
     let sp = lt[13] * 0.6 + pf(F_SHARPEN);
     if ((tx != 0.0 || sp != 0.0) && pu(F_HAS_TEX) != 0u) {
-        let det = l_pre - tex[i];
+        let det = l_pre - tex[i * pu(F_TEX_STRIDE)];
         let tame = 1.0 - 0.6 * sstep(0.4, 1.6, abs(det));
         delta += tx * 1.1 * clamp(det, -1.0, 1.0) * tame;
-        if (sp != 0.0) {
+        // (process V3 sharpens its own band after the tone map, below)
+        if (sp != 0.0 && pu(F_SHARP_V3) == 0u) {
             let sm = pf(F_SHARPEN_MASK);
             var mk = 1.0;
             if (sm > 0.0) {
@@ -394,7 +396,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     // local Noise: smooth (or, negative, boost) small-amplitude detail, keep edges
     if (l_noise != 0.0 && pu(F_HAS_TEX) != 0u) {
-        let det = l_pre - tex[i];
+        let det = l_pre - tex[i * pu(F_TEX_STRIDE)];
         delta -= clamp(l_noise, -1.0, 1.0) * 0.9 * det * (1.0 - sstep(0.1, 0.5, abs(det)));
     }
     if (delta != 0.0) {
@@ -416,6 +418,31 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let k = chroma_scale(o);
     if (k != 1.0) {
         d = vec3<f32>(o) + (d - vec3<f32>(o)) * k;
+    }
+    // --- process V3's sharpening (`sharpen::pixel`): display luminance scaled by one factor
+    if (sp != 0.0 && pu(F_HAS_SHARP) != 0u) {
+        let ts = pu(F_TEX_STRIDE);
+        let sb = tex[i * ts + 1u];
+        // `finish::SharpenParams::at`
+        let a3 = sp * 150.0;
+        var k3 = 1.0;
+        var lim = pf(F_SHARPEN_V3 + 1u);
+        if (a3 != pf(F_SHARPEN_V3)) {
+            k3 = pow(abs(a3) / pf(F_SHARPEN_V3), SHARPEN_AMOUNT_POW);
+            if (a3 < 0.0) {
+                k3 = -k3;
+            }
+            lim = pf(F_SHARPEN_V3 + 2u) * pow(min(abs(a3), 100.0) / 40.0, SHARPEN_LIMIT_POW);
+        }
+        let st = sharp_slope(yl, tone_apply(yl * TONE_UP), tone_apply(yl * TONE_DOWN));
+        var wm = 1.0;
+        if (pu(F_HAS_SHARP_EDGE) != 0u) {
+            wm = sharp_mask(tex[i * ts + 2u], exp2(0.5 * l_pre), sqrt(max(o, 0.0)), st, pf(F_SHARPEN_V3 + 3u));
+        }
+        let g3 = sharp_gain(sb, l_pre, o, st, k3, lim, wm);
+        if (g3 != 1.0) {
+            d = d * g3;
+        }
     }
     let mx = max(d.x, max(d.y, d.z));
     if (mx > 1.0) {

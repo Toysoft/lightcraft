@@ -39,7 +39,22 @@ pub enum Overlay {
     /// Visualize HDR (photos edited in HDR): the SDR image dimmed to grey, with every pixel the HDR
     /// rendition puts above SDR white painted by how far above it is ([`HDR_BANDS`]).
     HdrRange,
+    /// The sharpening mask while the Masking slider is Option-dragged: white where sharpening is
+    /// applied, black where Masking protects (the weight the render uses: `finish::sharpen_view`;
+    /// before process V3 `finish::sharpen_mask_weight`).
+    SharpenMask,
+    /// The render in grayscale while the sharpening Amount is Option-dragged, so sharpening is judged
+    /// without colour.
+    Luminance,
+    /// The sharpening band in grey while Radius or Detail is Option-dragged: mid-grey where nothing
+    /// is lifted, lighter and darker along the edges and texture the sliders pick (from process V3
+    /// the change the render makes, `finish::sharpen_detail_at`; before, the Texture band it
+    /// sharpens, [`SHARPEN_DETAIL_VIEW`]).
+    SharpenDetail,
 }
+
+/// [`Overlay::SharpenDetail`]'s grey per unit of the Texture band before process V3 (around 0.5).
+pub const SHARPEN_DETAIL_VIEW: f32 = 2.0;
 
 /// [`Overlay::HdrRange`] colours (sRGB) for 0–1, 1–2, 2–3 and ≥ 3 stops above SDR white.
 pub const HDR_BANDS: [[u8; 3]; 4] = [[255, 214, 92], [255, 150, 40], [235, 64, 52], [214, 60, 210]];
@@ -125,6 +140,9 @@ impl Overlay {
             Overlay::Mask { id, view, color, opacity } => (3, pack_mask(id, view, color, opacity) as f64),
             Overlay::AllMasks { view, color, opacity } => (5, pack_mask(0, view, color, opacity) as f64),
             Overlay::HdrRange => (4, 0.0),
+            Overlay::SharpenMask => (6, 0.0),
+            Overlay::Luminance => (7, 0.0),
+            Overlay::SharpenDetail => (8, 0.0),
         }
     }
 
@@ -143,6 +161,9 @@ impl Overlay {
                     opacity: ((v as u64 >> 44) & 0x7f).min(100) as u8,
                 }
             }
+            6 => Overlay::SharpenMask,
+            7 => Overlay::Luminance,
+            8 => Overlay::SharpenDetail,
             _ => Overlay::None,
         }
     }
@@ -156,6 +177,9 @@ impl Overlay {
             Overlay::Mask { id, view, color, opacity } => 3 << 60 | pack_mask(id, view, color, opacity),
             Overlay::AllMasks { view, color, opacity } => 5 << 60 | pack_mask(0, view, color, opacity),
             Overlay::HdrRange => 0x4000,
+            Overlay::SharpenMask => 0x6000,
+            Overlay::Luminance => 0x7000,
+            Overlay::SharpenDetail => 0x8000,
         }
     }
 
@@ -171,6 +195,10 @@ impl Overlay {
 /// Settings changes an overlay needs before rendering (e.g. the visualized sample's adjustment
 /// is left out, so the range is shown on the colours it selects).
 pub fn adjust_settings(o: Overlay, s: &mut Cow<'_, DevelopSettings>) {
+    // the mask is read from the sharpening band, which a render at Amount 0 doesn't make
+    if matches!(o, Overlay::SharpenMask | Overlay::SharpenDetail) && s.detail.sharpen_amount == 0.0 {
+        s.to_mut().detail.sharpen_amount = 1.0;
+    }
     if let Overlay::PointColorRange(i) = o
         && let Some(p) = s.point_colors.get(i as usize)
         && !p.is_neutral()
@@ -207,7 +235,30 @@ pub fn apply(img: &mut Rgba8, o: Overlay, plan: &Plan<'_>, mask: Option<&Plane>,
                 }
             }
         }
+        Overlay::SharpenMask | Overlay::SharpenDetail => {
+            if let Some(a) = mask.filter(|a| (a.width, a.height) == (img.width, img.height)) {
+                mask_view(img, a, MaskView::WhiteOnBlack, [255; 3], 100);
+            }
+        }
+        Overlay::Luminance => {
+            for px in img.data.iter_mut() {
+                let g = (0.2126 * px[0] as f32 + 0.7152 * px[1] as f32 + 0.0722 * px[2] as f32).round().clamp(0.0, 255.0) as u8;
+                *px = [g, g, g, px[3]];
+            }
+        }
     }
+}
+
+/// [`Overlay::SharpenMask`]'s plane: the sharpening weight of every pixel of a render prepared as
+/// `log_l` (log luminance) and `band` (the sharpening band's blur of it), under Masking `masking` (0..1).
+pub(crate) fn sharpen_mask(log_l: &Plane, band: &Plane, masking: f32) -> Plane {
+    log_l.zip_map(band, |l, b| crate::finish::sharpen_mask_weight(masking, l - b))
+}
+
+/// [`Overlay::SharpenDetail`]'s plane before process V3: the Texture band (`log_l` minus its blur
+/// `b`) as grey.
+pub(crate) fn sharpen_detail(log_l: &Plane, b: &Plane) -> Plane {
+    log_l.zip_map(b, |l, v| (0.5 + SHARPEN_DETAIL_VIEW * (l - v)).clamp(0.0, 1.0))
 }
 
 /// Draw mask alpha `a` over `img` as `view`.

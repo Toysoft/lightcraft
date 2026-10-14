@@ -207,9 +207,13 @@ fn stage_cache_matches_uncached_render_through_a_slider_session() {
             let a = render_cached(&src, &info, &s, req, &cache).image;
             let b = render(&src, &info, &s, req).image;
             if req.quality == Quality::Draft && i == 6 {
-                // a draft while noise reduction changes keeps the wide planes of the image before it
+                // a draft while noise reduction changes keeps the wide planes of the image before it:
+                // a few pixels off at a few edges. Without sharpening that is up to 36 levels at 2 of
+                // the 9,600 pixels; V1 / V2's sharpening (before the tone map) happens to hide most of
+                // it, V3's (after it) doesn't
                 let d = max_diff(&a, &b);
-                assert!(d <= 3, "step {i} draft: {d}");
+                let over = a.data.iter().zip(&b.data).filter(|(p, q)| (0..3).any(|c| (p[c] as i32 - q[c] as i32).abs() > 3)).count();
+                assert!(d <= 40 && over * 1000 <= a.data.len(), "step {i} draft: max {d}, {over} pixels over 3");
             } else {
                 assert_eq!(a, b, "step {i} {:?}", req.quality);
             }
@@ -258,18 +262,29 @@ fn drafts_keep_wide_planes_across_a_noise_reduction_change_and_full_renders_do_n
 #[test]
 fn exposure_after_spatial_filters_equals_exposing_the_source() {
     // The pipeline filters the image before exposure and applies exposure per pixel; filters on
-    // log luminance are shift-equivariant, so this must equal scaling the source.
+    // log luminance are shift-equivariant, so this must equal scaling the source. From V3, colour
+    // noise reduction is steered by the cube root of luminance, which follows the signal's absolute
+    // level as sensor noise does, so it is left out there (the Exposure slider still runs after it);
+    // so is sharpening, which leaves detail no stronger than the noise at its brightness alone.
+    use lightcraft_develop::Process;
     let src = scene();
     let info = SourceInfo { raw: true, ..Default::default() };
-    let mut s = typical_edits();
-    s.light.exposure = 1.3;
-    let a = render(&src, &info, &s, &RenderRequest::fit(200, 200)).image;
-    let g = 2f32.powf(1.3);
-    let scaled = src.map(|c| c.map(|v| v * g));
-    s.light.exposure = 0.0;
-    let b = render(&scaled, &info, &s, &RenderRequest::fit(200, 200)).image;
-    let d = max_diff(&a, &b);
-    assert!(d <= 2, "max difference {d}");
+    for p in [Process::V2, Process::V3] {
+        let mut s = typical_edits();
+        s.process = p.version();
+        if p == Process::V3 {
+            s.detail.nr_color = 0.0;
+            s.detail.sharpen_amount = 0.0;
+        }
+        s.light.exposure = 1.3;
+        let a = render(&src, &info, &s, &RenderRequest::fit(200, 200)).image;
+        let g = 2f32.powf(1.3);
+        let scaled = src.map(|c| c.map(|v| v * g));
+        s.light.exposure = 0.0;
+        let b = render(&scaled, &info, &s, &RenderRequest::fit(200, 200)).image;
+        let d = max_diff(&a, &b);
+        assert!(d <= 2, "{p:?}: max difference {d}");
+    }
 }
 
 /// A section whose eye is off renders as if it were at its defaults (issue #316): Light, Color
@@ -710,4 +725,226 @@ fn stored_process_numbers_render_with_a_known_process() {
             }
         }
     }
+}
+
+/// V3 colour noise reduction at its default (25) removes colour noise (V2's mixed in a fifth of its blur and left most of it), keeps a colour edge that is also a
+/// luminance edge (a gold light against dark blue), and never changes luminance.
+#[test]
+fn colour_noise_reduction_v3_cleans_flat_colour_and_keeps_edges() {
+    use lightcraft_color::luminance_2020;
+    use lightcraft_develop::Process;
+    let (w, h) = (160, 96);
+    let gold = [0.60f32, 0.42, 0.10];
+    let blue = [0.012f32, 0.016, 0.060];
+    let truth = |x: usize| if x < w / 2 { gold } else { blue };
+    // deterministic colour noise that keeps each pixel's luminance (chromaticity ×(1 ± 25 %))
+    let mut seed = 0x9e37_79b9u32;
+    let mut rnd = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed as f32 / u32::MAX as f32) * 2.0 - 1.0
+    };
+    let src = Rgb32f::from_fn(w, h, |x, _| truth(x));
+    let noisy = Rgb32f {
+        width: w,
+        height: h,
+        data: src
+            .data
+            .iter()
+            .map(|c| {
+                let n = [c[0] * (1.0 + 0.25 * rnd()), c[1] * (1.0 + 0.25 * rnd()), c[2] * (1.0 + 0.25 * rnd())];
+                let k = luminance_2020(*c) / luminance_2020(n);
+                n.map(|v| v * k)
+            })
+            .collect(),
+    };
+    // mean distance of chromaticity from the truth over columns `xs`
+    let err = |img: &Rgb32f, xs: std::ops::Range<usize>| {
+        let mut sum = 0.0;
+        let mut n = 0;
+        for y in 8..h - 8 {
+            for x in xs.clone() {
+                let (c, t) = (crate::local::chromaticity(img.get(x, y)), crate::local::chromaticity(truth(x)));
+                sum += ((c[0] - t[0]).powi(2) + (c[1] - t[1]).powi(2) + (c[2] - t[2]).powi(2)).sqrt();
+                n += 1;
+            }
+        }
+        sum / n as f32
+    };
+    let run = |p: Process| {
+        let mut s = DevelopSettings { process: p.version(), ..DevelopSettings::default() };
+        s.detail.nr_color = 25.0;
+        let mut img = noisy.clone();
+        crate::local::denoise(&mut img, &s, w, w, None);
+        img
+    };
+    let flat = |img: &Rgb32f| err(img, 12..w / 2 - 12) + err(img, w / 2 + 12..w - 12);
+    let (before, v2, v3) = (flat(&noisy), flat(&run(Process::V2)), flat(&run(Process::V3)));
+    assert!(v2 > before * 0.6, "V2 left most colour noise: {before} -> {v2}");
+    assert!(v3 < before * 0.25, "V3 removes colour noise: {before} -> {v3}");
+    // the two columns at the edge keep their own colour: no gold bled into the blue or back
+    let out = run(Process::V3);
+    let edge = err(&out, w / 2 - 2..w / 2 + 2);
+    assert!(edge < err(&noisy, w / 2 - 2..w / 2 + 2), "edge colour: {edge}");
+    let gap = {
+        let (g, b) = (crate::local::chromaticity(gold), crate::local::chromaticity(blue));
+        ((g[0] - b[0]).powi(2) + (g[1] - b[1]).powi(2) + (g[2] - b[2]).powi(2)).sqrt()
+    };
+    assert!(edge < gap * 0.1, "edge colour {edge} against a colour gap of {gap}");
+    // luminance is untouched
+    for (a, b) in noisy.data.iter().zip(&out.data) {
+        let (ya, yb) = (luminance_2020(*a), luminance_2020(*b));
+        assert!((ya - yb).abs() <= 1e-4 * ya.max(1e-3), "luminance {ya} -> {yb}");
+    }
+}
+
+/// V3 colour noise reduction keeps colour detail that is clearly more than the image's colour noise:
+/// fine warm and cool strands at one luminance (hair, fabric) stay, while the colour noise of the
+/// flat area beside them goes. Before it measured the noise, the guided filter (which can follow
+/// colour only where luminance changes) averaged the strands to grey, as it did low-ISO hair.
+#[test]
+fn colour_noise_reduction_v3_keeps_colour_detail_above_the_noise() {
+    use lightcraft_color::luminance_2020;
+    use lightcraft_develop::Process;
+    let (w, h) = (192, 128);
+    let warm = [0.42f32, 0.24, 0.14];
+    let cool = {
+        let c = [0.20f32, 0.26, 0.34];
+        let k = luminance_2020(warm) / luminance_2020(c);
+        c.map(|v| v * k)
+    };
+    let flat = [0.30f32, 0.25, 0.20];
+    // strands 3 px wide in the right quarter, flat colour elsewhere
+    let strands = |x: usize| x >= w * 3 / 4;
+    let truth = |x: usize| {
+        if !strands(x) {
+            flat
+        } else if (x / 3).is_multiple_of(2) {
+            warm
+        } else {
+            cool
+        }
+    };
+    // a deterministic value in −1..1 per pixel and channel
+    let rnd = |x: usize, y: usize, k: usize| {
+        let mut v = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841) ^ (k as u32).wrapping_mul(0xcb1a_b31f);
+        v ^= v >> 13;
+        v = v.wrapping_mul(0x5bd1_e995);
+        v ^= v >> 15;
+        (v & 0xffff) as f32 / 32768.0 - 1.0
+    };
+    // colour noise of ±6 % chromaticity (luminance kept): a low-ISO raw
+    let noisy = Rgb32f::from_fn(w, h, |x, y| {
+        let c = truth(x);
+        let n = [0, 1, 2].map(|k| c[k] * (1.0 + 0.06 * rnd(x, y, k)));
+        let k = luminance_2020(c) / luminance_2020(n);
+        n.map(|v| v * k)
+    });
+    let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+    s.detail.nr_color = 25.0;
+    let mut out = noisy.clone();
+    crate::local::denoise(&mut out, &s, w, w, None);
+    let chroma = |p: [f32; 3]| crate::local::chromaticity(p);
+    // the strands' contrast: mean |warm − cool| of red chromaticity between neighbouring strands
+    let contrast = |img: &Rgb32f| {
+        let (mut sum, mut n) = (0.0, 0);
+        for y in 8..h - 8 {
+            for x in (w * 3 / 4 + 7..w - 8).step_by(6) {
+                sum += (chroma(img.get(x, y))[0] - chroma(img.get(x + 3, y))[0]).abs();
+                n += 1;
+            }
+        }
+        sum / n as f32
+    };
+    // the flat area's colour noise: mean distance of chromaticity from the truth
+    let noise = |img: &Rgb32f| {
+        let (mut sum, mut n) = (0.0, 0);
+        for y in 8..h - 8 {
+            for x in 8..w * 3 / 4 - 16 {
+                let (c, t) = (chroma(img.get(x, y)), chroma(flat));
+                sum += ((c[0] - t[0]).powi(2) + (c[1] - t[1]).powi(2) + (c[2] - t[2]).powi(2)).sqrt();
+                n += 1;
+            }
+        }
+        sum / n as f32
+    };
+    let truth_img = Rgb32f::from_fn(w, h, |x, _| truth(x));
+    let (c0, c1) = (contrast(&truth_img), contrast(&out));
+    assert!(c1 > c0 * 0.8, "the strands keep their colour: contrast {c0} -> {c1}");
+    let (n0, n1) = (noise(&noisy), noise(&out));
+    assert!(n1 < n0 * 0.35, "the flat area's colour noise goes: {n0} -> {n1}");
+    // Detail 0 lowers the bar no further than noise: the strands go grey as before the measurement
+    s.detail.nr_color_detail = 0.0;
+    let mut smooth = noisy.clone();
+    crate::local::denoise(&mut smooth, &s, w, w, None);
+    assert!(contrast(&smooth) < c1, "Detail 0 keeps less colour detail: {} vs {c1}", contrast(&smooth));
+}
+
+/// A draft of a white balance drag stands in the last colour-noise measurement of its framing
+/// (measuring costs a few ms per tick); the full-quality render that ends the drag, at the same size
+/// (a zoomed window), measures its own and never reuses the draft's image from the stage cache.
+#[test]
+fn a_draft_standing_in_a_colour_noise_measurement_is_not_reused() {
+    use lightcraft_develop::{Process, WbMode};
+    let (w, h) = (640, 480);
+    let src = std::sync::Arc::new(Rgb32f::from_fn(w, h, |x, y| {
+        let mut v = (x as u32).wrapping_mul(0x8da6_b343) ^ (y as u32).wrapping_mul(0xd816_3841);
+        v ^= v >> 13;
+        v = v.wrapping_mul(0x5bd1_e995);
+        v ^= v >> 15;
+        let n = |k: u32| 1.0 + 0.3 * (((v >> (k * 8)) & 0xff) as f32 / 128.0 - 1.0);
+        [0.25 * n(0), 0.22 * n(1), 0.18 * n(2)]
+    }));
+    let info = SourceInfo::default();
+    let at = |temp: f64| {
+        let mut s = DevelopSettings { process: Process::V3.version(), ..DevelopSettings::default() };
+        s.detail.nr_color = 25.0;
+        s.wb.mode = WbMode::Custom;
+        s.wb.temp = temp;
+        s
+    };
+    let cache = crate::StageCache::default();
+    let full = RenderRequest::fit(w, h);
+    let draft = RenderRequest { quality: crate::Quality::Draft, ..full };
+    crate::render_cached(&src, &info, &at(9000.0), &full, &cache);
+    crate::render_cached(&src, &info, &at(2800.0), &draft, &cache);
+    let ended = crate::render_cached(&src, &info, &at(2800.0), &full, &cache);
+    let fresh = render(&src, &info, &at(2800.0), &full);
+    assert!(ended.image == fresh.image, "the render that ends the drag measures its own colour noise");
+}
+
+/// The Option-drag sharpening previews: Masking draws the weight the render sharpens with (all white
+/// at 0; high Masking leaves flat areas black and keeps edges white), Amount the render in grayscale,
+/// and neither touches a render without the overlay.
+#[test]
+fn sharpening_previews_show_the_mask_and_grayscale() {
+    use crate::Overlay;
+    // a flat grey field with a hard-edged bright square in the middle
+    let src = Rgb32f::from_fn(240, 160, |x, y| if (80..160).contains(&x) && (50..110).contains(&y) { [0.6, 0.4, 0.2] } else { [0.12, 0.12, 0.12] });
+    let info = SourceInfo { raw: true, ..Default::default() };
+    let mut s = DevelopSettings::default();
+    s.detail.sharpen_amount = 40.0;
+    let req = |o| RenderRequest { overlay: o, ..RenderRequest::fit(240, 160) };
+    let lum = |p: [u8; 4]| p[0];
+    let at = |img: &lightcraft_raster::Rgba8, x: usize, y: usize| img.data[y * img.width + x];
+    s.detail.sharpen_masking = 0.0;
+    let open = render(&src, &info, &s, &req(Overlay::SharpenMask)).image;
+    assert!(open.data.iter().all(|p| p[0] == 255 && p[1] == 255 && p[2] == 255), "Masking 0 sharpens everything");
+    s.detail.sharpen_masking = 80.0;
+    let masked = render(&src, &info, &s, &req(Overlay::SharpenMask)).image;
+    assert!(masked.data.iter().all(|p| p[0] == p[1] && p[1] == p[2]), "a grey mask");
+    assert!(lum(at(&masked, 20, 20)) < 20, "the flat field is protected: {:?}", at(&masked, 20, 20));
+    assert!(lum(at(&masked, 80, 80)) > 200, "the square's edge is sharpened: {:?}", at(&masked, 80, 80));
+    let grey = render(&src, &info, &s, &req(Overlay::Luminance)).image;
+    assert!(grey.data.iter().all(|p| p[0] == p[1] && p[1] == p[2]));
+    // Radius / Detail: the band in grey, mid-grey on the flat field, light and dark at the edge
+    let detail = render(&src, &info, &s, &req(Overlay::SharpenDetail)).image;
+    assert!(detail.data.iter().all(|p| p[0] == p[1] && p[1] == p[2]), "grey");
+    assert!((120..=136).contains(&lum(at(&detail, 20, 20))), "flat: {:?}", at(&detail, 20, 20));
+    let edge: Vec<u8> = (76..84).map(|x| lum(at(&detail, x, 80))).collect();
+    assert!(edge.iter().any(|v| *v > 150) && edge.iter().any(|v| *v < 105), "edge: {edge:?}");
+    let plain = render(&src, &info, &s, &req(Overlay::None)).image;
+    assert_ne!(at(&plain, 120, 80)[0], at(&plain, 120, 80)[2], "the render itself keeps its colour");
+    assert_eq!(plain, render(&src, &info, &s, &RenderRequest::fit(240, 160)).image);
 }

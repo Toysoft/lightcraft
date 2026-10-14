@@ -488,3 +488,45 @@ fn level_degrees_sign_matches_crop_angle() {
     let deg = crate::upright::level_degrees(&src, &SourceInfo::default(), &DevelopSettings::default()).expect("lines found");
     assert!((deg + 6.0).abs() < 0.5, "{deg}");
 }
+
+/// Sampling several windows at once (colour noise is measured on patches of the whole frame,
+/// `chroma_noise`) gives each window the pixels a render of the whole frame has there, with a
+/// user orientation, a straightened crop and a lens warp, minified (prefiltered) or not.
+#[test]
+fn sampling_windows_gives_the_whole_frames_pixels() {
+    use crate::PixelWindow;
+    use crate::geometry::Frame;
+    use lightcraft_geom::{Orientation, Rect};
+    let src = Rgb32f::from_fn(600, 400, |x, y| {
+        let (fx, fy) = (x as f32, y as f32);
+        [0.3 + 0.2 * (fx * 0.11).sin(), 0.3 + 0.2 * (fy * 0.07).cos(), 0.2 + 0.15 * ((fx + fy) * 0.05).sin()]
+    });
+    let mut s = DevelopSettings { orientation: Orientation::Rotate90, ..DevelopSettings::default() };
+    s.crop.geometry.angle = 5.0;
+    s.crop.geometry.rect = Rect { x0: 0.12, y0: 0.1, x1: 0.88, y1: 0.9 };
+    s.optics.distortion = 30.0;
+    let frame = Frame::new(src.width, src.height, &s, true);
+    assert!(frame.warp.is_some(), "the test needs a warp");
+    for max in [400, 180] {
+        let (fw, fh) = frame.fit(max, max);
+        let whole = frame.sample(&src, fw, fh);
+        let wins = [
+            PixelWindow { x: 0, y: 0, w: 40, h: 30 },
+            PixelWindow { x: fw / 3, y: fh / 2, w: 50, h: 20 },
+            PixelWindow { x: fw - 25, y: fh - 25, w: 25, h: 25 },
+        ];
+        let parts = frame.sample_windows(&src, fw, fh, &wins);
+        assert_eq!(parts.len(), wins.len());
+        for (win, part) in wins.iter().zip(&parts) {
+            assert_eq!((part.width, part.height), (win.w, win.h));
+            let mut worst = 0.0f32;
+            for y in 0..win.h {
+                for x in 0..win.w {
+                    let (a, b) = (whole.get(win.x + x, win.y + y), part.get(x, y));
+                    worst = worst.max((0..3).map(|k| (a[k] - b[k]).abs()).fold(0.0, f32::max));
+                }
+            }
+            assert!(worst < 1e-4, "{max}: {win:?} differs by {worst}");
+        }
+    }
+}

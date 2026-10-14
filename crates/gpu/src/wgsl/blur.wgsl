@@ -129,3 +129,54 @@ fn median_v(@builtin(global_invocation_id) g: vec3<u32>) {
     }
     dst[g.y * w + g.x] = median_of(n, r, &v);
 }
+
+// Exact separable Gaussian of one channel (`lightcraft_raster::blur::gaussian_exact`): taps at
+// P[3..], 2r + 1 of them, clamped edges, summed in the CPU's order. P: w, h, r, taps.
+@compute @workgroup_size(16, 16)
+fn conv_h(@builtin(global_invocation_id) g: vec3<u32>) {
+    let w = pu(0u);
+    let h = pu(1u);
+    let r = pu(2u);
+    if (g.x >= w || g.y >= h) {
+        return;
+    }
+    var acc = 0.0;
+    for (var k = 0u; k <= 2u * r; k = k + 1u) {
+        let sx = min(u32(max(i32(g.x + k) - i32(r), 0)), w - 1u);
+        acc = acc + pf(3u + k) * src[g.y * w + sx];
+    }
+    dst[g.y * w + g.x] = acc;
+}
+
+@compute @workgroup_size(16, 16)
+fn conv_v(@builtin(global_invocation_id) g: vec3<u32>) {
+    let w = pu(0u);
+    let h = pu(1u);
+    let r = pu(2u);
+    if (g.x >= w || g.y >= h) {
+        return;
+    }
+    var acc = 0.0;
+    for (var k = 0u; k <= 2u * r; k = k + 1u) {
+        let sy = min(u32(max(i32(g.y + k) - i32(r), 0)), h - 1u);
+        acc = acc + pf(3u + k) * src[sy * w + g.x];
+    }
+    dst[g.y * w + g.x] = acc;
+}
+
+// Masking's edge map before its average (`local::sharpen_edge_plane`): the gradient magnitude of
+// the smoothed square root of luminance (central differences, clamped at the edges) times P[2].
+@compute @workgroup_size(16, 16)
+fn grad_k(@builtin(global_invocation_id) g: vec3<u32>) {
+    let w = pu(0u);
+    let h = pu(1u);
+    if (g.x >= w || g.y >= h) {
+        return;
+    }
+    let row = g.y * w;
+    let gx = src[row + min(g.x + 1u, w - 1u)] - src[row + u32(max(i32(g.x) - 1, 0))];
+    let up = u32(max(i32(g.y) - 1, 0)) * w;
+    let down = min(g.y + 1u, h - 1u) * w;
+    let gy = src[down + g.x] - src[up + g.x];
+    dst[row + g.x] = sqrt(gx * gx + gy * gy) * bitcast<f32>(P[2]);
+}

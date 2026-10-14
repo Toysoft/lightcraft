@@ -32,7 +32,7 @@ const MODULES: &[Module] = &[
     Module {
         src: include_str!("wgsl/blur.wgsl"),
         bindings: &[("src", false, "f32"), ("dst", true, "f32")],
-        entries: &["box_h", "box_v", "median_h", "median_v"],
+        entries: &["box_h", "box_v", "median_h", "median_v", "conv_h", "conv_v", "grad_k"],
     },
     Module {
         src: include_str!("wgsl/resize.wgsl"),
@@ -52,6 +52,18 @@ const MODULES: &[Module] = &[
             "nr_lum",
             "chroma_k",
             "nr_col",
+            "nrx_pre",
+            "nrx_ab",
+            "nrx_q",
+            "nrx_energy",
+            "nrx_apply",
+            "sharpen_mask_k",
+            "detail_view_k",
+            "pack_tex",
+            "axpy_k",
+            "sqrt_lum_k",
+            "sharpen_view_k",
+            "sharpen_detail_k",
             "subsample",
             "redeye_k",
             "xguided_pre",
@@ -259,6 +271,13 @@ fn constants() -> String {
     use lightcraft_pipeline::masks::{AUTO_TOL_CHROMA, AUTO_TOL_EV};
     s += &format!("const AUTO_TOL_EV: f32 = {AUTO_TOL_EV:?};\nconst AUTO_TOL_CHROMA: f32 = {AUTO_TOL_CHROMA:?};\n");
     s += &format!("const SHADOW_TINT_K: f32 = {:?};\n", lightcraft_pipeline::colorops::SHADOW_TINT);
+    {
+        use lightcraft_pipeline::sharpen::{AMOUNT_POW, LIMIT_POW, Q0, QW, TONE_DOWN, TONE_UP};
+        s += &format!("const TONE_UP: f32 = {TONE_UP:?};\nconst TONE_DOWN: f32 = {TONE_DOWN:?};\n");
+        s += &format!(
+            "const SHARPEN_Q0: f32 = {Q0:?};\nconst SHARPEN_QW: f32 = {QW:?};\nconst SHARPEN_AMOUNT_POW: f32 = {AMOUNT_POW:?};\nconst SHARPEN_LIMIT_POW: f32 = {LIMIT_POW:?};\n"
+        );
+    }
     for (i, h) in GRAIN_HASH.iter().enumerate() {
         s += &format!("const GRAIN_H{i}: u32 = {h}u;\n");
     }

@@ -62,7 +62,7 @@ impl SettingsHashes {
 }
 
 /// Bump when the pipeline's output changes, to invalidate cached thumbnails.
-pub const RENDER_CACHE_VERSION: u64 = 62;
+pub const RENDER_CACHE_VERSION: u64 = 63;
 
 /// Thumbnails render at one of these long edges (so window/cell size changes reuse the cache).
 pub const THUMB_SIZES: [usize; 4] = [128, 256, 384, 512];
@@ -216,7 +216,10 @@ impl DecodedSource {
     /// What to render these pixels against: the decoder's facts, else `header` (the catalog's)
     /// with any stored camera tone curve.
     pub fn info_or(&self, header: SourceInfo) -> SourceInfo {
-        self.info.clone().unwrap_or_else(|| SourceInfo { camera_tone: self.camera_tone.or(header.camera_tone), ..header })
+        match &self.info {
+            Some(i) => SourceInfo { native_long: if i.native_long > 0 { i.native_long } else { header.native_long }, ..i.clone() },
+            None => SourceInfo { camera_tone: self.camera_tone.or(header.camera_tone), ..header },
+        }
     }
 }
 
@@ -1095,6 +1098,10 @@ pub fn content_key(p: &Photo) -> String {
 }
 
 pub fn source_info(p: &Photo) -> SourceInfo {
+    SourceInfo { native_long: p.width.max(p.height) as usize, ..source_info_of(p) }
+}
+
+fn source_info_of(p: &Photo) -> SourceInfo {
     // Procedural demo scenes are scene-referred HDR (like raw files): use the filmic tone map.
     if matches!(p.source, Source::Demo { .. }) {
         return SourceInfo { raw: true, ..Default::default() };
