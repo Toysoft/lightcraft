@@ -5,16 +5,20 @@ use crate::{Image, par_rows};
 
 /// Box radii approximating a Gaussian of `sigma` with 3 passes (Kovesi / Wells).
 pub fn box_radii(sigma: f32) -> [usize; 3] {
-    let n = 3.0f32;
-    let w_ideal = (12.0 * sigma * sigma / n + 1.0).sqrt();
-    let mut wl = w_ideal.floor() as i32;
-    if wl % 2 == 0 {
-        wl -= 1;
+    let n = 3.0f64;
+    // hostile sigma (non-finite or absurd) is clamped to a width the f64 arithmetic below cannot
+    // overflow and the radii stay bounded; every legitimate sigma in the pipeline is far smaller
+    // than the clamp (#1519)
+    let s = if sigma.is_finite() { (sigma as f64).clamp(0.0, 1.0e4) } else { 1.0e4 };
+    let w_ideal = (12.0 * s * s / n + 1.0).sqrt();
+    let mut wl = w_ideal.floor();
+    if wl % 2.0 == 0.0 {
+        wl -= 1.0;
     }
-    let wu = wl + 2;
-    let m_ideal = (12.0 * sigma * sigma - n * (wl * wl) as f32 - 4.0 * n * wl as f32 - 3.0 * n) / (-4.0 * wl as f32 - 4.0);
-    let m = m_ideal.round() as i32;
-    std::array::from_fn(|i| (((if (i as i32) < m { wl } else { wu }) - 1) / 2).max(0) as usize)
+    let wu = wl + 2.0;
+    let m_ideal = (12.0 * s * s - n * wl * wl - 4.0 * n * wl - 3.0 * n) / (-4.0 * wl - 4.0);
+    let m = m_ideal.round();
+    std::array::from_fn(|i| (((if (i as f64) < m { wl } else { wu }) - 1.0) / 2.0).max(0.0) as usize)
 }
 
 /// One horizontal box pass over `row` (clamped edges), using `tmp` as scratch.
@@ -71,11 +75,14 @@ fn box_v<T: Pixel>(src: &Image<T>, dst: &mut Image<T>, r: usize) {
     });
 }
 
-/// Blur with Gaussian `sigma` (pixels). `sigma <= 0.3` returns a copy.
+/// Blur with Gaussian `sigma` (pixels). `sigma <= 0.3` or non-finite returns a copy; a sigma larger
+/// than the picture is capped to it — a wider blur is visually a flat average, and a hostile
+/// serialized radius must not drive radius-sized loops (#1519).
 pub fn gaussian<T: Pixel>(img: &Image<T>, sigma: f32) -> Image<T> {
-    if sigma <= 0.3 || img.is_empty() {
+    if img.is_empty() || !sigma.is_finite() || sigma <= 0.3 {
         return img.clone();
     }
+    let sigma = sigma.min(img.width.max(img.height) as f32);
     let radii = box_radii(sigma);
     let mut a = img.clone();
     par_rows(&mut a.data, img.width, |_, row| {
@@ -122,5 +129,23 @@ mod tests {
         let b = gaussian(&imp, sigma);
         let var: f32 = b.data.iter().enumerate().map(|(i, v)| v * ((i as f32 - 100.0).powi(2))).sum();
         assert!((var.sqrt() - sigma).abs() / sigma < 0.1, "{}", var.sqrt());
+    }
+
+    #[test]
+    fn hostile_sigma_is_capped_not_an_overflow() {
+        // #1519: a hostile serialized sigma must not overflow the box-radius arithmetic (i32
+        // `wl + 2` / `wl * wl` used to panic) or drive radius-sized loops; a blur wider than the
+        // picture is capped to it, and a non-finite sigma leaves the image alone.
+        let img = Image::<f32>::filled(50, 30, 0.7);
+        for sigma in [f32::MAX, 1.0e30, 1.0e5, f32::INFINITY, f32::NAN, f32::NEG_INFINITY] {
+            let b = gaussian(&img, sigma);
+            assert_eq!((b.width, b.height), (50, 30), "{sigma}");
+            assert!(b.data.iter().all(|v| v.is_finite()), "{sigma}");
+            assert!(b.data.iter().all(|v| (v - 0.7).abs() < 1e-5), "{sigma}");
+        }
+        // the box radii themselves stay bounded for any input (the GPU path calls this directly)
+        for sigma in [f32::MAX, f32::INFINITY, f32::NAN, 1.0e30, -1.0e30, 0.0] {
+            assert!(box_radii(sigma).iter().all(|&r| r <= 10_000), "{sigma}");
+        }
     }
 }

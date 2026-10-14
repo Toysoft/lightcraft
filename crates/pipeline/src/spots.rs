@@ -165,7 +165,7 @@ pub fn window_for_reads_checked(
     let boxes: Vec<([f64; 4], [f64; 4])> = spots
         .iter()
         .filter_map(|spot| {
-            let r = (spot.size * ppl).max(1.0);
+            let r = spot_radius(spot.size, ppl, full_w.max(full_h));
             let pts: Vec<_> = spot.points.iter().map(|p| to_out.apply(*p)).collect();
             let first = pts.first()?;
             let (mut x0, mut y0, mut x1, mut y1) = (first.x, first.y, first.x, first.y);
@@ -239,6 +239,13 @@ pub fn window_for_reads_checked(
     )
 }
 
+/// Spot radius in output pixels: at least 1, at most the output's long edge. A hostile serialized
+/// size (huge, infinite) must not reach radius-sized loops or overflowing blur arithmetic (#1519);
+/// a spot wider than the picture is meaningless anyway.
+fn spot_radius(size: f64, ppl: f64, long_edge: usize) -> f64 {
+    (size * ppl).max(1.0).min(long_edge.max(1) as f64)
+}
+
 /// Content-aware fill of the box: `src` becomes `tgt` with every pixel under the stroke (`alpha > 0`)
 /// rebuilt from the rest of the box. Falls back to a smooth membrane fill when the box holds no whole
 /// patch to copy from.
@@ -261,7 +268,7 @@ pub fn apply(img: &mut Rgb32f, spots: &[Spot], frame: &Frame, ppl: f64) {
     let (w, h) = (img.width, img.height);
     let to_out = frame.norm_to_out(w, h);
     for spot in spots {
-        let r = (spot.size * ppl).max(1.0) as f32;
+        let r = spot_radius(spot.size, ppl, w.max(h)) as f32;
         let pts: Vec<(f32, f32)> = spot
             .points
             .iter()
@@ -455,6 +462,20 @@ mod tests {
             let spot = Spot { mode: SpotMode::Fill, points: vec![Point::new(p.0, p.1)], size, ..Default::default() };
             apply(&mut img, &[spot], &frame, frame.px_per_long(40));
             assert!(img.data.iter().flatten().all(|v| v.is_finite()));
+        }
+    }
+
+    #[test]
+    fn heal_survives_a_hostile_spot_size() {
+        // #1519: an oversized serialized spot size used to reach the heal blur as an infinite
+        // sigma, overflowing the Gaussian box-radius arithmetic; the radius is now capped to the
+        // picture, so every hostile size completes with finite output.
+        let frame = Frame::new(40, 30, &DevelopSettings::default(), true);
+        for size in [f64::INFINITY, 1.0e30, 1.0e6, f64::NAN, -1.0e30] {
+            let mut img = Rgb32f::from_fn(40, 30, |x, _| [x as f32 / 40.0; 3]);
+            let spot = Spot { mode: SpotMode::Heal, points: vec![Point::new(0.5, 0.5)], size, ..Default::default() };
+            apply(&mut img, &[spot], &frame, frame.px_per_long(40));
+            assert!(img.data.iter().flatten().all(|v| v.is_finite()), "{size}");
         }
     }
 
