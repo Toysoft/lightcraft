@@ -120,6 +120,7 @@ language_table! {
     ZhHans, "zh-hans", "简体中文", "Hans", include_str!("../locales/zh-hans.json");
     ZhHant, "zh-hant", "繁體中文（台灣）", "Hant", include_str!("../locales/zh-hant.json");
     Ja, "ja", "日本語", "Jpan", include_str!("../locales/ja.json");
+    Ko, "ko", "한국어", "Hang", include_str!("../locales/ko.json");
     PtBr, "pt-br", "Português (Brasil)", "Latn", include_str!("../locales/pt-br.json");
     Es, "es", "Español", "Latn", include_str!("../locales/es.json");
     De, "de", "Deutsch", "Latn", include_str!("../locales/de.json");
@@ -147,9 +148,17 @@ thread_local! {
     static LOCALE: std::cell::Cell<Locale> = const { std::cell::Cell::new(Locale::En) };
 }
 
-/// The UI language from the environment (`LIGHTCRAFT_LANGUAGE=zh-hans`), for headless runs.
+/// The UI language from `LIGHTCRAFT_LANGUAGE` or the system locale environment.
 pub fn default_language() -> Locale {
-    std::env::var("LIGHTCRAFT_LANGUAGE").ok().and_then(|value| Locale::parse_tag(&value)).unwrap_or(Locale::En)
+    let explicit = std::env::var("LIGHTCRAFT_LANGUAGE").ok();
+    let all = std::env::var("LC_ALL").ok();
+    let messages = std::env::var("LC_MESSAGES").ok();
+    let lang = std::env::var("LANG").ok();
+    language_from_environment(explicit.as_deref(), all.as_deref(), messages.as_deref(), lang.as_deref())
+}
+
+fn language_from_environment(explicit: Option<&str>, all: Option<&str>, messages: Option<&str>, lang: Option<&str>) -> Locale {
+    [explicit, all, messages, lang].into_iter().flatten().next().and_then(Locale::parse_tag).unwrap_or(Locale::En)
 }
 
 pub fn set_language(language: Locale) {
@@ -450,6 +459,52 @@ mod tests {
         }
     }
 
+    #[test]
+    fn korean_catalog_covers_all_messages_and_preserves_format_placeholders() {
+        let korean = Locale::Ko.catalog();
+        for language in Locale::ALL.iter().filter(|language| **language != Locale::En) {
+            for source in language.catalog().keys() {
+                assert!(korean.contains_key(source), "ko.json is missing {source:?} from {}", language.code());
+            }
+        }
+
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
+        let mut format_keys = std::collections::BTreeSet::new();
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if !path.file_name().is_some_and(|name| name.to_string_lossy().ends_with("-formats.json")) {
+                continue;
+            }
+            let messages: BTreeMap<String, String> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            format_keys.extend(messages.into_keys());
+        }
+        let path = dir.join("ko-formats.json");
+        let messages: BTreeMap<String, String> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(messages.keys().cloned().collect::<std::collections::BTreeSet<_>>(), format_keys, "ko-formats.json message coverage");
+
+        let fields = |text: &str| {
+            let mut out: Vec<String> = Vec::new();
+            let mut rest = text;
+            let mut next_positional = 0;
+            while let Some(start) = rest.find('{') {
+                let Some(end) = rest[start..].find('}') else { break };
+                let field = rest[start + 1..start + end].split(':').next().unwrap_or_default();
+                if field.is_empty() {
+                    out.push(next_positional.to_string());
+                    next_positional += 1;
+                } else {
+                    out.push(field.to_string());
+                }
+                rest = &rest[start + end + 1..];
+            }
+            out.sort();
+            out
+        };
+        for (source, translated) in messages {
+            assert_eq!(fields(&source), fields(&translated), "{source:?} -> {translated:?}");
+        }
+    }
+
     /// Where two catalogs translate the same text they agree on its placeholders. Catalogs may cover
     /// different sets of messages (a message a language lacks shows in English): the gaps are
     /// reported, not failed, so a translation can grow at its own pace.
@@ -506,6 +561,9 @@ mod tests {
         assert_eq!(Locale::parse_tag("zh-Hant-TW"), Some(Locale::ZhHant));
         assert_eq!(Locale::parse_tag("zh-CN"), Some(Locale::ZhHans));
         assert_eq!(Locale::parse_tag("ja_JP.UTF-8"), Some(Locale::Ja));
+        for tag in ["ko", "ko-KR", "ko_KR.UTF-8"] {
+            assert_eq!(Locale::parse_tag(tag), Some(Locale::Ko), "{tag}");
+        }
         assert_eq!(Locale::parse_tag("pt-br"), Some(Locale::PtBr));
         assert_eq!(Locale::parse_tag("pt-BR"), Some(Locale::PtBr));
         assert_eq!(Locale::parse_tag("pt_BR.UTF-8"), Some(Locale::PtBr));
@@ -526,6 +584,15 @@ mod tests {
     }
 
     #[test]
+    fn system_locale_sets_the_initial_ui_language() {
+        assert_eq!(language_from_environment(None, None, None, Some("ko_KR.UTF-8")), Locale::Ko);
+        assert_eq!(language_from_environment(None, Some("ko-KR"), Some("ja_JP"), Some("en_US")), Locale::Ko);
+        assert_eq!(language_from_environment(Some("de-DE"), Some("ko-KR"), None, None), Locale::De);
+        assert_eq!(language_from_environment(None, Some("C"), None, Some("ko_KR")), Locale::En);
+        assert_eq!(language_from_environment(None, None, None, None), Locale::En);
+    }
+
+    #[test]
     fn switching_language_translates_and_restores() {
         set_language(Locale::ZhHans);
         assert_eq!(tr("Exposure"), "曝光");
@@ -536,6 +603,9 @@ mod tests {
         assert_eq!(tr("A string no catalog has"), "A string no catalog has");
         set_language(Locale::Ja);
         assert_eq!(tr("Exposure"), "露出");
+        set_language(Locale::Ko);
+        assert_eq!(tr("Exposure"), "노출");
+        assert_eq!(tr("Settings"), "설정");
         set_language(Locale::PtBr);
         assert_eq!(tr("Exposure"), "Exposição");
         assert_eq!(tr("Settings"), "Configurações");
@@ -661,6 +731,7 @@ mod tests {
             ("app.language.english", Locale::En),
             ("app.language.simplifiedChinese", Locale::ZhHans),
             ("app.language.japanese", Locale::Ja),
+            ("app.language.korean", Locale::Ko),
             ("app.language.portuguese", Locale::PtBr),
             ("app.language.french", Locale::Fr),
             ("app.language.spanish", Locale::Es),
@@ -681,14 +752,17 @@ mod tests {
     #[test]
     fn preferences_round_trip_and_old_settings_remain_readable() {
         let old: crate::state::UiState = serde_json::from_str("{}").unwrap();
-        assert_eq!(old.language, Locale::En);
+        assert_eq!(old.language, default_language());
         // Settings written before the language list grew still load.
         let legacy: crate::state::UiState = serde_json::from_str(r#"{"language":"ja"}"#).unwrap();
         assert_eq!(legacy.language, Locale::Ja);
-        let settings = crate::state::UiState { language: Locale::ZhHans, ..old };
+        let legacy_korean: crate::state::UiState = serde_json::from_str(r#"{"language":"ko-KR"}"#).unwrap();
+        assert_eq!(legacy_korean.language, Locale::Ko);
+        let settings = crate::state::UiState { language: Locale::Ko, ..old };
         let saved = serde_json::to_string(&settings).unwrap();
+        assert!(saved.contains(r#""language":"ko""#));
         let restored: crate::state::UiState = serde_json::from_str(&saved).unwrap();
-        assert_eq!(restored.language, Locale::ZhHans);
+        assert_eq!(restored.language, Locale::Ko);
     }
 
     #[test]
@@ -820,17 +894,12 @@ mod tests {
         }
     }
 
-    /// Ukrainian's coverage of every catalog message and display label. Gaps are reported, not failed
-    /// (like `catalogs_agree_on_placeholders_and_report_gaps`): a feature PR that adds a label doesn't
-    /// have to ship its Ukrainian text, which shows in English until the translation catches up.
+    /// Korean and Ukrainian coverage of every catalog message and display label. Gaps are reported,
+    /// not failed: a feature PR that adds a label doesn't have to ship its translation, which shows
+    /// in English until the translation catches up.
     #[test]
-    fn ukrainian_coverage_of_catalogs_commands_controls_and_rules_is_reported() {
-        let catalog = Locale::Uk.catalog();
+    fn korean_and_ukrainian_coverage_of_catalogs_commands_controls_and_rules_is_reported() {
         let keys: std::collections::BTreeSet<&String> = Locale::ALL.iter().flat_map(|language| language.catalog().keys()).collect();
-        let lacking: Vec<_> = keys.into_iter().filter(|key| !catalog.contains_key(key.as_str())).collect();
-        if !lacking.is_empty() {
-            eprintln!("uk lacks {} catalog message(s) (shown in English): {lacking:?}", lacking.len());
-        }
         let mut labels: Vec<&str> = lightcraft_engine::command_specs().iter().map(|spec| spec.label).collect();
         labels.extend(crate::menus::ui_commands().map(|command| command.1).filter(|label| !Locale::ALL.iter().any(|locale| locale.name() == *label)));
         labels.extend(lightcraft_develop::CONTROLS.iter().map(|control| control.label));
@@ -841,10 +910,29 @@ mod tests {
         }
         labels.extend(lightcraft_engine::rename::TOKENS.iter().map(|token| token.meaning));
         labels.extend(lightcraft_engine::rename::TEMPLATE_NOTES);
-        let missing: Vec<_> = labels.into_iter().filter(|label| !catalog.contains_key(*label)).collect();
-        if !missing.is_empty() {
-            eprintln!("uk lacks {} display label(s) (shown in English): {missing:?}", missing.len());
+        for language in [Locale::Ko, Locale::Uk] {
+            let catalog = language.catalog();
+            let lacking: Vec<_> = keys.iter().filter(|key| !catalog.contains_key(key.as_str())).collect();
+            if !lacking.is_empty() {
+                eprintln!("{} lacks {} catalog message(s) (shown in English): {lacking:?}", language.code(), lacking.len());
+            }
+            let missing: Vec<_> = labels.iter().filter(|label| !catalog.contains_key(**label)).collect();
+            if !missing.is_empty() {
+                eprintln!("{} lacks {} display label(s) (shown in English): {missing:?}", language.code(), missing.len());
+            }
         }
+    }
+
+    #[test]
+    fn korean_language_command_switches_and_persists() {
+        let mut app = crate::LightcraftApp::new(lightcraft_engine::Session::with_demo(), Default::default());
+        app.run("app.language.korean", serde_json::json!({})).unwrap();
+        assert_eq!(app.ui.language, Locale::Ko);
+        assert_eq!(crate::menubar::checked(&app, "app.language.korean"), Some(true));
+        assert_eq!(tr("Exposure"), "노출");
+        let saved = serde_json::to_string(&app.ui).unwrap();
+        assert!(saved.contains(r#""language":"ko""#));
+        assert_eq!(serde_json::from_str::<crate::state::UiState>(&saved).unwrap().language, Locale::Ko);
     }
 
     #[test]

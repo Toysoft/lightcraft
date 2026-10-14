@@ -2,10 +2,13 @@
 
 The interface ships in the language it is written in (English) plus every language in the table in
 `crates/ui-egui/src/i18n.rs`. Today that is English, Simplified Chinese (`zh-hans`), Traditional
-Chinese (`zh-hant`, Taiwan), Japanese (`ja`), Brazilian Portuguese (`pt-br`), Spanish (`es`), German (`de`), Russian (`ru`) and French (`fr`). This file is the reference for **adding or maintaining a language**; the per-language notes
+Chinese (`zh-hant`, Taiwan), Japanese (`ja`), Korean (`ko`), Brazilian Portuguese (`pt-br`), Spanish
+(`es`), German (`de`), Russian (`ru`), French (`fr`) and Ukrainian (`uk`). This file is the
+reference for **adding or maintaining a language**; the per-language notes
 are in [`localization-zh-hans.md`](localization-zh-hans.md), [`localization-zh-hant.md`](localization-zh-hant.md),
 [`localization-ja.md`](localization-ja.md), [`localization-pt-br.md`](localization-pt-br.md), [`localization-es.md`](localization-es.md),
-[`localization-de.md`](localization-de.md) and [`localization-ru.md`](localization-ru.md).
+[`localization-de.md`](localization-de.md), [`localization-ru.md`](localization-ru.md) and
+[`localization-ko.md`](localization-ko.md).
 
 ## Adding a language
 
@@ -30,11 +33,12 @@ are in [`localization-zh-hans.md`](localization-zh-hans.md), [`localization-zh-h
        De, "de", "Deutsch", "Latn", include_str!("../locales/de.json");
        Ru, "ru", "Русский", "Cyrl", include_str!("../locales/ru.json");
        Uk, "uk", "Українська", "Cyrl", include_str!("../locales/uk.json");
+       Ko, "ko", "한국어", "Hang", include_str!("../locales/ko.json");
    }
    ```
 
    The fields are the BCP-47 code (also the settings-file value), the **endonym** shown in the
-   Language menu, the ISO 15924 script (`Latn`, `Jpan`, `Hans`, `Hant`, `Kore`…), and the embedded
+   Language menu, the ISO 15924 script (`Latn`, `Jpan`, `Hans`, `Hant`, `Hang`…), and the embedded
    catalog. `build.rs` picks up `<code>-formats.json` by name, so the macro and the format lookup
    follow automatically. Add the corresponding `app.language.<name>` entry to
    `LANGUAGE_COMMANDS` and `language_from_command` in `src/menus.rs`, and to the
@@ -88,7 +92,7 @@ The glyph tests are skipped without `CRAFT_FONTS_DIR` (there are no CJK faces to
 To look at a language, render it headless:
 
 ```sh
-LIGHTCRAFT_LANGUAGE=zh-hans lightcraft-cli snapshot --demo --script tour.jsonl -o out.png --size 1600x1000
+LIGHTCRAFT_LANGUAGE=zh-hans lightcraft-cli snapshot --demo -o out.png --size 1600x1000
 ```
 
 or, with the app running (`--control 7980`), run the language command
@@ -98,8 +102,10 @@ or, with the app running (`--control 7980`), run the language command
 
 The settings file stores the BCP-47 code, never the Rust variant name, so a language can be renamed
 in code without invalidating anyone's saved preference. `LIGHTCRAFT_LANGUAGE` accepts what a system
-locale looks like (`zh_Hans`, `zh-CN`, `en_US`, `ja_JP.UTF-8`) and falls back to the base language
-when a region has no dedicated entry.
+locale looks like (`zh_Hans`, `zh-CN`, `en_US`, `ja_JP.UTF-8`) and takes precedence over system
+locale variables. Without it, new settings use `LC_ALL`, `LC_MESSAGES` or `LANG` in that order and
+fall back to English for an unsupported locale. A region with no dedicated entry falls back to its
+base language (`ko-KR` to `ko`).
 
 ## Release notes
 

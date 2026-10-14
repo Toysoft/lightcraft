@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~14 points and ~340–600 h away
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Leica Q3 verified, 236 models; EOS R5 Mark II CR3 verified; RAW decoding 77%) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Korean UI localization; Hangul font dependency) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 One-page summary of how close LightCraft is to Adobe Lightroom. Agents: read this, then pick work
 from [docs/gaps.md](docs/gaps.md). The full assessment, method and evidence are in
@@ -49,7 +49,7 @@ Hours are calibrated on this repo's PR history; see
 | UI/UX fidelity | ~70% | ~85% | 34–58 h | [ui-parity](docs/ui-parity.md) |
 | File formats (non-raw) | ~70% | ~85% | 30–55 h | [file-format-parity](docs/file-format-parity.md) |
 | Hardware | ~40% | ~50% | 40–80 h | [hardware-parity](docs/hardware-parity.md) |
-| Localization | ~52% of the 12 key languages | 7 of 12 present | 130–210 h (+145–255 h new scripts) | [localization-parity](docs/localization-parity.md) |
+| Localization | ~59% of the 12 key languages | 8 of 12 present | 130–215 h (+130–235 h for Hindi, Arabic, Indonesian, Vietnamese) | [localization-parity](docs/localization-parity.md) |
 | Performance | ~70% | ~80% | 30–50 h | [target-app-parity](docs/target-app-parity.md#by-dimension) |
 | Stability | ~60% | — | 30–60 h | [target-app-parity](docs/target-app-parity.md#by-dimension) |
 | Platforms | ~60% | macOS, Windows, Linux, FreeBSD, web | 25–45 h | [target-app-parity](docs/target-app-parity.md#by-dimension) |
@@ -78,25 +78,25 @@ Weights and evidence: [target-app-parity.md](docs/target-app-parity.md#features)
 
 ## Languages
 
-Measured from `crates/ui-egui/locales` (share of 2,304 catalog messages translated); none is `full`
+Measured from `crates/ui-egui/locales` (share of 2,410 catalog messages translated); none is `full`
 while lower-layer errors stay English. Detail: [localization-parity.md](docs/localization-parity.md).
 
 | Language | Code | Translated | Status |
 |---|---|---:|---|
 | English | en | 100% | full (source) |
-| Simplified Chinese | zh-hans | 87% | partial |
-| Spanish | es | 86% | partial |
+| Simplified Chinese | zh-hans | 92% | partial |
+| Spanish | es | 92% | partial |
 | Hindi | hi | 0% | none (no Devanagari shaping) |
 | Arabic | ar | 0% | none (no RTL / shaping) |
 | French | fr | 88% | partial |
-| Portuguese (Brazil) | pt-br | 85% | partial |
+| Portuguese (Brazil) | pt-br | 87% | partial |
 | Indonesian | id | 0% | none |
 | Japanese | ja | 87% | partial |
-| German | de | 91% | partial |
-| Korean | ko | 0% | none (no Hangul face) |
+| German | de | 92% | partial |
+| Korean | ko | 75% | partial (Pretendard Hangul face; native review needed) |
 | Vietnamese | vi | 0% | none |
 
-Also shipped: Traditional Chinese (87%), Russian (74%), Ukrainian (99%).
+Also shipped: Traditional Chinese (87%), Russian (98%), Ukrainian (99%).
 
 ## Upcoming
 
@@ -163,6 +163,7 @@ Ranked toward beta; detail in [docs/roadmap.md](docs/roadmap.md), gaps in [docs/
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Added Korean UI localization and Hangul font dependency; 8/12 key languages present, localization mean 52% → 59% |
 | 2026-10-12 | minor | UI/UX remaining 40–70 h → 34–58 h (accessibility audit landed); headline numbers unchanged |
 | 2026-10-11 | minor | EOS R5 Mark II CR3 verified: CR3 on four verified bodies, RAW decoding 76% → 77%; headline numbers unchanged |
 | 2026-10-10 | minor | RAW measured model by model; RAW decode and colour as explicit rows: full 59% → 61%, mainstream 51% → 49%, essentials 63% → 64%; beta ~14 points |
