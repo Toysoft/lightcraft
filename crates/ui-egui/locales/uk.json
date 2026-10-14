@@ -2151,5 +2151,22 @@
   "Adding to Apple Photos": "Додавання до Apple Фото",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Графічний процесор не знайдено: LightCraft виконує рендеринг на ЦП, а це набагато повільніше. Докладніше: Довідка → Інформація про систему.",
   "On NixOS, start it from `nix develop`.": "У NixOS запускайте його з `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Файли з тим самим вмістом, що й інший файл цього імпорту: імпортується лише перший."
+  "Files with the same content as another file in this import: only the first is imported.": "Файли з тим самим вмістом, що й інший файл цього імпорту: імпортується лише перший.",
+  "Map": "Карта",
+  "Move Map": "Перемістити карту",
+  "Online Map (OpenStreetMap)": "Онлайн-карта (OpenStreetMap)",
+  "No location in these photos": "Ці фотографії не мають місця розташування",
+  "Photos with a GPS position appear on the map": "Фотографії з GPS-координатами з’являються на карті",
+  "Show the detailed OpenStreetMap map. Its tiles are loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer.": "Показати докладну карту OpenStreetMap. Її плитки завантажуються з openstreetmap.org, і сервер дізнається, яку ділянку ви переглядаєте; ваші фотографії залишаються на цьому комп’ютері.",
+  "Show all photos on the map": "Показати всі фотографії на карті",
+  "Zoom in": "Збільшити",
+  "Zoom out": "Зменшити",
+  "The online map could not be loaded; showing the offline map": "Не вдалося завантажити онлайн-карту; показано офлайн-карту",
+  "Loading map tiles": "Завантаження плиток карти",
+  "Show streets and place names?": "Показувати вулиці та назви місць?",
+  "The detailed map is loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer. You can change this any time above the map.": "Докладна карта завантажується з openstreetmap.org; сервер при цьому дізнається, яку ділянку карти ви переглядаєте. Ваші фотографії залишаються на цьому комп’ютері. Це можна змінити будь-коли над картою.",
+  "Use OpenStreetMap": "Використовувати OpenStreetMap",
+  "Keep the Offline Map": "Залишити офлайн-карту",
+  "Photos on the map": "Фотографії на карті",
+  "At most this many photos of the filmstrip appear on the map: the first ones with a location. More take longer to draw.": "На карті з’являється не більше цієї кількості фотографій зі стрічки: перші, що мають місце розташування. Що більше фотографій, то довше малювання."
 }

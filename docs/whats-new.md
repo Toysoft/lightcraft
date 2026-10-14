@@ -6,6 +6,17 @@
 - A spot with Feather at 0 no longer draws black pixels exactly on its radius. This also fixes spots at 0% Opacity
   changing pixels along their edge. The hard edge now leaves pixels on the radius unchanged.
 
+### Map
+- **View ▸ Map** (or the pin in the bottom bar) shows the photos of the filmstrip that have a GPS position on a map of
+  the world, each with a tip that points at its place. Photos taken at the same place are one stack with their number
+  in its corner; click a photo or a stack to select its photos in the filmstrip below the map. The first time, the
+  map asks whether to load the detailed OpenStreetMap map; Settings ▸ Interface ▸ Map sets how many photos it
+  shows (100 by default, up to 1000); while its tiles load, the map sharpens in place instead
+  of showing gaps. The line above the map says when photos are left out or have no position.
+- The map works offline (coasts, lakes and country borders from Natural Earth). For streets and place names, switch
+  on **OpenStreetMap** above the map: its tiles are then loaded from openstreetmap.org, which learns the area you look
+  at. Your photos and their positions are not sent. It is off until you switch it on.
+
 ## 2026-10-13
 
 ### HDR merges keep the lens correction

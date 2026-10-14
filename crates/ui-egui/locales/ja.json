@@ -1961,5 +1961,22 @@
   "Adding to Apple Photos": "Appleの写真に追加中",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "グラフィックプロセッサが見つかりません。LightCraftはCPUで描画するため、かなり遅くなります。詳細は「ヘルプ → システム情報」を参照してください。",
   "On NixOS, start it from `nix develop`.": "NixOSでは `nix develop` から起動してください。",
-  "Files with the same content as another file in this import: only the first is imported.": "この読み込み内の別のファイルと内容が同じファイルです。最初のファイルだけが読み込まれます。"
+  "Files with the same content as another file in this import: only the first is imported.": "この読み込み内の別のファイルと内容が同じファイルです。最初のファイルだけが読み込まれます。",
+  "Map": "マップ",
+  "Move Map": "マップを移動",
+  "Online Map (OpenStreetMap)": "オンラインマップ (OpenStreetMap)",
+  "No location in these photos": "これらの写真に位置情報がありません",
+  "Photos with a GPS position appear on the map": "GPS 位置のある写真がマップに表示されます",
+  "Show the detailed OpenStreetMap map. Its tiles are loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer.": "詳細な OpenStreetMap の地図を表示します。タイルは openstreetmap.org から読み込まれ、表示中の範囲がサーバーに伝わります。写真はこのコンピューターから出ません。",
+  "Show all photos on the map": "すべての写真をマップに表示",
+  "Zoom in": "ズームイン",
+  "Zoom out": "ズームアウト",
+  "The online map could not be loaded; showing the offline map": "オンラインマップを読み込めませんでした。オフラインマップを表示しています",
+  "Loading map tiles": "マップタイルを読み込み中",
+  "Show streets and place names?": "道路と地名を表示しますか？",
+  "The detailed map is loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer. You can change this any time above the map.": "詳細な地図は openstreetmap.org から読み込まれ、表示している地域がサーバーに伝わります。写真はこのコンピューターから出ません。この設定は地図の上でいつでも変更できます。",
+  "Use OpenStreetMap": "OpenStreetMap を使用",
+  "Keep the Offline Map": "オフラインマップのままにする",
+  "Photos on the map": "地図上の写真",
+  "At most this many photos of the filmstrip appear on the map: the first ones with a location. More take longer to draw.": "フィルムストリップの写真のうち、位置情報のある最初の写真がこの枚数まで地図に表示されます。枚数が多いほど描画に時間がかかります。"
 }

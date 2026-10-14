@@ -658,6 +658,20 @@ fn interface_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
         use crate::state::InfoOverlay as I;
         choices(ui, "settingsInfo", &[(I::Off, "Off"), (I::Basic, "File & date"), (I::Exposure, "Exposure")], &mut app.ui.info_overlay);
     });
+    heading(ui, t, crate::i18n::tr("Map"));
+    row(ui, t, crate::i18n::tr("Photos on the map"), |ui| {
+        let labels = lightcraft_map::PHOTO_LIMITS.map(|n| n.to_string());
+        let options: Vec<(usize, &str)> = lightcraft_map::PHOTO_LIMITS.iter().zip(&labels).map(|(n, l)| (*n, l.as_str())).collect();
+        let mut limit = lightcraft_map::photo_limit(app.ui.map.limit);
+        if choices(ui, "settingsMapLimit", &options, &mut limit) {
+            app.ui.map.limit = limit;
+        }
+    });
+    hint(
+        ui,
+        t,
+        crate::i18n::tr("At most this many photos of the filmstrip appear on the map: the first ones with a location. More take longer to draw."),
+    );
 }
 
 /// Appearance Mode (`button:settingsAppearance-{0,1,2}`: Auto, Dark, Light) above the light and

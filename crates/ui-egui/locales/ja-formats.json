@@ -247,5 +247,9 @@
   "{n} photos opened for editing; each is stacked with its original": "{n}枚の写真を編集用に開きました。それぞれ元の写真とスタックされています",
   "{name} opened in the other editor": "{name}を別のエディタで開きました",
   "{n} originals opened in the other editor": "{n}個の元ファイルを別のエディタで開きました",
-  "· {in_source} identical copies": "・同一のコピー {in_source} 件"
+  "· {in_source} identical copies": "・同一のコピー {in_source} 件",
+  "{n} without a location": "{n} 枚は位置情報なし",
+  "the first {limit} of {n} with a location": "位置情報のある {n} 枚のうち最初の {limit} 枚",
+  "{n} photos at this place": "この場所に {n} 枚の写真",
+  "and {n} more": "ほか {n} 枚"
 }

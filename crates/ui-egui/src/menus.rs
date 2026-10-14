@@ -64,6 +64,9 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("view.compare", "Compare", Some("Shift+C"), "View"),
     ("view.survey", "Survey", Some("N"), "View"),
     ("view.people", "People", None, "View"),
+    ("view.map", "Map", None, "View"),
+    ("map.view", "Move Map", None, ""),
+    ("map.onlineTiles", "Online Map (OpenStreetMap)", None, "View"),
     ("view.person", "Show Person", None, ""),
     ("view.faceBoxes", "Face Boxes", None, "View"),
     ("view.reference", "Reference View", Some("Shift+R"), "View"),
@@ -505,6 +508,12 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             app.ui.view = ViewMode::People;
             Ok(json!({"people": app.session.catalog.people().len()}))
         }
+        "view.map" => {
+            app.ui.view = ViewMode::Map;
+            Ok(Value::Null)
+        }
+        "map.view" => crate::panels::map::view_command(app, p),
+        "map.onlineTiles" => crate::panels::map::online_command(app, p),
         "view.person" => {
             // {name}: one person's page in the People view: their faces, and the faces that look like them
             let Some(name) = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()) else {

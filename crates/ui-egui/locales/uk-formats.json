@@ -247,5 +247,9 @@
   "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом",
   "{name} opened in the other editor": "{name} відкрито в іншому редакторі",
   "{n} originals opened in the other editor": "Відкрито оригіналів в іншому редакторі: {n}",
-  "· {in_source} identical copies": "· ідентичних копій: {in_source}"
+  "· {in_source} identical copies": "· ідентичних копій: {in_source}",
+  "{n} without a location": "{n} без місця розташування",
+  "the first {limit} of {n} with a location": "перші {limit} із {n} з місцем розташування",
+  "{n} photos at this place": "Фотографій у цьому місці: {n}",
+  "and {n} more": "і ще {n}"
 }

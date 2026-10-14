@@ -1,0 +1,12 @@
+[package]
+name = "lightcraft-map"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LightCraft map view: Web Mercator viewport, stacking photos by place, tile addresses and the offline Natural Earth basemap (L1)"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }

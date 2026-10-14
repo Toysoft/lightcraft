@@ -1998,5 +1998,22 @@
   "Recognition models": "Modelos de reconhecimento",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Nenhum processador gráfico encontrado: o LightCraft renderiza na CPU, o que é muito mais lento. Detalhes em Ajuda → Informações do sistema.",
   "On NixOS, start it from `nix develop`.": "No NixOS, inicie-o a partir de `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado."
+  "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado.",
+  "Map": "Mapa",
+  "Move Map": "Mover mapa",
+  "Online Map (OpenStreetMap)": "Mapa online (OpenStreetMap)",
+  "No location in these photos": "Estas fotos não têm localização",
+  "Photos with a GPS position appear on the map": "As fotos com posição GPS aparecem no mapa",
+  "Show the detailed OpenStreetMap map. Its tiles are loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer.": "Mostra o mapa detalhado do OpenStreetMap. Os blocos são carregados de openstreetmap.org, que fica sabendo a área que você vê; suas fotos permanecem neste computador.",
+  "Show all photos on the map": "Mostrar todas as fotos no mapa",
+  "Zoom in": "Mais zoom",
+  "Zoom out": "Menos zoom",
+  "The online map could not be loaded; showing the offline map": "Não foi possível carregar o mapa online; mostrando o mapa offline",
+  "Loading map tiles": "Carregando blocos do mapa",
+  "Show streets and place names?": "Mostrar ruas e nomes de lugares?",
+  "The detailed map is loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer. You can change this any time above the map.": "O mapa detalhado é carregado de openstreetmap.org, que fica sabendo a área que você está vendo; suas fotos permanecem neste computador. Você pode mudar isso a qualquer momento acima do mapa.",
+  "Use OpenStreetMap": "Usar o OpenStreetMap",
+  "Keep the Offline Map": "Manter o mapa offline",
+  "Photos on the map": "Fotos no mapa",
+  "At most this many photos of the filmstrip appear on the map: the first ones with a location. More take longer to draw.": "No máximo esta quantidade de fotos da tira de filme aparece no mapa: as primeiras com localização. Mais fotos demoram mais para desenhar."
 }

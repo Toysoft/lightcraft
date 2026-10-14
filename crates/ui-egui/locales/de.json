@@ -2118,5 +2118,22 @@
   "Adding to Apple Photos": "Wird zu Apple Fotos hinzugefügt",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Kein Grafikprozessor gefunden: LightCraft rendert auf der CPU, was viel langsamer ist. Details unter Hilfe → Systeminformationen.",
   "On NixOS, start it from `nix develop`.": "Unter NixOS starten Sie es aus `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Dateien mit demselben Inhalt wie eine andere Datei dieses Imports: Nur die erste wird importiert."
+  "Files with the same content as another file in this import: only the first is imported.": "Dateien mit demselben Inhalt wie eine andere Datei dieses Imports: Nur die erste wird importiert.",
+  "Map": "Karte",
+  "Move Map": "Karte bewegen",
+  "Online Map (OpenStreetMap)": "Online-Karte (OpenStreetMap)",
+  "No location in these photos": "Diese Fotos haben keinen Standort",
+  "Photos with a GPS position appear on the map": "Fotos mit GPS-Position erscheinen auf der Karte",
+  "Show the detailed OpenStreetMap map. Its tiles are loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer.": "Die detaillierte OpenStreetMap-Karte anzeigen. Ihre Kacheln werden von openstreetmap.org geladen; der Server erfährt dabei, welchen Kartenausschnitt du ansiehst. Deine Fotos bleiben auf diesem Computer.",
+  "Show all photos on the map": "Alle Fotos auf der Karte zeigen",
+  "Zoom in": "Einzoomen",
+  "Zoom out": "Auszoomen",
+  "The online map could not be loaded; showing the offline map": "Die Online-Karte konnte nicht geladen werden; die Offline-Karte wird angezeigt",
+  "Loading map tiles": "Kartenkacheln werden geladen",
+  "Show streets and place names?": "Straßen und Ortsnamen anzeigen?",
+  "The detailed map is loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer. You can change this any time above the map.": "Die detaillierte Karte wird von openstreetmap.org geladen; der Server erfährt dabei, welchen Kartenausschnitt du ansiehst. Deine Fotos bleiben auf diesem Computer. Du kannst das jederzeit über der Karte ändern.",
+  "Use OpenStreetMap": "OpenStreetMap verwenden",
+  "Keep the Offline Map": "Offline-Karte behalten",
+  "Photos on the map": "Fotos auf der Karte",
+  "At most this many photos of the filmstrip appear on the map: the first ones with a location. More take longer to draw.": "Höchstens so viele Fotos des Filmstreifens erscheinen auf der Karte: die ersten mit Standort. Mehr Fotos brauchen länger zum Zeichnen."
 }

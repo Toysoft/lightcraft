@@ -1995,5 +1995,22 @@
   "Adding to Apple Photos": "Añadiendo a Fotos de Apple",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "No se encontró ningún procesador gráfico: LightCraft renderiza en la CPU, lo que es mucho más lento. Detalles en Ayuda → Información del sistema.",
   "On NixOS, start it from `nix develop`.": "En NixOS, inícielo desde `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Archivos con el mismo contenido que otro archivo de esta importación: solo se importa el primero."
+  "Files with the same content as another file in this import: only the first is imported.": "Archivos con el mismo contenido que otro archivo de esta importación: solo se importa el primero.",
+  "Map": "Mapa",
+  "Move Map": "Mover mapa",
+  "Online Map (OpenStreetMap)": "Mapa en línea (OpenStreetMap)",
+  "No location in these photos": "Estas fotos no tienen ubicación",
+  "Photos with a GPS position appear on the map": "Las fotos con posición GPS aparecen en el mapa",
+  "Show the detailed OpenStreetMap map. Its tiles are loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer.": "Muestra el mapa detallado de OpenStreetMap. Sus teselas se cargan desde openstreetmap.org, que conoce así la zona que miras; tus fotos se quedan en este equipo.",
+  "Show all photos on the map": "Mostrar todas las fotos en el mapa",
+  "Zoom in": "Acercar",
+  "Zoom out": "Alejar",
+  "The online map could not be loaded; showing the offline map": "No se pudo cargar el mapa en línea; se muestra el mapa sin conexión",
+  "Loading map tiles": "Cargando teselas del mapa",
+  "Show streets and place names?": "¿Mostrar calles y nombres de lugares?",
+  "The detailed map is loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer. You can change this any time above the map.": "El mapa detallado se carga desde openstreetmap.org, que conoce así la zona que estás viendo; tus fotos permanecen en este ordenador. Puedes cambiarlo en cualquier momento encima del mapa.",
+  "Use OpenStreetMap": "Usar OpenStreetMap",
+  "Keep the Offline Map": "Mantener el mapa sin conexión",
+  "Photos on the map": "Fotos en el mapa",
+  "At most this many photos of the filmstrip appear on the map: the first ones with a location. More take longer to draw.": "Como máximo aparecen en el mapa tantas fotos de la tira de imágenes: las primeras con ubicación. Más fotos tardan más en dibujarse."
 }
