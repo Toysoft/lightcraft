@@ -60,6 +60,7 @@ pub mod preset_luminar;
 pub mod presets;
 pub mod proof;
 pub mod rename;
+pub mod render_dng;
 pub mod segment;
 pub mod sidecar;
 pub mod smart;
