@@ -25,6 +25,19 @@ pub fn shown(session: &lightcraft_engine::Session) -> bool {
     !matches!(session.source, LibrarySource::Folder | LibrarySource::RecentlyDeleted) && is_empty(session)
 }
 
+/// The welcome is what the view shows: the empty library in a grid with no filter hiding
+/// anything (else the grid says the filter does), or in Detail with no photo open. The window around it steps back then: the grid's photo
+/// count, the bottom bar (view modes and thumbnail size, with nothing to look at yet) and
+/// Detail's empty filmstrip aren't drawn, and the sidebar's empty sections fold into one line.
+pub fn in_view(app: &LightcraftApp) -> bool {
+    let view = match app.ui.view {
+        ViewMode::PhotoGrid | ViewMode::SquareGrid => app.session.filter == Default::default(),
+        ViewMode::Detail => app.session.active().is_none(),
+        _ => false,
+    };
+    view && shown(&app.session)
+}
+
 /// At launch, an empty library opens on a grid with the sidebar, where the way in is (Detail had
 /// only "Choose a photo in the grid" to say). Square Grid stays as it is; a library with photos
 /// opens as left. The desktop host calls this before it notes what its settings file holds, so

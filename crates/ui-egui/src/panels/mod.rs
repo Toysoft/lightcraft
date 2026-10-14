@@ -107,7 +107,7 @@ pub fn toast(app: &mut LightcraftApp, ctx: &egui::Context) {
 pub fn empty_message(ui: &egui::Ui, rect: Rect, title: &str, body: &str) {
     let t = Tokens::get(ui.ctx());
     let p = ui.painter();
-    p.text(rect.center() - vec2(0.0, 12.0), Align2::CENTER_CENTER, crate::i18n::tr(title), t.semibold(18.0), t.text_label);
+    p.text(rect.center() - vec2(0.0, 12.0), Align2::CENTER_CENTER, crate::i18n::tr(title), t.semibold(18.0), t.text);
     p.text(rect.center() + vec2(0.0, 14.0), Align2::CENTER_CENTER, crate::i18n::tr(body), t.font(13.0), t.text_dim);
 }
 
@@ -160,7 +160,30 @@ fn empty_button(i: usize, a: &EmptyAction) -> crate::button::Button<'static> {
 /// [`empty_state`]'s layout, shared with [`empty_state_height`] so the two can't drift.
 const EMPTY_BUTTON_H: f32 = crate::button::Size::Medium.height();
 const EMPTY_BUTTON_GAP: f32 = 8.0;
-const EMPTY_TITLE_GAP: f32 = 6.0;
+const EMPTY_TITLE_GAP: f32 = 8.0;
+/// The widest an empty state's words run: a short paragraph to read, not one line across a wide
+/// window.
+const EMPTY_TEXT_MAX: f32 = 540.0;
+
+/// The width to wrap an empty state's `text` at: at most `wrap` and [`EMPTY_TEXT_MAX`], and as
+/// narrow as it can be without taking another line, so its lines come out even rather than a long
+/// one over a short one.
+fn balanced_wrap(ui: &egui::Ui, text: &str, font: &egui::FontId, wrap: f32) -> f32 {
+    let max = wrap.min(EMPTY_TEXT_MAX);
+    let rows = |w: f32| ui.painter().layout(text.to_string(), font.clone(), egui::Color32::WHITE, w).rows.len();
+    let n = rows(max);
+    if n <= 1 {
+        return max;
+    }
+    // the narrowest width that keeps `n` lines, found to about a point (from nothing up: lines
+    // broken by hand can be narrower than an even share)
+    let (mut lo, mut hi) = (1.0, max);
+    for _ in 0..10 {
+        let mid = (lo + hi) / 2.0;
+        if rows(mid) > n { lo = mid } else { hi = mid }
+    }
+    hi
+}
 const EMPTY_BUTTONS_GAP: f32 = 20.0;
 const EMPTY_HINT_GAP: f32 = 12.0;
 
@@ -169,7 +192,10 @@ const EMPTY_HINT_GAP: f32 = 12.0;
 pub fn empty_state_height(ui: &egui::Ui, rect: Rect, title: &str, body: &str, actions: &[EmptyAction], hint: Option<&str>) -> f32 {
     let t = Tokens::get(ui.ctx());
     let wrap = (rect.width() - 48.0).max(80.0);
-    let height = |text: &str, font: egui::FontId| ui.painter().layout(text.to_string(), font, t.text, wrap).size().y;
+    let height = |text: &str, font: egui::FontId| {
+        let w = balanced_wrap(ui, text, &font, wrap);
+        ui.painter().layout(text.to_string(), font, t.text, w).size().y
+    };
     let widths: Vec<f32> = actions.iter().enumerate().map(|(i, a)| empty_button(i, a).desired_size(ui).x).collect();
     let row_w = widths.iter().sum::<f32>() + EMPTY_BUTTON_GAP * widths.len().saturating_sub(1) as f32;
     let buttons_h = match (actions.len(), row_w <= wrap) {
@@ -206,11 +232,13 @@ pub fn empty_state(
     let t = Tokens::get(ui.ctx());
     let wrap = (rect.width() - 48.0).max(80.0);
     let centred = |ui: &egui::Ui, text: &str, font: egui::FontId, color: egui::Color32| {
-        let mut job = egui::text::LayoutJob::simple(text.to_string(), font, color, wrap);
+        let w = balanced_wrap(ui, text, &font, wrap);
+        let mut job = egui::text::LayoutJob::simple(text.to_string(), font, color, w);
         job.halign = egui::Align::Center;
         ui.painter().layout_job(job)
     };
-    let title = centred(ui, crate::i18n::tr(title), t.semibold(18.0), t.text_label);
+    // the title in the brightest text: the first thing read, above the window's own headings
+    let title = centred(ui, crate::i18n::tr(title), t.semibold(18.0), t.text);
     let body = centred(ui, crate::i18n::tr(body), t.font(13.0), t.text_dim);
     let hint = hint.map(|h| centred(ui, h, t.font(12.0), t.text_dim));
     // the buttons' widths, and whether they fit side by side (else one above the other)
@@ -235,9 +263,10 @@ pub fn empty_state(
     let title_at = pos2(rect.center().x, top);
     crate::widgets::register(ui.ctx(), "text:emptyTitle", title.rect.translate(title_at.to_vec2()));
     let body_at = pos2(rect.center().x, body_top);
+    crate::widgets::register(ui.ctx(), "text:emptyBody", body.rect.translate(body_at.to_vec2()));
     readable(ui, title.rect.translate(title_at.to_vec2()), "empty-title", title.text(), true);
     readable(ui, body.rect.translate(body_at.to_vec2()), "empty-body", body.text(), false);
-    p.galley(title_at, title, t.text_label);
+    p.galley(title_at, title, t.text);
     p.galley(body_at, body, t.text_dim);
     let mut clicked = None;
     let mut x = rect.center().x - row_w / 2.0;

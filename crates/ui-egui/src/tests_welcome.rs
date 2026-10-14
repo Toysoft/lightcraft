@@ -1,6 +1,7 @@
 //! The welcome owns the window while the library is empty: the Tools panel steps aside (and comes
 //! back as it was once photos arrive), the bottom bar's rating and flags hide, and a row of sample
-//! photos under the buttons opens the samples on the one clicked.
+//! photos under the buttons opens the samples on the one clicked. The window around it steps back:
+//! no photo count, no bottom bar, one line in the sidebar for the sections still to fill.
 
 use std::time::Duration;
 
@@ -234,4 +235,66 @@ fn the_welcome_keeps_clear_of_the_grid_header() {
         // the header is 44 points under the 42-point top bar
         assert!(title.top() >= 42.0 + 44.0, "{size:?}: the title starts at {}", title.top());
     }
+}
+
+fn widget(h: &Headless, id: &str) -> egui::Rect {
+    h.app.widgets.iter().find(|(w, _)| w == id).map(|(_, r)| *r).unwrap_or_else(|| panic!("no {id}"))
+}
+
+#[test]
+fn the_window_steps_back_while_the_welcome_shows() {
+    // Given a new library's welcome, with the sidebar out as an empty library opens
+    let mut a = LightcraftApp::new(library("quiet"), Services::default());
+    a.ui.view = ViewMode::PhotoGrid;
+    a.ui.left_panel = true;
+    let mut h = Headless::new(a, [1600.0, 1000.0], 1.0);
+    h.step();
+    h.step();
+    // Then nothing around it competes: no "0 photos", no bottom bar, and one line in the sidebar
+    // in place of four empty sections
+    assert!(has(&h, "grid:title") && !has(&h, "grid:count"));
+    assert!(!has(&h, "slider:thumbSize"), "the bottom bar is not drawn");
+    assert!(has(&h, "sidebarEmpty:welcome"));
+    for section in ["albums", "byDate", "folders", "keywords"] {
+        assert!(!has(&h, &format!("sidebarSection:{section}")), "{section} is folded into the line");
+    }
+    // When photos arrive, the window is back as it was
+    h.app.run("library.addSamples", json!({})).unwrap();
+    h.app.ui.view = ViewMode::PhotoGrid;
+    h.step();
+    h.step();
+    assert!(has(&h, "grid:count") && has(&h, "slider:thumbSize"));
+    assert!(!has(&h, "sidebarEmpty:welcome"));
+    assert!(has(&h, "sidebarSection:albums") && has(&h, "sidebarSection:keywords"));
+}
+
+#[test]
+fn another_view_keeps_the_window_as_it_is() {
+    // the welcome isn't what the People view shows: its way out stays
+    let mut h = headless(library("people"), [1600.0, 1000.0]);
+    h.app.ui.view = ViewMode::People;
+    h.step();
+    h.step();
+    assert!(!crate::panels::empty_library::in_view(&h.app), "People keeps its bottom bar");
+    h.app.ui.view = ViewMode::Detail;
+    h.step();
+    assert!(crate::panels::empty_library::in_view(&h.app), "Detail with nothing open shows the welcome");
+    h.step();
+    assert!(has(&h, "text:emptyTitle"));
+    assert!(!has(&h, "slider:thumbSize"), "no bottom bar");
+    let canvas = h.app.canvas_rect.unwrap();
+    assert!(canvas.bottom() >= 999.0, "no empty filmstrip under the welcome: {canvas:?}");
+}
+
+#[test]
+fn the_welcome_reads_as_a_short_paragraph() {
+    // a wide window: the message breaks into even lines rather than running across it
+    let h = headless(library("measure"), [1600.0, 1000.0]);
+    let title = widget(&h, "text:emptyTitle");
+    let body = widget(&h, "text:emptyBody");
+    assert!(body.width() <= 540.0, "the body runs {} wide", body.width());
+    assert!(body.height() > title.height(), "two lines: {body:?}");
+    assert!(body.width() > 360.0, "the lines are even, not one long over one short: {body:?}");
+    // still centred under the title
+    assert!((body.center().x - title.center().x).abs() < 2.0);
 }
