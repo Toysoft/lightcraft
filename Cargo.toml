@@ -10,7 +10,7 @@ rust-version = "1.90"
 repository = "https://github.com/storytold/lightcraft"
 
 [workspace.dependencies]
-craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "5d9c5780debff884922aa2a3fab87ba2fc61ac30", features = ["serde"] }
 # internal
 lightcraft-denoise-core = { path = "crates/denoise-core" }
 lightcraft-denoise = { path = "crates/denoise", default-features = false }
