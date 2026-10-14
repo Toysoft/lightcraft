@@ -116,26 +116,41 @@ impl DevelopSettings {
         std::borrow::Cow::Owned(d)
     }
 
+    /// Does control `id` hold a different value from `base`? A white balance slider differs
+    /// when the mode does; left As Shot on both sides it never does, whatever numbers each holds
+    /// (those are the file's, read again when it renders). A control `base` has no value for (a
+    /// point colour it lacks) is compared with the control's default. An unknown id differs in
+    /// nothing.
+    pub fn control_differs(&self, base: &DevelopSettings, id: &str) -> bool {
+        if id.starts_with("wb.") {
+            if self.wb.mode != base.wb.mode {
+                return true;
+            }
+            if self.wb.mode == WbMode::AsShot {
+                return false;
+            }
+        }
+        let Some(v) = controls::get(self, id) else { return false };
+        let b = controls::get(base, id).or_else(|| controls::find(id).map(|c| c.default));
+        b.is_some_and(|b| (v - b).abs() > 1e-9)
+    }
+
     /// Does the Edit-panel section `panel` (`"light"`, `"color"`, …) differ from `base`, the
     /// photo's starting settings ([`panel_sections`])? An unknown name differs in nothing.
     pub fn panel_differs(&self, base: &DevelopSettings, panel: &str) -> bool {
         panel_sections(panel).iter().any(|&s| self.section_differs(base, s))
     }
 
-    /// Does any setting of `section` differ from `base`: its sliders, and the settings that
-    /// aren't sliders (the tone curve, white balance mode, point colours, lens switches…)? An
-    /// As Shot white balance on both sides is the same whatever numbers each holds: those are
-    /// the file's, read again when it renders.
+    /// Does any setting of `section` differ from `base`: its sliders ([`Self::control_differs`],
+    /// so a white balance mode change counts), and the settings that aren't sliders (the tone
+    /// curve, point colours, lens switches…)?
     pub fn section_differs(&self, base: &DevelopSettings, section: Section) -> bool {
-        let as_shot = self.wb.mode == WbMode::AsShot && base.wb.mode == WbMode::AsShot;
-        let sliders = controls::in_section(section)
-            .filter(|c| !(as_shot && c.id.starts_with("wb.")))
-            .any(|c| matches!((controls::get(self, c.id), controls::get(base, c.id)), (Some(a), Some(b)) if (a - b).abs() > 1e-9));
-        sliders
+        controls::in_section(section).any(|c| self.control_differs(base, c.id))
             || match section {
                 Section::Light => self.hdr.enabled != base.hdr.enabled,
                 Section::Curve => self.curve != base.curve,
-                Section::Color => self.wb.mode != base.wb.mode,
+                // black and white is the Color panel's: its mixer becomes the B&W Mixer
+                Section::Color => self.treatment != base.treatment,
                 Section::PointColor => self.point_colors != base.point_colors,
                 Section::Vignette => self.vignette.amount != 0.0 && self.vignette.style != base.vignette.style,
                 Section::Detail => self.enhance.denoise_on != base.enhance.denoise_on,
@@ -235,6 +250,22 @@ mod tests {
         w.wb.mode = WbMode::Custom;
         assert!(w.panel_differs(&base, "color"));
         assert!(!s.panel_differs(&base, "nonsense"));
+        // black and white is a Color edit
+        let mut bw = base.clone();
+        bw.treatment = Treatment::Bw;
+        assert!(bw.panel_differs(&base, "color"));
+    }
+
+    #[test]
+    fn a_control_the_base_lacks_is_compared_with_its_default() {
+        let base = DevelopSettings::default();
+        let mut s = base.clone();
+        s.point_colors.push(PointColor::default());
+        assert!(controls::get(&base, "pointColor.0.hueShift").is_none(), "the base has no point colour");
+        assert!(!s.control_differs(&base, "pointColor.0.hueShift"), "a new point colour at its defaults is no edit");
+        controls::set(&mut s, "pointColor.0.hueShift", 30.0);
+        assert!(s.control_differs(&base, "pointColor.0.hueShift"), "a point colour's slider off its default is");
+        assert!(!s.control_differs(&base, "no.such.control"));
     }
 
     #[test]

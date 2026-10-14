@@ -210,6 +210,29 @@ fn with_content_pad<R>(ui: &mut Ui, pad: f32, add: impl FnOnce(&mut Ui) -> R) ->
     r
 }
 
+fn pointer_cover_key() -> egui::Id {
+    egui::Id::new("lc-pointer-cover")
+}
+
+/// Say that `rect` is drawn over scrolled rows this frame (a pinned header): rows beneath it
+/// don't take the pointer (hover, arrow keys, the wheel) on the next frame.
+pub fn cover_pointer(ctx: &egui::Context, rect: Rect) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(pointer_cover_key(), (frame, rect)));
+}
+
+/// Is the pointer on `rect` and not under something drawn over it ([`cover_pointer`], last
+/// frame or this one)?
+pub fn pointer_on(ui: &Ui, rect: Rect) -> bool {
+    if !ui.rect_contains_pointer(rect) {
+        return false;
+    }
+    let now = ui.ctx().cumulative_frame_nr();
+    let cover = ui.ctx().data(|d| d.get_temp::<(u64, Rect)>(pointer_cover_key()));
+    let covered = cover.is_some_and(|(frame, r)| frame + 1 >= now && ui.ctx().pointer_latest_pos().is_some_and(|p| r.contains(p)));
+    !covered
+}
+
 /// A slider whose value counts as changed when it is off the control's own default.
 pub fn slider(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool, label_override: Option<&str>) -> SliderOut {
     slider_changed(ui, spec, value, enabled, label_override, (value - spec.default).abs() > 1e-9)
@@ -225,10 +248,9 @@ pub fn slider_changed(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool
     let t = Tokens::get(ui.ctx());
     let w = ui.available_width();
     let (row, _) = ui.allocate_exact_size(vec2(w, t.slider_row_h), Sense::hover());
-    let pad_l = content_pad(ui);
-    let pad_r = pad_l;
-    let label_rect = Rect::from_min_size(pos2(row.left() + pad_l, row.top() + 2.0), vec2(w - pad_l - pad_r, 18.0));
-    let track_rect = Rect::from_min_max(pos2(row.left() + pad_l, row.top() + 20.0), pos2(row.right() - pad_r, row.top() + 36.0));
+    let pad = content_pad(ui);
+    let label_rect = Rect::from_min_size(pos2(row.left() + pad, row.top() + 2.0), vec2(w - 2.0 * pad, 18.0));
+    let track_rect = Rect::from_min_max(pos2(row.left() + pad, row.top() + 20.0), pos2(row.right() - pad, row.top() + 36.0));
     let id = ui.id().with(spec.id);
     let resp = ui.interact(track_rect.expand2(vec2(8.0, 2.0)), id, if enabled { Sense::click_and_drag() } else { Sense::hover() });
     // A click selects the slider for arrow/wheel adjustments. Keep scroll-to-adjust
@@ -376,7 +398,7 @@ pub fn slider_changed(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool
             })
         });
         // Arrow keys work with either a hovered or a focused slider.
-        if enabled && out.value.is_none() && typing.is_none() && (ui.rect_contains_pointer(row) || resp.has_focus() || inc || dec) {
+        if enabled && out.value.is_none() && typing.is_none() && (pointer_on(ui, row) || resp.has_focus() || inc || dec) {
             let (up, down, shift) = ui.input_mut(|i| {
                 let shift = i.modifiers.shift;
                 let m = if shift { egui::Modifiers::SHIFT } else { egui::Modifiers::NONE };
@@ -398,7 +420,7 @@ pub fn slider_changed(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool
         let wheel_id = id.with("wheel-rem");
         if !resp.has_focus() {
             ui.data_mut(|m| m.remove::<f32>(wheel_id));
-        } else if enabled && typing.is_none() && out.value.is_none() && ui.rect_contains_pointer(row) {
+        } else if enabled && typing.is_none() && out.value.is_none() && pointer_on(ui, row) {
             let delta = ui.input_mut(|i| {
                 let dy = i.smooth_scroll_delta.y;
                 if dy != 0.0 {
@@ -424,7 +446,7 @@ pub fn slider_changed(ui: &mut Ui, spec: &ControlSpec, value: f64, enabled: bool
     }
     // paint
     let hovered = resp.hovered() || resp.dragged();
-    let (label_c, value_c) = slider_text_colors(&t, enabled, hovered || ui.rect_contains_pointer(row), changed || (v - value).abs() > 1e-12);
+    let (label_c, value_c) = slider_text_colors(&t, enabled, hovered || pointer_on(ui, row), changed);
     let p = ui.painter();
     p.text(label_rect.left_center(), Align2::LEFT_CENTER, crate::i18n::tr(label_override.unwrap_or(spec.label)), t.font(12.0), label_c);
     if typing.is_none() {
@@ -494,12 +516,14 @@ pub fn paint_section_header(ui: &Ui, painter: &egui::Painter, r: Rect, title: &s
     let pad = t.panel_pad;
     let chev = Rect::from_min_size(pos2(r.left() + pad, r.center().y - 7.0), vec2(14.0, 14.0));
     paint(painter, chev, if open { Icon::ChevronDown } else { Icon::ChevronRight }, t.text_label);
-    let galley = painter.layout_no_wrap(title.to_string(), t.semibold(15.0), t.text);
-    let at = pos2(chev.right() + 6.0, r.center().y - galley.size().y / 2.0);
-    let title_right = at.x + galley.size().x;
-    painter.galley(at, galley, t.text);
-    if edited {
-        painter.circle_filled(pos2(title_right + 8.0, r.center().y), 3.0, t.text_label);
+    title_with_dot(painter, pos2(chev.right() + 6.0, r.center().y), title, t.semibold(15.0), &t, edited.then_some(3.0));
+}
+
+/// A title, left-centred on `at`, followed by a dot of radius `dot` (an edited mark) when given.
+fn title_with_dot(painter: &egui::Painter, at: egui::Pos2, title: &str, font: egui::FontId, t: &Tokens, dot: Option<f32>) {
+    let r = painter.text(at, Align2::LEFT_CENTER, title, font, t.text);
+    if let Some(radius) = dot {
+        painter.circle_filled(pos2(r.right() + 2.0 + 2.0 * radius, r.center().y), radius, t.text_label);
     }
 }
 
@@ -555,45 +579,43 @@ pub const CARD_INSET: f32 = 12.0;
 pub fn card(ui: &mut Ui, id: &str, title: &str, icon: Icon, open: bool, edited: bool, body: impl FnOnce(&mut Ui)) -> Response {
     let title = crate::i18n::tr(title);
     let t = Tokens::get(ui.ctx());
-    let side = CARD_INSET as i8;
-    let frame = egui::Frame::NONE.fill(t.inset).corner_radius(6.0).outer_margin(egui::Margin { left: side, right: side, top: 3, bottom: 3 });
-    frame
-        .show(ui, |ui| {
-            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
-            let resp = ui.interact(r, ui.id().with(("flyout", id)), Sense::click());
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, true, open, title));
-            register(ui.ctx(), format!("flyout:{id}"), r);
-            if edited {
-                register(ui.ctx(), format!("flyoutEdited:{id}"), r);
-            }
-            let p = ui.painter();
-            if resp.hovered() {
-                let radius = if open { CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 } } else { CornerRadius::same(6) };
-                p.rect_filled(r, radius, t.hover.gamma_multiply(0.8));
-            }
-            let tile = Rect::from_min_size(pos2(r.left() + 6.0, r.top() + 7.0), vec2(24.0, 24.0));
-            p.rect_filled(tile, 3.0, t.chrome.gamma_multiply(1.15));
-            paint(p, tile.shrink(3.0), icon, t.text_label);
-            let galley = p.layout_no_wrap(title.to_string(), t.semibold(13.0), t.text);
-            let at = pos2(tile.right() + 10.0, r.center().y - galley.size().y / 2.0);
-            let title_right = at.x + galley.size().x;
-            p.galley(at, galley, t.text);
-            if edited {
-                p.circle_filled(pos2(title_right + 7.0, r.center().y), 2.5, t.text_label);
-            }
-            paint(
-                p,
-                Rect::from_center_size(pos2(r.right() - 14.0, r.center().y), vec2(12.0, 12.0)),
-                if open { Icon::ChevronDown } else { Icon::TriangleLeft },
-                t.text_label,
-            );
-            if open {
-                with_content_pad(ui, CARD_INSET, body);
-                ui.add_space(6.0);
-            }
-            resp
-        })
-        .inner
+    let frame = egui::Frame::NONE.fill(t.inset).corner_radius(6.0).outer_margin(egui::Margin::symmetric(CARD_INSET as i8, 3));
+    // keyed by the card, so the ids of the sliders inside (focus, a typed value, a drag) don't
+    // change when rows above it come and go
+    ui.push_id(("card", id), |ui| {
+        frame
+            .show(ui, |ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
+                let resp = ui.interact(r, ui.id().with(("flyout", id)), Sense::click());
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::CollapsingHeader, true, open, title));
+                register(ui.ctx(), format!("flyout:{id}"), r);
+                if edited {
+                    register(ui.ctx(), format!("flyoutEdited:{id}"), r);
+                }
+                let p = ui.painter();
+                if resp.hovered() {
+                    let radius = if open { CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 } } else { CornerRadius::same(6) };
+                    p.rect_filled(r, radius, t.hover.gamma_multiply(0.8));
+                }
+                let tile = Rect::from_min_size(pos2(r.left() + 6.0, r.top() + 7.0), vec2(24.0, 24.0));
+                p.rect_filled(tile, 3.0, t.chrome.gamma_multiply(1.15));
+                paint(p, tile.shrink(3.0), icon, t.text_label);
+                title_with_dot(p, pos2(tile.right() + 10.0, r.center().y), title, t.semibold(13.0), &t, edited.then_some(2.5));
+                paint(
+                    p,
+                    Rect::from_center_size(pos2(r.right() - 14.0, r.center().y), vec2(12.0, 12.0)),
+                    if open { Icon::ChevronDown } else { Icon::TriangleLeft },
+                    t.text_label,
+                );
+                if open {
+                    with_content_pad(ui, CARD_INSET, body);
+                    ui.add_space(6.0);
+                }
+                resp
+            })
+            .inner
+    })
+    .inner
 }
 
 /// A small bordered text button (Auto, B&W, HDR…).

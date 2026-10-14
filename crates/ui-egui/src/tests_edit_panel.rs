@@ -36,6 +36,11 @@ fn exec(h: &mut Headless, command: &str, params: serde_json::Value) {
     assert_eq!(r["ok"], true, "{command}: {r}");
 }
 
+fn develop(h: &Headless) -> lightcraft_develop::DevelopSettings {
+    let id = h.app.session.active().expect("active photo");
+    (*h.app.session.develop_of(id).unwrap_or_default()).clone()
+}
+
 fn widget(h: &Headless, id: &str) -> Option<Rect> {
     h.app.widgets.iter().find(|(w, _)| w == id).map(|(_, r)| *r)
 }
@@ -82,6 +87,15 @@ fn the_open_sections_header_stays_pinned_and_a_click_collapses_it() {
     assert!(header.top() < pinned.top(), "the real header has scrolled above the pinned one");
     assert!(pinned.top() >= panel.top() - 0.5 && pinned.top() <= panel.top() + 80.0, "pinned at the panel's top: {pinned:?} in {panel:?}");
 
+    // a slider scrolled beneath the pinned header is out of reach: the arrow keys with the
+    // pointer resting on the header change nothing
+    let before = develop(&h);
+    h.request("ui.move", json!({"x": pinned.center().x, "y": pinned.center().y}), T);
+    h.step();
+    h.request("ui.key", json!({"key": "ArrowUp"}), T);
+    h.step();
+    assert_eq!(develop(&h), before, "no hidden slider moved");
+
     let r = h.request("ui.clickWidget", json!({"id": "sectionPinned:light"}), T);
     assert_eq!(r["ok"], true, "{r}");
     h.step();
@@ -93,11 +107,11 @@ fn the_open_sections_header_stays_pinned_and_a_click_collapses_it() {
 #[test]
 fn the_pinned_header_is_pushed_up_by_the_next_section() {
     let viewport = Rect::from_min_max(pos2(0.0, 100.0), pos2(270.0, 700.0));
-    let s = |id: &str, top: f32, bottom: f32, open: bool| PlacedSection { id: id.into(), title: id.into(), open, edited: false, top, bottom };
+    let s = |id: &'static str, top: f32, bottom: f32, open: bool| PlacedSection { id, title: id, open, edited: false, top, bottom };
     // Light's header is above the top, its body runs on: pinned at the top
     let sections = [s("light", 40.0, 600.0, true), s("color", 600.0, 653.0, false)];
     let (p, r) = pinned_section(&sections, viewport).expect("Light pinned");
-    assert_eq!((p.id.as_str(), r.top()), ("light", 100.0));
+    assert_eq!((p.id, r.top()), ("light", 100.0));
     // Light ends 20 points below the top: the pinned header slides up with its end, Color's
     // header right below it
     let sections = [s("light", -400.0, 120.0, true), s("color", 120.0, 600.0, true)];
