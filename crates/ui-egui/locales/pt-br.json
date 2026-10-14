@@ -1998,5 +1998,13 @@
   "Recognition models": "Modelos de reconhecimento",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Nenhum processador gráfico encontrado: o LightCraft renderiza na CPU, o que é muito mais lento. Detalhes em Ajuda → Informações do sistema.",
   "On NixOS, start it from `nix develop`.": "No NixOS, inicie-o a partir de `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado."
+  "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado.",
+  "Navigation": "Navegação",
+  "Photo Navigation": "Navegação da foto",
+  "Zoom with wheel": "Zoom com a roda",
+  "Pan with an editing tool": "Mover com uma ferramenta de edição",
+  "Pan while zoomed": "Mover ao ampliar",
+  "Left drag": "Arrastar com botão esquerdo",
+  "Middle drag": "Arrastar com botão central",
+  "Hold the selected modifier while dragging with an editing tool. Middle drag always pans; it does not paint or crop.": "Segure o modificador escolhido ao arrastar com uma ferramenta de edição. Arrastar com o botão central sempre move a vista, sem pintar ou recortar."
 }

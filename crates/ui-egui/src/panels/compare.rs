@@ -216,7 +216,7 @@ fn photo_tile(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, slot: Slo
             // a pinch changes the zoom every frame: no new windows until it is quiet
             app.compare_hold_until = ui.input(|i| i.time) + crate::region::HOLD_SECS;
             ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(crate::region::HOLD_SECS));
-        } else if resp.dragged() {
+        } else if crate::navigation::pan_requested(ui.ctx(), &resp, &app.ui.settings.navigation, false) {
             super::detail::pan_image(app, img_area, img, resp.drag_delta());
         }
     }

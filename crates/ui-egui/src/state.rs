@@ -236,6 +236,7 @@ impl LightTheme {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppSettings {
+    pub navigation: NavigationSettings,
     /// Library opened at launch when no `--library` is given (empty = the default location).
     pub library_path: String,
     /// Libraries opened recently, newest first (File ▸ Open Recent Library; at most
@@ -288,6 +289,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
+            navigation: NavigationSettings::default(),
             library_path: String::new(),
             recent_libraries: Vec::new(),
             startup_view: StartupView::Last,
@@ -315,6 +317,70 @@ impl Default for AppSettings {
 /// The editor name that means PhotoCraft (Photo ▸ Edit In ▸ Edit in PhotoCraft): the host finds
 /// where it is installed.
 pub const PHOTOCRAFT: &str = "PhotoCraft";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WheelModifier {
+    None,
+    #[default]
+    Ctrl,
+    Alt,
+    Shift,
+    Command,
+    Disabled,
+}
+impl WheelModifier {
+    pub const OPTIONS: &'static [(Self, &'static str)] = &[
+        (Self::Ctrl, "Ctrl"),
+        (Self::Alt, "Alt"),
+        (Self::Shift, "Shift"),
+        (Self::Command, "Cmd"),
+        (Self::None, "None"),
+        (Self::Disabled, "Disabled"),
+    ];
+    pub fn label(self) -> &'static str {
+        Self::OPTIONS.iter().find(|(v, _)| *v == self).map_or("Ctrl", |(_, l)| *l)
+    }
+    pub fn matches(self, m: egui::Modifiers) -> bool {
+        if m.alt != (self == Self::Alt) || m.shift != (self == Self::Shift) {
+            return false;
+        }
+        match self {
+            Self::None => !m.ctrl && !m.command,
+            Self::Ctrl => m.ctrl && (!m.mac_cmd),
+            Self::Command => m.command && (!m.ctrl || !cfg!(target_os = "macos")),
+            Self::Alt | Self::Shift => !m.ctrl && !m.command,
+            Self::Disabled => false,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PanButton {
+    #[default]
+    Primary,
+    Middle,
+}
+impl PanButton {
+    pub fn button(self) -> egui::PointerButton {
+        match self {
+            Self::Primary => egui::PointerButton::Primary,
+            Self::Middle => egui::PointerButton::Middle,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct NavigationSettings {
+    pub wheel_modifier: WheelModifier,
+    pub pan_button: PanButton,
+    pub pan_modifier: WheelModifier,
+}
+impl Default for NavigationSettings {
+    fn default() -> Self {
+        Self { wheel_modifier: WheelModifier::Ctrl, pan_button: PanButton::Primary, pan_modifier: WheelModifier::Disabled }
+    }
+}
 
 /// The file format Edit In renders the copy as.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

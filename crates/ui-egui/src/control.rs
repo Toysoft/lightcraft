@@ -179,14 +179,14 @@ fn key_from(name: &str) -> Option<egui::Key> {
     })
 }
 
-fn push_drag(app: &mut LightcraftApp, a: egui::Pos2, b: egui::Pos2, steps: u64, m: egui::Modifiers) {
+fn push_drag(app: &mut LightcraftApp, a: egui::Pos2, b: egui::Pos2, steps: u64, m: egui::Modifiers, button: egui::PointerButton) {
     app.synthetic.push(egui::Event::PointerMoved(a));
-    app.synthetic.push(egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: m });
+    app.synthetic.push(egui::Event::PointerButton { pos: a, button, pressed: true, modifiers: m });
     for i in 1..=steps.max(1) {
         let t = i as f32 / steps.max(1) as f32;
         app.synthetic.push(egui::Event::PointerMoved(a + (b - a) * t));
     }
-    app.synthetic.push(egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m });
+    app.synthetic.push(egui::Event::PointerButton { pos: b, button, pressed: false, modifiers: m });
 }
 
 fn widget_rect(app: &LightcraftApp, id: &str) -> Option<egui::Rect> {
@@ -223,11 +223,15 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context, req: &ControlRequest
             let m = modifiers(p);
             // optional relative position inside the widget (0..1)
             let at = egui::pos2(r.left() + r.width() * f("fx").unwrap_or(0.5) as f32, r.top() + r.height() * f("fy").unwrap_or(0.5) as f32);
+            let button = match s("button") {
+                Some("right") => egui::PointerButton::Secondary,
+                Some("middle") => egui::PointerButton::Middle,
+                _ => egui::PointerButton::Primary,
+            };
             if req.method == "ui.hoverWidget" {
                 app.synthetic.push(egui::Event::PointerMoved(at));
             } else if req.method == "ui.clickWidget" {
                 let n = p.get("count").and_then(Value::as_u64).unwrap_or(1);
-                let button = if s("button") == Some("right") { egui::PointerButton::Secondary } else { egui::PointerButton::Primary };
                 app.synthetic.push(egui::Event::PointerMoved(at));
                 for _ in 0..n {
                     app.synthetic.push(egui::Event::PointerButton { pos: at, button, pressed: true, modifiers: m });
@@ -238,7 +242,7 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context, req: &ControlRequest
                     f("toX").map(|v| v as f32).unwrap_or(at.x + f("dx").unwrap_or(0.0) as f32),
                     f("toY").map(|v| v as f32).unwrap_or(at.y + f("dy").unwrap_or(0.0) as f32),
                 );
-                push_drag(app, at, to, p.get("steps").and_then(Value::as_u64).unwrap_or(10), m);
+                push_drag(app, at, to, p.get("steps").and_then(Value::as_u64).unwrap_or(10), m, button);
             }
             ctx.request_repaint();
             ok(json!({"rect": rect_json(r)}))
@@ -251,10 +255,14 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context, req: &ControlRequest
         "ui.click" | "ui.drag" => {
             let a = egui::pos2(f("x").unwrap_or(0.0) as f32, f("y").unwrap_or(0.0) as f32);
             let m = modifiers(p);
-            let button = if s("button") == Some("right") { egui::PointerButton::Secondary } else { egui::PointerButton::Primary };
+            let button = match s("button") {
+                Some("right") => egui::PointerButton::Secondary,
+                Some("middle") => egui::PointerButton::Middle,
+                _ => egui::PointerButton::Primary,
+            };
             if req.method == "ui.drag" {
                 let b = egui::pos2(f("toX").unwrap_or(0.0) as f32, f("toY").unwrap_or(0.0) as f32);
-                push_drag(app, a, b, p.get("steps").and_then(Value::as_u64).unwrap_or(10), m);
+                push_drag(app, a, b, p.get("steps").and_then(Value::as_u64).unwrap_or(10), m, button);
             } else {
                 app.synthetic.push(egui::Event::PointerMoved(a));
                 for _ in 0..p.get("count").and_then(Value::as_u64).unwrap_or(1) {

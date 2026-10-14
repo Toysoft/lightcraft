@@ -230,3 +230,132 @@ fn a_wheel_notch_scrolls_a_hundred_points() {
     let moved = grid_y(&h) - y0;
     assert!(moved >= 3.0 * crate::theme::WHEEL_LINE_POINTS - 1.0, "three notches scrolled {moved} points");
 }
+
+#[test]
+fn configured_wheel_modifier_replaces_the_default_without_scaling_the_ui() {
+    let mut h = demo("detail");
+    let reply = h.request("ui.set", json!({"zoom":{"percent":200},"pan":[0.5,0.5],"settings":{"navigation":{"wheelModifier":"alt"}}}), T);
+    assert_eq!(reply["ok"], true, "{reply}");
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    let rect = &state["canvasRect"];
+    let x = rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap() / 2.0;
+    let y = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0;
+    let scale = state["pixelsPerPoint"].clone();
+    h.request("ui.move", json!({"x":x,"y":y}), T);
+    h.request("ui.scroll", json!({"dy":80.0,"ctrl":true}), T);
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    assert_eq!(state["ui"]["zoom"]["percent"], 200.0, "the previous wheel modifier must stop zooming");
+    h.request("ui.scroll", json!({"dy":80.0,"alt":true}), T);
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    assert!(state["ui"]["zoom"]["percent"].as_f64().unwrap() > 200.0, "the configured wheel modifier zooms the photo");
+    assert_eq!(state["pixelsPerPoint"], scale, "photo zoom must not resize the interface");
+}
+
+#[test]
+fn middle_drag_pans_with_crop_open_without_changing_edits() {
+    let mut h = demo("detail");
+    assert_eq!(
+        h.request("ui.set", json!({"right":"crop","zoom":{"percent":200},"pan":[0.5,0.5],"settings":{"navigation":{"panButton":"middle"}}}), T)["ok"],
+        true
+    );
+    let before = h.request("engine.execute", json!({"command":"develop.get"}), T)["result"].clone();
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    let rect = &state["canvasRect"];
+    let x = rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap() / 2.0;
+    let y = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0;
+    assert_eq!(h.request("ui.drag", json!({"x":x,"y":y,"toX":x+60.0,"toY":y+35.0,"button":"middle"}), T)["ok"], true);
+    let after = h.request("ui.inspect", json!({}), T)["result"].clone();
+    assert_ne!(after["ui"]["pan"], state["ui"]["pan"], "middle drag pans while Crop is open");
+    assert_eq!(h.request("engine.execute", json!({"command":"develop.get"}), T)["result"], before, "panning must not change crop or other edits");
+}
+
+#[test]
+fn choosing_middle_pan_disables_left_drag_navigation() {
+    let mut h = demo("detail");
+    h.request("ui.set", json!({"right":"none","zoom":{"percent":200},"pan":[0.5,0.5],"settings":{"navigation":{"panButton":"middle"}}}), T);
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    let rect = &state["canvasRect"];
+    let x = rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap() / 2.0;
+    let y = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0;
+    assert_eq!(h.request("ui.drag", json!({"x":x,"y":y,"toX":x+60.0,"toY":y+35.0}), T)["ok"], true);
+    assert_eq!(h.request("ui.inspect", json!({}), T)["result"]["ui"]["pan"], state["ui"]["pan"], "only the selected pan button navigates");
+}
+
+#[test]
+fn wheel_zoom_is_scoped_to_photos_and_can_be_disabled_without_disabling_pinch() {
+    let mut h = demo("detail");
+    h.request("ui.set", json!({"zoom":{"percent":200},"pan":[0.5,0.5],"settings":{"navigation":{"wheelModifier":"alt"}}}), T);
+    h.request("ui.move", json!({"x":10.0,"y":10.0}), T);
+    h.request("ui.scroll", json!({"dy":80.0,"alt":true}), T);
+    assert_eq!(h.request("ui.inspect", json!({}), T)["result"]["ui"]["zoom"]["percent"], 200.0, "scrolling outside the photo must not zoom it");
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    let rect = &state["canvasRect"];
+    let x = rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap() / 2.0;
+    let y = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0;
+    h.request("ui.move", json!({"x":x,"y":y}), T);
+    h.request("ui.set", json!({"settings":{"navigation":{"wheelModifier":"disabled"}}}), T);
+    for modifiers in [json!({"dy":80.0}), json!({"dy":80.0,"alt":true}), json!({"dy":80.0,"ctrl":true})] {
+        h.request("ui.scroll", modifiers, T);
+        assert_eq!(h.request("ui.inspect", json!({}), T)["result"]["ui"]["zoom"]["percent"], 200.0, "disabled wheel binding must not zoom");
+    }
+    // Native pinch is a separate egui input event, independent of wheel preferences.
+    h.events.push(egui::Event::Zoom(1.2));
+    h.step();
+    assert!(h.request("ui.inspect", json!({}), T)["result"]["ui"]["zoom"]["percent"].as_f64().unwrap() > 200.0, "native pinch remains available");
+}
+
+#[test]
+fn configured_modifier_pans_instead_of_editing_and_preferences_survive_reload() {
+    let mut h = demo("detail");
+    h.request("ui.set",json!({"right":"crop","zoom":{"percent":200},"pan":[0.5,0.5],"settings":{"navigation":{"wheelModifier":"shift","panButton":"primary","panModifier":"alt"}}}),T);
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    let saved: crate::UiState = serde_json::from_value(state["ui"].clone()).unwrap();
+    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services { png: None, ..Default::default() });
+    app.ui = saved;
+    let mut h = Headless::new(app, [1200.0, 800.0], 1.0);
+    h.settle(SETTLE);
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    assert_eq!(state["ui"]["settings"]["navigation"], json!({"wheelModifier":"shift","panButton":"primary","panModifier":"alt"}));
+    let before = h.request("engine.execute", json!({"command":"develop.get"}), T)["result"].clone();
+    let rect = &state["canvasRect"];
+    let x = rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap() / 2.0;
+    let y = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0;
+    h.request("ui.drag", json!({"x":x,"y":y,"toX":x+60.0,"toY":y+35.0,"alt":true}), T);
+    assert_ne!(h.request("ui.inspect", json!({}), T)["result"]["ui"]["pan"], state["ui"]["pan"]);
+    assert_eq!(h.request("engine.execute", json!({"command":"develop.get"}), T)["result"], before);
+}
+
+#[test]
+fn native_two_finger_pinch_takes_precedence_over_pointer_drag() {
+    let mut h = demo("detail");
+    h.request("ui.set", json!({"right":"none","zoom":{"percent":200},"pan":[0.5,0.5]}), T);
+    let state = h.request("ui.inspect", json!({}), T)["result"].clone();
+    let rect = &state["canvasRect"];
+    let x = (rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap() / 2.0) as f32;
+    let y = (rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0) as f32;
+    let touch = |id, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+    h.events.extend([
+        touch(1, egui::TouchPhase::Start, egui::pos2(x - 30.0, y)),
+        touch(2, egui::TouchPhase::Start, egui::pos2(x + 30.0, y)),
+        egui::Event::PointerMoved(egui::pos2(x - 30.0, y)),
+        egui::Event::PointerButton {
+            pos: egui::pos2(x - 30.0, y),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ]);
+    h.step();
+    // egui establishes the gesture from the previous frame's pointer position.
+    h.step();
+    h.events.extend([
+        touch(1, egui::TouchPhase::Move, egui::pos2(x - 60.0, y)),
+        touch(2, egui::TouchPhase::Move, egui::pos2(x + 60.0, y)),
+        egui::Event::PointerMoved(egui::pos2(x - 60.0, y)),
+    ]);
+    h.step();
+    assert!(
+        h.request("ui.inspect", json!({}), T)["result"]["ui"]["zoom"]["percent"].as_f64().unwrap() > 200.0,
+        "the native two-finger pinch must zoom, even when its first contact produces a pointer drag"
+    );
+}

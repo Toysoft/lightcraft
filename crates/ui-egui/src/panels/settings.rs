@@ -24,6 +24,7 @@ pub const TABS: &[(&str, &str)] = &[
     ("performance", "Performance"),
     ("display", "Display"),
     ("interface", "Interface"),
+    ("navigation", "Navigation"),
     ("faces", "Faces"),
     ("denoise", "AI Denoise"),
 ];
@@ -52,10 +53,39 @@ pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String) {
         "performance" => performance_tab(app, ui, &t),
         "display" => display_tab(app, ui, &t),
         "interface" => interface_tab(app, ui, &t),
+        "navigation" => navigation_tab(app, ui, &t),
         "faces" => super::faces::settings_tab(app, ui, &t),
         "denoise" => super::denoise::settings_tab(app, ui, &t),
         _ => general_tab(app, ui, &t),
     }
+}
+
+fn navigation_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
+    use crate::state::{PanButton, WheelModifier};
+    heading(ui, t, "Photo Navigation");
+    hint(ui, t, "These gestures work over photos. Other panels keep their normal scrolling.");
+    for (id, label, tool) in [("navigationWheel", "Zoom with wheel", false), ("navigationPanModifier", "Pan with an editing tool", true)] {
+        row(ui, t, label, |ui| {
+            let binding = if tool { &mut app.ui.settings.navigation.pan_modifier } else { &mut app.ui.settings.navigation.wheel_modifier };
+            let r = egui::ComboBox::from_id_salt(id).selected_text(crate::i18n::tr(binding.label())).show_ui(ui, |ui| {
+                for (value, label) in WheelModifier::OPTIONS {
+                    if !tool || !matches!(value, WheelModifier::None) {
+                        ui.selectable_value(binding, *value, crate::i18n::tr(label));
+                    }
+                }
+            });
+            register(ui.ctx(), format!("combo:{id}"), r.response.rect);
+        });
+    }
+    row(ui, t, "Pan while zoomed", |ui| {
+        choices(
+            ui,
+            "navigationPan",
+            &[(PanButton::Primary, "Left drag"), (PanButton::Middle, "Middle drag")],
+            &mut app.ui.settings.navigation.pan_button,
+        );
+    });
+    hint(ui, t, "Hold the selected modifier while dragging with an editing tool. Middle drag always pans; it does not paint or crop.");
 }
 
 pub(super) fn heading(ui: &mut egui::Ui, t: &Tokens, text: &str) {
