@@ -109,6 +109,10 @@ pub struct ImportOptions {
     pub metadata_preset: Option<String>,
     /// Copy: raws are copied as DNG (Copy as DNG).
     pub convert_dng: bool,
+    /// Import files whose content the library already has as new photos (Lightroom's "Don't
+    /// Import Suspected Duplicates" unchecked). A file at a path the library already lists, or one
+    /// in Recently Deleted, is still handled as a duplicate.
+    pub import_duplicates: bool,
 }
 
 /// How copies are filed in the destination. The date is the capture time, else the time of the
@@ -944,7 +948,10 @@ impl ImportJob {
             if let Source::File { path } = &p.source {
                 self.by_path.insert(path.clone(), (p.id, p.local));
             }
-            if let Some(h) = &p.content_hash {
+            // importing suspected duplicates: only a trashed photo's content still matches
+            if let Some(h) = &p.content_hash
+                && (p.deleted || !self.opts.import_duplicates)
+            {
                 self.by_hash.insert(h.clone(), Some(p.id));
             }
         }
@@ -1098,7 +1105,9 @@ impl ImportJob {
                 }
                 _ => path.clone(),
             };
-            if let Some(h) = &info.content_hash {
+            if let Some(h) = &info.content_hash
+                && !self.opts.import_duplicates
+            {
                 self.by_hash.insert(h.clone(), None);
             }
             self.done.fetch_add(1, Relaxed);
@@ -1122,6 +1131,7 @@ impl ImportJob {
             };
             if let PreparedItem::Ready(r) = &item
                 && let Some(h) = &r.info.content_hash
+                && !self.opts.import_duplicates
             {
                 self.by_hash.insert(h.clone(), None);
             }
