@@ -247,5 +247,9 @@
   "{n} photos opened for editing; each is stacked with its original": "{n}枚の写真を編集用に開きました。それぞれ元の写真とスタックされています",
   "{name} opened in the other editor": "{name}を別のエディタで開きました",
   "{n} originals opened in the other editor": "{n}個の元ファイルを別のエディタで開きました",
-  "· {in_source} identical copies": "・同一のコピー {in_source} 件"
+  "· {in_source} identical copies": "・同一のコピー {in_source} 件",
+  "Couldn't read {name}: {error}": "{name} を読み取れませんでした: {error}",
+  "Couldn't read {n} photo{s} from {name}": "{name}: {n} 枚の写真を読み取れませんでした{s:.0}",
+  "No new photos on {name} ({n} already in the library)": "{name} に新しい写真はありません（{n} 枚はライブラリにあります）",
+  "No photos found on {name}": "{name} に写真が見つかりません"
 }

@@ -247,5 +247,9 @@
   "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом",
   "{name} opened in the other editor": "{name} відкрито в іншому редакторі",
   "{n} originals opened in the other editor": "Відкрито оригіналів в іншому редакторі: {n}",
-  "· {in_source} identical copies": "· ідентичних копій: {in_source}"
+  "· {in_source} identical copies": "· ідентичних копій: {in_source}",
+  "Couldn't read {name}: {error}": "Не вдалося прочитати {name}: {error}",
+  "Couldn't read {n} photo{s} from {name}": "{name}: не вдалося прочитати фото ({n}){s:.0}",
+  "No new photos on {name} ({n} already in the library)": "На {name} немає нових фото ({n} вже в бібліотеці)",
+  "No photos found on {name}": "На {name} не знайдено фото"
 }

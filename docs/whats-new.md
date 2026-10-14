@@ -2,6 +2,14 @@
 
 ## 2026-10-14
 
+### Import from cameras that don't show up as a drive, on macOS too
+- On macOS, cameras and phones that talk PTP over USB (a Leica M11, most cameras in their default USB mode) are now
+  listed in File ▸ Import from Device as well, read through ImageCaptureCore, the framework Image Capture and Photos
+  use. The system keeps the connection, so Image Capture and other apps can stay open. Same flow as on Windows:
+  only new photos are copied, with progress and ✕, then the import review opens with **Move** checked (issue #1005).
+  Checked with a Leica M11-P over USB 2.0: 352 photos (12.7 GB) listed in under 0.1 s once the camera has built
+  its catalog, DNGs copied at about 24 MB/s, byte-identical, with the camera's capture times.
+
 ### Hard-edged Heal and Clone spots
 - A spot with Feather at 0 no longer draws black pixels exactly on its radius. This also fixes spots at 0% Opacity
   changing pixels along their edge. The hard edge now leaves pixels on the radius unchanged.
@@ -217,6 +225,13 @@
   files, the same files as `library.import` (issue #1080). They used to be skipped without a word.
 - Compare and Reference View panes say "Rendering…" (or that the photo can't be opened) the same way, so a
   magnified preview isn't taken for the photo when checking focus at 1:1.
+### Import from cameras that don't show up as a drive (Windows)
+- Cameras and phones that connect over USB without appearing as a drive (they talk PTP or MTP: a Fujifilm X100T,
+  a Leica M11, most phones) are listed in File ▸ Import from Device next to memory cards (issue #1005). Choosing
+  one copies the photos the library doesn't have yet off the camera, with progress and ✕ in the activity stack,
+  then opens the import review with **Move** checked. Photos already imported (same file name, size and capture
+  time) are not read again, and a cancelled copy carries on where it stopped. Nothing on the camera is changed.
+  Windows only so far; agents use `library.fetchCamera`.
 
 ### JPEG XL export
 - Export as JPEG XL (issue #247): Format ▸ JPEG XL in the Export dialog, `format: "jxl"` for agents and the CLI
