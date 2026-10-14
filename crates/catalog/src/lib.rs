@@ -227,6 +227,12 @@ pub enum Op {
         id: PhotoId,
         wb: Option<(f64, f64)>,
     },
+    /// Whether a photo's file holds a stereo pair, as its file reads (`None` = not checked yet). Bookkeeping, not an
+    /// edit: the look does not change, only the "Spatial" label (issue #446).
+    SetStereo {
+        id: PhotoId,
+        stereo: Option<bool>,
+    },
     /// The name shown for a colour label (`None` = its colour's name).
     SetLabelName {
         label: ColorLabel,
@@ -717,6 +723,10 @@ impl Catalog {
                 }
                 let p = self.photo_mut(id)?;
                 Op::SetAsShotWb { id, wb: std::mem::replace(&mut p.as_shot_wb, wb) }
+            }
+            Op::SetStereo { id, stereo } => {
+                let p = self.photo_mut(id)?;
+                Op::SetStereo { id, stereo: std::mem::replace(&mut p.stereo, stereo) }
             }
             Op::SetFile { id, file_name, source } => {
                 if file_name.trim().is_empty() {
