@@ -9,6 +9,7 @@
 use std::{cell::RefCell, collections::BTreeMap, sync::OnceLock};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use unicode_bidi::{BidiClass, BidiInfo, Level};
 
 /// The language table.
 ///
@@ -45,6 +46,12 @@ macro_rules! language_table {
                 match self { Self::$source => "Latn", $(Self::$variant => $script,)* }
             }
 
+            /// Does this language read right to left? Its labels are stored in the visual order
+            /// egui draws its runs in ([`visual_rtl`]), so its lookups read right to left.
+            pub fn rtl(self) -> bool {
+                match self { $($variant => matches!($script, "Arab" | "Hebr"),)* _ => false }
+            }
+
             /// The language's embedded catalog, parsed once. The source language has none: its
             /// lookups return the source text itself.
             fn catalog(self) -> &'static BTreeMap<String, String> {
@@ -68,7 +75,15 @@ macro_rules! language_table {
                             .iter()
                             .map(|language| {
                                 let catalog = match *language { $(Self::$variant => Some($catalog),)* _ => None };
-                                (*language, parse(catalog))
+                                let parsed = parse(catalog);
+                                // A right-to-left language's translations are stored in visual
+                                // order: the order egui draws a label's runs in (visual_rtl).
+                                let parsed = if language.rtl() {
+                                    parsed.into_iter().map(|(source, translated)| (source, visual_rtl(&translated))).collect()
+                                } else {
+                                    parsed
+                                };
+                                (*language, parsed)
                             })
                             .collect()
                     })
@@ -126,6 +141,7 @@ language_table! {
     Ru, "ru", "Русский", "Cyrl", include_str!("../locales/ru.json");
     Fr, "fr", "Français", "Latn", include_str!("../locales/fr.json");
     Uk, "uk", "Українська", "Cyrl", include_str!("../locales/uk.json");
+    Ar, "ar", "العربية", "Arab", include_str!("../locales/ar.json");
 }
 
 // The settings file stores the BCP-47 code (`"zh-hans"`), never the Rust variant name, so a
@@ -174,6 +190,142 @@ fn tr_ctx_in<'a>(language: Locale, context: &str, source: &'a str) -> &'a str {
         Some(translation) => translation.as_str(),
         None => tr_in(language, source),
     }
+}
+
+
+// egui lays a label out run by run — every run one font, shaped on its own — and puts the runs
+// left to right in the order it met them. It does not run the Unicode bidirectional algorithm
+// (its text code still carries `TODO(emilk): heed bidi characters`), so a right-to-left label
+// reads with its words in reverse order: egui shapes each Arabic word correctly, but it draws the
+// first word at the left of the line, and the reader meets the second one first (#1395).
+//
+// `visual_rtl` puts a translation into *visual order* before egui sees it: the label's runs come
+// out in the order they must appear on screen, left to right, while the characters inside each run
+// stay in logical order, because the shaper reverses a right-to-left run itself (harfrust picks
+// the direction from the script). Brackets are mirrored too, as UAX #9 L4 asks: egui draws the
+// glyph of the character it is handed. Only catalog lookups and the filled `tr_format!` results
+// go through here, so what a user types into a field keeps its logical order — the order the
+// clipboard and search expect. A label long enough to wrap still wraps from its visual end, and
+// the mirrored layout of the chrome is a separate, larger step (#1395 lists both).
+
+/// A character the shaper lays out as part of a right-to-left run: a strong right-to-left
+/// character (Arabic and Hebrew letters) or a mark riding on one.
+fn is_rtl_shaped(c: char) -> bool {
+    matches!(unicode_bidi::bidi_class(c), BidiClass::R | BidiClass::AL | BidiClass::NSM)
+}
+
+/// The glyph a bracket has to show in a right-to-left context: egui draws the glyph of the
+/// character it is given, so the mirror pair has to be swapped in the text itself. The pairs
+/// come from `BidiMirroring.txt`; curly brackets are left alone, since in an interface label
+/// they are almost always a `{placeholder}`'s own syntax, and mirroring them would break the
+/// fill.
+fn mirror(c: char) -> char {
+    match c {
+        '(' => ')',
+        ')' => '(',
+        '[' => ']',
+        ']' => '[',
+        '<' => '>',
+        '>' => '<',
+        _ => c,
+    }
+}
+
+/// `label` in logical order, rearranged for egui's run-by-run, left-to-right layout: the runs in
+/// visual order (left to right), the characters inside each run in logical order for the shaper,
+/// brackets mirrored. Lines are reordered on their own (`\n` ends one). A `{placeholder}` is
+/// the label's own syntax: it rides through the pass as one character, so the reordering can
+/// neither split, reverse nor mirror it, and every placeholder comes back exactly as written.
+/// A label with nothing right-to-left in it comes back as it was.
+pub fn visual_rtl(label: &str) -> String {
+    if !label.chars().any(is_rtl_shaped) {
+        return label.into();
+    }
+    // Each placeholder becomes one private-use character (a left-to-right one, like the name
+    // inside it) for the pass, and is restored afterwards; the mapping is per placeholder, so
+    // a reordered sentence still finds its own.
+    let mut tokens: Vec<&str> = Vec::new();
+    let mut guarded = String::with_capacity(label.len());
+    let mut rest = label;
+    while let Some(open) = rest.find('{') {
+        guarded.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        if let Some(close) = after.find('}') {
+            tokens.push(&rest[open..open + close + 2]);
+            guarded.push(char::from_u32(0xE000 + tokens.len() as u32 - 1).unwrap_or('\u{E000}'));
+            rest = &after[close + 1..];
+        } else {
+            guarded.push('{');
+            rest = after;
+        }
+    }
+    guarded.push_str(rest);
+    let mut out = String::with_capacity(label.len());
+    let mut first = true;
+    for line in guarded.split('\n') {
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+        let bidi = BidiInfo::new(line, Some(Level::rtl()));
+        let Some(para) = bidi.paragraphs.first() else {
+            out.push_str(line);
+            continue;
+        };
+        let chars: Vec<char> = line.chars().collect();
+        let levels = bidi.reordered_levels_per_char(para, para.range.clone());
+        // The line's characters in visual order, left to right (UAX #9 L1–L2).
+        let order = BidiInfo::reorder_visual(&levels);
+        let mut p = 0;
+        while p < order.len() {
+            let i = order[p];
+            if is_rtl_shaped(chars[i]) {
+                // One shaping run: a stretch of right-to-left characters, contiguous in the line,
+                // whatever order the reordering brought it in. Emitted in logical order, which is
+                // ascending; the shaper lays its letters out right to left itself.
+                let (mut lo, mut hi) = (i, i);
+                let mut end = p + 1;
+                loop {
+                    if let Some(&j) = order.get(end)
+                        && is_rtl_shaped(chars[j])
+                        && (j + 1 == lo || j == hi + 1)
+                    {
+                        lo = lo.min(j);
+                        hi = hi.max(j);
+                        end += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let mut j = lo;
+                while j <= hi {
+                    out.push(chars[j]);
+                    j += 1;
+                }
+                p = end;
+            } else {
+                // A left-to-right run — a Latin word, a number — or a character between runs: a
+                // space, an ellipsis. It stands where the reordering put it; a bracket in a
+                // right-to-left context shows its mirror.
+                let c = chars[i];
+                out.push(if levels[i].is_rtl() { mirror(c) } else { c });
+                p += 1;
+            }
+        }
+    }
+    if tokens.is_empty() {
+        return out;
+    }
+    let mut restored = String::with_capacity(out.len());
+    for c in out.chars() {
+        let k = c as u32;
+        if (0xE000..0xE000 + tokens.len() as u32).contains(&k) {
+            restored.push_str(tokens[(k - 0xE000) as usize]);
+        } else {
+            restored.push(c);
+        }
+    }
+    restored
 }
 
 /// Catalog values are `'static` (they live in the embedded file), so a translation can be handed
@@ -522,6 +674,9 @@ mod tests {
         for tag in ["es", "es-ES", "es_MX.UTF-8", "es-419"] {
             assert_eq!(Locale::parse_tag(tag), Some(Locale::Es), "{tag}");
         }
+        for tag in ["ar", "ar-SA", "ar_EG.UTF-8", "ar-AE", "ar-Arab-EG"] {
+            assert_eq!(Locale::parse_tag(tag), Some(Locale::Ar), "{tag}");
+        }
         assert_eq!(Locale::parse_tag("xx"), None);
     }
 
@@ -539,6 +694,10 @@ mod tests {
         set_language(Locale::PtBr);
         assert_eq!(tr("Exposure"), "Exposição");
         assert_eq!(tr("Settings"), "Configurações");
+        set_language(Locale::Ar);
+        assert_eq!(tr("Exposure"), "تعريض");
+        assert_eq!(tr("My Photos"), "صوري");
+        assert_eq!(tr("White Balance"), "الأبيض اللون موازنة"); // visual order (visual_rtl)
         set_language(Locale::En);
         assert_eq!(tr("Exposure"), "Exposure");
     }
@@ -575,6 +734,57 @@ mod tests {
         }
         set_language(Locale::En);
         assert_eq!(tr_format!("Reading photos… {} of {}", 3, 10), "Reading photos… 3 of 10");
+    }
+
+    /// The right-to-left pass (#1395): the runs of a label in visual order, the letters inside
+    /// each run in logical order for the shaper.
+    #[test]
+    fn visual_rtl_orders_runs_not_letters() {
+        // "كل الصور" was drawn with `كل` at the left (the reader met `الصور` first).
+        assert_eq!(visual_rtl("كل الصور"), "الصور كل");
+        assert_eq!(visual_rtl("موازنة اللون الأبيض"), "الأبيض اللون موازنة");
+        assert_eq!(visual_rtl("حفظ كـ PDF…"), "…PDF كـ حفظ");
+        assert_eq!(visual_rtl("إنشاء 3 نسخ"), "نسخ 3 إنشاء");
+        // A `{placeholder}` rides through as one unit, never mirrored.
+        assert_eq!(visual_rtl("لون مميز {n}"), "{n} مميز لون");
+        assert_eq!(visual_rtl("حفظ (النسخة الحالية)"), "(الحالية النسخة) حفظ");
+        assert_eq!(visual_rtl("سطر أول\nPDF"), "أول سطر\nPDF");
+        assert_eq!(visual_rtl("Exposure"), "Exposure");
+        assert_eq!(visual_rtl(""), "");
+    }
+
+    /// A filled `tr_format!` message comes out in visual order too: the generated arm wraps the
+    /// `format!` in the pass, so the numbers land inside the sentence where the reader meets them.
+    #[test]
+    fn tr_format_in_arabic_reads_right_to_left() {
+        set_language(Locale::Ar);
+        assert_eq!(tr_format!("Reading photos… {} of {}", 3, 10), "10 من 3 …الصور قراءة جارٍ");
+        set_language(Locale::En);
+    }
+
+    /// The pass and the shaper must not reverse each other's work: on a real egui layout, a
+    /// stored (visual-order) Arabic label draws with its first word rightmost (#1395).
+    #[test]
+    fn arabic_labels_lay_out_right_to_left() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::theme::font_definitions(lightcraft_engine::CRAFT_FONTS));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear();
+        let painter = egui::Painter::new(ctx.clone(), egui::LayerId::background(), egui::Rect::EVERYTHING);
+        let font = egui::FontId::proportional(13.0);
+        for (label, first, second) in [("ملف جديد", "ملف", "جديد"), ("حفظ كـ PDF…", "حفظ", "PDF")] {
+            let galley = painter.layout_no_wrap(visual_rtl(label), font.clone(), egui::Color32::WHITE);
+            let glyphs = &galley.rows[0].row.glyphs;
+            let x_of = |word: &str| glyphs.iter().filter(|g| word.contains(g.chr)).map(|g| g.pos.x).collect::<Vec<f32>>();
+            let (a, b) = (x_of(first), x_of(second));
+            assert!(!a.is_empty() && !b.is_empty(), "{label}: no glyphs for `{first}`/`{second}`");
+            assert!(
+                a.iter().all(|&x| b.iter().all(|&y| x > y)),
+                "`{label}`: `{first}` must sit right of `{second}` after the pass"
+            );
+        }
+        let mut out = ctx.run_ui(egui::RawInput::default(), |_| {});
+        out.textures_delta.clear();
     }
 
     /// Every character a catalog paints has a glyph in the fonts the UI installs, so a translation
@@ -667,6 +877,7 @@ mod tests {
             ("app.language.german", Locale::De),
             ("app.language.russian", Locale::Ru),
             ("app.language.ukrainian", Locale::Uk),
+            ("app.language.arabic", Locale::Ar),
         ];
         // One command per language, and every command reachable from the menu table.
         assert_eq!(commands.len(), Locale::ALL.len());
