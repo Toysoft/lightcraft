@@ -214,3 +214,19 @@ fn show_original_alone_is_not_a_comparison() {
     h.step();
     assert!(samples::message(&h.app, true).unwrap_or_default().starts_with("That's your first edit."));
 }
+
+#[test]
+fn adding_the_samples_says_what_came_and_where() {
+    let mut h = headless(library("said"));
+    h.app.run("library.addSamples", json!({})).unwrap();
+    h.step();
+    let n = lightcraft_engine::demo::sample_count();
+    let toast = h.app.ui.toast.as_ref().map(|(text, _, _)| text.clone()).unwrap_or_default();
+    assert!(toast.contains(&format!("Added {n} sample photos")) && toast.contains("“Sample Photos”"), "{toast}");
+    // long enough to read, as a toast saying where to look is
+    let (_, until, _) = h.app.ui.toast.clone().unwrap();
+    assert!(until - h.app.last_time >= 3.0, "{until} at {}", h.app.last_time);
+    // their albums are together, in the folder the toast names
+    let top: Vec<String> = h.app.session.catalog.albums().filter(|a| a.parent.is_none()).map(|a| a.name.clone()).collect();
+    assert_eq!(top, ["Sample Photos"]);
+}

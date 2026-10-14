@@ -27,6 +27,11 @@ pub fn welcome_scenes() -> Vec<(u32, String)> {
     [1u32, 2, 14, 6, 18].iter().filter_map(|id| scenes.iter().find(|s| s.id == *id).map(|s| (s.id, s.name.clone()))).collect()
 }
 
+/// How many sample photos [`ops`] adds.
+pub fn sample_count() -> usize {
+    lightcraft_scenes::demo_library().len()
+}
+
 /// A sample scene drawn small for the welcome (`max_edge` on its long side), as it looks before
 /// any edit. About 25 ms for one at 320 px on all cores: call it off the UI thread.
 pub fn scene_preview(scene: u32, max_edge: usize) -> Option<lightcraft_raster::Rgba8> {
@@ -174,6 +179,28 @@ pub fn ops(s: &mut Session) -> Vec<Op> {
             album: Album { id, name: name.into(), parent, folder: false, photos, cover, smart: None, quick: false, order: None },
         });
     }
+    ops
+}
+
+/// The name of the folder [`ops_in_folder`] puts the sample albums in, unless asked for another
+/// (the interface asks for it in its language).
+pub const SAMPLES_FOLDER: &str = "Sample Photos";
+
+/// [`ops`], with every album in one folder named `folder`, so the samples' albums stay together
+/// and apart from the ones the person makes.
+pub fn ops_in_folder(s: &mut Session, folder: &str) -> Vec<Op> {
+    let mut ops = ops(s);
+    let id = s.catalog.alloc_album_id();
+    for op in &mut ops {
+        if let Op::AddAlbum { album } = op
+            && album.parent.is_none()
+        {
+            album.parent = Some(id);
+        }
+    }
+    let at = ops.iter().position(|op| matches!(op, Op::AddAlbum { .. })).unwrap_or(ops.len());
+    let album = Album { id, name: folder.into(), parent: None, folder: true, photos: vec![], cover: None, smart: None, quick: false, order: None };
+    ops.insert(at, Op::AddAlbum { album });
     ops
 }
 

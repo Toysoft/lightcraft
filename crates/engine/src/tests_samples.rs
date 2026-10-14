@@ -167,3 +167,36 @@ fn a_new_library_on_disk_starts_empty_unless_samples_are_asked_for() {
     again.open_library(dir.join("plain"), false).unwrap();
     assert_eq!(samples(&again), n);
 }
+
+#[test]
+fn the_sample_albums_come_in_one_folder() {
+    // Given an empty library, when the samples come in
+    let mut s = Session::new();
+    let r = s.execute("library.addSamples", &json!({})).unwrap();
+    // Then every album they bring is inside one folder, named in the reply
+    assert_eq!(r["folder"], "Sample Photos");
+    let folder = album(&s, "Sample Photos").unwrap();
+    let top: Vec<String> = s.catalog.albums().filter(|a| a.parent.is_none()).map(|a| a.name.clone()).collect();
+    assert_eq!(top, ["Sample Photos"]);
+    let inside = s.catalog.albums().filter(|a| a.parent == Some(folder) && !a.folder).count();
+    assert!(r["albums"].as_u64().unwrap() > inside as u64, "and more in Travel 2026, a folder inside it");
+    // and removing the samples takes the folder too
+    s.execute("library.removeSamples", &json!({})).unwrap();
+    assert_eq!(s.catalog.albums().count(), 0);
+}
+
+#[test]
+fn the_sample_folder_can_be_named() {
+    let mut s = Session::new();
+    s.execute("library.addSamples", &json!({"folder": "  Beispielfotos "})).unwrap();
+    assert!(album(&s, "Beispielfotos").is_some());
+    let mut s = Session::new();
+    s.execute("library.addSamples", &json!({"folder": format!(" {} ", "x".repeat(200))})).unwrap();
+    assert!(album(&s, &"x".repeat(200)).is_some(), "200 characters once trimmed");
+    for bad in [json!(""), json!("   "), json!(3), json!("x".repeat(201)), json!("two\nlines")] {
+        let mut s = Session::new();
+        let err = s.execute("library.addSamples", &json!({"folder": bad})).unwrap_err().to_string();
+        assert!(err.contains("folder") && err.len() < 200, "says what is wrong, without echoing it: {err}");
+        assert_eq!(s.catalog.len(), 0, "nothing added");
+    }
+}

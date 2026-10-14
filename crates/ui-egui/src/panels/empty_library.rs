@@ -126,6 +126,8 @@ pub fn follow(app: &mut LightcraftApp) {
 /// that draws them (they take a moment each, never on the UI thread).
 pub struct SampleStrip {
     tiles: Vec<Tile>,
+    /// How many sample photos come in (not just the ones shown).
+    count: usize,
     rx: Option<std::sync::mpsc::Receiver<(u32, lightcraft_raster::Rgba8)>>,
 }
 
@@ -162,7 +164,7 @@ impl SampleStrip {
         if let Err(e) = spawned {
             log::warn!("welcome sample thumbnails: {e}");
         }
-        SampleStrip { tiles, rx: Some(rx) }
+        SampleStrip { tiles, count: lightcraft_engine::demo::sample_count(), rx: Some(rx) }
     }
 
     /// The worker is still drawing thumbnails.
@@ -267,9 +269,10 @@ fn strip(strip: &mut SampleStrip, ui: &mut egui::Ui, area: Rect) -> Option<u32> 
     }
     strip.receive(ui.ctx());
     let p = ui.painter().clone();
-    let caption = crate::i18n::tr("Or try LightCraft on a sample photo");
-    let caption_rect = p.text(pos2(area.center().x, area.top() + 8.0), egui::Align2::CENTER_CENTER, caption, t.font(12.0), t.text_label);
-    super::readable(ui, caption_rect, "welcome-caption", caption, false);
+    // (all of them come: the caption says how many)
+    let caption = crate::i18n::tr_format!("Or explore LightCraft with {n} sample photos", n = strip.count);
+    let caption_rect = p.text(pos2(area.center().x, area.top() + 8.0), egui::Align2::CENTER_CENTER, &caption, t.font(12.0), t.text_label);
+    super::readable(ui, caption_rect, "welcome-caption", &caption, false);
     let h = w * 2.0 / 3.0;
     let row_w = n as f32 * w + (n as f32 - 1.0) * TILE_GAP;
     let mut x = area.center().x - row_w / 2.0;

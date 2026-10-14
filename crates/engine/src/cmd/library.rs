@@ -915,14 +915,24 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add Sample Photos",
             ["Help"],
             None,
-            "{} → {added} — adds the procedural sample photos and their albums to the library, to try LightCraft on (one undo step)",
+            "{folder?: name of the folder their albums go in (default \"Sample Photos\"; the interface names it in its language)} → {added, albums, folder} — adds the procedural sample photos, their keywords and their albums (in one folder) to the library, to try LightCraft on (one undo step)",
             no_samples,
-            |s, _| {
-                let ops = crate::demo::ops(s);
+            |s, p| {
+                let folder = match p.get("folder") {
+                    None | Some(Value::Null) => crate::demo::SAMPLES_FOLDER.to_string(),
+                    Some(Value::String(name))
+                        if !name.trim().is_empty() && name.trim().chars().count() <= 200 && !name.chars().any(char::is_control) =>
+                    {
+                        name.trim().to_string()
+                    }
+                    Some(_) => return Err(bad("library.addSamples", "`folder` must be a name of 1 to 200 characters, without control characters")),
+                };
+                let ops = crate::demo::ops_in_folder(s, &folder);
                 let added = ops.iter().filter(|o| matches!(o, Op::AddPhoto { .. })).count();
+                let albums = ops.iter().filter(|o| matches!(o, Op::AddAlbum { album } if !album.folder)).count();
                 s.commit("Add Sample Photos", Op::Batch { ops })?;
                 crate::demo::select_first(s);
-                Ok(json!({"added": added}))
+                Ok(json!({"added": added, "albums": albums, "folder": folder}))
             }
         ),
         cmd!(
