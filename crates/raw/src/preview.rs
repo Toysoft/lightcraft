@@ -65,31 +65,43 @@ pub fn embedded_preview_dynamic_range_optimized(bytes: &[u8]) -> Option<bool> {
     crate::vendor::arw::dynamic_range_optimizer(&mn)
 }
 
-/// Whether `b` looks like a displayable (DCT) JPEG: SOI, and the first SOF marker is not lossless.
-fn is_dct_jpeg(b: &[u8]) -> bool {
-    if b.len() < 4 || b[0] != 0xff || b[1] != 0xd8 {
-        return false;
+/// The first frame (SOF) marker of a JPEG and its position, from the marker segments before the first scan.
+fn first_frame(b: &[u8]) -> Option<(u8, usize)> {
+    if b.len() < 4 || !b.starts_with(&[0xff, 0xd8]) {
+        return None;
     }
-    let mut i = 2;
-    while i + 4 <= b.len() {
-        if b[i] != 0xff {
-            return false;
+    let mut i = 2usize;
+    while i.checked_add(4)? <= b.len() {
+        if *b.get(i)? != 0xff {
+            return None;
         }
-        let m = b[i + 1];
+        let m = *b.get(i + 1)?;
         if m == 0xff {
             i += 1;
             continue;
         }
         match m {
-            0xc0..=0xc2 => return true,
-            0xc3 | 0xc5..=0xc7 | 0xcb | 0xcd..=0xcf => return false,
-            0xda | 0xd9 => return false,
+            0xc0..=0xc3 | 0xc5..=0xc7 | 0xcb | 0xcd..=0xcf => return Some((m, i)),
+            0xda | 0xd9 => return None,
             _ => {}
         }
-        let len = u16::from_be_bytes([b[i + 2], b[i + 3]]) as usize;
-        i += 2 + len;
+        let len = usize::from(u16::from_be_bytes([*b.get(i + 2)?, *b.get(i + 3)?]));
+        i = i.checked_add(2 + len)?;
     }
-    false
+    None
+}
+
+/// Whether `b` looks like a displayable (DCT) JPEG: SOI, and the first SOF marker is not lossless.
+fn is_dct_jpeg(b: &[u8]) -> bool {
+    first_frame(b).is_some_and(|(m, _)| matches!(m, 0xc0..=0xc2))
+}
+
+/// Width, height and component count of a displayable (DCT) JPEG, from its frame header.
+fn jpeg_frame(b: &[u8]) -> Option<(u32, u32, u8)> {
+    let (_, i) = first_frame(b).filter(|(m, _)| matches!(m, 0xc0..=0xc2))?;
+    let at = |k: usize| b.get(i.checked_add(k)?).copied();
+    let be16 = |k: usize| Some(u32::from(u16::from_be_bytes([at(k)?, at(k + 1)?])));
+    Some((be16(7)?, be16(5)?, at(9)?))
 }
 
 /// Whether `b` is a JPEG XL file: a bare codestream or the ISO-BMFF container's signature box.
@@ -139,20 +151,33 @@ fn candidates<'a>(data: &'a [u8], ifd: &Ifd, base: u64, out: &mut Vec<&'a [u8]>)
 /// The largest embedded preview, if any: a JPEG, or (DNG 1.7) a JPEG XL file — both decode with
 /// `lightcraft_codecs::decode`.
 pub fn embedded_preview(bytes: &[u8]) -> Option<Vec<u8>> {
-    preview_at_least(bytes, None)
+    preview_covering(bytes, None)
 }
 
-/// The smallest embedded preview whose long edge is at least `min_edge` pixels, of the same shape as the largest
-/// (a letterboxed or cropped small preview is never chosen), else the largest ([`embedded_preview`]).
-///
-/// Why it exists: many raws carry a full-size JPEG beside a small one (a Sony α1's ARW: 8640 × 5760 in 5.6 MB and
-/// 1616 × 1080 in 170 KB); a 512 px thumbnail or a content-index picture needs only the small one, and decoding the
-/// big one costs about 30 times the time and memory.
-pub fn embedded_preview_at_least(bytes: &[u8], min_edge: u32) -> Option<Vec<u8>> {
-    preview_at_least(bytes, Some(min_edge))
+/// The smallest embedded JPEG whose long edge is at least `min_edge` and that looks like a copy of the largest preview
+/// (its aspect ratio within 1 %, so not a letterboxed or cropped thumbnail, and as many colour components, so not a
+/// grey mask or depth map), else [`embedded_preview`]. Only TIFF-based raws keep several: an A7R VI's 1616 × 1080
+/// preview is 0.3 MB beside its 9984 × 6656 one (5.6 MB), so a stand-in up to 1616 px decodes about a twentieth of the data.
+pub fn embedded_preview_covering(bytes: &[u8], min_edge: u32) -> Option<Vec<u8>> {
+    preview_covering(bytes, Some(min_edge))
 }
 
-fn preview_at_least(bytes: &[u8], min_edge: Option<u32>) -> Option<Vec<u8>> {
+/// Of the DCT JPEGs in `found`, the one with the shortest long edge of at least `min_edge` with `largest`'s aspect
+/// ratio (within 1 %) and component count.
+fn smallest_covering<'a>(found: &[&'a [u8]], largest: &[u8], min_edge: u32) -> Option<&'a [u8]> {
+    let (bw, bh, bc) = jpeg_frame(largest)?;
+    let like = |(w, h, c): (u32, u32, u8)| {
+        let (a, b) = (u64::from(w) * u64::from(bh), u64::from(h) * u64::from(bw));
+        w > 0 && h > 0 && c == bc && a.abs_diff(b) * 100 <= a
+    };
+    found
+        .iter()
+        .filter_map(|&s| jpeg_frame(s).filter(|&f| like(f) && f.0.max(f.1) >= min_edge).map(|(w, h, _)| (s, w.max(h))))
+        .min_by_key(|&(_, long)| long)
+        .map(|(s, _)| s)
+}
+
+fn preview_covering(bytes: &[u8], min_edge: Option<u32>) -> Option<Vec<u8>> {
     if bytes.starts_with(b"FUJIFILMCCD-RAW") {
         let j = crate::vendor::raf::header(bytes).ok()?.jpeg?;
         return is_dct_jpeg(j).then(|| trim_eoi(j).to_vec());
@@ -165,8 +190,7 @@ fn preview_at_least(bytes: &[u8], min_edge: Option<u32>) -> Option<Vec<u8>> {
         return scan_for_jpeg(bytes);
     }
     let found = tiff_candidates(bytes)?;
-    let usable: Vec<&[u8]> = found.into_iter().filter(|s| is_dct_jpeg(s) || is_jxl(s)).collect();
-    let best = choose(&usable, min_edge).map(|s| if is_jxl(s) { s.to_vec() } else { trim_eoi(s).to_vec() });
+    let best = choose(&found, min_edge).map(|s| if is_jxl(s) { s.to_vec() } else { trim_eoi(s).to_vec() });
     // a TIFF raw we can't decode whose preview no tag points to (Leaf MOS, Epson ERF)
     best.or_else(|| format.filter(|f| !f.is_supported()).and_then(|_| scan_for_jpeg(bytes)))
 }
@@ -200,34 +224,20 @@ fn tiff_candidates(bytes: &[u8]) -> Option<Vec<&[u8]>> {
     Some(found)
 }
 
-/// The preview [`preview_at_least`] takes among the `usable` ones (displayable JPEGs and JPEG XL files).
-fn choose<'a>(usable: &[&'a [u8]], min_edge: Option<u32>) -> Option<&'a [u8]> {
-    let largest = usable.iter().copied().max_by_key(|s| s.len());
-    match (min_edge, largest) {
-        (Some(min), Some(big)) if is_dct_jpeg(big) => {
-            let shape = dct_jpeg_size(big).map(|(w, h)| f64::from(w) / f64::from(h.max(1)));
-            usable
-                .iter()
-                .copied()
-                .filter(|s| s.len() < big.len())
-                .filter_map(|s| dct_jpeg_size(s).map(|(w, h)| (s, w, h)))
-                .filter(|(_, w, h)| (*w).max(*h) >= min && *h > 0)
-                .filter(|(_, w, h)| shape.is_some_and(|r| (f64::from(*w) / f64::from(*h) / r - 1.0).abs() <= 0.02))
-                .min_by_key(|(s, _, _)| s.len())
-                .map(|(s, _, _)| s)
-                .or(Some(big))
-        }
-        (_, big) => big,
-    }
+/// The preview [`preview_covering`] takes among a TIFF-based raw's candidates: the largest displayable one (a JPEG or
+/// a JPEG XL file), or with `min_edge` the smallest copy of it that covers that edge ([`smallest_covering`]).
+fn choose<'a>(found: &[&'a [u8]], min_edge: Option<u32>) -> Option<&'a [u8]> {
+    let largest = found.iter().copied().filter(|s| is_dct_jpeg(s) || is_jxl(s)).max_by_key(|s| s.len());
+    min_edge.zip(largest).and_then(|(min, big)| smallest_covering(found, big, min)).or(largest)
 }
 
-/// Bytes past a candidate's unfinished head that [`at_least_plan`] asks for with it.
+/// Bytes past a candidate's unfinished head that [`covering_plan`] asks for with it.
 const HEAD_ROOM: u64 = 64 * 1024;
 
-/// How many leading bytes of a candidate [`is_dct_jpeg`], [`dct_jpeg_size`] and [`is_jxl`] look at: the JPEG's
-/// marker segments up to its first frame header (or the marker that stops the walk), and the JPEG XL signature.
-/// A walk that meets a byte the caller has not loaded stops there too, and that byte is inside the reach, so a
-/// caller that loads the reach and asks again ends with the walk the whole file gives.
+/// How many leading bytes of a candidate [`is_dct_jpeg`], [`jpeg_frame`] and [`is_jxl`] look at: the JPEG's marker
+/// segments up to its first frame header (its size and component count, or the marker that stops the walk), and the
+/// JPEG XL signature. A walk that meets a byte the caller has not loaded stops there too, and that byte is inside the
+/// reach, so a caller that loads the reach and asks again ends with the walk the whole file gives.
 fn head_reach(b: &[u8]) -> usize {
     let mut reach = 12usize;
     let mut i = 2usize;
@@ -242,7 +252,8 @@ fn head_reach(b: &[u8]) -> usize {
             continue;
         }
         if matches!(m, 0xc0..=0xc2) {
-            reach = reach.max(i.saturating_add(9));
+            // height, width and the component count (`jpeg_frame`)
+            reach = reach.max(i.saturating_add(10));
             break;
         }
         if matches!(m, 0xc3 | 0xc5..=0xc7 | 0xcb | 0xcd..=0xcf | 0xda | 0xd9) {
@@ -256,10 +267,10 @@ fn head_reach(b: &[u8]) -> usize {
     reach.max(i.min(b.len())).min(b.len())
 }
 
-/// What [`embedded_preview_at_least`] reads of a TIFF-based raw whose metadata `loaded` already holds (its
+/// What [`embedded_preview_covering`] reads of a TIFF-based raw whose metadata `loaded` already holds (its
 /// [`crate::sparse::header_plan`] is `Ready`): the head of every candidate preview, then the one it takes. Only
 /// that one is read whole, so a 512 px thumbnail of a raw with a full-size JPEG beside a small one reads the small one.
-pub(crate) fn at_least_plan(bytes: &[u8], loaded: &crate::sparse::Ranges, min_edge: u32) -> crate::sparse::HeaderPlan {
+pub(crate) fn covering_plan(bytes: &[u8], loaded: &crate::sparse::Ranges, min_edge: u32) -> crate::sparse::HeaderPlan {
     use crate::sparse::{HeaderPlan, Ranges};
     let Some(found) = tiff_candidates(bytes) else { return HeaderPlan::Whole("TIFF structure") };
     let base = bytes.as_ptr() as usize;
@@ -283,38 +294,12 @@ pub(crate) fn at_least_plan(bytes: &[u8], loaded: &crate::sparse::Ranges, min_ed
     if !need.is_empty() {
         return HeaderPlan::Need(need);
     }
-    let usable: Vec<&[u8]> = found.into_iter().filter(|s| is_dct_jpeg(s) || is_jxl(s)).collect();
-    let Some(chosen) = choose(&usable, Some(min_edge)) else { return HeaderPlan::Whole("no preview its tags point at") };
+    let Some(chosen) = choose(&found, Some(min_edge)) else { return HeaderPlan::Whole("no preview its tags point at") };
     let Some((start, end)) = at(chosen) else { return HeaderPlan::Whole("a preview outside the file") };
     if loaded.contains(start, end) {
         return HeaderPlan::Ready;
     }
     HeaderPlan::Need(loaded.gaps(start, end))
-}
-
-/// Width and height of a displayable (DCT) JPEG, from its first SOF marker.
-fn dct_jpeg_size(b: &[u8]) -> Option<(u32, u32)> {
-    if !is_dct_jpeg(b) {
-        return None;
-    }
-    let mut i = 2usize;
-    loop {
-        let (&ff, &m) = (b.get(i)?, b.get(i + 1)?);
-        if ff != 0xff {
-            return None;
-        }
-        if m == 0xff {
-            i += 1;
-            continue;
-        }
-        if matches!(m, 0xc0..=0xc2) {
-            let s = b.get(i + 5..i + 9)?;
-            let (h, w) = (u16::from_be_bytes([s[0], s[1]]), u16::from_be_bytes([s[2], s[3]]));
-            return (w > 0 && h > 0).then_some((u32::from(w), u32::from(h)));
-        }
-        let len = b.get(i + 2..i + 4).map(|s| usize::from(u16::from_be_bytes([s[0], s[1]])))?;
-        i = i.checked_add(2 + len)?;
-    }
 }
 
 /// The end of the DCT JPEG whose SOI is at `soi` (exclusive index after its EOI) and its component count,
@@ -675,6 +660,61 @@ mod tests {
         assert_eq!(embedded_preview(&cr3).unwrap(), j);
         for n in 0..cr3.len() {
             let _ = embedded_preview(&cr3[..n]);
+        }
+    }
+
+    /// A JPEG like [`fake_jpeg`] whose frame header says `w` x `h` with `nc` components.
+    fn sized_jpeg(w: u16, h: u16, nc: u8, n: usize) -> Vec<u8> {
+        let mut j = vec![0xff, 0xd8, 0xff, 0xc0, 0x00, 8 + 3 * nc, 8];
+        j.extend_from_slice(&h.to_be_bytes());
+        j.extend_from_slice(&w.to_be_bytes());
+        j.push(nc);
+        for c in 0..nc {
+            j.extend_from_slice(&[c + 1, 0x11, 0]);
+        }
+        j.extend(std::iter::repeat_n(0x55u8, n));
+        j.extend_from_slice(&[0xff, 0xd9]);
+        j
+    }
+
+    /// A TIFF raw holding `jpegs` as JPEG-compressed strips: the first in IFD0, the others in sub-IFDs.
+    fn tiff_with_jpegs(jpegs: &[&[u8]]) -> Vec<u8> {
+        let ifd = |j: &[u8]| {
+            let mut ifd = IfdBuilder::new();
+            ifd.set(t::COMPRESSION, Value::Short(vec![6]));
+            ifd.set(t::IMAGE_WIDTH, Value::Long(vec![1]));
+            ifd.set(t::IMAGE_LENGTH, Value::Long(vec![1]));
+            ifd.set_image(ImageData::Strips { rows_per_strip: 1, strips: vec![j.to_vec()] });
+            ifd
+        };
+        let mut ifd0 = ifd(jpegs[0]);
+        for j in &jpegs[1..] {
+            ifd0.add_sub_ifd(ifd(j));
+        }
+        TiffWriter::default().write(&[ifd0]).unwrap()
+    }
+
+    /// A stand-in decodes the smallest JPEG that covers its box and shows the same picture as the largest: not a
+    /// thumbnail of another shape (a letterboxed one) or a grey mask, and the largest when no smaller one is big enough.
+    #[test]
+    fn a_stand_in_takes_the_smallest_covering_jpeg_of_the_same_shape() {
+        let (big, small, boxed) = (sized_jpeg(9984, 6656, 3, 500), sized_jpeg(1616, 1080, 3, 50), sized_jpeg(160, 120, 3, 10));
+        // a ProRAW DNG keeps grey semantic masks of the picture's shape as JPEGs too
+        let mask = sized_jpeg(768, 512, 1, 20);
+        let file = tiff_with_jpegs(&[&small, &big, &boxed, &mask]);
+        assert_eq!(embedded_preview(&file).unwrap(), big, "unchanged: the largest");
+        assert_eq!(embedded_preview_covering(&file, 1600).unwrap(), small, "1616 px covers a 1600 px box");
+        assert_eq!(embedded_preview_covering(&file, 1616).unwrap(), small);
+        assert_eq!(embedded_preview_covering(&file, 1617).unwrap(), big, "too small: the largest");
+        assert_eq!(embedded_preview_covering(&file, u32::MAX).unwrap(), big);
+        assert_eq!(embedded_preview_covering(&file, 100).unwrap(), small, "the 4:3 thumbnail and the grey mask are not this picture");
+        // a small copy of the same shape (within 1 %) is taken
+        let thumb = sized_jpeg(160, 107, 3, 10);
+        let file = tiff_with_jpegs(&[&small, &big, &thumb]);
+        assert_eq!(embedded_preview_covering(&file, 100).unwrap(), thumb);
+        assert_eq!(embedded_preview_covering(&tiff_with_jpegs(&[&big]), 100).unwrap(), big, "one preview: that one");
+        for n in (0..file.len()).step_by(7) {
+            let _ = embedded_preview_covering(&file[..n], 100);
         }
     }
 

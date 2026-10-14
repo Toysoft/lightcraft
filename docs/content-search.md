@@ -126,7 +126,7 @@ index. It runs in the background:
   Fast). A render can hold a whole file and its decode; the renders run on the processor (they are small, and leave the
   graphics card to the views and the model). Raws with a full-size JPEG and a small one (a Sony α1: 8640 × 5760 and
   1616 × 1080) are read from the smallest that covers 512 px, and only that preview's bytes are read from disk with the
-  file's header (`sparse::preview_plan_at_least`, [raw-preview-reads.md](raw-preview-reads.md)): a 70.6 MiB α1 ARW
+  file's header (`sparse::preview_plan_covering`, [raw-preview-reads.md](raw-preview-reads.md)): a 70.6 MiB α1 ARW
   costs 0.75 MB of reads, not its 8 MB full-size JPEG or the whole file, so a library on an external drive is not read
   end to end. Big TIFFs (a layered Photoshop TIFF can be gigabytes) are reduced strip by strip as they are read. Indexing 502 Sony α1 raws (and one 2.3 GB TIFF) peaks at about 1.4 GB
   of memory; 352 mixed photos at Fast pace about 1.9 GB.

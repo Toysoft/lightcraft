@@ -86,12 +86,12 @@ sparse_corpus -- --nocapture` prints these numbers. `LIGHTCRAFT_PROFILE=1` says 
 [profile] preview …/arw-sony-a7rm4a-compressed.arw: read 688128 of 61832192 bytes (plan, window 483441)
 ```
 
-### The smallest preview that covers the display
+### Reading only the preview that covers the display
 
-A display of `max_edge` pixels takes the smallest embedded preview that covers it
-(`embedded_preview_at_least`): a 512 px grid thumbnail or content-index picture of a Sony α1 ARW uses its
-1616 × 1080 JPEG, not the 8640 × 5760 one. The planned read takes the same one and reads only it:
-`sparse::preview_plan_at_least(bytes, loaded, min_edge)` reads the header ranges with every large preview
+A display of `max_edge` pixels decodes the smallest embedded preview that covers it
+([below](#the-smallest-jpeg-that-covers-the-box)): a 512 px grid thumbnail or content-index picture of a Sony α1
+ARW uses its 1616 × 1080 JPEG, not the 8640 × 5760 one. The planned read reads only that one:
+`sparse::preview_plan_covering(bytes, loaded, min_edge)` reads the header ranges with every large preview
 skipped but its first 64 KiB (the strips of preview IFDs, and the `JPEGInterchangeFormat` blobs where a Sony
 ARW keeps its full-size JPEG), then the head of every candidate up to its frame header, which is what the
 choice looks at, and then only the preview it takes. A CR3 or a RAF carries one preview and gets
@@ -123,6 +123,9 @@ loupe render of a cold photo finished 174 s after the click, most of it spent be
 - `grid::skips_the_real_render(embedded_is_final, from_embedded)` is the decision, unit-tested:
   a **cached render** as the stand-in, an **edited photo** and a **raw with no embedded JPEG** all
   still render, because their thumbnail must show the pipeline's output rather than the camera's.
+- Whether the embedded JPEG can actually be read is only known when the quick job runs, so
+  `Session::quick_thumb_job` carries the real thumbnail job as its last resort: a raw whose preview
+  the loader can't read renders the raw instead of leaving the cell empty (issue #1448).
 - The thumbnail key still changes with the settings hash, so editing a photo re-renders its
   thumbnail through the ordinary background path.
 
@@ -130,11 +133,27 @@ Measured on the real folder: idle for a minute, the app read 12 previews (**26.9
 **zero** raws for thumbnails, against 638 MB of whole-file reads for the same 12 photos before. The
 render queue stayed empty.
 
+## The smallest JPEG that covers the box
+
+Many TIFF-based raws keep more than one embedded JPEG. A Sony A7R VI ARW holds a 1616 × 1080 one
+(0.3 MB) beside the 9984 × 6656 one (5.6 MB), and Nikon NEF and Panasonic RW2 files have mid-sized
+copies too. The loupe stand-in and the grid thumbnail (`embedded_preview_srgb`) decode the smallest
+JPEG whose long edge is at least the size asked for (`lightcraft_raw::embedded_preview_covering`).
+They take the largest one when no other JPEG is big enough. The plan route picks the same way
+(`preview_window` takes the size asked for), so a raw read through the plan gets the JPEG the whole
+file would give, and reads only that one ([above](#reading-only-the-preview-that-covers-the-display)). A smaller JPEG only counts as a copy of the picture when its aspect ratio is within
+1 % of the largest one's and it has the same number of colour components. That rules out letterboxed
+thumbnails of another shape and the grey masks an iPhone ProRAW DNG keeps at the picture's shape.
+Sources for editing (an unsupported raw's JPEG, `load_embedded_preview`) and the camera-look fit still
+use the largest JPEG, so their geometry and colour do not depend on the size level.
+
 ## Tests
 
 - `crates/raw/src/preview.rs`: the header-only range matches `embedded_preview` byte for byte; a
   clamped prefix, a padded extent, a late pointer, a lying pointer and a non-JPEG window are all
-  covered.
+  covered. `a_stand_in_takes_the_smallest_covering_jpeg_of_the_same_shape` covers the picker: a
+  smaller JPEG that covers the box is taken, the largest when none does, and a thumbnail of another
+  shape or a grey mask never is.
 - `crates/engine/src/files.rs`: on a synthetic RAF with a 200 KB tail, the quick path and the
   whole-file path produce identical pixels, and the read stays under half the file. On a synthetic
   TIFF/DNG whose preview only its tags locate — the plan path — the same identity holds and the CFA
@@ -142,15 +161,17 @@ render queue stayed empty.
   guessing, and the caller keeps reading it whole. So does a file whose own orientation only the
   whole-file path can show. One that states Adobe RGB takes the plan route and shows the same pixels
   as the whole-file path (the space changes them: decoded as sRGB they differ), and one that states
-  sRGB stays on the fast path.
-- `crates/raw/src/sparse.rs`: on a raw with a full-size JPEG beside a small one, `preview_plan_at_least`
+  sRGB stays on the fast path. A synthetic DNG with a full-size and a half-size JPEG gets, on the plan
+  path, the half-size one for a box it covers and the full-size one otherwise, with the same pixels as
+  the whole-file path (`preview_loading_plans_the_smallest_covering_jpeg`).
+- `crates/raw/src/sparse.rs`: on a raw with a full-size JPEG beside a small one, `preview_plan_covering`
   reads the small one and not the big one for 512 px and the big one past the small one's size, and the
-  buffer gives `embedded_preview_at_least`'s whole-file answer with the skipped bytes `0` and `0xFF`; a
+  buffer gives `embedded_preview_covering`'s whole-file answer with the skipped bytes `0` and `0xFF`; a
   candidate whose frame header sits past the kept 64 KiB is read up to it before the choice.
 - `crates/engine/src/files.rs`: the content scan's loader reads a fixture's small preview and not its big
   one, with the whole-file path's pixels; asked for more, it reads the big one; a file the planner cannot
   describe is read whole.
-- `crates/raw/tests/sparse_corpus.rs`: `preview_plan_at_least` at 512 and 2048 px must hand on the whole
+- `crates/raw/tests/sparse_corpus.rs`: `preview_plan_covering` at 512 and 2048 px must hand on the whole
   file's choice for every corpus file it answers for. `preview_plan` is asked for **every** corpus file, not only
   the ones whose header plan is `Ready`, and the preview it yields must equal the whole file's with
   the skipped bytes `0` and `0xFF`. The test prints what each format reads.

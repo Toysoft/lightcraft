@@ -8,8 +8,8 @@
 //! small part of the file (`cargo test -p lightcraft-raw --release --test sparse_corpus -- --nocapture`
 //! prints what each format reads).
 
-use lightcraft_raw::sparse::{HeaderPlan, Ranges, header_plan, preview_plan, preview_plan_at_least};
-use lightcraft_raw::{embedded_preview, embedded_preview_at_least, probe, probe_info};
+use lightcraft_raw::sparse::{HeaderPlan, Ranges, header_plan, preview_plan, preview_plan_covering};
+use lightcraft_raw::{embedded_preview, embedded_preview_covering, probe, probe_info};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -69,7 +69,7 @@ fn partial_reads_describe_raws_as_whole_files_do() {
     // format → (files ready, bytes read, bytes total, files read whole)
     let mut stats: BTreeMap<String, (usize, u64, u64, usize)> = BTreeMap::new();
     let mut preview_stats: BTreeMap<String, (usize, u64, u64, usize)> = BTreeMap::new();
-    let mut at_least_stats: BTreeMap<(String, u32), (usize, u64, u64, usize)> = BTreeMap::new();
+    let mut covering_stats: BTreeMap<(String, u32), (usize, u64, u64, usize)> = BTreeMap::new();
     for p in paths {
         let name = p.file_name().unwrap().to_string_lossy().to_string();
         let file = std::fs::read(&p).unwrap();
@@ -129,14 +129,14 @@ fn partial_reads_describe_raws_as_whole_files_do() {
         // The smallest preview that covers a content scan's 512 px and a face scan's 2048 px: what the plan hands on
         // is the whole file's choice, with the skipped bytes zeroed and again 0xFF.
         for edge in [512u32, 2048] {
-            let wanted = embedded_preview_at_least(&file, edge);
-            let entry = at_least_stats.entry((format.clone(), edge)).or_default();
-            match run_with(&file, 0, |b, l| preview_plan_at_least(b, l, edge)) {
+            let wanted = embedded_preview_covering(&file, edge);
+            let entry = covering_stats.entry((format.clone(), edge)).or_default();
+            match run_with(&file, 0, |b, l| preview_plan_covering(b, l, edge)) {
                 (HeaderPlan::Ready, buf, loaded) => {
-                    assert!(embedded_preview_at_least(&buf, edge) == wanted, "{name}: a different preview of at least {edge} px");
-                    let (plan_ff, buf_ff, loaded_ff) = run_with(&file, 0xff, |b, l| preview_plan_at_least(b, l, edge));
+                    assert!(embedded_preview_covering(&buf, edge) == wanted, "{name}: a different preview of at least {edge} px");
+                    let (plan_ff, buf_ff, loaded_ff) = run_with(&file, 0xff, |b, l| preview_plan_covering(b, l, edge));
                     assert_eq!((plan_ff, loaded_ff.total()), (HeaderPlan::Ready, loaded.total()), "{name}: the {edge} px plan read skipped bytes");
-                    assert!(embedded_preview_at_least(&buf_ff, edge) == wanted, "{name}: a different {edge} px preview (skipped bytes 0xFF)");
+                    assert!(embedded_preview_covering(&buf_ff, edge) == wanted, "{name}: a different {edge} px preview (skipped bytes 0xFF)");
                     entry.0 += 1;
                     entry.1 += loaded.total();
                     entry.2 += file.len() as u64;
@@ -146,7 +146,7 @@ fn partial_reads_describe_raws_as_whole_files_do() {
             }
         }
     }
-    for ((format, edge), (ready, read, total, whole)) in at_least_stats {
+    for ((format, edge), (ready, read, total, whole)) in covering_stats {
         eprintln!(
             "{format:>10} preview ≥ {edge} px: {ready} read from {:.1} % of their bytes, {whole} read whole",
             read as f64 * 100.0 / total.max(1) as f64

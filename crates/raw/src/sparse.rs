@@ -13,9 +13,9 @@
 //! tracks (keeping the raw track's coding headers and quantization maps, and the timed-metadata
 //! track where Canon puts the as-shot white balance), a RAF's CFA strip (keeping its compression
 //! header) and a Panasonic RW2's raw data. Formats whose header probe reads samples (NEF: masked
-//! columns; ORF: bit depth and CFA phase; PEF: dark borders) and anything else get
-//! [`HeaderPlan::Whole`], as does a structure that is incomplete, inconsistent or keeps metadata
-//! inside its sample data: the plan never guesses.
+//! columns; ORF: bit depth and CFA phase; PEF: dark borders; ARW6, for its header plan only: the
+//! start of every tile) and anything else get [`HeaderPlan::Whole`], as does a structure that is
+//! incomplete, inconsistent or keeps metadata inside its sample data: the plan never guesses.
 
 use std::collections::HashSet;
 
@@ -157,11 +157,11 @@ pub fn preview_plan(bytes: &[u8], loaded: &Ranges) -> HeaderPlan {
     plan(bytes, loaded, true)
 }
 
-/// [`preview_plan`] for [`crate::embedded_preview_at_least`]`(bytes, min_edge)`: the header ranges, the head of every
+/// [`preview_plan`] for [`crate::embedded_preview_covering`]`(bytes, min_edge)`: the header ranges, the head of every
 /// preview a TIFF-based raw's tags point at, and then only the preview that call takes — the small one when it is big
 /// enough, where [`preview_plan`] reads every preview. Once it says [`HeaderPlan::Ready`], that call on the buffer gives
 /// what it gives on the whole file. A CR3 or a RAF carries one preview, and gets [`preview_plan`].
-pub fn preview_plan_at_least(bytes: &[u8], loaded: &Ranges, min_edge: u32) -> HeaderPlan {
+pub fn preview_plan_covering(bytes: &[u8], loaded: &Ranges, min_edge: u32) -> HeaderPlan {
     if is_cr3(bytes) || bytes.starts_with(b"FUJIFILMCCD-RAW") {
         return preview_plan(bytes, loaded);
     }
@@ -178,7 +178,7 @@ pub fn preview_plan_at_least(bytes: &[u8], loaded: &Ranges, min_edge: u32) -> He
     // the header ranges, with every large preview skipped but its head — the `JPEGInterchangeFormat` blobs too, where
     // a Sony ARW keeps its full-size JPEG — then the heads and the one preview the choice takes
     match tiff_plan(bytes, loaded, false, true) {
-        HeaderPlan::Ready => crate::preview::at_least_plan(bytes, loaded, min_edge),
+        HeaderPlan::Ready => crate::preview::covering_plan(bytes, loaded, min_edge),
         other => other,
     }
 }
@@ -243,7 +243,7 @@ fn finish(len: u64, loaded: &Ranges, holes: &Ranges, meta: &Ranges, ready: impl 
 }
 
 /// `pointed_holes`: also skip the large JPEGs IFDs point at with `JPEGInterchangeFormat` (but their heads), for
-/// [`preview_plan_at_least`], which then reads the one it takes.
+/// [`preview_plan_covering`], which then reads the one it takes.
 fn tiff_plan(bytes: &[u8], loaded: &Ranges, preview: bool, pointed_holes: bool) -> HeaderPlan {
     let len = bytes.len() as u64;
     let mut w = Want::new(bytes, loaded);
@@ -264,6 +264,8 @@ fn tiff_plan(bytes: &[u8], loaded: &Ranges, preview: bool, pointed_holes: bool) 
         let chunks: Vec<(u64, u64)> = match ifd.image() {
             // a preview's strips are read when the preview is wanted: only the raw image is skipped
             Ok(info) if preview && !matches!(info.photometric, t::photometric::CFA | t::photometric::LINEAR_RAW) => continue,
+            // (Sony Compressed RAW 2: the header probe decodes the start of every tile; a preview reads none)
+            Ok(info) if !preview && info.compression == 32766 => return HeaderPlan::Whole("an ARW6 header probe reads its tiles"),
             Ok(info) => info.chunks(len).iter().map(|c| (c.offset, c.len)).collect(),
             // a raw IFD without the tags a TIFF image needs (an older CR2's) still lists its strips
             Err(_) => match (ifd.u64s(t::STRIP_OFFSETS), ifd.u64s(t::STRIP_BYTE_COUNTS)) {
@@ -584,17 +586,17 @@ mod tests {
     /// big one, which [`preview_plan`] reads whole; asked for more than the small one has, it reads the big one. Either
     /// way the buffer gives what the whole file gives, whatever the unread bytes hold.
     #[test]
-    fn a_preview_of_at_least_an_edge_reads_only_the_preview_it_takes() {
+    fn a_covering_preview_reads_only_the_preview_it_takes() {
         let file = raw_with_two_previews(2_000_000, 300_000);
         let (every, _, read_every) = run_plan(&file, 0, preview_plan);
         assert_eq!(every, HeaderPlan::Ready);
         for (edge, big) in [(512u32, false), (1616, false), (1617, true), (6000, true)] {
-            let whole = crate::embedded_preview_at_least(&file, edge).expect("a preview");
+            let whole = crate::embedded_preview_covering(&file, edge).expect("a preview");
             assert_eq!(whole.len() > 1_000_000, big, "{edge}: the fixture's choice");
             for fill in [0u8, 0xff] {
-                let (plan, buf, loaded) = run_plan(&file, fill, |b, l| preview_plan_at_least(b, l, edge));
+                let (plan, buf, loaded) = run_plan(&file, fill, |b, l| preview_plan_covering(b, l, edge));
                 assert_eq!(plan, HeaderPlan::Ready, "{edge}");
-                assert!(crate::embedded_preview_at_least(&buf, edge) == Some(whole.clone()), "{edge}/{fill}: the whole file's preview");
+                assert!(crate::embedded_preview_covering(&buf, edge) == Some(whole.clone()), "{edge}/{fill}: the whole file's preview");
                 let most = if big { 2_200_000 } else { 500_000 };
                 assert!(loaded.total() < most, "{edge}: read {} bytes (every preview: {})", loaded.total(), read_every.total());
             }
@@ -602,7 +604,7 @@ mod tests {
         // a CR3, a RAF and a file the header plan cannot describe answer as their own plans do
         let mut not_raw = file.clone();
         not_raw[0..4].copy_from_slice(b"XXXX");
-        assert!(matches!(run_plan(&not_raw, 0, |b, l| preview_plan_at_least(b, l, 512)).0, HeaderPlan::Whole(_)));
+        assert!(matches!(run_plan(&not_raw, 0, |b, l| preview_plan_covering(b, l, 512)).0, HeaderPlan::Whole(_)));
     }
 
     /// A candidate's head the header plan did not load (its frame header sits past the 64 KiB kept at the start of a
@@ -647,12 +649,12 @@ mod tests {
         raw.set(t::IMAGE_LENGTH, Value::Long(vec![4000]));
         raw.set_image(ImageData::Strips { rows_per_strip: 4000, strips: vec![vec![0x33u8; 3_000_000]] });
         let file = TiffWriter::default().write(&[big, small, raw]).expect("the fixture writes");
-        let whole = crate::embedded_preview_at_least(&file, 512).expect("a preview");
+        let whole = crate::embedded_preview_covering(&file, 512).expect("a preview");
         assert!(whole.len() < 1_000_000, "the small one is the whole file's choice");
         for fill in [0u8, 0xff] {
-            let (plan, buf, loaded) = run_plan(&file, fill, |b, l| preview_plan_at_least(b, l, 512));
+            let (plan, buf, loaded) = run_plan(&file, fill, |b, l| preview_plan_covering(b, l, 512));
             assert_eq!(plan, HeaderPlan::Ready);
-            assert!(crate::embedded_preview_at_least(&buf, 512) == Some(whole.clone()), "{fill}: the whole file's preview");
+            assert!(crate::embedded_preview_covering(&buf, 512) == Some(whole.clone()), "{fill}: the whole file's preview");
             assert!(loaded.total() < 1_000_000, "the big preview is not read: {}", loaded.total());
         }
     }
@@ -714,5 +716,18 @@ mod tests {
         raf[100..104].copy_from_slice(&1000u32.to_be_bytes());
         raf[104..108].copy_from_slice(&1000u32.to_be_bytes());
         assert_eq!(run(&raf, 160, 0).0, HeaderPlan::Whole("RAF raw container"));
+    }
+
+    /// An ARW6 header probe reads every tile's headers and the first lines of its data, which lie in the strip a
+    /// plan would skip: here the second tile, past a first one of bulk size.
+    #[test]
+    fn arw6_is_described_from_the_whole_file() {
+        use crate::vendor::arw6_testenc::{Qis, arw6_file, one_tile_quantised};
+        let (tile, _) = one_tile_quantised(64, 48, 0, Qis::REAL);
+        let mut first = tile.clone();
+        first.resize(BULK as usize, 0);
+        let file = arw6_file(&[(0, 0, 64, 48, first), (64, 0, 64, 48, tile)], 128, 48);
+        assert!(crate::probe_info(&file).is_ok());
+        assert_eq!(run(&file, 16, 0).0, HeaderPlan::Whole("an ARW6 header probe reads its tiles"));
     }
 }
