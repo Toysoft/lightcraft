@@ -298,6 +298,15 @@ pub struct Session {
     pub activity: activity::Activity,
     /// The last (or running) Build Previews.
     pub preview_build: Option<std::sync::Arc<cmd::previews::PreviewBuild>>,
+    /// Configured Immich servers (persisted per user in the config folder, never in the library).
+    pub immich_servers: Vec<cmd::immich::ImmichServer>,
+    /// Where the Immich settings file lives; `None` = the default in the per-user config folder.
+    /// Tests point it at a scratch path so they never touch the real one.
+    pub immich_store: Option<std::path::PathBuf>,
+    /// A background `immich.import` run (the dialog's path): the engine's worker downloads, this
+    /// session commits. Poll with [`Session::poll_immich_import`].
+    #[cfg(not(target_arch = "wasm32"))]
+    pub immich_import: Option<cmd::immich::ImmichImportJob>,
     /// Develop defaults applied on import (persisted in prefs.json).
     pub import_defaults: import::ImportDefaults,
     /// Disk budget of the library's thumbnail cache in MB (0 = default; persisted in prefs.json).
@@ -398,6 +407,10 @@ impl Session {
             folder_changes: None,
             activity: Default::default(),
             preview_build: None,
+            immich_servers: Vec::new(),
+            immich_store: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            immich_import: None,
             import_defaults: import::ImportDefaults::default(),
             cache_mb: 0,
             smart_previews_dir: None,
@@ -1021,6 +1034,8 @@ mod tests_folders;
 mod tests_forget_local;
 #[cfg(test)]
 mod tests_history_cursor;
+#[cfg(test)]
+mod tests_immich;
 #[cfg(test)]
 mod tests_import;
 #[cfg(test)]

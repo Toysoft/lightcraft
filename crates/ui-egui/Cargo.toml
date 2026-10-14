@@ -26,6 +26,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+lightcraft-immich = { workspace = true }
+lightcraft-codecs = { workspace = true }
+
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }
 lightcraft-denoise = { workspace = true, features = ["runtime"] }

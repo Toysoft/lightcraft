@@ -454,6 +454,8 @@ impl Session {
         self.recent_keywords = prefs.recent_keywords;
         self.import_defaults = prefs.import;
         self.cache_mb = prefs.cache_mb;
+        // the Immich servers (with their API keys) are per-user settings, not library preferences
+        self.immich_servers = crate::cmd::immich::load(self);
         self.forget_local_days = prefs.forget_local_days.unwrap_or(lightcraft_catalog::DEFAULT_FORGET_DAYS);
         self.smart_previews_dir = prefs.smart_previews_dir.filter(|_| on_disk).map(PathBuf::from);
         if let Some(d) = &self.smart_previews_dir {
@@ -707,7 +709,63 @@ impl Session {
                 "prefs: prefs.json couldn't be read when the library opened, so it isn't overwritten; reopen the library to save preferences".into(),
             ));
         }
-        lib.files.write_atomic("prefs.json", &v).map_err(|e| EngineError::Other(format!("prefs: {e}")))
+        lib.files.write_atomic("prefs.json", &v).map_err(|e| EngineError::Other(format!("prefs: {e}")))?;
+        Ok(())
+    }
+
+    /// Save the Immich servers (with their API keys) to the per-user settings file. Unlike
+    /// [`save_prefs`], this is not tied to a library — the settings are per user, and there is no
+    /// library to save into.
+    pub fn save_immich(&self) -> Result<()> {
+        crate::cmd::immich::save(self)
+    }
+
+    /// Take in what the background Immich import's worker brought back, and — when it is done —
+    /// join the staged files through the same `library.import` the synchronous path uses (one
+    /// undo step). Cheap when nothing has moved; call it every frame while the dialog is open.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn poll_immich_import(&mut self) {
+        let done = self.immich_import.as_mut().and_then(crate::cmd::immich::ImmichImportJob::poll);
+        let Some((paths, failed)) = done else {
+            return;
+        };
+        let Some(job) = self.immich_import.as_ref() else {
+            return;
+        };
+        let (mode, staging) = (job.mode().to_string(), job.staging().to_path_buf());
+        let finished = if paths.is_empty() {
+            let _ = std::fs::remove_dir(&staging);
+            serde_json::json!({ "failed": failed, "error": "nothing could be downloaded" })
+        } else {
+            let params = serde_json::json!({ "paths": paths, "mode": mode });
+            match self.execute("library.import", &params) {
+                Ok(report) => {
+                    if mode == "copy" {
+                        // the bytes are in the library now; the staged copies have no further use
+                        for path in &paths {
+                            if let Err(e) = std::fs::remove_file(path) {
+                                log::warn!("immich: staging cleanup: {path}: {e}");
+                            }
+                        }
+                        let _ = std::fs::remove_dir(&staging);
+                    }
+                    serde_json::json!({ "report": report, "failed": failed })
+                }
+                Err(e) => serde_json::json!({ "failed": failed, "error": e.to_string() }),
+            }
+        };
+        if let Some(job) = self.immich_import.as_mut() {
+            job.finished = Some(finished);
+        }
+    }
+
+    /// Stop a running background Immich import (the dialog's Cancel): in-flight transfers stop at
+    /// the next chunk, no new file is started, and the finished downloads still join the library.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn cancel_immich_import(&mut self) {
+        if let Some(job) = self.immich_import.as_mut() {
+            job.cancel();
+        }
     }
 
     /// Warnings about the open library not handed out yet: its settings files, and a lock that
