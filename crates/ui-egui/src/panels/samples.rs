@@ -4,7 +4,6 @@
 //! (until samples are added again). After landing on a sample it walks the first edit through:
 //! drag a slider, then compare with the original.
 
-use egui::RichText;
 use lightcraft_catalog::Source;
 use serde_json::json;
 
@@ -12,6 +11,7 @@ use crate::LightcraftApp;
 use crate::theme::Tokens;
 use crate::widgets::register;
 
+#[derive(Clone, Copy)]
 enum Click {
     Import,
     Remove,
@@ -91,6 +91,27 @@ pub fn message(app: &LightcraftApp, mac: bool) -> Option<String> {
     }
 }
 
+/// The banner's height with one line of words, and with two.
+const BANNER_H: f32 = 34.0;
+const BANNER_TALL: f32 = 50.0;
+
+/// The banner's band: the accent, faintly, over the chrome, so it reads as a note apart from the
+/// top bar above it (its words stay at AA on it in every theme).
+pub(crate) fn fill(t: &Tokens) -> egui::Color32 {
+    toward_accent(t, 0.2)
+}
+
+/// The line under the band.
+pub(crate) fn edge(t: &Tokens) -> egui::Color32 {
+    t.accent
+}
+
+/// The chrome taken `share` of the way to the accent.
+fn toward_accent(t: &Tokens, share: f32) -> egui::Color32 {
+    let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * share).round().clamp(0.0, 255.0) as u8;
+    egui::Color32::from_rgb(mix(t.chrome.r(), t.accent.r()), mix(t.chrome.g(), t.accent.g()), mix(t.chrome.b(), t.accent.b()))
+}
+
 pub fn banner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     // cached by the photo set, not by every edit (see `Session::has_samples`)
     let present = app.session.has_samples();
@@ -105,32 +126,56 @@ pub fn banner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let Some(text) = message(app, ui.ctx().os() == egui::os::OperatingSystem::Mac) else { return };
     let own = own_photos(app);
     let t = Tokens::get(ui.ctx());
+    use crate::button::{Button, Kind};
+    // right to left: Hide (or Keep Them) at the edge
+    let (hide, hide_widget) = if own { ("Keep Them", "button:samplesKeep") } else { ("Hide", "button:samplesHide") };
+    let mut buttons =
+        vec![(hide, hide_widget, Kind::Ghost, Click::Hide), ("Remove Sample Photos", "button:samplesRemove", Kind::Secondary, Click::Remove)];
+    if !own {
+        buttons.push(("Import Photos…", "button:samplesImport", Kind::Primary, Click::Import));
+    }
+    let button = |(label, widget, kind, _): &(&'static str, &'static str, Kind, Click)| Button::new(label).kind(*kind).small().widget(*widget);
+    // the room the words have beside the buttons: a long message (or language) takes a second
+    // line before it is shortened
+    let font = t.font(13.0);
+    let gap = ui.spacing().item_spacing.x;
+    let buttons_w: f32 = buttons.iter().map(|b| button(b).desired_size(ui).x + gap).sum();
+    let room = (ui.available_width() - 24.0 - buttons_w - 8.0).max(80.0);
+    let lines = ui.painter().layout(text.clone(), font.clone(), t.text, room).rows.len();
+    let height = if lines > 1 { BANNER_TALL } else { BANNER_H };
     let mut click = None;
     let resp = egui::Panel::top("samples-banner")
-        .exact_size(34.0)
-        .frame(egui::Frame::NONE.fill(t.inset).inner_margin(egui::Margin::symmetric(12, 0)))
+        .exact_size(height)
+        .frame(egui::Frame::NONE.fill(fill(&t)).inner_margin(egui::Margin::symmetric(12, 0)))
         .show(ui, |ui| {
-            // the buttons first, from the right edge, so a long translation shortens the message
-            // (whole on hover) instead of pushing them out of the window
+            // the buttons first, from the right edge, so a long translation wraps or shortens the
+            // message instead of pushing them out of the window
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                use crate::button::Button;
-                let (label, widget) = if own { ("Keep Them", "button:samplesKeep") } else { ("Hide", "button:samplesHide") };
-                if Button::new(label).ghost().small().widget(widget).show(ui).clicked() {
-                    click = Some(Click::Hide);
-                }
-                if Button::new("Remove Sample Photos").secondary().small().widget("button:samplesRemove").show(ui).clicked() {
-                    click = Some(Click::Remove);
-                }
-                if !own && Button::new("Import Photos…").primary().small().widget("button:samplesImport").show(ui).clicked() {
-                    click = Some(Click::Import);
+                for b in &buttons {
+                    let resp = button(b).show(ui);
+                    // (a focused one keeps only the keys that press it, as the welcome's do)
+                    crate::widgets::plain_button(ui.ctx(), resp.id);
+                    if resp.clicked() {
+                        click = Some(b.3);
+                    }
                 }
                 ui.add_space(8.0);
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(RichText::new(text).font(t.font(12.5)).color(t.text)).truncate());
+                    let mut job = egui::text::LayoutJob::simple(text.clone(), font.clone(), t.text, ui.available_width());
+                    job.wrap.max_rows = 2;
+                    job.wrap.overflow_character = Some('…');
+                    // (shortened past two lines, egui shows the whole on hover)
+                    let words = ui.add(egui::Label::new(job).wrap());
+                    // read out when it appears or changes (each step of the first edit), without
+                    // taking the screen reader from what it was reading
+                    ui.ctx().accesskit_node_builder(words.id, |node| node.set_live(egui::accesskit::Live::Polite));
                 });
             });
         });
     register(ui.ctx(), "banner:samples", resp.response.rect);
+    // its lower edge in the accent, so the band reads as a note apart from the window
+    let r = resp.response.rect;
+    ui.painter().hline(r.x_range(), r.bottom() - 0.5, egui::Stroke::new(1.0, edge(&t)));
     match click {
         Some(Click::Import) => {
             if let Err(e) = app.run("file.addPhotos", json!({})) {

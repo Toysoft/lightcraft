@@ -152,6 +152,8 @@ mod tests_sam_setup;
 #[cfg(test)]
 mod tests_samples;
 #[cfg(test)]
+mod tests_samples_banner;
+#[cfg(test)]
 mod tests_samples_landing;
 #[cfg(test)]
 mod tests_scroll;
