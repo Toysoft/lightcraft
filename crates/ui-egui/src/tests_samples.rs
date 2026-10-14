@@ -155,6 +155,21 @@ fn samples_in_recently_deleted_are_not_offered_again() {
 }
 
 #[test]
+fn samples_in_recently_deleted_dont_keep_the_banner_saying_they_are_here() {
+    // the grid says the library is empty: a banner saying "these are sample photos" with a second
+    // Import button contradicted it
+    let mut s = library("trashed", true);
+    let ids: Vec<u64> = s.catalog.photos().map(|p| p.id.0).collect();
+    s.selection.ids = s.catalog.photos().map(|p| p.id).collect();
+    s.execute("photo.delete", &json!({"ids": ids})).unwrap();
+    let h = headless(s);
+    assert!(h.app.session.has_samples(), "still removable from the Help menu");
+    assert!(!has(&h, "banner:samples"));
+    assert!(!has(&h, "button:samplesImport"));
+    assert!(has(&h, "button:emptyImportPhotos"), "one Import, the empty state's");
+}
+
+#[test]
 fn samples_added_from_the_help_menu_bring_the_banner_back() {
     let mut a = LightcraftApp::new(library("help", false), Services::default());
     a.ui.view = ViewMode::PhotoGrid;

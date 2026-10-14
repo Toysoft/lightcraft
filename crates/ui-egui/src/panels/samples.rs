@@ -27,7 +27,9 @@ pub fn banner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     app.samples_present = Some(present);
     // only over a library: an in-memory demo session (`--memory`, the showcase scripts, the CLI's
     // `--demo`) is a demo by design and needs no notice saying so
-    if app.ui.samples_banner_hidden || !present || app.session.library.is_none() {
+    // and only while samples are in the library: once they're all in Recently Deleted the grid
+    // says the library is empty, and a banner saying they're here would contradict it
+    if app.ui.samples_banner_hidden || app.session.catalog.sample_photos_in_library() == 0 || app.session.library.is_none() {
         return;
     }
     // stops at the first photo of the person's own (samples are a couple of dozen)

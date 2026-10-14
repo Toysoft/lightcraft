@@ -126,6 +126,23 @@ fn the_catalog_counts_its_sample_photos_as_they_come_and_go() {
     // and a catalog read back from its snapshot counts them again
     let back = lightcraft_catalog::Catalog::from_snapshot(&s.catalog.to_snapshot()).unwrap();
     assert_eq!(back.sample_photos(), n);
+    assert_eq!(back.sample_photos_in_library(), n);
+}
+
+#[test]
+fn samples_in_recently_deleted_are_counted_but_not_as_in_the_library() {
+    let mut s = Session::with_demo();
+    let n = samples(&s);
+    let ids: Vec<_> = s.catalog.photos().map(|p| p.id).collect();
+    s.selection.ids = ids.clone();
+    s.execute("photo.delete", &json!({"ids": ids.iter().map(|i| i.0).collect::<Vec<_>>()})).unwrap();
+    assert_eq!(s.catalog.sample_photos(), n, "still in the library's catalog, to remove or restore");
+    assert_eq!(s.catalog.sample_photos_in_library(), 0);
+    let back = lightcraft_catalog::Catalog::from_snapshot(&s.catalog.to_snapshot()).unwrap();
+    assert_eq!(back.sample_photos_in_library(), 0);
+    // restored, they are back in the library
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.catalog.sample_photos_in_library(), n);
 }
 
 #[test]
