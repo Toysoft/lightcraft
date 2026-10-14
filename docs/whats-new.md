@@ -2,6 +2,14 @@
 
 ## 2026-10-13
 
+### Buttons answer the pointer
+- The top bar's buttons, the in-window menu titles (File, Edit, View…) and the sidebar's rows, section headers and
+  folder triangles show the pointing hand while the pointer is on them. Disabled buttons, such as Forward with
+  nowhere to go, keep the arrow.
+- A menu title is highlighted while the pointer is on it and while its menu is open. Icon buttons (the top bar,
+  tool strip, bottom bar and panels) use the theme's full hover colour instead of a fainter one, and its pressed
+  colour while held down.
+
 ### Slider drags on large raws
 - Dragging a slider no longer re-renders the edited photo's filmstrip thumbnail on every frame; it follows once you
   let go. On a 64 MP raw the first of those renders decoded the whole file again, which held up the loupe's

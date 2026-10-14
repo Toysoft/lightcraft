@@ -70,6 +70,8 @@ mod tests_grading;
 #[cfg(test)]
 mod tests_grid;
 #[cfg(test)]
+mod tests_hover_pointer;
+#[cfg(test)]
 mod tests_info_dialogs;
 #[cfg(test)]
 mod tests_keymap;

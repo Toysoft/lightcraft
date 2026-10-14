@@ -83,6 +83,8 @@ fn row_sensed(
     let label = if matches!(id, "all" | "recentlyAdded" | "picks" | "missing" | "recentlyDeleted") { crate::i18n::tr(label) } else { label };
     let t = Tokens::get(ui.ctx());
     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), sense);
+    // a row a click opens shows the hand, like a photo in the grid (a drag's own cursor comes later)
+    let resp = if sense.senses_click() { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };
     if scroll_asked(ui, id) {
         ui.scroll_to_rect_animation(r, None, egui::style::ScrollAnimation::none());
     }
@@ -180,7 +182,7 @@ fn disclosure_triangle(ui: &mut egui::Ui, row: &egui::Response, indent: f32, ope
     let t = Tokens::get(ui.ctx());
     let c = pos2(row.rect.left() + 10.0 + indent, row.rect.center().y);
     let tri = Rect::from_center_size(c, vec2(14.0, 14.0));
-    let tr = ui.interact(tri, id, Sense::click());
+    let tr = ui.interact(tri, id, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     register(ui.ctx(), widget, tri);
     let col = if tr.hovered() { t.text } else { t.text_dim };
     ui.painter().add(egui::Shape::convex_polygon(triangle_points(c, open), col, egui::Stroke::NONE));
@@ -429,6 +431,7 @@ fn section_header(app: &mut LightcraftApp, ui: &mut egui::Ui, section: SidebarSe
     let edge = r.right().min(visible_right(ui));
     let hovered = resp.hovered() && app.ui.dragging_section.is_none();
     if hovered {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         let bar = Rect::from_min_max(r.min + vec2(8.0, 2.0), pos2((edge - 8.0).max(r.left() + 8.0), r.bottom() - 2.0));
         ui.painter().rect_filled(bar, 4.0, t.hover.gamma_multiply(0.6));
     }
