@@ -446,4 +446,85 @@ mod tests {
         assert_eq!(Overlay::from_parts(k, v), o);
         assert_ne!(o.key(), Overlay::Mask { id: 1, view: MaskView::WhiteOnBlack, color: [255, 0, 0], opacity: 100 }.key());
     }
+
+    #[test]
+    fn all_masks_overlay_combines_coverage_once_in_every_view() {
+        let src = Rgb32f::filled(4, 1, [0.1; 3]);
+        let s = DevelopSettings::default();
+        let plan = crate::plan(&src, &SourceInfo::default(), &s, &RenderRequest::fit(4, 1));
+        let original = Rgba8::filled(4, 1, [100, 150, 200, 255]);
+        // Disjoint full-coverage pixels, a shared feathered pixel, and an unmasked pixel.
+        let left = Plane { width: 4, height: 1, data: vec![1.0, 0.0, 0.5, 0.0] };
+        let right = Plane { width: 4, height: 1, data: vec![0.0, 1.0, 0.5, 0.0] };
+        // Same sample count, different dimensions: it must not enter the union.
+        let wrong_size = Plane::filled(2, 2, 1.0);
+        let cases = [
+            (MaskView::Color, [[170, 95, 110, 255], [170, 95, 110, 255], [135, 123, 155, 255], [100, 150, 200, 255]]),
+            (MaskView::ColorOnBw, [[191, 91, 81, 255], [191, 91, 81, 255], [167, 117, 112, 255], [143, 143, 143, 255]]),
+            (MaskView::ImageOnBlack, [[100, 150, 200, 255], [100, 150, 200, 255], [50, 75, 100, 255], [0, 0, 0, 255]]),
+            (MaskView::ImageOnWhite, [[100, 150, 200, 255], [100, 150, 200, 255], [178, 203, 228, 255], [255, 255, 255, 255]]),
+            (MaskView::WhiteOnBlack, [[255, 255, 255, 255], [255, 255, 255, 255], [128, 128, 128, 255], [0, 0, 0, 255]]),
+        ];
+        for (view, expected) in cases {
+            let o = Overlay::AllMasks { view, color: [240, 40, 20], opacity: 50 };
+            for planes in [
+                vec![left.clone(), right.clone()],
+                vec![right.clone(), left.clone()],
+                vec![wrong_size.clone(), left.clone(), wrong_size.clone(), right.clone()],
+            ] {
+                let mut img = original.clone();
+                apply(&mut img, o, &plan, None, Some(&planes));
+                assert_eq!(img.data, expected.to_vec(), "{view:?}: union is independent of mask order and opacity is applied once");
+            }
+            // A matching plane with no coverage still draws the selected view's background.
+            let mut img = original.clone();
+            apply(&mut img, o, &plan, None, Some(&[Plane::new(4, 1)]));
+            assert_eq!(img.data, vec![expected[3]; 4], "{view:?}: empty coverage draws the background");
+        }
+    }
+
+    #[test]
+    fn all_masks_overlay_without_matching_planes_leaves_image_unchanged() {
+        let src = Rgb32f::filled(4, 1, [0.1; 3]);
+        let s = DevelopSettings::default();
+        let plan = crate::plan(&src, &SourceInfo::default(), &s, &RenderRequest::fit(4, 1));
+        let original = Rgba8::filled(4, 1, [100, 150, 200, 255]);
+        let wrong_size = [Plane::filled(2, 2, 1.0)];
+        for view in MaskView::ALL {
+            let o = Overlay::AllMasks { view, color: [240, 40, 20], opacity: 50 };
+            for planes in [None, Some([].as_slice()), Some(wrong_size.as_slice())] {
+                let mut img = original.clone();
+                apply(&mut img, o, &plan, None, planes);
+                assert_eq!(img, original, "{view:?}: no matching planes draw nothing");
+            }
+        }
+    }
+
+    #[test]
+    fn all_masks_overlay_opacity_only_affects_colour_views() {
+        // opacity (0..100) only changes the Colour views; WhiteOnBlack/ImageOnBlack/ImageOnWhite
+        // ignore it (the source comment notes "the colour views only").
+        let src = Rgb32f::filled(4, 1, [0.1; 3]);
+        let s = DevelopSettings::default();
+        let plan = crate::plan(&src, &SourceInfo::default(), &s, &RenderRequest::fit(4, 1));
+        let original = Rgba8::filled(4, 1, [100, 150, 200, 255]);
+        let masks = vec![Plane { width: 4, height: 1, data: vec![1.0, 0.0, 0.5, 0.0] }];
+        // WhiteOnBlack ignores opacity: opacity 0 and 100 paint the same (full white on coverage).
+        let mut img0 = original.clone();
+        apply(&mut img0, Overlay::AllMasks { view: MaskView::WhiteOnBlack, color: [240, 40, 20], opacity: 0 }, &plan, None, Some(&masks));
+        let mut img100 = original.clone();
+        apply(&mut img100, Overlay::AllMasks { view: MaskView::WhiteOnBlack, color: [240, 40, 20], opacity: 100 }, &plan, None, Some(&masks));
+        assert_eq!(img0, img100, "WhiteOnBlack ignores opacity");
+        // Colour view: opacity 0 leaves the image untouched, opacity 100 tints covered pixels fully.
+        let mut img_c0 = original.clone();
+        apply(&mut img_c0, Overlay::AllMasks { view: MaskView::Color, color: [240, 40, 20], opacity: 0 }, &plan, None, Some(&masks));
+        assert_eq!(img_c0, original, "Colour view at opacity 0 draws nothing");
+        let mut img_c100 = original.clone();
+        apply(&mut img_c100, Overlay::AllMasks { view: MaskView::Color, color: [240, 40, 20], opacity: 100 }, &plan, None, Some(&masks));
+        assert_eq!(
+            img_c100.data,
+            vec![[240, 40, 20, 255], [100, 150, 200, 255], [170, 95, 110, 255], [100, 150, 200, 255]],
+            "Colour view at opacity 100 tints covered pixels fully (partial tint where alpha is 0.5)"
+        );
+    }
 }
