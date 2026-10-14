@@ -218,6 +218,17 @@
 - Compare and Reference View panes say "Rendering…" (or that the photo can't be opened) the same way, so a
   magnified preview isn't taken for the photo when checking focus at 1:1.
 
+### Synchronize Folder: no need to wait for the scan
+- While Synchronize Folder… scans a folder (a large one on a network share can take minutes), its button is
+  **Continue in Background**: the dialog closes, the scan goes on under its row in the activity stack, and you can
+  go on working. When it is done nothing pops up: a notice in the activity stack says how many changes were found.
+  Click it to open the dialog with the result, or ✕ to let go of it. A scan that found nothing to do only says so.
+  Cancel and the row's ✕ stop the scan as before. One folder is scanned at a time.
+- Working on the folder's photos while it is scanned (ratings, flags, colour labels, keywords, edits, albums,
+  virtual copies) no longer sends Synchronize back to scanning. What the scan found still holds, and Synchronize
+  does it. It scans again only when the folder holds other photos than it did, one of them is another file now, or
+  a photo whose sidecar is about to be read was changed here since.
+
 ### JPEG XL export
 - Export as JPEG XL (issue #247): Format ▸ JPEG XL in the Export dialog, `format: "jxl"` for agents and the CLI
   (`render in.raw -o out.jxl`). Quality as for JPEG, or Lossless; Effort (Fast / Normal) trades time for a
