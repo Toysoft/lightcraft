@@ -203,7 +203,12 @@ mod tests {
         // #1511: cpp = 2 must not read a third sample that is not there; it falls back to grey from
         // the first sample (defence in depth behind the decoder-level rejection).
         // pixel p = (y*4 + x) carries samples [p/12, 1 - p/12]; grey comes from the first sample
-        let data: Vec<f32> = (0..12).flat_map(|p| { let g = p as f32 / 12.0; [g, 1.0 - g] }).collect();
+        let data: Vec<f32> = (0..12)
+            .flat_map(|p| {
+                let g = p as f32 / 12.0;
+                [g, 1.0 - g]
+            })
+            .collect();
         let n = Normalized { width: 4, height: 3, cpp: 2, data, cfa: None };
         let rgb = demosaic(&n, Method::Bilinear);
         assert_eq!((rgb.width, rgb.height), (4, 3));

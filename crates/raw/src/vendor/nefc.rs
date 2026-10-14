@@ -281,15 +281,11 @@ pub(crate) fn decode_rows(src: &[u8], w: usize, h: usize, rows: usize, bits: u32
             };
             let p = if x < 2 {
                 let s = seeds.get_mut(x).ok_or(RawError::Limit("NEF column"))?;
-                *s = s
-                    .checked_add(d)
-                    .ok_or_else(|| RawError::Corrupt(format!("NEF: predictor overflow at row {y}")))?;
+                *s = s.checked_add(d).ok_or_else(|| RawError::Corrupt(format!("NEF: predictor overflow at row {y}")))?;
                 hpred[x & 1] = *s;
                 *s
             } else {
-                hpred[x & 1] = hpred[x & 1]
-                    .checked_add(d)
-                    .ok_or_else(|| RawError::Corrupt(format!("NEF: predictor overflow at row {y}")))?;
+                hpred[x & 1] = hpred[x & 1].checked_add(d).ok_or_else(|| RawError::Corrupt(format!("NEF: predictor overflow at row {y}")))?;
                 hpred[x & 1]
             };
             let v = p.clamp(0, max);

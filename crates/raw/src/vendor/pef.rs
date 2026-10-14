@@ -151,16 +151,12 @@ pub(crate) fn decode_huffman(src: &[u8], h: &Huffman, w: usize, hgt: usize, bits
         for (x, o) in row.iter_mut().enumerate() {
             let d = diff(&mut bits, h).ok_or_else(|| RawError::Corrupt(format!("PEF: invalid Huffman code at row {y}")))?;
             let p = if x < 2 {
-                let v = vpred[y & 1][x]
-                    .checked_add(d)
-                    .ok_or_else(|| RawError::Corrupt(format!("PEF: predictor overflow at row {y}")))?;
+                let v = vpred[y & 1][x].checked_add(d).ok_or_else(|| RawError::Corrupt(format!("PEF: predictor overflow at row {y}")))?;
                 vpred[y & 1][x] = v;
                 hpred[x] = v;
                 v
             } else {
-                let v = hpred[x & 1]
-                    .checked_add(d)
-                    .ok_or_else(|| RawError::Corrupt(format!("PEF: predictor overflow at row {y}")))?;
+                let v = hpred[x & 1].checked_add(d).ok_or_else(|| RawError::Corrupt(format!("PEF: predictor overflow at row {y}")))?;
                 hpred[x & 1] = v;
                 v
             };
@@ -408,8 +404,7 @@ mod tests {
             (0..len).rev().for_each(|i| bits.push((code >> i) & 1 == 1));
             (0..14).rev().for_each(|i| bits.push(16383 >> i & 1 == 1));
         }
-        let src: Vec<u8> =
-            bits.chunks(8).map(|c| c.iter().enumerate().fold(0u8, |a, (i, &b)| a | (b as u8) << (7 - i))).collect();
+        let src: Vec<u8> = bits.chunks(8).map(|c| c.iter().enumerate().fold(0u8, |a, (i, &b)| a | (b as u8) << (7 - i))).collect();
         // 135 000 × 16 383 ≈ 2.21e9 passes i32::MAX part-way along the row: Corrupt, not a panic
         assert!(matches!(decode_huffman(&src, &h, w, hgt, 14), Err(RawError::Corrupt(_))));
     }

@@ -530,20 +530,14 @@ fn two_samples_per_pixel_is_refused() {
     let (w, h) = (8, 8);
     let mut raw = base_ifd(w, h, 16, 2, false);
     raw.set(t::COMPRESSION, Value::Short(vec![1]));
-    raw.set_image(ImageData::Strips {
-        rows_per_strip: h as u32,
-        strips: vec![u16_bytes(&pattern(w, h, 2, 16), ByteOrder::Little)],
-    });
+    raw.set_image(ImageData::Strips { rows_per_strip: h as u32, strips: vec![u16_bytes(&pattern(w, h, 2, 16), ByteOrder::Little)] });
     let bytes = dng(raw, ByteOrder::Little);
     let Err(lightcraft_raw::RawError::Unsupported(why)) = decode(&bytes) else { panic!("expected Unsupported") };
     assert!(why.contains("2 samples per pixel"), "{why}");
     // the same file with three samples per pixel still decodes
     let mut raw = base_ifd(w, h, 16, 3, false);
     raw.set(t::COMPRESSION, Value::Short(vec![1]));
-    raw.set_image(ImageData::Strips {
-        rows_per_strip: h as u32,
-        strips: vec![u16_bytes(&pattern(w, h, 3, 16), ByteOrder::Little)],
-    });
+    raw.set_image(ImageData::Strips { rows_per_strip: h as u32, strips: vec![u16_bytes(&pattern(w, h, 3, 16), ByteOrder::Little)] });
     assert!(decode(&dng(raw, ByteOrder::Little)).is_ok());
 }
 
