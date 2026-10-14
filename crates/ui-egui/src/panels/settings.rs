@@ -74,6 +74,17 @@ fn row<R>(ui: &mut egui::Ui, t: &Tokens, label: &str, add: impl FnOnce(&mut egui
     .inner
 }
 
+fn row_wrapped<R>(ui: &mut egui::Ui, t: &Tokens, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.horizontal_wrapped(|ui| {
+        ui.allocate_ui_with_layout(egui::vec2(LABEL_W, 24.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_width(LABEL_W);
+            ui.label(RichText::new(crate::i18n::tr(label)).color(t.text_label));
+        });
+        add(ui)
+    })
+    .inner
+}
+
 pub(super) fn hint(ui: &mut egui::Ui, t: &Tokens, text: &str) {
     ui.label(RichText::new(crate::i18n::tr(text)).size(11.0).color(t.text_dim));
 }
@@ -101,7 +112,7 @@ pub(super) fn choices<V: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, options:
 // ------------------------------------------------------------------------------------- General
 
 fn general_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
-    row(ui, t, crate::i18n::tr("Language"), |ui| {
+    row_wrapped(ui, t, crate::i18n::tr("Language"), |ui| {
         let languages: Vec<_> = crate::i18n::Locale::ALL.iter().map(|language| (*language, language.name())).collect();
         choices(ui, "settingsLanguage", &languages, &mut app.ui.language);
         crate::i18n::set_language(app.ui.language);

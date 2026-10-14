@@ -78,25 +78,25 @@ Weights and evidence: [target-app-parity.md](docs/target-app-parity.md#features)
 
 ## Languages
 
-Measured from `crates/ui-egui/locales` (share of 2,304 catalog messages translated); none is `full`
+Measured from `crates/ui-egui/locales` (share of 2,410 catalog messages translated); none is `full`
 while lower-layer errors stay English. Detail: [localization-parity.md](docs/localization-parity.md).
 
 | Language | Code | Translated | Status |
 |---|---|---:|---|
 | English | en | 100% | full (source) |
-| Simplified Chinese | zh-hans | 87% | partial |
-| Spanish | es | 86% | partial |
+| Simplified Chinese | zh-hans | 92% | partial |
+| Spanish | es | 91% | partial |
 | Hindi | hi | 0% | none (no Devanagari shaping) |
 | Arabic | ar | 0% | none (no RTL / shaping) |
-| French | fr | 88% | partial |
-| Portuguese (Brazil) | pt-br | 85% | partial |
+| French | fr | 87% | partial |
+| Portuguese (Brazil) | pt-br | 87% | partial |
 | Indonesian | id | 0% | none |
 | Japanese | ja | 87% | partial |
 | German | de | 91% | partial |
 | Korean | ko | 0% | none (no Hangul face) |
 | Vietnamese | vi | 0% | none |
 
-Also shipped: Traditional Chinese (87%), Russian (74%), Ukrainian (99%).
+Also shipped: Traditional Chinese (86%), Italian (97%), Russian (98%), Ukrainian (98%).
 
 ## Upcoming
 
