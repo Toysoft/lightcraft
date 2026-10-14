@@ -32,6 +32,8 @@ pub const TABS: &[(&str, &str)] = &[
 const CACHE_SIZES: [u32; 5] = [512, 1024, 2048, 4096, 8192];
 
 const LABEL_W: f32 = 150.0;
+/// Widest the row of language buttons grows before it wraps.
+const LANGUAGE_ROW_W: f32 = 640.0;
 
 /// The dialog body for `tab` (the tab bar switches `tab`).
 pub fn body(app: &mut LightcraftApp, ui: &mut egui::Ui, tab: &mut String) {
@@ -103,7 +105,12 @@ pub(super) fn choices<V: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, options:
 fn general_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
     row(ui, t, crate::i18n::tr("Language"), |ui| {
         let languages: Vec<_> = crate::i18n::Locale::ALL.iter().map(|language| (*language, language.name())).collect();
-        choices(ui, "settingsLanguage", &languages, &mut app.ui.language);
+        // One button per language: past LANGUAGE_ROW_W they wrap onto another line instead of
+        // widening the dialog off a small window as languages are added.
+        ui.horizontal_wrapped(|ui| {
+            ui.set_max_width(LANGUAGE_ROW_W);
+            choices(ui, "settingsLanguage", &languages, &mut app.ui.language);
+        });
         crate::i18n::set_language(app.ui.language);
     });
     heading(ui, t, crate::i18n::tr("Library"));
