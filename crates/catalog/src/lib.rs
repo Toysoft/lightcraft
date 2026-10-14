@@ -293,6 +293,10 @@ pub struct Catalog {
     /// Lookups derived from the above (never saved), see [`index`].
     #[serde(skip)]
     index: index::Indexes,
+    /// How many photos are procedural samples (`Source::Demo`): kept as photos come and go, and
+    /// counted again by [`Catalog::repair`] on load, so asking needs no scan of a large library.
+    #[serde(skip)]
+    demo_photos: usize,
 }
 
 /// What of a photo an op changed: enough to tell which tallies of the library an edit leaves as they were (a
@@ -395,6 +399,15 @@ impl Catalog {
     }
     pub fn is_empty(&self) -> bool {
         self.photos.is_empty()
+    }
+    /// No photo was ever added (photo ids are never reused): a library as it was created.
+    pub fn never_held_photos(&self) -> bool {
+        self.next_photo <= 1
+    }
+    /// How many photos are procedural samples (`Source::Demo`), wherever they are (Recently
+    /// Deleted too).
+    pub fn sample_photos(&self) -> usize {
+        self.demo_photos
     }
     pub fn album(&self, id: AlbumId) -> Option<&Album> {
         self.albums.get(&id)
@@ -616,9 +629,25 @@ impl Catalog {
             // the revision was set from outside: what is remembered is of another past
             self.changes = Changes { floor: self.revision, seen: self.revision, ..Default::default() };
         }
-        let inv = self.apply_inner(op)?;
+        let inv = self.apply_counted(op)?;
         self.revision += 1;
         self.changes.seen = self.revision;
+        Ok(inv)
+    }
+
+    /// [`Catalog::apply_inner`], keeping the count of sample photos: the ops that add, remove or
+    /// re-source a photo change it by what they do to that photo.
+    fn apply_counted(&mut self, op: Op) -> Result<Op> {
+        let is_demo = |s: &Source| matches!(s, Source::Demo { .. });
+        let was = |c: &Catalog, id: &PhotoId| c.photos.get(id).is_some_and(|p| is_demo(&p.source));
+        let (minus, plus) = match &op {
+            Op::AddPhoto { photo } => (false, is_demo(&photo.source)),
+            Op::RemovePhoto { id } => (was(self, id), false),
+            Op::Relink { id, source, .. } | Op::SetFile { id, source, .. } => (was(self, id), is_demo(source)),
+            _ => (false, false),
+        };
+        let inv = self.apply_inner(op)?;
+        self.demo_photos = (self.demo_photos + usize::from(plus)).saturating_sub(usize::from(minus));
         Ok(inv)
     }
 
@@ -957,12 +986,12 @@ impl Catalog {
             Op::Batch { ops } => {
                 let mut inverses = Vec::with_capacity(ops.len());
                 for op in ops {
-                    match self.apply_inner(op) {
+                    match self.apply_counted(op) {
                         Ok(inv) => inverses.push(inv),
                         Err(e) => {
                             // roll back what was applied
                             for inv in inverses.into_iter().rev() {
-                                let _ = self.apply_inner(inv);
+                                let _ = self.apply_counted(inv);
                             }
                             return Err(e);
                         }
@@ -1025,6 +1054,7 @@ impl Catalog {
     /// missing, not a folder or inside itself moves to the top level. Returns what was changed
     /// (nothing, for a catalog this build wrote).
     pub fn repair(&mut self) -> Vec<String> {
+        self.demo_photos = self.photos.values().filter(|p| matches!(p.source, Source::Demo { .. })).count();
         let mut changed = Vec::new();
         for (id, p) in self.photos.iter_mut() {
             if p.id != *id {
