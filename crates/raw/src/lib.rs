@@ -715,6 +715,11 @@ impl RawImage {
         if self.width == 0 || self.height == 0 || !(1..=4).contains(&self.cpp) {
             return Err(RawError::Corrupt("bad dimensions".into()));
         }
+        // two samples per pixel has no meaning on any sensor and no demosaic: refuse it before it
+        // reaches one, which would read a third sample that is not there (#1511)
+        if self.cpp == 2 {
+            return Err(RawError::Unsupported("2 samples per pixel".into()));
+        }
         if samples && self.data.len() != self.width * self.height * self.cpp {
             return Err(RawError::Corrupt("data length mismatch".into()));
         }
@@ -869,6 +874,43 @@ mod tests {
         // a crop that pokes out is clipped to the picture
         whole.crop = Rect::new(6, 4, 10, 10);
         assert_eq!(whole.develop_crop(8, 6), Rect::new(6, 4, 2, 2));
+    }
+
+    #[test]
+    fn two_samples_per_pixel_is_rejected() {
+        // #1511: two samples per pixel has no demosaic (it would read a third sample that is not
+        // there), so it is refused before it can reach one.
+        let (w, h) = (8usize, 6usize);
+        let base = RawImage {
+            format: RawFormat::Dng,
+            width: w,
+            height: h,
+            cpp: 1,
+            data: RawData::U16(vec![100; w * h]),
+            cfa: None,
+            bits: 12,
+            black: BlackLevel::uniform(0.0),
+            white: vec![1023.0],
+            active_area: Rect::new(0, 0, w, h),
+            crop: Rect::default(),
+            orientation: Orientation::Normal,
+            color: ColorData::default(),
+            wb_multipliers: None,
+            linearized: false,
+            opcodes: OpcodeLists::default(),
+            metadata: Metadata::default(),
+        };
+        let mut two = base.clone();
+        two.cpp = 2;
+        two.data = RawData::U16(vec![100; w * h * 2]);
+        assert!(matches!(two.validate(), Err(RawError::Unsupported(_))));
+        assert!(two.normalized().is_err());
+        // one and three samples per pixel stay fine
+        assert!(base.validate().is_ok());
+        let mut three = base;
+        three.cpp = 3;
+        three.data = RawData::U16(vec![100; w * h * 3]);
+        assert!(three.validate().is_ok());
     }
 
     #[test]

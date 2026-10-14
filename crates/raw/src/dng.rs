@@ -207,7 +207,8 @@ pub(crate) fn decode_as(bytes: &[u8], mode: Mode, format: RawFormat) -> Result<R
     }
     let info = raw.image()?;
     let (w, h, cpp) = (info.width as usize, info.height as usize, info.samples_per_pixel as usize);
-    if !(1..=4).contains(&cpp) {
+    // two samples per pixel has no demosaic (it would read a third sample that is not there, #1511)
+    if !(1..=4).contains(&cpp) || cpp == 2 {
         return Err(RawError::Unsupported(format!("{cpp} samples per pixel")));
     }
     let mut data = read_image_in(mode, bytes, &info, tiff.order, Packing::Msb)?;

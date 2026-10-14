@@ -71,14 +71,18 @@ impl Mosaic<'_> {
     }
 }
 
-/// Demosaic normalised raw data. `cpp == 3` data is returned as is; monochrome data is replicated to grey.
+/// Demosaic normalised raw data. `cpp == 3` data is returned as is; monochrome data is replicated to grey;
+/// two samples per pixel (which has no colour interpretation) falls back to grey from the first sample.
 pub fn demosaic(n: &Normalized, method: Method) -> Rgb32f {
     let (w, h) = (n.width, n.height);
-    if w == 0 || h == 0 {
+    if w == 0 || h == 0 || n.cpp == 0 {
         return Rgb32f::new(w, h);
     }
     match (&n.cfa, n.cpp) {
         (_, 3) => Rgb32f { width: w, height: h, data: n.data.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2]]).collect() },
+        // two samples per pixel has no colour interpretation: grey from the first sample rather than
+        // reading a third sample that is not there (#1511)
+        (_, 2) => Rgb32f { width: w, height: h, data: n.data.chunks_exact(2).map(|c| [c[0]; 3]).collect() },
         (_, cpp) if cpp != 1 => Rgb32f { width: w, height: h, data: n.data.chunks_exact(cpp).map(|c| [c[0], c[1], c[2]]).collect() },
         (None, _) => Rgb32f { width: w, height: h, data: n.data.iter().map(|&v| [v; 3]).collect() },
         (Some(cfa), _) => {
@@ -192,6 +196,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn two_samples_per_pixel_demosaics_to_grey_without_panic() {
+        // #1511: cpp = 2 must not read a third sample that is not there; it falls back to grey from
+        // the first sample (defence in depth behind the decoder-level rejection).
+        // pixel p = (y*4 + x) carries samples [p/12, 1 - p/12]; grey comes from the first sample
+        let data: Vec<f32> = (0..12).flat_map(|p| { let g = p as f32 / 12.0; [g, 1.0 - g] }).collect();
+        let n = Normalized { width: 4, height: 3, cpp: 2, data, cfa: None };
+        let rgb = demosaic(&n, Method::Bilinear);
+        assert_eq!((rgb.width, rgb.height), (4, 3));
+        assert_eq!(rgb.get(0, 0), [0.0; 3]);
+        assert_eq!(rgb.get(1, 0), [1.0 / 12.0; 3]);
+        assert_eq!(rgb.get(3, 2), [11.0 / 12.0; 3]);
     }
 
     #[test]
