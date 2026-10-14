@@ -209,6 +209,29 @@ fn strip_height(width: f32) -> f32 {
     strip_layout(width).map_or(0.0, |(_, w)| CAPTION_H + w * 2.0 / 3.0)
 }
 
+/// Samples just came into an empty library (the welcome's button or thumbnails, Help ▸ Add
+/// Sample Photos, an agent): open the first of the welcome's in Detail, ready to edit, so every
+/// way in lands in the same place; and note the session's commit count, so the samples banner
+/// invites a first change until one is made.
+pub fn land_on_samples(app: &mut LightcraftApp) {
+    let first = lightcraft_engine::demo::welcome_scenes().first().map(|(id, _)| *id);
+    if let Some(scene) = first {
+        select_sample(app, scene);
+    }
+    // the sliders beside it: the banner invites dragging one
+    app.ui.right = RightPanel::Edit;
+    app.samples_landed = Some(app.session.commits());
+}
+
+/// Select the sample photo of `scene` and show it in Detail.
+fn select_sample(app: &mut LightcraftApp, scene: u32) {
+    let photo = app.session.catalog.photos().find(|p| matches!(p.source, lightcraft_catalog::Source::Demo { scene: s } if s == scene)).map(|p| p.id);
+    if let Some(id) = photo {
+        app.session.selection = lightcraft_engine::Selection::single(id);
+    }
+    app.ui.view = ViewMode::Detail;
+}
+
 /// Add the samples and open the one clicked in Detail, ready to edit (the Tools panel comes back
 /// with the photos).
 fn open_sample(app: &mut LightcraftApp, ctx: &egui::Context, scene: u32) {
@@ -216,11 +239,8 @@ fn open_sample(app: &mut LightcraftApp, ctx: &egui::Context, scene: u32) {
         app.toast_error(ctx, e);
         return;
     }
-    let photo = app.session.catalog.photos().find(|p| matches!(p.source, lightcraft_catalog::Source::Demo { scene: s } if s == scene)).map(|p| p.id);
-    if let Some(id) = photo {
-        app.session.selection = lightcraft_engine::Selection::single(id);
-    }
-    app.ui.view = ViewMode::Detail;
+    // (adding them landed on the first: this one was clicked)
+    select_sample(app, scene);
 }
 
 /// The row of sample thumbnails in `area`, under a caption. Returns the scene clicked.

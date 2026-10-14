@@ -17,6 +17,38 @@ enum Click {
     Hide,
 }
 
+/// The library holds photos of the person's own beside the samples (stops at the first one:
+/// samples are a couple of dozen).
+fn own_photos(app: &LightcraftApp) -> bool {
+    app.session.catalog.photos().any(|p| p.in_library() && !matches!(p.source, Source::Demo { .. }))
+}
+
+/// What the banner says now, or `None` while it isn't shown: hidden, no sample in the library
+/// (all in Recently Deleted: the grid says the library is empty), or an in-memory demo session (a
+/// demo by design). On a sample open in Detail before the first change since the samples came,
+/// it invites that change, with the key Compare Before and After is bound to.
+pub fn message(app: &LightcraftApp, mac: bool) -> Option<String> {
+    if app.ui.samples_banner_hidden || app.session.catalog.sample_photos_in_library() == 0 || app.session.library.is_none() {
+        return None;
+    }
+    if own_photos(app) {
+        return Some(crate::i18n::tr("Your photos are in. The sample photos are still here too.").to_string());
+    }
+    let on_a_sample = app.ui.view == crate::state::ViewMode::Detail
+        && app.session.active().and_then(|id| app.session.catalog.photo(id)).is_some_and(|p| matches!(p.source, Source::Demo { .. }));
+    if on_a_sample && app.samples_landed == Some(app.session.commits()) {
+        let first = crate::i18n::tr("Drag any slider: the original never changes.");
+        return Some(match crate::shortcuts::shortcut_of(&app.ui.settings.keymap, "view.beforeAfter") {
+            Some(sc) => {
+                let key = crate::menubar::shortcut_text(sc, mac);
+                format!("{first} {}", crate::i18n::tr_format!("Press {key} to compare before and after.", key = key))
+            }
+            None => first.to_string(),
+        });
+    }
+    Some(crate::i18n::tr("These are sample photos, to try LightCraft on. Import your own whenever you're ready.").to_string())
+}
+
 pub fn banner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     // cached by the photo set, not by every edit (see `Session::has_samples`)
     let present = app.session.has_samples();
@@ -25,22 +57,10 @@ pub fn banner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         app.ui.samples_banner_hidden = false;
     }
     app.samples_present = Some(present);
-    // only over a library: an in-memory demo session (`--memory`, the showcase scripts, the CLI's
-    // `--demo`) is a demo by design and needs no notice saying so
-    // and only while samples are in the library: once they're all in Recently Deleted the grid
-    // says the library is empty, and a banner saying they're here would contradict it
-    if app.ui.samples_banner_hidden || app.session.catalog.sample_photos_in_library() == 0 || app.session.library.is_none() {
-        return;
-    }
-    // stops at the first photo of the person's own (samples are a couple of dozen)
-    let own = app.session.catalog.photos().any(|p| p.in_library() && !matches!(p.source, Source::Demo { .. }));
+    let Some(text) = message(app, ui.ctx().os() == egui::os::OperatingSystem::Mac) else { return };
+    let own = own_photos(app);
     let t = Tokens::get(ui.ctx());
     let mut click = None;
-    let text = crate::i18n::tr(if own {
-        "Your photos are in. The sample photos are still here too."
-    } else {
-        "These are sample photos, to try LightCraft on. Import your own whenever you're ready."
-    });
     let resp = egui::Panel::top("samples-banner")
         .exact_size(34.0)
         .frame(egui::Frame::NONE.fill(t.inset).inner_margin(egui::Margin::symmetric(12, 0)))

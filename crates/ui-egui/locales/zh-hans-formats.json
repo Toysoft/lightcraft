@@ -49,6 +49,7 @@
   "Open the sample photo “{title}”": "打开示例照片“{title}”",
   "Paste into {n} photo{} — only settings that were copied are pasted": "粘贴到 {n} 张照片 — 仅粘贴已复制的设置{0:.0}",
   "Preset: {name}": "预设：{name}",
+  "Press {key} to compare before and after.": "按 {key} 对比调整前后。",
   "Preview only — editing the camera's embedded JPEG ({})": "仅预览 — 正在编辑相机内嵌的 JPEG（{0}）",
   "Preview only — {}": "仅预览 — {0}",
   "Profile: {}": "配置文件：{0}",

@@ -275,6 +275,7 @@
   "Template preview: {name}": "Template preview: {name}",
   "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.": "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.",
   "Open the sample photo “{title}”": "სანიმუშო ფოტოს „{title}“ გახსნა",
+  "Press {key} to compare before and after.": "დააჭირეთ {key}-ს „მანამდე“ და „შემდეგ“ შესადარებლად.",
   "Removed {n} sample photos. Edit → Undo brings them back.": "წაიშალა {n} სანიმუშო ფოტო. რედაქტირება → გაუქმება მათ დააბრუნებს.",
   "Update “{name}” with Current Settings": "Update “{name}” with Current Settings",
   "Updated {name}": "Updated {name}",

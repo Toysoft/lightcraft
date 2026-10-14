@@ -151,6 +151,13 @@
   further ⇧-clicks carry on from the last point, as in Lightroom. Change the brush size, feather or flow before the
   ⇧-click and the line tapers from the old values to the new ones. The whole line is one undo step.
   `mask.brushStroke {connect: true}` does the same for agents.
+### Every way to the samples leads to the editor
+- However the sample photos come into an empty library (a thumbnail, the welcome's Try Sample Photos button, Help ▸
+  Add Sample Photos, an agent), they open on a sample in Detail with the Edit panel, ready to edit; a thumbnail opens
+  the one clicked. A library that already has photos stays where it was.
+- There, until the first change, the banner invites one: "Drag any slider: the original never changes. Press Y to
+  compare before and after." (the key Compare Before and After is bound to).
+
 ### The welcome reads for everyone
 - Screen readers now hear the empty library's welcome, not only its buttons: the title (as a heading), what it says,
   the hint and the sample row's caption, and the right panel's note beside it.

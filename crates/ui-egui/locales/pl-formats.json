@@ -281,6 +281,7 @@
   "{n} raws can now be developed from their raw data": "{n} raws can now be developed from their raw data",
   "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.": "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.",
   "Open the sample photo “{title}”": "Otwórz przykładowe zdjęcie „{title}”",
+  "Press {key} to compare before and after.": "Naciśnij {key}, aby porównać przed i po.",
   "Removed {n} sample photos. Edit → Undo brings them back.": "Usunięto przykładowe zdjęcia ({n}). Edycja → Cofnij je przywróci.",
   "Create the keyword “{name}”": "Create the keyword “{name}”",
   "new, inside {parent}": "new, inside {parent}",

@@ -250,6 +250,7 @@
   "… and {more} more": "… a dalších {more}",
   "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.": "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.",
   "Open the sample photo “{title}”": "Otevřít ukázkovou fotografii „{title}“",
+  "Press {key} to compare before and after.": "Stisknutím {key} porovnáte stav před a po.",
   "Removed {n} sample photos. Edit → Undo brings them back.": "Odebráno ukázkových fotografií: {n}. Úpravy → Zpět je vrátí.",
   "Create the keyword “{name}”": "Create the keyword “{name}”",
   "new, inside {parent}": "new, inside {parent}",
