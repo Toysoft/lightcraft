@@ -137,7 +137,8 @@
 ### Reliability
 
 ### One kind of button
-- Dialogs' buttons and About's Discord link are drawn by one button component: primary (filled with the accent),
+- Dialogs' buttons, About's Discord link, the empty library's welcome and the samples banner are drawn by one button
+  component: primary (filled with the accent),
   secondary, danger (filled red) and ghost, in three sizes, with an icon or without, and an icon alone (named for
   screen readers). Each darkens a little when hovered and more when pressed, shows a ring where the keyboard is, and
   its text reads at 4.5:1 or more on its fill in every theme. Dialog buttons are 30 points tall, like the welcome's.

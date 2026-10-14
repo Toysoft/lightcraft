@@ -151,8 +151,14 @@ pub fn empty_note(ui: &egui::Ui, rect: Rect, text: &str) {
 /// `height` tall, counted when the block is centred.
 pub const EMPTY_EXTRA_GAP: f32 = 28.0;
 
+/// An empty state's `i`th action as a button: the first is the primary one.
+fn empty_button(i: usize, a: &EmptyAction) -> crate::button::Button<'static> {
+    let b = crate::button::Button::new(a.label).widget(a.widget);
+    if i == 0 { b.primary() } else { b.secondary() }
+}
+
 /// [`empty_state`]'s layout, shared with [`empty_state_height`] so the two can't drift.
-const EMPTY_BUTTON_H: f32 = 30.0;
+const EMPTY_BUTTON_H: f32 = crate::button::Size::Medium.height();
 const EMPTY_BUTTON_GAP: f32 = 8.0;
 const EMPTY_TITLE_GAP: f32 = 6.0;
 const EMPTY_BUTTONS_GAP: f32 = 20.0;
@@ -164,8 +170,7 @@ pub fn empty_state_height(ui: &egui::Ui, rect: Rect, title: &str, body: &str, ac
     let t = Tokens::get(ui.ctx());
     let wrap = (rect.width() - 48.0).max(80.0);
     let height = |text: &str, font: egui::FontId| ui.painter().layout(text.to_string(), font, t.text, wrap).size().y;
-    let widths: Vec<f32> =
-        actions.iter().map(|a| ui.painter().layout_no_wrap(crate::i18n::tr(a.label).to_string(), t.semibold(13.0), t.text).size().x + 32.0).collect();
+    let widths: Vec<f32> = actions.iter().enumerate().map(|(i, a)| empty_button(i, a).desired_size(ui).x).collect();
     let row_w = widths.iter().sum::<f32>() + EMPTY_BUTTON_GAP * widths.len().saturating_sub(1) as f32;
     let buttons_h = match (actions.len(), row_w <= wrap) {
         (0, _) => 0.0,
@@ -211,8 +216,7 @@ pub fn empty_state(
     // the buttons' widths, and whether they fit side by side (else one above the other)
     const BUTTON_H: f32 = EMPTY_BUTTON_H;
     const GAP: f32 = EMPTY_BUTTON_GAP;
-    let widths: Vec<f32> =
-        actions.iter().map(|a| ui.painter().layout_no_wrap(crate::i18n::tr(a.label).to_string(), t.semibold(13.0), t.text).size().x + 32.0).collect();
+    let widths: Vec<f32> = actions.iter().enumerate().map(|(i, a)| empty_button(i, a).desired_size(ui).x).collect();
     let row_w = widths.iter().sum::<f32>() + GAP * widths.len().saturating_sub(1) as f32;
     let side_by_side = row_w <= wrap;
     let buttons_h = match (actions.len(), side_by_side) {
@@ -246,18 +250,11 @@ pub fn empty_state(
             let w = widths.iter().copied().fold(0.0, f32::max).min(wrap);
             Rect::from_min_size(pos2(rect.center().x - w / 2.0, buttons_top + i as f32 * (BUTTON_H + GAP)), vec2(w, BUTTON_H))
         };
-        let label = egui::RichText::new(crate::i18n::tr(a.label)).font(t.semibold(13.0));
-        let button =
-            if i == 0 { egui::Button::new(label.color(egui::Color32::WHITE)).fill(t.accent) } else { egui::Button::new(label.color(t.text)) };
-        let resp = ui.put(r, button);
-        crate::widgets::register(ui.ctx(), a.widget, resp.rect);
+        // (the button shows a ring where the keyboard is, as the sample thumbnails do)
+        let resp = empty_button(i, a).show_at(ui, r);
         crate::widgets::plain_button(ui.ctx(), resp.id);
         if i == 0 && focus_primary {
             resp.request_focus();
-        }
-        // where the keyboard is: the accent ring the sample thumbnails show too
-        if resp.has_focus() {
-            p.rect_stroke(resp.rect.expand(2.0), 6.0, egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
         }
         if resp.clicked() {
             clicked = Some(a.command);

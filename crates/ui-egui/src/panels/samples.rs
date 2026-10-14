@@ -68,23 +68,16 @@ pub fn banner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             // the buttons first, from the right edge, so a long translation shortens the message
             // (whole on hover) instead of pushing them out of the window
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                use crate::button::Button;
                 let (label, widget) = if own { ("Keep Them", "button:samplesKeep") } else { ("Hide", "button:samplesHide") };
-                let b = ui.add(egui::Button::new(crate::i18n::tr(label)).frame(false));
-                register(ui.ctx(), widget, b.rect);
-                if b.clicked() {
+                if Button::new(label).ghost().small().widget(widget).show(ui).clicked() {
                     click = Some(Click::Hide);
                 }
-                let b = ui.button(crate::i18n::tr("Remove Sample Photos"));
-                register(ui.ctx(), "button:samplesRemove", b.rect);
-                if b.clicked() {
+                if Button::new("Remove Sample Photos").secondary().small().widget("button:samplesRemove").show(ui).clicked() {
                     click = Some(Click::Remove);
                 }
-                if !own {
-                    let b = ui.add(egui::Button::new(RichText::new(crate::i18n::tr("Import Photos…")).color(egui::Color32::WHITE)).fill(t.accent));
-                    register(ui.ctx(), "button:samplesImport", b.rect);
-                    if b.clicked() {
-                        click = Some(Click::Import);
-                    }
+                if !own && Button::new("Import Photos…").primary().small().widget("button:samplesImport").show(ui).clicked() {
+                    click = Some(Click::Import);
                 }
                 ui.add_space(8.0);
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
