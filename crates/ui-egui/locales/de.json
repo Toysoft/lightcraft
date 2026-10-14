@@ -1243,6 +1243,9 @@
   "Reset all curves: point curves (all channels) and parametric (double-click a channel to reset only that one)": "Alle Kurven zurücksetzen: Punktkurven (alle Kanäle) und parametrische Kurve (Doppelklick auf einen Kanal setzt nur diesen zurück)",
   "Reset all edits (Cmd+Shift+R)": "Alle Bearbeitungen zurücksetzen (⌘⇧R)",
   "Reshuffle": "Neu mischen",
+  "Custom Order": "Benutzerdefinierte Reihenfolge",
+  "Move in Custom Order": "In benutzerdefinierter Reihenfolge verschieben",
+  "Set Custom Order": "Benutzerdefinierte Reihenfolge festlegen",
   "Resize Face Box": "Gesichtsrahmengröße ändern",
   "Resize panel window": "Größe des Bereichsfensters ändern",
   "Resize panels": "Bereichsgrößen ändern",
@@ -2118,5 +2121,7 @@
   "Adding to Apple Photos": "Wird zu Apple Fotos hinzugefügt",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Kein Grafikprozessor gefunden: LightCraft rendert auf der CPU, was viel langsamer ist. Details unter Hilfe → Systeminformationen.",
   "On NixOS, start it from `nix develop`.": "Unter NixOS starten Sie es aus `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Dateien mit demselben Inhalt wie eine andere Datei dieses Imports: Nur die erste wird importiert."
+  "Files with the same content as another file in this import: only the first is imported.": "Dateien mit demselben Inhalt wie eine andere Datei dieses Imports: Nur die erste wird importiert.",
+  "Duplicate Album": "Album duplizieren",
+  "Another album with the same photos, to arrange in its own order": "Ein weiteres Album mit denselben Fotos, in eigener Reihenfolge anzuordnen"
 }

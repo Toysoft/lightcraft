@@ -212,8 +212,9 @@ fn op_variants_are_versioned() {
             Op::SetFolderRecord { .. } => 6,
             Op::SetAsShotWb { .. } => 7,
             Op::SetHistoryCursor { .. } => 8,
+            Op::SetAlbumPhotoOrder { .. } => 9,
         }
     }
-    let newest = since(&Op::SetHistoryCursor { id: PhotoId(1), cursor: None });
+    let newest = since(&Op::SetAlbumPhotoOrder { id: AlbumId(1), order: vec![] });
     assert_eq!(newest, VERSION, "the newest op's version must be the current format version");
 }

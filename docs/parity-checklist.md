@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (integration batch 35: KEYC-SELECTONLYACTIVE, Select Only Active Photo ⌘⇧D; LR-BEHAV-AUTOSAVE, damaged snapshots repaired on open; LR-EDIT-OPTICS-PROFILE, Nikon Z 6II / Z 8 / Z f in-file distortion; LRC-LIB-CATALOG-IMPORT, WAL-only catalogs open; LR-EXP-DIM, enlargements stop at 512 MP; LR-IMP-CAMERA-COVERAGE, Canon EOS RP CR3 verified; model folder retry) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (LR-FILT-SORT: Custom Order in albums, Duplicate Album keeps it; integration batch 35: KEYC-SELECTONLYACTIVE, Select Only Active Photo ⌘⇧D; LR-BEHAV-AUTOSAVE, damaged snapshots repaired on open; LR-EDIT-OPTICS-PROFILE, Nikon Z 6II / Z 8 / Z f in-file distortion; LRC-LIB-CATALOG-IMPORT, WAL-only catalogs open; LR-EXP-DIM, enlargements stop at 512 MP; LR-IMP-CAMERA-COVERAGE, Canon EOS RP CR3 verified; model folder retry) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -156,7 +156,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-FILT-LOCATION | Location filter | P2 | ✅ | `cmd:library.filter` (`text`, `ruleSet` field `location`) | free text, or a rule on location / city / state / country (smart albums, `library.filter`) |
 | LR-FILT-PEOPLE | People filter | P2 | 🟡 | `cmd:library.filter`, `crates/catalog/src/query.rs` | filter by a person's name (case-insensitive, named Face regions only) from the People view, a filter chip or `person:`; no unnamed / suggested people |
 | LR-FILT-CULL | Culling-score filters | P2 | ✅ | `cmd:library.filter` (`ruleSet` fields `sharpness`, `bestOfGroup`) | Focus and Best of Similar Shots in the rule editor / smart albums |
-| LR-FILT-SORT | Sort | P0 | ✅ | `cmd:library.sort`, `cmd:library.shuffle`, `crates/ui-egui/src/panels/bottombar.rs` | Random sort (seeded, stable under edits; choosing Random or Reshuffle picks a new seed); the shuffle is part of the saved view state; no effect in Recently Added (always newest import first); no colour-label or custom (manual) order |
+| LR-FILT-SORT | Sort | P0 | ✅ | `cmd:library.sort`, `cmd:library.shuffle`, `cmd:album.orderPhotos`, `cmd:album.setPhotoOrder`, `cmd:album.duplicate`, `crates/ui-egui/src/panels/bottombar.rs`, `crates/ui-egui/src/panels/grid.rs` | Random sort (seeded, stable under edits; choosing Random or Reshuffle picks a new seed); the shuffle is part of the saved view state; no effect in Recently Added (always newest import first). Custom Order in regular albums: drag photos in the grid to reorder (dragging in another sort switches to Custom Order, as in Classic); saved per album in the library, followed by Rename `{seq}` and export of a selection; smart albums and other sources fall back to capture date. No colour-label sort; no reordering in the filmstrip yet |
 | LR-FILT-SAVED | Filter presets [Classic] | P2 | ✅ | `cmd:filter.savePreset`, `cmd:filter.applyPreset`, `cmd:filter.presets`, `cmd:filter.deletePreset`, `crates/ui-egui/src/panels/filterbar.rs` | filter bar → Presets: apply, save current filter, delete (right-click); saved with the library |
 
 ## E. Metadata (META)
@@ -815,6 +815,8 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 | 2026-10-13 | patch | LR-BEHAV-AUTOSAVE: a damaged snapshot that still parses is repaired on open (ids, stacks, folder loops, id counters) instead of panicking or hanging; status unchanged |
 | 2026-10-13 | minor | LR-EDIT-OPTICS-PROFILE: Nikon Z 6II / Z 8 / Z f NEFs use the camera's in-file distortion correction (NikonNEFInfo); status unchanged (🟡) |
 | 2026-10-11 | minor | Model setup folder action, opener error and retry (LR-MASK-OBJECTS). |
+| 2026-10-12 | minor | LR-FILT-SORT: Duplicate Album (`album.duplicate`) keeps the Custom Order — several orders of the same photos, one album each as in Lightroom Classic; New Album with selected photos starts in the shown order; status unchanged (✅) |
+| 2026-10-12 | minor | LR-FILT-SORT: Custom Order — drag to reorder a regular album's photos (catalog format 9); status unchanged (✅) |
 | 2026-10-11 | minor | KEY-SLIDER-TYPE: honor immediate Return/Escape and keep typed keys in the value editor; add regression references |
 | 2026-10-11 | minor | LR-PROF-CAMERACOLOR: raws with a black-and-white camera JPEG take its tone curve (issue #577) |
 | 2026-10-11 | minor | LR-VIEW-ZOOM and LR-VIEW-COMPARE: Compare and Reference are sharp at 1:1 (zoom windows per pane, two originals kept decoded while they are open); statuses unchanged |

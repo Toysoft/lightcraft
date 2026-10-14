@@ -996,6 +996,9 @@
   "Reset all curves: point curves (all channels) and parametric (double-click a channel to reset only that one)": "Сбросить все кривые: точечные (все каналы) и параметрическую (двойной щелчок по каналу сбрасывает только его)",
   "Reset all edits (Cmd+Shift+R)": "Сбросить все правки (Cmd+Shift+R)",
   "Reshuffle": "Перемешать",
+  "Custom Order": "Пользовательский порядок",
+  "Move in Custom Order": "Переместить в пользовательском порядке",
+  "Set Custom Order": "Задать пользовательский порядок",
   "Resize panel window": "Изменить размер окна панели",
   "Resize panels": "Изменить размеры панелей",
   "Resize to": "Изменить размер до",
@@ -2151,5 +2154,7 @@
   "Adding to Apple Photos": "Добавление в Apple Фото",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Графический процессор не найден: LightCraft выполняет рендеринг на CPU, а это намного медленнее. Подробности: Справка → Сведения о системе.",
   "On NixOS, start it from `nix develop`.": "В NixOS запускайте его из `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Файлы с тем же содержимым, что и другой файл этого импорта: импортируется только первый."
+  "Files with the same content as another file in this import: only the first is imported.": "Файлы с тем же содержимым, что и другой файл этого импорта: импортируется только первый.",
+  "Duplicate Album": "Дублировать альбом",
+  "Another album with the same photos, to arrange in its own order": "Ещё один альбом с теми же фото, чтобы упорядочить их по-своему"
 }

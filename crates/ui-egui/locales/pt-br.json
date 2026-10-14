@@ -1204,6 +1204,9 @@
   "Reset all curves: point curves (all channels) and parametric (double-click a channel to reset only that one)": "Redefine todas as curvas: curvas de pontos (todos os canais) e paramétrica (clique duas vezes em um canal para redefinir apenas ele)",
   "Reset all edits (Cmd+Shift+R)": "Redefinir todas as edições (Cmd+Shift+R)",
   "Reshuffle": "Embaralhar de novo",
+  "Custom Order": "Ordem personalizada",
+  "Move in Custom Order": "Mover na ordem personalizada",
+  "Set Custom Order": "Definir ordem personalizada",
   "Resize Face Box": "Redimensionar caixa de rosto",
   "Resize panel window": "Redimensionar janela do painel",
   "Resize panels": "Redimensionar painéis",
@@ -1998,5 +2001,7 @@
   "Recognition models": "Modelos de reconhecimento",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Nenhum processador gráfico encontrado: o LightCraft renderiza na CPU, o que é muito mais lento. Detalhes em Ajuda → Informações do sistema.",
   "On NixOS, start it from `nix develop`.": "No NixOS, inicie-o a partir de `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado."
+  "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado.",
+  "Duplicate Album": "Duplicar álbum",
+  "Another album with the same photos, to arrange in its own order": "Outro álbum com as mesmas fotos, para organizar em ordem própria"
 }
