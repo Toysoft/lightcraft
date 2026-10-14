@@ -1960,5 +1960,17 @@
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "找不到圖形處理器：LightCraft 改用 CPU 算繪，速度會慢很多。詳情請見「說明 → 系統資訊」。",
   "On NixOS, start it from `nix develop`.": "在 NixOS 上，請從 `nix develop` 啟動。",
   "Files with the same content as another file in this import: only the first is imported.": "與本次匯入中另一個檔案內容相同的檔案：只匯入第一個。",
-  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "智慧型相簿會自動更新：請變更其規則，或使用「照片 ▸ 刪除照片」"
+  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "智慧型相簿會自動更新：請變更其規則，或使用「照片 ▸ 刪除照片」",
+  "Delete from Disk": "從磁碟刪除",
+  "Delete from Disk…": "從磁碟刪除…",
+  "Delete Rejected Photos…": "刪除已排除的照片…",
+  "Remove from Library": "從圖庫中移除",
+  "Nothing was deleted from disk for them. Remove them from the library instead? The files stay on disk.": "這些照片沒有從磁碟刪除任何內容。改為從圖庫中移除它們？檔案會保留在磁碟上。",
+  "Delete the rejected photo from disk, or just remove it from the library?": "要從磁碟刪除已排除的照片，還是僅從圖庫中移除？",
+  "Delete the selected photo from disk, or just remove it from the library?": "要從磁碟刪除所選照片，還是僅從圖庫中移除？",
+  "Remove takes them out of the library for good; the files stay on disk.": "「移除」會將它們永久移出圖庫；檔案保留在磁碟上。",
+  "Remove moves them to Recently Deleted; the files stay on disk.": "「移除」會將它們移到「最近刪除」；檔案保留在磁碟上。",
+  "There are no rejected photos here": "這裡沒有已排除的照片",
+  "Trash": "垃圾桶",
+  "Recycle Bin": "資源回收筒"
 }

@@ -1958,5 +1958,17 @@
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Aucun processeur graphique trouvé : LightCraft effectue le rendu sur le processeur, ce qui est beaucoup plus lent. Détails dans Aide → Informations système.",
   "On NixOS, start it from `nix develop`.": "Sous NixOS, lancez-le depuis `nix develop`.",
   "Files with the same content as another file in this import: only the first is imported.": "Fichiers au contenu identique à un autre fichier de cette importation : seul le premier est importé.",
-  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "Les albums intelligents se mettent à jour d'eux-mêmes : modifiez leurs règles ou utilisez Photo ▸ Supprimer la photo"
+  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "Les albums intelligents se mettent à jour d'eux-mêmes : modifiez leurs règles ou utilisez Photo ▸ Supprimer la photo",
+  "Delete from Disk": "Supprimer du disque",
+  "Delete from Disk…": "Supprimer du disque…",
+  "Delete Rejected Photos…": "Supprimer les photos rejetées…",
+  "Remove from Library": "Retirer de la bibliothèque",
+  "Nothing was deleted from disk for them. Remove them from the library instead? The files stay on disk.": "Rien n’a été supprimé du disque pour elles. Les retirer plutôt de la bibliothèque ? Les fichiers restent sur le disque.",
+  "Delete the rejected photo from disk, or just remove it from the library?": "Supprimer la photo rejetée du disque, ou seulement la retirer de la bibliothèque ?",
+  "Delete the selected photo from disk, or just remove it from the library?": "Supprimer la photo sélectionnée du disque, ou seulement la retirer de la bibliothèque ?",
+  "Remove takes them out of the library for good; the files stay on disk.": "Retirer les enlève définitivement de la bibliothèque ; les fichiers restent sur le disque.",
+  "Remove moves them to Recently Deleted; the files stay on disk.": "Retirer les place dans Supprimées récemment ; les fichiers restent sur le disque.",
+  "There are no rejected photos here": "Il n’y a pas de photo rejetée ici",
+  "Trash": "Corbeille",
+  "Recycle Bin": "Corbeille"
 }

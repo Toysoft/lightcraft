@@ -209,6 +209,8 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
     });
     let mut close = false;
     let mut confirm = false;
+    // the Delete dialog's Delete from Disk (issue #1706)
+    let mut from_disk = false;
     // Return presses OK in a dialog without a text field of its own (Lightroom's default button);
     // a widget that has the keyboard focus (a text field, a button or checkbox reached with Tab)
     // takes Return itself. Consumed before the dialog is drawn, so nothing else sees it too.
@@ -1113,11 +1115,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                         .color(t.text_dim),
                     );
                 }
-                Dialog::ConfirmDelete { count } => {
-                    let what = if *count == 1 { crate::i18n::tr("this photo").to_string() } else { crate::i18n::tr_format!("these {count} photos", count = count) };
-                    ui.label(crate::i18n::tr_format!("Move {what} to Recently Deleted?", what = what));
-                    ui.label(egui::RichText::new(crate::i18n::tr("They can be restored from Recently Deleted until it is emptied.")).color(t.text_dim));
-                }
+                Dialog::ConfirmDelete { count, ids, rejected, error } => delete_body(app, ui, &t, *count, ids, *rejected, error.as_deref()),
                 d @ Dialog::SynchronizeFolder { .. } => crate::sync::body(app, ui, d),
                 Dialog::LightroomCatalog { folder, catalog } => {
                     ui.label(crate::i18n::tr("This is a Lightroom catalog, not a LightCraft library. Import it into a LightCraft library instead?"));
@@ -1212,6 +1210,17 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     Dialog::SamModel { .. } => "Not Now",
                     _ => "Cancel",
                 };
+                // Lightroom's order: Delete from Disk apart on the left, then Cancel and Remove
+                if let Dialog::ConfirmDelete { error: None, .. } = &dlg
+                    && lightcraft_engine::trash::available().is_ok()
+                {
+                    let r = ui.button(crate::i18n::tr("Delete from Disk"));
+                    crate::widgets::register(ui.ctx(), "button:dialogDeleteFromDisk", r.rect);
+                    if r.clicked() {
+                        from_disk = true;
+                    }
+                    ui.add_space(24.0);
+                }
                 if !informational {
                     let r = ui.button(crate::i18n::tr(cancel));
                     crate::widgets::register(ui.ctx(), "button:dialogCancel", r.rect);
@@ -1233,7 +1242,9 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     Dialog::DenoiseModel { .. } => "Install",
                     Dialog::FaceModel { info, .. } if !informational && info["download"].is_string() => "Download",
                     Dialog::FaceModel { .. } if !informational => "Install",
-                    Dialog::ConfirmDelete { .. } | Dialog::DeleteKeyword { .. } => "Delete",
+                    Dialog::ConfirmDelete { error: Some(_), .. } => "Remove from Library",
+                    Dialog::ConfirmDelete { .. } => "Remove",
+                    Dialog::DeleteKeyword { .. } => "Delete",
                     // (not "Merge": that is photo merging, HDR / panorama, in some languages)
                     Dialog::MoveKeyword { .. } => "Merge Keywords",
                     Dialog::KeywordSet { .. } => "Save",
@@ -1290,6 +1301,9 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
     // the dialog, such as a date picker's calendar, takes it to close itself)
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !crate::widgets::escape_taken(ctx) {
         close = true;
+    }
+    if from_disk {
+        delete_from_disk(app, ctx, &mut dlg, &mut close);
     }
     if confirm {
         match confirm_dialog(app, &dlg) {
@@ -1721,7 +1735,11 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
         }
         Dialog::Merge { opts } => crate::merge::start_final(app, opts),
         Dialog::Import { opts } => crate::import::start(app, opts),
-        Dialog::ConfirmDelete { .. } => app.run("photo.delete", json!({})),
+        Dialog::ConfirmDelete { ids, .. } => {
+            // Remove: to Recently Deleted; photos there already leave the library for good
+            let trashed = ids.iter().all(|id| app.session.catalog.photo(lightcraft_engine::catalog::PhotoId(*id)).is_some_and(|p| p.deleted));
+            app.run(if trashed { "photo.deletePermanently" } else { "photo.delete" }, json!({"ids": ids}))
+        }
         // the catalog found: no file dialog; none: File ▸ Import Lightroom Catalog… asks for it
         Dialog::LightroomCatalog { catalog, .. } => {
             app.run("file.importLightroom", catalog.as_ref().map_or_else(|| json!({}), |c| json!({"path": c})))
@@ -1729,6 +1747,81 @@ pub fn confirm_dialog(app: &mut LightcraftApp, dlg: &Dialog) -> Result<serde_jso
         Dialog::RemoveFolder { path, disk, .. } => app.run("library.removeFolder", json!({"path": path, "disk": disk})),
         d @ Dialog::SynchronizeFolder { .. } => crate::sync::confirm(app, d),
         Dialog::About | Dialog::Shortcuts | Dialog::Settings { .. } => Ok(serde_json::Value::Null),
+    }
+}
+
+/// The Delete dialog's question (issue #1706): Lightroom's, with LightCraft's Recently Deleted for
+/// Remove; after a failed Delete from Disk, why, and the offer to remove the photos instead.
+fn delete_body(app: &LightcraftApp, ui: &mut egui::Ui, t: &Tokens, count: usize, ids: &[u64], rejected: bool, error: Option<&str>) {
+    let bin = crate::i18n::tr(app.session.trash.name()).to_string();
+    let plural = if count == 1 { "" } else { "s" };
+    if let Some(e) = error {
+        ui.label(crate::i18n::tr_format!("Couldn't move {count} photo{} to the {bin}: {error}", plural, count = count, bin = bin, error = e));
+        ui.label(
+            egui::RichText::new(crate::i18n::tr(
+                "Nothing was deleted from disk for them. Remove them from the library instead? The files stay on disk.",
+            ))
+            .color(t.text_dim),
+        );
+        return;
+    }
+    let question = match (rejected, count) {
+        (true, 1) => crate::i18n::tr("Delete the rejected photo from disk, or just remove it from the library?").to_string(),
+        (true, _) => crate::i18n::tr_format!("Delete the {count} rejected photos from disk, or just remove them from the library?", count = count),
+        (false, 1) => crate::i18n::tr("Delete the selected photo from disk, or just remove it from the library?").to_string(),
+        (false, _) => crate::i18n::tr_format!("Delete the {count} selected photos from disk, or just remove them from the library?", count = count),
+    };
+    ui.label(question);
+    ui.label(
+        egui::RichText::new(crate::i18n::tr_format!(
+            "Delete from Disk moves the files and their XMP sidecars to the {bin} and removes the photos from the library. Undo can't bring the files back: restore them from the {bin}.",
+            bin = bin
+        ))
+        .color(t.text_dim),
+    );
+    let in_trash = ids.iter().all(|id| app.session.catalog.photo(lightcraft_engine::catalog::PhotoId(*id)).is_some_and(|p| p.deleted));
+    ui.label(
+        egui::RichText::new(if in_trash {
+            crate::i18n::tr("Remove takes them out of the library for good; the files stay on disk.")
+        } else {
+            crate::i18n::tr("Remove moves them to Recently Deleted; the files stay on disk.")
+        })
+        .color(t.text_dim),
+    );
+}
+
+/// The Delete dialog's Delete from Disk: the files to the Trash (`photo.deleteFromDisk`). What
+/// couldn't be moved stays, with its photos; the dialog then says why and offers to remove those
+/// photos from the library instead.
+fn delete_from_disk(app: &mut LightcraftApp, ctx: &egui::Context, dlg: &mut Dialog, close: &mut bool) {
+    let Dialog::ConfirmDelete { count, ids, error, .. } = dlg else { return };
+    let bin = crate::i18n::tr(app.session.trash.name()).to_string();
+    match app.run("photo.deleteFromDisk", json!({"ids": ids.clone()})) {
+        Ok(r) => {
+            let failed = r["failed"].as_array().cloned().unwrap_or_default();
+            let left: Vec<u64> = failed
+                .iter()
+                .flat_map(|f| f["ids"].as_array().cloned().unwrap_or_default())
+                .filter_map(|v| v.as_u64())
+                .filter(|id| app.session.catalog.photo(lightcraft_engine::catalog::PhotoId(*id)).is_some())
+                .collect();
+            let n = r["trashed"].as_array().map_or(0, Vec::len);
+            if n > 0 {
+                app.toast(ctx, crate::i18n::tr_format!("Moved {n} file{} to the {bin}", if n == 1 { "" } else { "s" }, n = n, bin = bin));
+            }
+            if left.is_empty() {
+                if let Some(e) = failed.first().and_then(|f| f["error"].as_str()) {
+                    // only a sidecar stayed behind
+                    app.toast_error(ctx, e.to_string());
+                }
+                *close = true;
+            } else {
+                *error = failed.first().and_then(|f| f["error"].as_str()).map(str::to_string);
+                *count = left.len();
+                *ids = left;
+            }
+        }
+        Err(e) => *error = Some(e),
     }
 }
 
@@ -1926,7 +2019,7 @@ fn choices<V: PartialEq + Copy>(ui: &mut egui::Ui, label: &str, id: &str, option
 /// Dialogs that Return confirms with nothing focused (those with text fields confirm from the
 /// field: `dialog_field`).
 fn return_confirms(dlg: &Dialog) -> bool {
-    matches!(dlg, Dialog::CopySettings { .. } | Dialog::PasteSettings { .. })
+    matches!(dlg, Dialog::CopySettings { .. } | Dialog::PasteSettings { .. } | Dialog::ConfirmDelete { .. })
 }
 
 /// A dialog's one text field: it keeps the focus (except while its own menu has it) and opens

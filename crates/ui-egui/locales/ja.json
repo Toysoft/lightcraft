@@ -1962,5 +1962,17 @@
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "グラフィックプロセッサが見つかりません。LightCraftはCPUで描画するため、かなり遅くなります。詳細は「ヘルプ → システム情報」を参照してください。",
   "On NixOS, start it from `nix develop`.": "NixOSでは `nix develop` から起動してください。",
   "Files with the same content as another file in this import: only the first is imported.": "この読み込み内の別のファイルと内容が同じファイルです。最初のファイルだけが読み込まれます。",
-  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "スマートアルバムは自動で更新されます。ルールを変更するか、写真 ▸ 写真を削除を使ってください"
+  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "スマートアルバムは自動で更新されます。ルールを変更するか、写真 ▸ 写真を削除を使ってください",
+  "Delete from Disk": "ディスクから削除",
+  "Delete from Disk…": "ディスクから削除…",
+  "Delete Rejected Photos…": "除外した写真を削除…",
+  "Remove from Library": "ライブラリから除去",
+  "Nothing was deleted from disk for them. Remove them from the library instead? The files stay on disk.": "これらはディスクから何も削除されていません。代わりにライブラリから除去しますか？ファイルはディスクに残ります。",
+  "Delete the rejected photo from disk, or just remove it from the library?": "除外した写真をディスクから削除しますか？それともライブラリから除去するだけにしますか？",
+  "Delete the selected photo from disk, or just remove it from the library?": "選択した写真をディスクから削除しますか？それともライブラリから除去するだけにしますか？",
+  "Remove takes them out of the library for good; the files stay on disk.": "除去すると、ライブラリから完全に取り除かれます。ファイルはディスクに残ります。",
+  "Remove moves them to Recently Deleted; the files stay on disk.": "除去すると、「最近削除した写真」に移動します。ファイルはディスクに残ります。",
+  "There are no rejected photos here": "ここには除外した写真がありません",
+  "Trash": "ゴミ箱",
+  "Recycle Bin": "ごみ箱"
 }

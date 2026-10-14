@@ -1998,5 +1998,17 @@
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "未找到图形处理器：LightCraft 改用 CPU 渲染，速度会慢很多。详情见“帮助 → 系统信息”。",
   "On NixOS, start it from `nix develop`.": "在 NixOS 上，请从 `nix develop` 启动。",
   "Files with the same content as another file in this import: only the first is imported.": "与本次导入中另一个文件内容相同的文件：只导入第一个。",
-  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "智能相册会自动更新：请更改其规则，或使用“照片 ▸ 删除照片”"
+  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "智能相册会自动更新：请更改其规则，或使用“照片 ▸ 删除照片”",
+  "Delete from Disk": "从磁盘删除",
+  "Delete from Disk…": "从磁盘删除…",
+  "Delete Rejected Photos…": "删除被排除的照片…",
+  "Remove from Library": "从图库中移去",
+  "Nothing was deleted from disk for them. Remove them from the library instead? The files stay on disk.": "这些照片没有从磁盘删除任何内容。改为从图库中移去它们？文件会保留在磁盘上。",
+  "Delete the rejected photo from disk, or just remove it from the library?": "要从磁盘删除被排除的照片，还是仅从图库中移去？",
+  "Delete the selected photo from disk, or just remove it from the library?": "要从磁盘删除所选照片，还是仅从图库中移去？",
+  "Remove takes them out of the library for good; the files stay on disk.": "“移去”会将它们永久移出图库；文件保留在磁盘上。",
+  "Remove moves them to Recently Deleted; the files stay on disk.": "“移去”会将它们移到“最近删除”；文件保留在磁盘上。",
+  "There are no rejected photos here": "这里没有被排除的照片",
+  "Trash": "废纸篓",
+  "Recycle Bin": "回收站"
 }

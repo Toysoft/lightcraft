@@ -986,9 +986,21 @@ pub enum Dialog {
         folder: String,
         catalog: Option<String>,
     },
-    /// Confirm moving photos to Recently Deleted.
+    /// Delete photos (issue #1706), as in Lightroom: Delete from Disk (the files to the Trash and
+    /// the photos out of the library, `photo.deleteFromDisk`), Cancel, or Remove (OK: to Recently
+    /// Deleted, `photo.delete`).
     ConfirmDelete {
         count: usize,
+        /// The photos asked about (fixed when the dialog opened).
+        #[serde(default)]
+        ids: Vec<u64>,
+        /// Photo ▸ Delete Rejected Photos: the question says they are the rejected ones.
+        #[serde(default)]
+        rejected: bool,
+        /// Delete from Disk failed for `ids` (they and their files are untouched): why. The dialog
+        /// then only offers to remove them from the library.
+        #[serde(default)]
+        error: Option<String>,
     },
     /// Confirm taking a folder's photos out of the library (`library.removeFolder`).
     RemoveFolder {

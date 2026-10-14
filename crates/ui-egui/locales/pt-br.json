@@ -1999,5 +1999,17 @@
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Nenhum processador gráfico encontrado: o LightCraft renderiza na CPU, o que é muito mais lento. Detalhes em Ajuda → Informações do sistema.",
   "On NixOS, start it from `nix develop`.": "No NixOS, inicie-o a partir de `nix develop`.",
   "Files with the same content as another file in this import: only the first is imported.": "Arquivos com o mesmo conteúdo de outro arquivo desta importação: apenas o primeiro é importado.",
-  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "Álbuns inteligentes se atualizam sozinhos: altere as regras ou use Foto ▸ Excluir foto"
+  "Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo": "Álbuns inteligentes se atualizam sozinhos: altere as regras ou use Foto ▸ Excluir foto",
+  "Delete from Disk": "Excluir do disco",
+  "Delete from Disk…": "Excluir do disco…",
+  "Delete Rejected Photos…": "Excluir fotos rejeitadas…",
+  "Remove from Library": "Remover da biblioteca",
+  "Nothing was deleted from disk for them. Remove them from the library instead? The files stay on disk.": "Nada foi excluído do disco para elas. Removê-las da biblioteca em vez disso? Os arquivos continuam no disco.",
+  "Delete the rejected photo from disk, or just remove it from the library?": "Excluir a foto rejeitada do disco ou apenas removê-la da biblioteca?",
+  "Delete the selected photo from disk, or just remove it from the library?": "Excluir a foto selecionada do disco ou apenas removê-la da biblioteca?",
+  "Remove takes them out of the library for good; the files stay on disk.": "Remover as tira da biblioteca de vez; os arquivos continuam no disco.",
+  "Remove moves them to Recently Deleted; the files stay on disk.": "Remover as move para Excluídos recentemente; os arquivos continuam no disco.",
+  "There are no rejected photos here": "Não há fotos rejeitadas aqui",
+  "Trash": "Lixeira",
+  "Recycle Bin": "Lixeira"
 }

@@ -247,5 +247,10 @@
   "{n} photos opened for editing; each is stacked with its original": "{n} fotos abiertas para editar; cada una está apilada con su original",
   "{name} opened in the other editor": "{name} abierto en el otro editor",
   "{n} originals opened in the other editor": "{n} originales abiertos en el otro editor",
-  "· {in_source} identical copies": "· {in_source} copias idénticas"
+  "· {in_source} identical copies": "· {in_source} copias idénticas",
+  "Couldn't move {count} photo{} to the {bin}: {error}": "No se pudo mover {count} foto{} a la {bin}: {error}",
+  "Delete the {count} rejected photos from disk, or just remove them from the library?": "¿Eliminar las {count} fotos rechazadas del disco o solo quitarlas de la biblioteca?",
+  "Delete the {count} selected photos from disk, or just remove them from the library?": "¿Eliminar las {count} fotos seleccionadas del disco o solo quitarlas de la biblioteca?",
+  "Delete from Disk moves the files and their XMP sidecars to the {bin} and removes the photos from the library. Undo can't bring the files back: restore them from the {bin}.": "Eliminar del disco mueve los archivos y sus archivos XMP complementarios a la {bin} y quita las fotos de la biblioteca. Deshacer no recupera los archivos: restáuralos desde la {bin}.",
+  "Moved {n} file{} to the {bin}": "{n} archivo{0} movido{0} a la {bin}"
 }

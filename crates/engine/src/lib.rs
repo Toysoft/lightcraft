@@ -64,6 +64,7 @@ pub mod segment;
 pub mod sidecar;
 pub mod smart;
 pub mod sync;
+pub mod trash;
 mod view;
 pub mod walk;
 
@@ -321,6 +322,9 @@ pub struct Session {
     /// (lightcraft-cli, a script) never ends in the middle of one.
     #[cfg(not(target_arch = "wasm32"))]
     pub apple_photos_background: bool,
+    /// Where Delete from Disk (`photo.deleteFromDisk`) moves files: the system trash, or a folder
+    /// (`LIGHTCRAFT_TRASH_DIR`; tests set it so the real trash is never touched).
+    pub trash: trash::TrashRoot,
 }
 
 impl Default for Session {
@@ -408,6 +412,7 @@ impl Session {
             apple_photos_imports: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             apple_photos_background: false,
+            trash: trash::TrashRoot::from_env(),
         }
     }
 
@@ -1003,6 +1008,8 @@ mod tests_albums_local;
 mod tests_color;
 #[cfg(test)]
 mod tests_crop_angle;
+#[cfg(test)]
+mod tests_delete_from_disk;
 #[cfg(test)]
 mod tests_denoise;
 #[cfg(test)]

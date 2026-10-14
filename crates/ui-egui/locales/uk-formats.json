@@ -247,5 +247,10 @@
   "{n} photos opened for editing; each is stacked with its original": "Відкрито для редагування фото: {n}; кожне об’єднано в стос з оригіналом",
   "{name} opened in the other editor": "{name} відкрито в іншому редакторі",
   "{n} originals opened in the other editor": "Відкрито оригіналів в іншому редакторі: {n}",
-  "· {in_source} identical copies": "· ідентичних копій: {in_source}"
+  "· {in_source} identical copies": "· ідентичних копій: {in_source}",
+  "Couldn't move {count} photo{} to the {bin}: {error}": "Не вдалося перемістити фото ({count}{:.0}) до об'єкта «{bin}»: {error}",
+  "Delete the {count} rejected photos from disk, or just remove them from the library?": "Видалити відхилені фото ({count}) з диска чи лише прибрати їх із бібліотеки?",
+  "Delete the {count} selected photos from disk, or just remove them from the library?": "Видалити вибрані фото ({count}) з диска чи лише прибрати їх із бібліотеки?",
+  "Delete from Disk moves the files and their XMP sidecars to the {bin} and removes the photos from the library. Undo can't bring the files back: restore them from the {bin}.": "«Видалити з диска» переміщує файли та їхні XMP-файли до об'єкта «{bin}» і прибирає фото з бібліотеки. Скасування не поверне файли: відновіть їх з об'єкта «{bin}».",
+  "Moved {n} file{} to the {bin}": "Файлів переміщено до об'єкта «{bin}»: {n}{:.0}"
 }
