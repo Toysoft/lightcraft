@@ -271,7 +271,7 @@ pub(crate) fn as_shot_wb_op(id: lightcraft_catalog::PhotoId, ph: &lightcraft_cat
     (ph.develops_raw() && !ph.relative_wb() && ph.as_shot_wb != Some(read)).then_some(Op::SetAsShotWb { id, wb: Some(read) })
 }
 
-/// The op that records whether the file is a stereo pair (an iPhone spatial photo), or none when the catalog already
+/// The op that records whether the file is a stereo pair (a spatial photo), or none when the catalog already
 /// agrees or the probe did not look (`info.stereo` is `None`: that never erases what the catalog has). A photo
 /// imported before the flag existed has `None` until Reload reads the file (issue #446).
 pub(crate) fn stereo_op(id: lightcraft_catalog::PhotoId, ph: &lightcraft_catalog::Photo, info: &crate::media::ProbeInfo) -> Option<Op> {
@@ -393,7 +393,7 @@ pub fn edit_specs() -> Vec<CommandSpec> {
             "Reload from Disk",
             ["Photo"],
             None,
-            "{ids?} — re-read photos whose files changed on disk (e.g. saved by an external editor), or raws shown from their embedded preview that can be decoded now; camera fields the catalog lacks are filled in, and so is the lens data the file carries (an untouched photo then gets its lens correction turned on as import would; an edited one keeps its settings); whether the file is a stereo pair (an iPhone spatial photo, shown as Spatial) is read too → {reloaded}",
+            "{ids?} — re-read photos whose files changed on disk (e.g. saved by an external editor), or raws shown from their embedded preview that can be decoded now; camera fields the catalog lacks are filled in, and so is the lens data the file carries (an untouched photo then gets its lens correction turned on as import would; an edited one keeps its settings); whether the file is a stereo pair (a spatial photo, shown as Spatial) is read too → {reloaded}",
             has_selection,
             reload
         ),
