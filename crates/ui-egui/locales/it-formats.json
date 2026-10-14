@@ -270,6 +270,7 @@
   "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.": "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.",
   "Open the sample photo “{title}”": "Apri la foto di esempio “{title}”",
   "Press {key} to compare before and after.": "Premi {key} per confrontare prima e dopo.",
+  "Press {key} to see it beside the original.": "Premi {key} per vederla accanto all'originale.",
   "Removed {n} sample photos. Edit → Undo brings them back.": "Rimosse {n} foto di esempio. Modifica → Annulla le ripristina.",
   "Apply to “{mask}” on Selected Photos": "Apply to “{mask}” on Selected Photos",
   "Update “{name}” with Current Settings": "Update “{name}” with Current Settings",

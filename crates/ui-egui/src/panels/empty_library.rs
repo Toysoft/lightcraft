@@ -234,6 +234,7 @@ pub fn land_on_samples(app: &mut LightcraftApp) {
     // the sliders beside it: the banner invites dragging one
     app.ui.right = RightPanel::Edit;
     app.samples_landed = Some(app.session.commits());
+    app.samples_tour = super::samples::Tour::Invited;
 }
 
 /// Select the sample photo of `scene` and show it in Detail.

@@ -501,6 +501,9 @@ pub struct LightcraftApp {
     /// ([`panels::empty_library::land_on_samples`]): until it moves on (a first change), the
     /// samples banner invites one.
     pub(crate) samples_landed: Option<u64>,
+    /// How far the person has come since then: edited, compared ([`panels::samples::Tour`]). The
+    /// count itself only says samples landed in this library.
+    pub(crate) samples_tour: panels::samples::Tour,
     /// The activity stack shows every task, not just the first few ("+N more" was clicked).
     pub activity_expanded: bool,
 }
@@ -586,6 +589,7 @@ impl LightcraftApp {
             welcome_drawn: false,
             welcome_focused: false,
             samples_landed: None,
+            samples_tour: Default::default(),
             activity_expanded: false,
             model_setup: Default::default(),
         }

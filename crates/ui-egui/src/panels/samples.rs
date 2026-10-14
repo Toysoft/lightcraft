@@ -1,7 +1,8 @@
 //! The banner under the top bar while the library holds the sample photos: it says what they
 //! are, and offers the next step. With only samples: Import Photos… or Remove Samples. Once photos
 //! of the person's own are in: Remove Samples or Keep Them. Closed for good with Hide / Keep Them
-//! (until samples are added again).
+//! (until samples are added again). After landing on a sample it walks the first edit through:
+//! drag a slider, then compare with the original.
 
 use egui::RichText;
 use lightcraft_catalog::Source;
@@ -23,30 +24,71 @@ fn own_photos(app: &LightcraftApp) -> bool {
     app.session.catalog.photos().any(|p| p.in_library() && !matches!(p.source, Source::Demo { .. }))
 }
 
+/// The first edit on a sample, from landing on one ([`crate::panels::empty_library::land_on_samples`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tour {
+    /// The sample open has its own settings: the banner invites dragging a slider.
+    #[default]
+    Invited,
+    /// It is edited: the banner says so, and how to see it beside the original.
+    Edited,
+    /// Comparing it with the original: the banner says what is on screen.
+    Comparing,
+    /// Compared and back: the usual message from here on.
+    Done,
+}
+
+/// Where the first edit stands now, from the sample open (edited or not: a rating or a keyword
+/// isn't an edit, and another sample or an undo can take the edit away again) and whether it is
+/// compared with the original. Comparing once ends it. `None` before samples landed here.
+fn tour(app: &LightcraftApp) -> Option<Tour> {
+    app.samples_landed?;
+    let edited = app.session.active().and_then(|id| app.session.develop_of(id)).is_some_and(|d| *d != lightcraft_develop::DevelopSettings::default());
+    // a Before / After layout: Show Original alone shows nothing beside the edit
+    let comparing = app.ui.before_after.is_layout();
+    Some(match app.samples_tour {
+        Tour::Done => Tour::Done,
+        Tour::Comparing if !comparing => Tour::Done,
+        _ if edited && comparing => Tour::Comparing,
+        _ if edited => Tour::Edited,
+        _ => Tour::Invited,
+    })
+}
+
 /// What the banner says now, or `None` while it isn't shown: hidden, no sample in the library
 /// (all in Recently Deleted: the grid says the library is empty), or an in-memory demo session (a
-/// demo by design). On a sample open in Detail before the first change since the samples came,
-/// it invites that change, with the key Compare Before and After is bound to.
+/// demo by design). On a sample open in Detail after landing there, it walks the first edit
+/// through: an invitation to drag a slider, then (once one is dragged) how to compare with the
+/// original, with the key Compare Before and After is bound to, then what the comparison shows.
 pub fn message(app: &LightcraftApp, mac: bool) -> Option<String> {
+    use crate::i18n::{tr, tr_format};
     if app.ui.samples_banner_hidden || app.session.catalog.sample_photos_in_library() == 0 || app.session.library.is_none() {
         return None;
     }
     if own_photos(app) {
-        return Some(crate::i18n::tr("Your photos are in. The sample photos are still here too.").to_string());
+        return Some(tr("Your photos are in. The sample photos are still here too.").to_string());
     }
     let on_a_sample = app.ui.view == crate::state::ViewMode::Detail
         && app.session.active().and_then(|id| app.session.catalog.photo(id)).is_some_and(|p| matches!(p.source, Source::Demo { .. }));
-    if on_a_sample && app.samples_landed == Some(app.session.commits()) {
-        let first = crate::i18n::tr("Drag any slider: the original never changes.");
-        return Some(match crate::shortcuts::shortcut_of(&app.ui.settings.keymap, "view.beforeAfter") {
-            Some(sc) => {
-                let key = crate::menubar::shortcut_text(sc, mac);
-                format!("{first} {}", crate::i18n::tr_format!("Press {key} to compare before and after.", key = key))
-            }
-            None => first.to_string(),
-        });
+    let key = crate::shortcuts::shortcut_of(&app.ui.settings.keymap, "view.beforeAfter").map(|sc| crate::menubar::shortcut_text(sc, mac));
+    match tour(app).filter(|_| on_a_sample) {
+        Some(Tour::Invited) => {
+            let first = tr("Drag any slider: the original never changes.");
+            Some(match key {
+                Some(key) => format!("{first} {}", tr_format!("Press {key} to compare before and after.", key = key)),
+                None => first.to_string(),
+            })
+        }
+        Some(Tour::Edited) => {
+            let how = match key {
+                Some(key) => tr_format!("Press {key} to see it beside the original.", key = key),
+                None => tr("View → Compare Before and After shows it beside the original.").to_string(),
+            };
+            Some(format!("{} {how}", tr("That's your first edit.")))
+        }
+        Some(Tour::Comparing) => Some(tr("The original beside your edit: the file itself never changes.").to_string()),
+        Some(Tour::Done) | None => Some(tr("These are sample photos, to try LightCraft on. Import your own whenever you're ready.").to_string()),
     }
-    Some(crate::i18n::tr("These are sample photos, to try LightCraft on. Import your own whenever you're ready.").to_string())
 }
 
 pub fn banner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
@@ -57,6 +99,9 @@ pub fn banner(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         app.ui.samples_banner_hidden = false;
     }
     app.samples_present = Some(present);
+    if let Some(now) = tour(app) {
+        app.samples_tour = now;
+    }
     let Some(text) = message(app, ui.ctx().os() == egui::os::OperatingSystem::Mac) else { return };
     let own = own_photos(app);
     let t = Tokens::get(ui.ctx());

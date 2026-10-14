@@ -1,6 +1,7 @@
 //! Every way into the sample photos lands in the same place: the welcome's thumbnails, its Try
 //! Sample Photos button, Help ▸ Add Sample Photos and agents open a sample in Detail, ready to
-//! edit. There, until the first change, the banner invites one.
+//! edit, as its thumbnail showed it. There the banner walks the first edit through: an invitation
+//! to drag a slider, how to compare the change with the original, what the comparison shows.
 
 use std::time::Duration;
 
@@ -71,7 +72,7 @@ fn samples_added_to_a_library_with_photos_leave_the_view_alone() {
 }
 
 #[test]
-fn the_banner_invites_the_first_edit_until_one_is_made() {
+fn the_banner_walks_the_first_edit_through() {
     let mut h = headless(library("invite"));
     h.app.run("library.addSamples", json!({})).unwrap();
     h.step();
@@ -80,7 +81,7 @@ fn the_banner_invites_the_first_edit_until_one_is_made() {
     let text = samples::message(&h.app, true).unwrap_or_default();
     assert!(text.starts_with("Drag any slider"), "{text}");
     assert!(text.contains("Y"), "the key Compare Before and After is bound to: {text}");
-    // after a first change, the banner says what it says elsewhere
+    // after a first change: it says so, and how to see it beside the original
     let r = h.request(
         "engine.execute",
         json!({"command": "develop.set", "params": {"control": "light.exposure", "value": 0.5}}),
@@ -89,7 +90,44 @@ fn the_banner_invites_the_first_edit_until_one_is_made() {
     assert_eq!(r["ok"], true, "{r}");
     h.step();
     let text = samples::message(&h.app, true).unwrap_or_default();
+    assert!(text.starts_with("That's your first edit."), "{text}");
+    assert!(text.contains("Press Y to see it beside the original"), "{text}");
+    // comparing: what is on screen
+    h.app.run("view.beforeAfter", json!({})).unwrap();
+    h.step();
+    let text = samples::message(&h.app, true).unwrap_or_default();
+    assert!(text.starts_with("The original beside your edit"), "{text}");
+    // and back: the usual message from then on, whatever comes next
+    h.app.run("view.beforeAfter", json!({})).unwrap();
+    h.step();
+    let text = samples::message(&h.app, true).unwrap_or_default();
     assert!(text.starts_with("These are sample photos"), "{text}");
+    h.app.run("view.beforeAfter", json!({})).unwrap();
+    h.step();
+    let text = samples::message(&h.app, true).unwrap_or_default();
+    assert!(text.starts_with("These are sample photos"), "compared once is enough: {text}");
+}
+
+#[test]
+fn comparing_before_any_change_still_invites_one() {
+    let mut h = headless(library("early"));
+    h.app.run("library.addSamples", json!({})).unwrap();
+    h.step();
+    h.app.run("view.beforeAfter", json!({})).unwrap();
+    h.step();
+    let text = samples::message(&h.app, true).unwrap_or_default();
+    assert!(text.starts_with("Drag any slider"), "nothing to compare yet: {text}");
+}
+
+#[test]
+fn the_sample_clicked_in_the_welcome_opens_as_its_thumbnail_showed_it() {
+    // every sample the welcome offers opens unedited: the first slider dragged is the first change
+    for (scene, title) in lightcraft_engine::demo::welcome_scenes() {
+        let mut h = headless(library(&format!("unedited-{scene}")));
+        h.app.run("library.addSamples", json!({})).unwrap();
+        let photo = h.app.session.catalog.photos().find(|p| matches!(p.source, lightcraft_catalog::Source::Demo { scene: s } if s == scene)).unwrap();
+        assert_eq!(*photo.develop, lightcraft_develop::DevelopSettings::default(), "“{title}” opens edited");
+    }
 }
 
 #[test]
@@ -122,4 +160,57 @@ fn samples_added_while_a_local_folder_is_shown_leave_the_view_alone() {
     h.app.run("library.addSamples", json!({})).unwrap();
     h.step();
     assert_eq!(h.app.ui.view, ViewMode::PhotoGrid);
+}
+
+fn set_exposure(h: &mut Headless, value: f64) {
+    let r = h.request(
+        "engine.execute",
+        json!({"command": "develop.set", "params": {"control": "light.exposure", "value": value}}),
+        Duration::from_secs(20),
+    );
+    assert_eq!(r["ok"], true, "{r}");
+    h.step();
+}
+
+#[test]
+fn only_an_edit_on_the_sample_open_counts_as_one() {
+    let mut h = headless(library("not-an-edit"));
+    h.app.run("library.addSamples", json!({})).unwrap();
+    h.step();
+    // a rating is a change to the library, not an edit
+    h.app.run("photo.rate", json!({"rating": 3})).unwrap();
+    h.step();
+    let text = samples::message(&h.app, true).unwrap_or_default();
+    assert!(text.starts_with("Drag any slider"), "{text}");
+    // an edit is
+    set_exposure(&mut h, 0.5);
+    assert!(samples::message(&h.app, true).unwrap_or_default().starts_with("That's your first edit."));
+    // another sample, unedited, is invited again
+    let other = h
+        .app
+        .session
+        .catalog
+        .photos()
+        .find(|p| Some(p.id) != h.app.session.active() && *p.develop == lightcraft_develop::DevelopSettings::default())
+        .map(|p| p.id)
+        .unwrap();
+    h.app.session.selection = lightcraft_engine::Selection::single(other);
+    h.step();
+    assert!(samples::message(&h.app, true).unwrap_or_default().starts_with("Drag any slider"));
+    // and an edit undone is no edit any more
+    set_exposure(&mut h, 0.5);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.step();
+    assert!(samples::message(&h.app, true).unwrap_or_default().starts_with("Drag any slider"));
+}
+
+#[test]
+fn show_original_alone_is_not_a_comparison() {
+    let mut h = headless(library("original"));
+    h.app.run("library.addSamples", json!({})).unwrap();
+    h.step();
+    set_exposure(&mut h, 0.5);
+    h.app.ui.before_after = crate::state::BeforeAfter::Original;
+    h.step();
+    assert!(samples::message(&h.app, true).unwrap_or_default().starts_with("That's your first edit."));
 }
