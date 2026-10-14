@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "lightcraft-video-encode"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "filmcraft-color",
  "filmcraft-h264",
