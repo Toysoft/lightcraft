@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use craft_ui::theme::SuiteDarkPalette;
+use craft_ui::theme::SuitePalette;
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, Visuals};
 
 pub const FONT_SEMIBOLD: &str = "semibold";
@@ -170,7 +170,7 @@ impl Tokens {
 impl Tokens {
     /// Foreground for a filled accent control in the standard Charcoal palette.
     pub fn on_accent(&self) -> Color32 {
-        let suite = SuiteDarkPalette::ARTCRAFT;
+        let suite = SuitePalette::ARTCRAFT_DARK;
         if self.chrome == suite.chrome { suite.on_accent } else { Color32::WHITE }
     }
 
@@ -178,7 +178,7 @@ impl Tokens {
     pub fn for_kind(kind: ThemeKind) -> Tokens {
         let rgb = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
         let base = Tokens::legacy_base();
-        let suite = SuiteDarkPalette::ARTCRAFT;
+        let suite = SuitePalette::ARTCRAFT_DARK;
         match kind {
             ThemeKind::Charcoal => Tokens {
                 // ArtCraft standard dark UI; photo, grid and label roles stay local.
@@ -436,7 +436,7 @@ pub fn apply_kind(ctx: &egui::Context, kind: ThemeKind) {
         o.input_options.scroll_zoom_speed = WHEEL_ZOOM_PER_POINT;
     });
     let t = Tokens::for_kind(kind);
-    let suite = SuiteDarkPalette::ARTCRAFT;
+    let suite = SuitePalette::ARTCRAFT_DARK;
     ctx.data_mut(|d| {
         d.insert_temp(egui::Id::NULL, t);
         d.insert_temp(theme_id(), kind);
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn charcoal_maps_shared_ui_roles_and_keeps_photo_semantics() {
-        let suite = SuiteDarkPalette::ARTCRAFT;
+        let suite = SuitePalette::ARTCRAFT_DARK;
         let charcoal = Tokens::for_kind(ThemeKind::Charcoal);
         for (actual, expected) in [
             (charcoal.chrome, suite.chrome),
