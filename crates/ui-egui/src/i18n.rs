@@ -215,15 +215,16 @@ fn is_rtl_shaped(c: char) -> bool {
 }
 
 /// The glyph a bracket has to show in a right-to-left context: egui draws the glyph of the
-/// character it is given, so the mirror pair has to be swapped in the text itself.
+/// character it is given, so the mirror pair has to be swapped in the text itself. The pairs
+/// come from `BidiMirroring.txt`; curly brackets are left alone, since in an interface label
+/// they are almost always a `{placeholder}`'s own syntax, and mirroring them would break the
+/// fill.
 fn mirror(c: char) -> char {
     match c {
         '(' => ')',
         ')' => '(',
         '[' => ']',
         ']' => '[',
-        '{' => '}',
-        '}' => '{',
         '<' => '>',
         '>' => '<',
         _ => c,
@@ -232,15 +233,36 @@ fn mirror(c: char) -> char {
 
 /// `label` in logical order, rearranged for egui's run-by-run, left-to-right layout: the runs in
 /// visual order (left to right), the characters inside each run in logical order for the shaper,
-/// brackets mirrored. Lines are reordered on their own (`\n` ends one). A label with nothing
-/// right-to-left in it comes back as it was.
+/// brackets mirrored. Lines are reordered on their own (`\n` ends one). A `{placeholder}` is
+/// the label's own syntax: it rides through the pass as one character, so the reordering can
+/// neither split, reverse nor mirror it, and every placeholder comes back exactly as written.
+/// A label with nothing right-to-left in it comes back as it was.
 pub fn visual_rtl(label: &str) -> String {
     if !label.chars().any(is_rtl_shaped) {
         return label.into();
     }
+    // Each placeholder becomes one private-use character (a left-to-right one, like the name
+    // inside it) for the pass, and is restored afterwards; the mapping is per placeholder, so
+    // a reordered sentence still finds its own.
+    let mut tokens: Vec<&str> = Vec::new();
+    let mut guarded = String::with_capacity(label.len());
+    let mut rest = label;
+    while let Some(open) = rest.find('{') {
+        guarded.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        if let Some(close) = after.find('}') {
+            tokens.push(&rest[open..open + close + 2]);
+            guarded.push(char::from_u32(0xE000 + tokens.len() as u32 - 1).unwrap_or('\u{E000}'));
+            rest = &after[close + 1..];
+        } else {
+            guarded.push('{');
+            rest = after;
+        }
+    }
+    guarded.push_str(rest);
     let mut out = String::with_capacity(label.len());
     let mut first = true;
-    for line in label.split('\n') {
+    for line in guarded.split('\n') {
         if !first {
             out.push('\n');
         }
@@ -291,7 +313,19 @@ pub fn visual_rtl(label: &str) -> String {
             }
         }
     }
-    out
+    if tokens.is_empty() {
+        return out;
+    }
+    let mut restored = String::with_capacity(out.len());
+    for c in out.chars() {
+        let k = c as u32;
+        if (0xE000..0xE000 + tokens.len() as u32).contains(&k) {
+            restored.push_str(tokens[(k - 0xE000) as usize]);
+        } else {
+            restored.push(c);
+        }
+    }
+    restored
 }
 
 /// Catalog values are `'static` (they live in the embedded file), so a translation can be handed
@@ -711,6 +745,8 @@ mod tests {
         assert_eq!(visual_rtl("موازنة اللون الأبيض"), "الأبيض اللون موازنة");
         assert_eq!(visual_rtl("حفظ كـ PDF…"), "…PDF كـ حفظ");
         assert_eq!(visual_rtl("إنشاء 3 نسخ"), "نسخ 3 إنشاء");
+        // A `{placeholder}` rides through as one unit, never mirrored.
+        assert_eq!(visual_rtl("لون مميز {n}"), "{n} مميز لون");
         assert_eq!(visual_rtl("حفظ (النسخة الحالية)"), "(الحالية النسخة) حفظ");
         assert_eq!(visual_rtl("سطر أول\nPDF"), "أول سطر\nPDF");
         assert_eq!(visual_rtl("Exposure"), "Exposure");
