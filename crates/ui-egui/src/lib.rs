@@ -179,6 +179,17 @@ pub type HostAction = Box<dyn FnMut(&mut Session) -> Result<Value, String>>;
 /// last heard and wakes the UI itself when that changes; it is never polled for changes.
 pub type SystemThemeFn = Box<dyn Fn(&egui::Context) -> Option<egui::Theme>>;
 
+/// HDR display output (desktop: an extended-range float window surface; LR-VIEW-HDR-DISPLAY).
+/// With it, the loupe shows an HDR edit above SDR white, up to the display's headroom.
+pub trait HdrOutput {
+    /// The display's peak over SDR white right now when the window shows HDR (`> 1`), else
+    /// `None` (an SDR display, HDR switched off in the OS, or unknown). Asked every frame.
+    fn headroom(&mut self) -> Option<f32>;
+    /// Upload a linear-light render (3 floats per pixel, row-major, SDR white = 1, sRGB
+    /// primaries) as the loupe's HDR texture, replacing the previous one.
+    fn upload(&mut self, width: usize, height: usize, rgb: &[f32]) -> Result<egui::TextureId, String>;
+}
+
 /// Platform services injected by the host app (desktop or web).
 #[derive(Default)]
 pub struct Services {
@@ -246,6 +257,8 @@ pub struct Services {
     pub restore_library: Option<HostAction>,
     /// The system appearance for Appearance Mode ▸ Auto, ahead of egui's own report.
     pub system_theme: Option<SystemThemeFn>,
+    /// HDR display output (none: the window is SDR).
+    pub hdr_output: Option<Box<dyn HdrOutput>>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -401,6 +414,12 @@ pub struct LightcraftApp {
     /// Say once, when the GPU device has been tried, that no graphics processor was found
     /// ([`panels::notices::gpu_notice`]). The desktop app sets it; headless sessions and tests don't.
     pub gpu_notice: bool,
+    /// The window shows SDR only (desktop: `hdr_display::report`), so the HDR button says HDR
+    /// edits are seen through the SDR rendition. Headless/tests: false.
+    pub hdr_display_sdr: bool,
+    /// The display's headroom when the window shows HDR now ([`HdrOutput::headroom`]): the loupe
+    /// then draws HDR edits from their HDR render ([`render::Slot::HdrView`]).
+    pub hdr_headroom: Option<f32>,
     /// The memory budget setting last applied (MB, 0 = automatic).
     memory_applied: Option<u32>,
     /// The display profile setting last applied (`app.displayProfile`).
@@ -484,6 +503,8 @@ impl LightcraftApp {
             window_is_fullscreen: false,
             gpu_applied: None,
             gpu_notice: false,
+            hdr_display_sdr: false,
+            hdr_headroom: None,
             memory_applied: None,
             display_applied: None,
             display_error: None,
@@ -990,6 +1011,11 @@ impl LightcraftApp {
         i18n::set_language(self.ui.language);
         let t0 = now_ms();
         panels::library_problem::logic(self);
+        // the display can switch between SDR and HDR (OS setting, another monitor) at any time
+        if let Some(h) = self.services.hdr_output.as_mut() {
+            self.hdr_headroom = h.headroom();
+            self.hdr_display_sdr = self.hdr_headroom.is_none();
+        }
         self.logic_inner(ctx);
         self.perf.logic_ms = now_ms() - t0;
     }

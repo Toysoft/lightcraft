@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (integration batch 35: KEYC-SELECTONLYACTIVE, Select Only Active Photo ⌘⇧D; LR-BEHAV-AUTOSAVE, damaged snapshots repaired on open; LR-EDIT-OPTICS-PROFILE, Nikon Z 6II / Z 8 / Z f in-file distortion; LRC-LIB-CATALOG-IMPORT, WAL-only catalogs open; LR-EXP-DIM, enlargements stop at 512 MP; LR-IMP-CAMERA-COVERAGE, Canon EOS RP CR3 verified; model folder retry) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (LR-VIEW-HDR-DISPLAY ⬜ → 🟡: HDR display output) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -28,7 +28,7 @@ cited here still exists. Formerly docs/parity.md.
 |---|---:|---:|---:|---:|---:|---:|
 | A. Import (IMP) | 12 | 3 | 1 | 1 | 4/6 (67%) | 5/5 (100%) |
 | B. Library management (LIB) | 22 | 2 | 1 | 2 | 9/9 (100%) | 9/9 (100%) |
-| C. Views & navigation (VIEW) | 15 | 1 | 1 | 0 | 8/9 (89%) | 4/4 (100%) |
+| C. Views & navigation (VIEW) | 15 | 2 | 0 | 0 | 8/9 (89%) | 4/4 (100%) |
 | D. Search & filter (FILT) | 11 | 1 | 1 | 0 | 4/4 (100%) | 4/4 (100%) |
 | E. Metadata (META) | 5 | 1 | 0 | 0 | 2/2 (100%) | 2/2 (100%) |
 | F. Edit panel — global adjustments (EDIT) | 43 | 2 | 3 | 1 | 28/28 (100%) | 13/14 (93%) |
@@ -53,9 +53,9 @@ cited here still exists. Formerly docs/parity.md.
 | Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 76 | 4 | 3 | 1 | 49/52 (94%) | 23/25 (92%) |
 | Lightroom Classic extras | 34 | 16 | 35 | 8 | — | 24/26 (92%) |
-| **Total** | 409 | 53 | 72 | 35 | 193/201 (96%) | 146/159 (92%) |
+| **Total** | 409 | 54 | 71 | 35 | 193/201 (96%) | 146/159 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.6%** of 534 in-scope rows — P0 98.0% of 201 · P1 95.0% of 159 · P2 50.0% of 173.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.6%** of 534 in-scope rows — P0 98.0% of 201 · P1 95.0% of 159 · P2 50.3% of 173.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -69,6 +69,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 
 | Id | Feature | Tier | Status | Evidence | Missing / notes |
 |---|---|---|---|---|---|
+| 2026-10-14 | minor | LR-VIEW-HDR-DISPLAY ⬜ → 🟡: HDR display output (extended-linear float surface via vendored egui-wgpu, paper-white UI, loupe up to the display's headroom, `--hdr-probe`); LR-HDR-EDIT note updated |
 | LR-IMP-ADD-DIALOG | Add photos/folders | P0 | ✅ | `cmd:file.addPhotos`, `cmd:library.importPreview`, `cmd:library.import` (`mode`, `album`, `albumName`, `preset`, `keywords`), `crates/ui-egui/src/import.rs` | review dialog (Import Photos): the scanned source (a scanned folder is not added to Local), candidate grid with thumbnails and checkboxes (duplicates by path/content marked and unchecked; with several file types, a toggle per type checks or unchecks all of its files, e.g. the raws without the JPEGs beside them, issue #344) filling a resizable window (issue #337), transfer mode (add in place / copy / move, each explained), album (existing/new), preset, keywords; the folder scan runs on a background thread, shown in the activity stack with ✕ to cancel (a NAS folder no longer freezes the window); the import itself (probing, sidecars, copying / moving files) runs on a worker thread and its batches join the library between frames, shown in the activity stack with ✕ to cancel; one undo step. Drag-and-drop goes through the same background import. File dialogs list the importable extensions (`lightcraft_engine::import::EXTENSIONS`) in any letter case on Linux, where GTK and the desktop portal match globs case-sensitively (`apps/lightcraft/src/dialog_filter.rs`, issue #342; 0.4.0 hid `.JPG` / `.NEF`, issue #705). The folder scan, Browse Folder, drag-and-drop and the sidecar lookup match extensions in any case (`crates/engine/src/tests_import.rs`) |
 | LR-IMP-DRAGDROP | Drop files/folders to import | P0 | ✅ | `crates/ui-egui/src/lib.rs` (dropped files → `cmd:library.import`) | dropping onto a specific album not supported |
 | LR-IMP-DUPES | Skip duplicates by content | P1 | ✅ | `crates/engine/src/import.rs`, `crates/engine/src/tests_import.rs` | |
@@ -139,7 +140,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-VIEW-SECONDWINDOW | Second display window [Classic] | P2 | ✅ | `cmd:view.secondWindow`, `crates/ui-egui/src/panels/second.rs` | Window ▸ Second Window (⌘F11): the active photo fitted in its own native window with its own render (a floating panel where there are no native windows); loupe view only (no grid / compare / survey there) |
 | LR-VIEW-CLIPPING | Clipping indicators | P0 | ✅ | `cmd:view.clipping` | |
 | LR-VIEW-HISTOGRAM | Histogram | P0 | ✅ | `cmd:view.histogram`, `crates/ui-egui/src/panels/edit.rs`, `crates/pipeline/src/lib.rs` (`hdr_histogram`) | HDR edits: SDR on the left half, the HDR range (0 to 5 stops above SDR white, a fixed scale) on the right with the headroom limit marked; colour bar (white, or Visualize HDR range's colours when that is on) and SDR / HDR labels; no drag-to-adjust on the histogram; it follows slider drags live (a small render beside the drafts, `Slot::HdrHistogram`) and never drops to the SDR layout mid-drag |
-| LR-VIEW-HDR-DISPLAY | HDR display output | P2 | ⬜ | |, `apps/lightcraft/src/hdr_display.rs` (`choose`, `preferred_hdr_format`) | SDR/HDR decision (platform, surface format, OS headroom, `LIGHTCRAFT_HDR_DISPLAY=0`) is unit-tested and logged at start; always SDR today because eframe configures an 8-bit surface; no OS headroom query yet;  |
+| LR-VIEW-HDR-DISPLAY | HDR display output | P2 | 🟡 | `apps/lightcraft/src/hdr_display.rs` (`levels`, `encode_pixel`, `WindowHdr`), `apps/lightcraft/src/hdr_probe.rs`, `vendor/egui-wgpu` (`hdr_surface_format`), `crates/ui-egui/src/panels/detail.rs` (`hdr_view_job`) | An HDR edit shows above SDR white on an HDR display (Windows HDR via scRGB; Wayland: headroom from the compositor's colour management, HDR metadata via `crates/hdrmeta`; macOS EDR built, not yet checked on a screen): `Rgba16Float` extended-linear surface where offered, UI at paper white, highlights up to the display's headroom; SDR displays unchanged; `LIGHTCRAFT_HDR_DISPLAY=0` opts out; `--hdr-probe` diagnostic; the HDR button's tooltip says when the window shows the SDR rendition. Not yet: zoomed tiles, Before/After, Compare and the second window stay SDR; no HDR preview toggle (MENU-VIEW-HDR); the X11 / XWayland window is SDR |
 
 ## D. Search & filter (FILT)
 
@@ -363,7 +364,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 
 | Id | Feature | Tier | Status | Evidence | Missing / notes |
 |---|---|---|---|---|---|
-| LR-HDR-EDIT | HDR editing | P2 | 🟡 | `cmd:develop.hdr`, `crates/pipeline/src/tone.rs` (`ToneMap::hdr`), `crates/pipeline/src/tests_hdr.rs` | HDR tone map (SDR curve through the midtones, highlights up to the headroom limit) and float HDR render, CPU only; no on-screen HDR display yet (LR-VIEW-HDR-DISPLAY); `crs:HDREditMode` from XMP / Lightroom catalogs turns HDR editing on or off (the headroom limit and SDR rendition aren't read from crs yet) |
+| LR-HDR-EDIT | HDR editing | P2 | 🟡 | `cmd:develop.hdr`, `crates/pipeline/src/tone.rs` (`ToneMap::hdr`), `crates/pipeline/src/tests_hdr.rs` | HDR tone map (SDR curve through the midtones, highlights up to the headroom limit) and float HDR render, CPU only; shown on HDR displays (LR-VIEW-HDR-DISPLAY); `crs:HDREditMode` from XMP / Lightroom catalogs turns HDR editing on or off (the headroom limit and SDR rendition aren't read from crs yet) |
 | LR-HDR-SDRPREVIEW | SDR preview of HDR | P2 | 🟡 | `ctl:hdr.sdr*` | SDR rendition sliders (brightness, contrast, highlights, shadows, whites, clarity) used by every SDR view and export; no separate SDR-preview toggle until HDR display lands |
 | LR-HDR-VISUALIZE | Visualize HDR range | P2 | ✅ | `cmd:view.visualizeHdr`, `crates/pipeline/src/visualize.rs` (`hdr_range`) | grey below SDR white, four colour bands by stops above it |
 | LR-HDR-LIMIT | HDR headroom limit | P2 | ✅ | `ctl:hdr.maxEv`, `cmd:develop.hdr` | 0 to 5 stops; marked on the HDR histogram (whose scale stays at 5 stops) |
