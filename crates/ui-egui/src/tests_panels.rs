@@ -1681,6 +1681,40 @@ fn a_renamed_folder_keeps_its_place_in_the_tree() {
     assert!(has(&h, &format!("source:libfolder:{b}/pics2/trip")), "the chosen folder is still on screen after the rename");
 }
 
+/// Photos dragged from the grid onto a Folders row move there on disk.
+#[test]
+fn dropping_photos_on_a_folder_moves_their_files_there() {
+    struct Cleanup(std::path::PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let base = std::env::temp_dir().join(format!("lc-ui-drop-folder-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let _cleanup = Cleanup(base.clone());
+    for (dir, file) in [("imports", "a.jpg"), ("portraits", "b.jpg")] {
+        std::fs::create_dir_all(base.join("pics").join(dir)).unwrap();
+        std::fs::write(base.join("pics").join(dir).join(file), b"x").unwrap();
+    }
+    let b = base.to_string_lossy().replace('\\', "/");
+    let mut h = folders_app(&[&format!("{b}/pics/imports/a.jpg"), &format!("{b}/pics/portraits/b.jpg")]);
+    click(&mut h, &format!("libraryFolderToggle:{b}/pics"));
+    let a = h.app.session.visible_cloned().into_iter().find(|id| {
+        h.app.session.catalog.photo(*id).is_some_and(|p| matches!(&p.source, lightcraft_catalog::Source::File { path } if path.ends_with("a.jpg")))
+    });
+    let a = a.expect("a.jpg is in the grid");
+    let r = h.request("engine.execute", json!({"command": "library.select", "params": {"ids": [a.0]}}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    let to = widget(&h, &format!("source:libfolder:{b}/pics/portraits")).center();
+    let r = h.request("ui.dragWidget", json!({"id": format!("thumb:{}", a.0), "toX": to.x, "toY": to.y, "steps": 12}), T);
+    assert_eq!(r["ok"], true, "{r}");
+    h.step();
+    assert!(base.join("pics/portraits/a.jpg").is_file(), "moved into portraits");
+    assert!(!base.join("pics/imports/a.jpg").exists(), "gone from imports");
+    assert!(h.app.ui.dragging_photos.is_none(), "the drag ended");
+}
+
 /// The menu opens from anywhere on a folder row, the disclosure triangle included; a disk row
 /// has its own, the startup disk none.
 #[test]

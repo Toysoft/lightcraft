@@ -1780,6 +1780,27 @@ fn folder_row(app: &mut LightcraftApp, ui: &mut egui::Ui, n: &FolderNode, id: &s
         }
     }
     row_menu(app, &resp, n);
+    folder_drop_target(app, ui, &resp, n);
+}
+
+/// A Folders row while photos are dragged from the grid: outlined under the pointer; a release
+/// there moves their files into the folder (`photo.moveToFolder`, the same as Move Selected
+/// Photos Here).
+fn folder_drop_target(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Response, n: &FolderNode) {
+    let Some(ids) = app.ui.dragging_photos.clone() else { return };
+    // a row that only opens and closes (it covers other disks too) is no destination
+    if !n.selectable || !pointer_over_row(ui, resp.rect) {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    ui.painter().rect_stroke(resp.rect.shrink2(vec2(8.0, 1.0)), 4.0, egui::Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
+    if ui.input(|i| i.pointer.any_released()) {
+        match app.run("photo.moveToFolder", json!({"folder": n.path, "ids": ids})) {
+            Ok(r) => app.toast(ui.ctx(), crate::i18n::tr_format!("Moved {} photo(s)", r["moved"])),
+            Err(e) => app.toast(ui.ctx(), e),
+        }
+        app.ui.dragging_photos = None;
+    }
 }
 
 /// The context menu of a Folders row: a folder's own, a disk's (remove it), none for the

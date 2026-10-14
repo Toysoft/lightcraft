@@ -1,5 +1,10 @@
 # What's new in LightCraft
 
+## 2026-10-14
+
+### Drag photos to a folder
+- Select photos in the grid and drop them on a folder in the sidebar's Folders section to move their files there,
+  with their XMP sidecars. Undo moves them back. The folder's menu (Move Selected Photos Here) does the same.
 ## 2026-10-13
 
 ### Slider drags on large raws
