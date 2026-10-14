@@ -82,6 +82,27 @@ pub fn plausible(h: &Homography, w: f64, ht: f64, max_frac: f64) -> bool {
 
 /// Align `frame` to `reference` (both as work images with features already detected).
 pub fn align_pair(ref_feat: &Features, feat: &Features, scale: f64, full_w: usize, full_h: usize, seed: u64) -> Alignment {
+    align_pair_with(
+        &[(Model::Translation, "translation", 5), (Model::Similarity, "similarity", 8), (Model::Homography, "homography", 16)],
+        ref_feat,
+        feat,
+        scale,
+        full_w,
+        full_h,
+        seed,
+    )
+}
+
+/// [`align_pair`] choosing among `models` (simplest first: model, name, minimum inliers).
+pub fn align_pair_with(
+    models: &[(Model, &'static str, usize)],
+    ref_feat: &Features,
+    feat: &Features,
+    scale: f64,
+    full_w: usize,
+    full_h: usize,
+    seed: u64,
+) -> Alignment {
     let m = features::match_features(ref_feat, feat, 0.8);
     let a: Vec<Point> = m.iter().map(|(i, _)| Point::new(ref_feat.points[*i].x as f64, ref_feat.points[*i].y as f64)).collect();
     let b: Vec<Point> = m.iter().map(|(_, j)| Point::new(feat.points[*j].x as f64, feat.points[*j].y as f64)).collect();
@@ -89,7 +110,7 @@ pub fn align_pair(ref_feat: &Features, feat: &Features, scale: f64, full_w: usiz
     // Fit every model; keep the simplest one that explains (almost) as many matches as the most
     // general one — extra degrees of freedom fitted to clustered points extrapolate badly.
     let mut fits: Vec<(&'static str, ransac::Fit)> = Vec::new();
-    for (model, name, min) in [(Model::Translation, "translation", 5), (Model::Similarity, "similarity", 8), (Model::Homography, "homography", 16)] {
+    for &(model, name, min) in models {
         if let Some(f) = ransac::ransac(model, &a, &b, 1.5, min, seed)
             && plausible(&f.h, ww, wh, 0.12)
         {

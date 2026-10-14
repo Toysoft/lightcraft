@@ -1,4 +1,4 @@
-//! Photo Merge commands: `merge.hdr`, `merge.panorama`, `merge.hdrPanorama`.
+//! Photo Merge commands: `merge.hdr`, `merge.panorama`, `merge.hdrPanorama`, `merge.focusStack`.
 //!
 //! Run synchronously here (CLI, MCP, control channel); the desktop UI plans the same job with
 //! [`Session::plan_merge`] and runs it on a worker thread. `preview: true` merges ≤ 1024 px frames
@@ -68,6 +68,15 @@ pub fn specs() -> Vec<CommandSpec> {
             "{ids?, bracket=0 (auto from EXIF), align, deghost, projection, boundaryWarp, autoCrop, fillEdges, autoSettings, stack, preview, previewPath?}",
             can_merge,
             |s, p| run(s, "merge.hdrPanorama", p)
+        ),
+        cmd!(
+            "merge.focusStack",
+            "Focus Stack Merge",
+            [],
+            None,
+            "{ids?, align=true, autoSettings=true, stack=false, preview=false, previewPath?}",
+            can_merge,
+            |s, p| run(s, "merge.focusStack", p)
         ),
     ]
 }

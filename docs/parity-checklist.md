@@ -1,6 +1,6 @@
 # Lightroom parity checklist
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (integration batch 35: KEYC-SELECTONLYACTIVE, Select Only Active Photo ⌘⇧D; LR-BEHAV-AUTOSAVE, damaged snapshots repaired on open; LR-EDIT-OPTICS-PROFILE, Nikon Z 6II / Z 8 / Z f in-file distortion; LRC-LIB-CATALOG-IMPORT, WAL-only catalogs open; LR-EXP-DIM, enlargements stop at 512 MP; LR-IMP-CAMERA-COVERAGE, Canon EOS RP CR3 verified; model folder retry) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (LR-MERGE-FOCUS, Photo ▸ Photo Merge ▸ Focus Stack, beyond Lightroom (new row, 🟡); integration batch 35: KEYC-SELECTONLYACTIVE, Select Only Active Photo ⌘⇧D; LR-BEHAV-AUTOSAVE, damaged snapshots repaired on open; LR-EDIT-OPTICS-PROFILE, Nikon Z 6II / Z 8 / Z f in-file distortion; LRC-LIB-CATALOG-IMPORT, WAL-only catalogs open; LR-EXP-DIM, enlargements stop at 512 MP; LR-IMP-CAMERA-COVERAGE, Canon EOS RP CR3 verified; model folder retry) · **Target:** Adobe Lightroom Classic 15.5 / Lightroom 9.6
 
 The measured, row-by-row checklist: one row per Lightroom feature, menu item and shortcut, what we
 have and what is missing. It answers *does the feature exist?* (feature breadth). Whether it is good
@@ -40,7 +40,7 @@ cited here still exists. Formerly docs/parity.md.
 | L. Presets (PRE) | 6 | 0 | 1 | 1 | 2/2 (100%) | 2/2 (100%) |
 | M. Versions & history (VER) | 5 | 0 | 0 | 0 | 1/1 (100%) | 3/3 (100%) |
 | N. Copy / paste / sync (SYNC) | 5 | 0 | 0 | 0 | 3/3 (100%) | 1/1 (100%) |
-| O. Merge (MERGE) | 4 | 0 | 0 | 0 | — | — |
+| O. Merge (MERGE) | 4 | 1 | 0 | 0 | — | — |
 | P. Enhance (ENH) | 0 | 0 | 2 | 0 | — | — |
 | Q. HDR (HDR) | 2 | 3 | 0 | 0 | — | — |
 | R. Video (VID) | 0 | 0 | 5 | 1 | — | 0/2 (0%) |
@@ -53,9 +53,9 @@ cited here still exists. Formerly docs/parity.md.
 | Y. Menus | 84 | 0 | 4 | 8 | 47/47 (100%) | 23/23 (100%) |
 | Z. Keyboard shortcuts (desktop) | 76 | 4 | 3 | 1 | 49/52 (94%) | 23/25 (92%) |
 | Lightroom Classic extras | 34 | 16 | 35 | 8 | — | 24/26 (92%) |
-| **Total** | 409 | 53 | 72 | 35 | 193/201 (96%) | 146/159 (92%) |
+| **Total** | 409 | 54 | 72 | 35 | 193/201 (96%) | 146/159 (92%) |
 
-Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.6%** of 534 in-scope rows — P0 98.0% of 201 · P1 95.0% of 159 · P2 50.0% of 173.
+Weighted completion (✅ = 1, 🟡 = ½, 🚫 left out): **81.5%** of 535 in-scope rows — P0 98.0% of 201 · P1 95.0% of 159 · P2 50.0% of 174.
 <!-- /parity:summary -->
 
 ## Top gaps and shortcut notes
@@ -150,7 +150,7 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-FILT-RATING | Rating filter | P0 | ✅ | `cmd:library.filter` (`rating`, `ratingOp`), `crates/ui-egui/src/panels/filterbar.rs` | ≥ / = / ≤ stars in the filter bar (`cmd:view.filterBar`) |
 | LR-FILT-FLAG | Flag filter | P0 | ✅ | `cmd:library.filter` (`flag`), `crates/ui-egui/src/panels/filterbar.rs` | picked / rejected / unflagged (one at a time) |
 | LR-FILT-LABEL | Colour-label filter | P1 | ✅ | `cmd:library.filter` (`label`), `crates/ui-egui/src/panels/filterbar.rs` | one label at a time; no “no label” choice |
-| LR-FILT-TYPE | Type / edited filter | P1 | ✅ | `cmd:library.filter` (`kind`, `merged`, `edited`), `crates/ui-egui/src/panels/filterbar.rs`, `crates/catalog/src/query.rs` (`merged_kind`) | photos / raw / videos / HDR / panoramas / HDR panoramas (merge results by name), edited / unedited; no depth kind |
+| LR-FILT-TYPE | Type / edited filter | P1 | ✅ | `cmd:library.filter` (`kind`, `merged`, `edited`), `crates/ui-egui/src/panels/filterbar.rs`, `crates/catalog/src/query.rs` (`merged_kind`) | photos / raw / videos / HDR / panoramas / HDR panoramas / focus stacks (merge results by name), edited / unedited; no depth kind |
 | LR-FILT-KEYWORD | Keyword filter | P1 | ✅ | `cmd:library.filter` (`keyword`), `crates/ui-egui/src/panels/filterbar.rs` | keyword picker |
 | LR-FILT-CAMERA | Camera / lens filter | P1 | ✅ | `cmd:library.filter` (`camera`, `lens`), `crates/ui-egui/src/panels/filterbar.rs` | camera and lens pickers |
 | LR-FILT-LOCATION | Location filter | P2 | ✅ | `cmd:library.filter` (`text`, `ruleSet` field `location`) | free text, or a rule on location / city / state / country (smart albums, `library.filter`) |
@@ -350,7 +350,8 @@ differences and missing bindings are in [ui-parity.md](ui-parity.md#shortcuts).
 | LR-MERGE-HDR | HDR merge | P2 | ✅ | `cmd:merge.hdr`, `cmd:dialog.mergeHdr`, `crates/merge/src/frame.rs` (`Frame::lens`) | auto align, deghost None–High + overlay, auto settings, float DNG, Create Stack; the DNG keeps the reference frame's embedded lens corrections (tested by `hdr_merge_keeps_the_reference_frames_lens_corrections`); JPEG brackets treated as linear; raws without colour matrices of their own (CR2, NEF, ARW…) keep the colour they open with, written as DNG tags (`starting_colour_tags`; the look's chroma curve has no tag; panoramas too), issue #965 |
 | LR-MERGE-PANO | Panorama | P2 | ✅ | `cmd:merge.panorama`, `cmd:dialog.mergePanorama` | spherical/cylindrical/perspective + auto, boundary warp, auto crop, fill edges (diffusion), DNG; no lens model / 360° wrap |
 | LR-MERGE-HDRPANO | HDR panorama | P2 | ✅ | `cmd:merge.hdrPanorama`, `cmd:dialog.mergeHdrPanorama` | brackets grouped by EXIF |
-| LR-MERGE-HEADLESS | Merge with last settings | P2 | ✅ | `cmd:merge.hdrLast`, `cmd:merge.panoramaLast`, `cmd:merge.hdrPanoramaLast` | no dialog; the options of the last merge of that kind (defaults the first time) |
+| LR-MERGE-FOCUS | Focus stack (beyond Lightroom) | P2 | 🟡 | `cmd:merge.focusStack`, `cmd:dialog.mergeFocusStack`, `crates/merge/src/focus.rs`, `crates/merge/tests/focus.rs` | photos focused at different distances → one DNG sharp throughout (`<name>-Focus.dng`), the photos taken in shooting order (capture time, then name): neighbour-to-neighbour similarity alignment chained (focus breathing), a failed step bridged to one of the three frames before, frames that align to nothing left out and reported; the most magnified frame as the reference; brightness measured from the pixels (auto ISO), EXIF only as a fallback; Laplacian-pyramid fusion with a steep soft selection above the noise floor, so out-of-focus areas average (about 5× less noise than one frame on a real 88-frame A7R VI macro crop) while texture keeps 95–100 % of a maximum selection's; one full-size frame in memory at a time; auto align, auto settings, Create Stack; type filter "Focus Stacks". Checked on a 175-frame A7R VI stack (no ghosting) and synthetic brackets; the chained alignment still drifts up to 0.2 % of the frame on strongly blurred synthetic neighbours; a similarity only (no tilt or rotation about the lens's side); no retouching between frames, no depth-map mode, no halo control. Not a Lightroom feature (Photoshop's Auto-Blend Layers ▸ Stack Images) |
+| LR-MERGE-HEADLESS | Merge with last settings | P2 | ✅ | `cmd:merge.hdrLast`, `cmd:merge.panoramaLast`, `cmd:merge.hdrPanoramaLast`, `cmd:merge.focusStackLast` | no dialog; the options of the last merge of that kind (defaults the first time) |
 
 ## P. Enhance (ENH)
 
@@ -556,7 +557,7 @@ visible menu bar yet: the menu model is only exposed through the control channel
 | MENU-PHOTO-FLIP | Flip horizontal / vertical | P0 | ✅ | `cmd:photo.flipHorizontal`, `cmd:photo.flipVertical` | |
 | MENU-PHOTO-CREATEVERSION | Create Version… | P1 | ✅ | `cmd:version.create` | no name prompt |
 | MENU-PHOTO-STACK | Stack submenu | P1 | ✅ | `cmd:stack.group`, `cmd:stack.ungroup`, `cmd:dialog.autoStack` | |
-| MENU-PHOTO-MERGE | Photo merge submenu | P2 | ✅ | `cmd:dialog.mergeHdr`, `cmd:dialog.mergePanorama`, `cmd:dialog.mergeHdrPanorama`, `cmd:merge.hdrLast` | |
+| MENU-PHOTO-MERGE | Photo merge submenu | P2 | ✅ | `cmd:dialog.mergeHdr`, `cmd:dialog.mergePanorama`, `cmd:dialog.mergeHdrPanorama`, `cmd:merge.hdrLast`, `cmd:dialog.mergeFocusStack`, `cmd:merge.focusStackLast` | also Focus Stack… and Focus Stack with Last Settings (beyond Lightroom) |
 | MENU-PHOTO-ENHANCE | Enhance… | P2 | ⬜ | | |
 | MENU-PHOTO-AUTO | Auto settings | P0 | ✅ | `cmd:develop.auto` | |
 | MENU-PHOTO-BW | Convert to B&W | P0 | ✅ | `cmd:develop.treatment` | |
@@ -790,6 +791,7 @@ Latin stays upright. Advanced Japanese composition remains open. Regression cove
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | LR-MERGE-FOCUS: Photo Merge ▸ Focus Stack (beyond Lightroom) lands as a new row, status 🟡 (verified on a real 175-frame macro stack and synthetic brackets); LR-MERGE-HEADLESS, LR-FILT-TYPE and MENU-PHOTO-MERGE cite its command, last-settings command and type filter; their statuses unchanged |
 | 2026-10-13 | patch | LR-VIEW-COMPARE, LRC-LIB-COMPARE: ⌘/Ctrl- and Shift-clicks on the filmstrip in Compare change the selection as in the grid; the two photos shown stay selected and the active photo is unchanged (#187); statuses unchanged |
 | 2026-10-13 | minor | KEYC-SELECTONLYACTIVE: Edit → Select Only Active Photo (⌘⇧D) lands as a new row; status 🟡 (headless-tested, native macOS menu path unverified) |
 | 2026-10-13 | patch | LRC-LIB-CATALOG-IMPORT: a catalog whose tables are all still in its `-wal` file (main file schema format 0) opens instead of failing as an unsupported schema format; status unchanged |
