@@ -151,6 +151,14 @@
   further ⇧-clicks carry on from the last point, as in Lightroom. Change the brush size, feather or flow before the
   ⇧-click and the line tapers from the old values to the new ones. The whole line is one undo step.
   `mask.brushStroke {connect: true}` does the same for agents.
+### The welcome has the window
+- While the library is empty, the welcome is the one thing asking for attention: the Tools panel steps aside (it comes
+  back as it was once photos arrive, an editing tool such as Crop as the Edit panel; opening it meanwhile keeps it
+  open), and the bottom bar's rating, flags and
+  Copy Edit Settings wait until there is a photo to use them on.
+- Under the welcome's buttons, a row of five sample photos: click one to add the samples and open it in Detail with the
+  Edit panel, ready to edit. Where the row doesn't fit, and in the web build, Try Sample Photos is a button as before.
+
 ### A new library asks how to begin
 - A new library made by the desktop app now starts empty instead of quietly filling with the 24 procedural demo
   photos. Its first screen, "Welcome to LightCraft", offers Import Photos…, Import Lightroom Catalog… and Try Sample
