@@ -249,5 +249,8 @@
   "Import {} Photo{}": "Імпорт {} фото{}",
   "Imported {} · {} already in the library · {} failed": "Імпортовано {} · {} вже в бібліотеці · {} не вдалося",
   "Page {}": "Сторінка {}",
-  "{} on this page · {} selected": "{} на цій сторінці · {} вибрано"
+  "{} on this page · {} selected": "{} на цій сторінці · {} вибрано",
+  "{name} opened in the other editor": "{name} відкрито в іншому редакторі",
+  "{n} originals opened in the other editor": "Відкрито оригіналів в іншому редакторі: {n}",
+  "· {in_source} identical copies": "· ідентичних копій: {in_source}"
 }
