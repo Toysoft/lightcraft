@@ -850,7 +850,7 @@ fn info_overlay(app: &LightcraftApp, p: &egui::Painter, canvas: Rect, photo: &li
     let mut y = canvas.top() + 12.0;
     for (i, l) in lines.iter().enumerate() {
         let font = if i == 0 { t.semibold(15.0) } else { t.font(12.5) };
-        let g = p.layout_no_wrap(l.clone(), font, Color32::WHITE);
+        let g = p.layout_no_wrap(crate::bidi::visual(l).into_owned(), font, Color32::WHITE);
         let at = pos2(canvas.left() + 14.0, y);
         // a soft shadow keeps the text readable on bright photos
         p.galley(at + vec2(1.0, 1.0), g.clone(), Color32::from_black_alpha(200));
@@ -2305,7 +2305,7 @@ pub(crate) fn filmstrip(app: &mut LightcraftApp, ui: &mut egui::Ui, r: Rect) {
             let names = app.ui.settings.film_names;
             if let Some(ph) = app.session.catalog.photo(*id).filter(|_| names) {
                 let name = ph.file_name.rsplit_once('.').map(|(n, _)| n).unwrap_or(&ph.file_name);
-                p.text(pos2(cr.left() + 8.0, cr.top() + 10.0), Align2::LEFT_CENTER, film_label(name), t.font(10.0), t.text_dim);
+                p.text(pos2(cr.left() + 8.0, cr.top() + 10.0), Align2::LEFT_CENTER, crate::bidi::visual(&film_label(name)), t.font(10.0), t.text_dim);
                 p.text(pos2(cr.right() - 8.0, cr.top() + 10.0), Align2::RIGHT_CENTER, &ph.format, t.semibold(8.5), t.text_dim);
             }
             let img_area = Rect::from_min_max(cr.min + vec2(10.0, 22.0), cr.max - vec2(10.0, 8.0));

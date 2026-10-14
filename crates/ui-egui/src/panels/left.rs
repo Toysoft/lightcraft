@@ -1059,7 +1059,7 @@ fn folder_tree(
             ui.data_mut(|d| d.insert_temp(revealed_id, target));
         }
     }
-    let resp = row(app, ui, &format!("local:{path}"), Icon::Folder, name, None, sel, indent + 12.0).on_hover_text(path);
+    let resp = row(app, ui, &format!("local:{path}"), Icon::Folder, &crate::bidi::visual(name), None, sel, indent + 12.0).on_hover_text(path);
     let tr = tree_toggle(ui, &resp, indent, open_id, &mut open, format!("folderToggle:{path}"));
     if !tr.clicked()
         && resp.clicked()
@@ -1169,8 +1169,19 @@ fn albums_tree(app: &mut LightcraftApp, ui: &mut egui::Ui, all: &AlbumKids, pare
                 open = true;
                 set_tree_open(ui, open_id, true);
             }
-            let resp =
-                row_sensed(app, ui, &format!("folder:{}", a.id.0), Icon::Folder, &a.name, None, None, false, indent, Sense::click_and_drag(), None);
+            let resp = row_sensed(
+                app,
+                ui,
+                &format!("folder:{}", a.id.0),
+                Icon::Folder,
+                &crate::bidi::visual(&a.name),
+                None,
+                None,
+                false,
+                indent,
+                Sense::click_and_drag(),
+                None,
+            );
             // a folder is no source, so its row folds it too; the triangle is the same click, aimed
             let has_children = all.get(&Some(a.id)).is_some_and(|v| !v.is_empty());
             if resp.drag_started() {
@@ -1209,7 +1220,19 @@ fn albums_tree(app: &mut LightcraftApp, ui: &mut egui::Ui, all: &AlbumKids, pare
             // a smart album whose rules no longer check (an album they test was deleted) says so
             let problems = app.caches.smart_album_problems(&app.session.catalog).get(&a.id).cloned().unwrap_or_default();
             let label = if problems.is_empty() { label } else { format!("⚠ {label}") };
-            let mut resp = row_sensed(app, ui, &format!("album:{}", a.id.0), icon, &label, None, Some(n), sel, indent, Sense::click_and_drag(), None);
+            let mut resp = row_sensed(
+                app,
+                ui,
+                &format!("album:{}", a.id.0),
+                icon,
+                &crate::bidi::visual(&label),
+                None,
+                Some(n),
+                sel,
+                indent,
+                Sense::click_and_drag(),
+                None,
+            );
             if !problems.is_empty() {
                 crate::widgets::register(ui.ctx(), format!("albumProblem:{}", a.id.0), resp.rect);
             }
@@ -1770,7 +1793,7 @@ fn folder_row(app: &mut LightcraftApp, ui: &mut egui::Ui, n: &FolderNode, id: &s
         None => name.to_string(),
     };
     let mark = n.label.map(crate::theme::label_color);
-    let resp = row_sensed(app, ui, id, Icon::Folder, name, Some(&spoken), Some(n.count), sel, indent, Sense::click(), mark);
+    let resp = row_sensed(app, ui, id, Icon::Folder, &crate::bidi::visual(name), Some(&spoken), Some(n.count), sel, indent, Sense::click(), mark);
     let mut toggled = false;
     if !n.children.is_empty() {
         let tr = tree_toggle(ui, &resp, indent, open_id, open, format!("libraryFolderToggle:{}", n.path));
@@ -1986,7 +2009,7 @@ fn keyword_rows(app: &mut LightcraftApp, ui: &mut egui::Ui, nodes: &[KeywordNode
 /// One drawn row of [`keyword_rows`]; `open_id` and `open` are its triangle's when it has rows inside it.
 fn keyword_row(app: &mut LightcraftApp, ui: &mut egui::Ui, n: &KeywordNode, id: &str, indent: f32, open_id: Option<egui::Id>, open: &mut bool) {
     let sel = app.session.filter.keyword.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(&n.path));
-    let resp = row(app, ui, id, Icon::Tag, &n.name, Some(n.count), sel, indent);
+    let resp = row(app, ui, id, Icon::Tag, &crate::bidi::visual(&n.name), Some(n.count), sel, indent);
     if let Some(k) = open_id {
         tree_toggle(ui, &resp, indent, k, open, format!("keywordToggle:{}", n.path));
     }

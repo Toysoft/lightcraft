@@ -52,11 +52,23 @@ macro_rules! language_table {
                 static EMPTY: OnceLock<BTreeMap<String, String>> = OnceLock::new();
                 // A malformed catalog logs and comes back empty: a broken translation degrades to
                 // English text, it never takes the app down.
-                let parse = |catalog: Option<&'static str>| match catalog {
-                    Some(json) => match serde_json::from_str(json) {
-                        Ok(messages) => messages,
+                let parse = |language: Locale, catalog: Option<&'static str>| match catalog {
+                    Some(json) => match serde_json::from_str::<BTreeMap<String, String>>(json) {
+                        Ok(mut messages) => {
+                            // A right-to-left catalog stores logical order; egui needs display
+                            // order, applied once at load (bidi::display_rtl). The key is the
+                            // catalog's own language: whichever caller fills `CATALOGS` first
+                            // parses every language, so `self` may be English while Arabic is
+                            // being parsed.
+                            if language.rtl() {
+                                for value in messages.values_mut() {
+                                    *value = crate::bidi::display_rtl(value);
+                                }
+                            }
+                            messages
+                        }
                         Err(error) => {
-                            log::error!("Invalid message catalog for {}: {error}", self.code());
+                            log::error!("Invalid message catalog for {}: {error}", language.code());
                             BTreeMap::new()
                         }
                     },
@@ -68,7 +80,7 @@ macro_rules! language_table {
                             .iter()
                             .map(|language| {
                                 let catalog = match *language { $(Self::$variant => Some($catalog),)* _ => None };
-                                (*language, parse(catalog))
+                                (*language, parse(*language, catalog))
                             })
                             .collect()
                     })
@@ -126,6 +138,22 @@ language_table! {
     Ru, "ru", "Русский", "Cyrl", include_str!("../locales/ru.json");
     Fr, "fr", "Français", "Latn", include_str!("../locales/fr.json");
     Uk, "uk", "Українська", "Cyrl", include_str!("../locales/uk.json");
+    Ar, "ar", "العربية", "Arab", include_str!("../locales/ar.json");
+}
+
+impl Locale {
+    /// Whether the language's text runs right to left: its catalog is reordered for display at
+    /// load (the `parse` above), its `tr_format!` results through [`display`], and user text is
+    /// drawn through `bidi::visual` at the paint sites.
+    pub fn rtl(self) -> bool {
+        matches!(self.script(), "Arab" | "Hebr")
+    }
+}
+
+/// The order a `tr_format!` result is drawn in: the active right-to-left language's result goes
+/// through `bidi::visual`, everything else is returned unchanged.
+pub fn display(text: String) -> String {
+    if language().rtl() { crate::bidi::visual(&text).into_owned() } else { text }
 }
 
 // The settings file stores the BCP-47 code (`"zh-hans"`), never the Rust variant name, so a
@@ -450,6 +478,17 @@ mod tests {
         }
     }
 
+    /// A right-to-left catalog is reordered for display at load whatever language asked for a
+    /// catalog first: `CATALOGS` parses every language on the first call, and the app reaches it
+    /// through English (the default) before the settings' language is applied.
+    #[test]
+    fn arabic_is_display_ordered_whoever_parses_catalogs_first() {
+        Locale::En.catalog();
+        let translation = Locale::Ar.tr("Photo Merge");
+        assert_eq!(translation, "الصور دمج", "a two-word label reads right to left");
+        assert_ne!(Locale::De.tr("File"), "File", "a left-to-right catalog is untouched");
+    }
+
     /// Where two catalogs translate the same text they agree on its placeholders. Catalogs may cover
     /// different sets of messages (a message a language lacks shows in English): the gaps are
     /// reported, not failed, so a translation can grow at its own pace.
@@ -521,6 +560,9 @@ mod tests {
         }
         for tag in ["es", "es-ES", "es_MX.UTF-8", "es-419"] {
             assert_eq!(Locale::parse_tag(tag), Some(Locale::Es), "{tag}");
+        }
+        for tag in ["ar", "ar-SA", "ar_EG.UTF-8", "ar-MA"] {
+            assert_eq!(Locale::parse_tag(tag), Some(Locale::Ar), "{tag}");
         }
         assert_eq!(Locale::parse_tag("xx"), None);
     }
@@ -667,6 +709,7 @@ mod tests {
             ("app.language.german", Locale::De),
             ("app.language.russian", Locale::Ru),
             ("app.language.ukrainian", Locale::Uk),
+            ("app.language.arabic", Locale::Ar),
         ];
         // One command per language, and every command reachable from the menu table.
         assert_eq!(commands.len(), Locale::ALL.len());

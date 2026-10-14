@@ -43,15 +43,17 @@ impl MenuNode {
     }
 }
 
-/// User-defined names in parameterized menus are data, not message keys.
-pub fn display_item_label<'a>(id: &str, params: &Value, label: &'a str) -> &'a str {
-    if matches!(id, "metadata.applyPreset" | "album.addPhotos" | "label.applySet")
+/// User-defined names in parameterized menus are data, not message keys. They are drawn in
+/// display order (`bidi::visual`): a name typed in Arabic keeps its letters' direction when the
+/// interface is in another language, and mixed-direction names read correctly under Arabic too.
+pub fn display_item_label<'a>(id: &str, params: &Value, label: &'a str) -> std::borrow::Cow<'a, str> {
+    if matches!(id, "metadata.applyPreset" | "album.addPhotos" | "label.applySet" | "file.addFromDevice")
         || (id == "app.export" && params.get("preset").is_some())
         || (id == "app.openLibrary" && params.get("path").is_some())
     {
-        label
+        crate::bidi::visual(label)
     } else {
-        crate::i18n::tr(label)
+        crate::i18n::tr(label).into()
     }
 }
 

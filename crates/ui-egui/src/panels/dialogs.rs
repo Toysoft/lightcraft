@@ -359,7 +359,7 @@ pub fn show(app: &mut LightcraftApp, ctx: &egui::Context) {
                     }
                 }
                 Dialog::AllMetadata { title, rows, search } => {
-                    ui.label(egui::RichText::new(title.as_str()).color(t.text_label));
+                    ui.label(egui::RichText::new(crate::bidi::visual(title.as_str())).color(t.text_label));
                     let r = crate::widgets::named(ui.add(egui::TextEdit::singleline(search).hint_text(crate::i18n::tr("Filter fields")).desired_width(f32::INFINITY)), crate::i18n::tr("Filter fields"));
                     crate::widgets::register(ui.ctx(), "field:metadataSearch", r.rect);
                     let q = search.trim().to_lowercase();

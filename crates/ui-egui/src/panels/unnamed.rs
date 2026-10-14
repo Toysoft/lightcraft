@@ -161,7 +161,7 @@ pub fn naming_bar(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             ui.horizontal(|ui| {
                 ui.add_space(super::people::PAD - 4.0);
                 for p in matching {
-                    let b = ui.add(egui::Button::new(RichText::new(p.as_str()).color(t.text_label)).frame(false));
+                    let b = ui.add(egui::Button::new(RichText::new(crate::bidi::visual(p.as_str())).color(t.text_label)).frame(false));
                     register(ui.ctx(), format!("unnamed:pick:{p}"), b.rect);
                     if b.clicked() {
                         submit = Some(p.clone());

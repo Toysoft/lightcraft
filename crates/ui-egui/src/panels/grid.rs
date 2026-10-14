@@ -633,7 +633,7 @@ fn cell(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, r: Rect, square
             "date" => photo.captured.as_deref().map(crate::i18n::display_time).unwrap_or_else(|| crate::i18n::tr("No date").into()),
             _ => photo.file_name.rsplit_once('.').map(|(n, _)| n.to_string()).unwrap_or(photo.file_name.clone()),
         };
-        p.text(pos2(r.left() + 8.0, r.top() + 12.0), Align2::LEFT_CENTER, name, t.font(10.5), t.text_dim);
+        p.text(pos2(r.left() + 8.0, r.top() + 12.0), Align2::LEFT_CENTER, crate::bidi::visual(&name), t.font(10.5), t.text_dim);
         let fmt = photo.format.clone();
         let g = p.layout_no_wrap(fmt, t.semibold(9.0), t.text_label);
         let br = Rect::from_min_size(pos2(r.right() - g.size().x - 14.0, r.top() + 5.0), g.size() + vec2(8.0, 3.0));
@@ -677,7 +677,7 @@ fn cell(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId, r: Rect, square
     }
     if let Some(name) = &photo.copy_name {
         // virtual copy: a folded-corner tag at the top right
-        let g = p.layout_no_wrap(name.clone(), t.semibold(10.5), Color32::WHITE);
+        let g = p.layout_no_wrap(crate::bidi::visual(name).into_owned(), t.semibold(10.5), Color32::WHITE);
         let tr = if square { img_rect.right_top() + vec2(-6.0, 6.0) } else { img_rect.right_top() + vec2(-5.0, 5.0) };
         let br = Rect::from_min_max(pos2(tr.x - g.size().x - 26.0, tr.y), pos2(tr.x, tr.y + 20.0));
         p.rect_filled(br, 10.0, Color32::from_black_alpha(165));
@@ -836,7 +836,7 @@ fn folder_breadcrumbs(app: &mut LightcraftApp, ui: &mut egui::Ui, path: &str) {
         let last = remaining == 1;
         // Share the bounded row among the remaining crumbs, leaving room for every separator.
         let width = ((ui.available_width() - separator_w * (remaining - 1) as f32) / remaining as f32).max(0.0).floor();
-        let text = egui::RichText::new(*part).size(13.0).color(if last { t.text } else { t.text_label });
+        let text = egui::RichText::new(crate::bidi::visual(part)).size(13.0).color(if last { t.text } else { t.text_label });
         let r = ui.add_sized(vec2(width, 24.0), egui::Label::new(if last { text.strong() } else { text }).truncate().sense(Sense::click()));
         register(ui.ctx(), format!("crumb:{i}"), r.rect);
         if !last {

@@ -127,7 +127,7 @@ pub fn drag_feedback(app: &mut LightcraftApp, ctx: &egui::Context) {
     let name = keyword.rsplit('|').next().unwrap_or(&keyword).to_string();
     egui::Area::new(egui::Id::new("drag-keyword")).order(egui::Order::Tooltip).interactable(false).fixed_pos(at + vec2(14.0, 10.0)).show(ctx, |ui| {
         egui::Frame::NONE.fill(t.accent).corner_radius(10.0).inner_margin(egui::Margin::symmetric(9, 3)).show(ui, |ui| {
-            ui.label(egui::RichText::new(name).color(Color32::WHITE).font(t.semibold(12.0)));
+            ui.label(egui::RichText::new(crate::bidi::visual(&name)).color(Color32::WHITE).font(t.semibold(12.0)));
         });
     });
 }
@@ -617,13 +617,13 @@ mod tests {
             "Export Keywords…",
         ];
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
-        for code in ["de", "es", "fr", "pt-br", "ru", "uk", "ja", "zh-hans", "zh-hant"] {
+        for code in ["de", "es", "fr", "pt-br", "ru", "uk", "ja", "zh-hans", "zh-hant", "ar"] {
             let text = std::fs::read_to_string(dir.join(format!("{code}.json"))).unwrap();
             let catalog: std::collections::HashMap<String, String> = serde_json::from_str(&text).unwrap();
             for label in labels {
                 assert!(catalog.contains_key(label), "{code}: “{label}”");
             }
         }
-        assert_eq!(Locale::ALL.len(), 10, "a language added: list its file above");
+        assert_eq!(Locale::ALL.len(), 11, "a language added: list its file above");
     }
 }

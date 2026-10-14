@@ -64,7 +64,7 @@ pub(crate) fn display_label(chip: &FilterChip, filter: &lightcraft_catalog::Filt
         } else if prefix == "Imported" {
             filter.imported.as_ref().map_or_else(|| value.to_string(), |date| date_group_label(date, false))
         } else {
-            value.to_string()
+            crate::bidi::visual(value).into_owned()
         };
         return format!("{}: {value}", tr(prefix));
     }

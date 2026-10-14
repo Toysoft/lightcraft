@@ -287,7 +287,7 @@ fn model_row(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, m: &Value, 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(m["name"].as_str().unwrap_or("")).color(t.text));
+                    ui.label(RichText::new(crate::bidi::visual(m["name"].as_str().unwrap_or(""))).color(t.text));
                     let size = mb(m["sizeBytes"].as_u64());
                     if !size.is_empty() {
                         ui.label(RichText::new(size).color(t.text_dim));
@@ -411,12 +411,12 @@ pub fn model_dialog(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens, info
             )
             .wrap(),
         );
-        ui.label(RichText::new(format!("{file} · {}", mb(info["sizeBytes"].as_u64()))).color(t.text_dim));
+        ui.label(RichText::new(format!("{} · {}", crate::bidi::visual(file), mb(info["sizeBytes"].as_u64()))).color(t.text_dim));
         return;
     }
     let m = &info["model"];
     ui.horizontal(|ui| {
-        ui.label(RichText::new(m["name"].as_str().unwrap_or(file)).font(t.semibold(14.0)).color(t.text));
+        ui.label(RichText::new(crate::bidi::visual(m["name"].as_str().unwrap_or(file))).font(t.semibold(14.0)).color(t.text));
         ui.label(RichText::new(mb(info["sizeBytes"].as_u64())).color(t.text_dim));
     });
     if info["alreadyInstalled"] == true {

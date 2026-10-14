@@ -77,7 +77,7 @@ calibration: M0–M13 took ≈ 25 active hours against an estimate of ≈ 110–
 | M13 | Merge | HDR merge (deghost), panorama (projections, boundary warp, fill edges), HDR panorama | 10–15 | ✅ |
 | M14 | Video | import/playback/trim via FilmCraft crates, global edits + presets on video, video export | 6–10 | ⬜ |
 | M15 | Classic modules | Map, Book, Slideshow, Print, Web; smart collections, stacks, virtual copies, publish services, tethering | 25–40 | 🚧 (smart albums, stacks, virtual copies, compare/survey ✅; contact-sheet PDF 🟡; Map/Book/Slideshow/Print/Web ⬜) |
-| M16 | 1.0 polish | preferences, shortcut editor, accessibility, localization, packaging (dmg/msi/AppImage/web), hardening | 10–20 | 🚧 (settings, keyboard shortcuts sheet, packaging basics ✅; English/Chinese (Simplified, Traditional)/Japanese/Brazilian Portuguese/Spanish/German/Russian/Ukrainian localisation 🟡; accessibility and further locales ⬜) |
+| M16 | 1.0 polish | preferences, shortcut editor, accessibility, localization, packaging (dmg/msi/AppImage/web), hardening | 10–20 | 🚧 (settings, keyboard shortcuts sheet, packaging basics ✅; English/Chinese (Simplified, Traditional)/Japanese/Brazilian Portuguese/Spanish/German/Russian/Ukrainian/Arabic localisation 🟡; accessibility and further locales ⬜) |
 
 ## Risks that coding hours alone don't retire
 
@@ -108,6 +108,7 @@ calibration: M0–M13 took ≈ 25 active hours against an estimate of ≈ 110–
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Arabic joins M16's shipped locales (RTL display order; chrome not mirrored) |
 | 2026-10-10 | minor | Beta hours 340–600; full ready ~59% in the gate note |
 | 2026-10-10 | minor | Added the Alpha gate table (core-workflow gate from the revised standard): passes, stays alpha |
 | 2026-10-10 | major | Created: milestones moved from ROADMAP.md (statuses refreshed: M3 ✅, M11 / M12 / M15 detail), current focus re-ranked toward beta, risks and design notes kept |

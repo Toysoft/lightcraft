@@ -2,10 +2,10 @@
 
 The interface ships in the language it is written in (English) plus every language in the table in
 `crates/ui-egui/src/i18n.rs`. Today that is English, Simplified Chinese (`zh-hans`), Traditional
-Chinese (`zh-hant`, Taiwan), Japanese (`ja`), Brazilian Portuguese (`pt-br`), Spanish (`es`), German (`de`), Russian (`ru`) and French (`fr`). This file is the reference for **adding or maintaining a language**; the per-language notes
+Chinese (`zh-hant`, Taiwan), Japanese (`ja`), Brazilian Portuguese (`pt-br`), Spanish (`es`), German (`de`), Russian (`ru`), French (`fr`), Ukrainian (`uk`) and Arabic (`ar`). This file is the reference for **adding or maintaining a language**; the per-language notes
 are in [`localization-zh-hans.md`](localization-zh-hans.md), [`localization-zh-hant.md`](localization-zh-hant.md),
 [`localization-ja.md`](localization-ja.md), [`localization-pt-br.md`](localization-pt-br.md), [`localization-es.md`](localization-es.md),
-[`localization-de.md`](localization-de.md) and [`localization-ru.md`](localization-ru.md).
+[`localization-de.md`](localization-de.md), [`localization-ru.md`](localization-ru.md) and [`localization-ar.md`](localization-ar.md).
 
 ## Adding a language
 
@@ -76,6 +76,23 @@ tr_format!("Added {n} photo{} to “{}”", if n == 1 { "" } else { "s" }, album
 - Every formats catalog carries the same messages (`build.rs` fails the build otherwise), and a
   `tr_format!` call whose message is in no catalog does not compile: add it to every
   `*-formats.json` file.
+
+## Right-to-left languages
+
+A catalog is stored in logical order like any other text. When the active language's script is
+right-to-left (`Locale::rtl()` — `Arab`, `Hebr`), `src/bidi.rs` puts text into display order for
+egui, which lays runs out left to right:
+
+- catalog values are reordered once at load (`bidi::display_rtl`, which keeps `{placeholders}` whole
+  for `format!` to fill, keeps a caption's colon next to its widget and leaves keyboard shortcuts
+  unreversed);
+- `tr_format!` results are reordered when they are produced (`i18n::display`);
+- user-entered text (file and folder names, album and keyword names, people, device and preset
+  names) is reordered with `bidi::visual` at the paint site and is never translated.
+
+The chrome itself does not mirror: panels, the menu bar and dialogs keep their left-to-right
+arrangement. Right-to-left scripts also need their face in craft-fonts (step 3) — without it the
+glyphs are boxes and the glyph-coverage test says so instead of failing.
 
 ## Testing and looking at it
 

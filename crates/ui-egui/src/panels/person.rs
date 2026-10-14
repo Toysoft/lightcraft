@@ -98,7 +98,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, name: &str) {
         if back.clicked() {
             let _ = app.run("view.people", json!({}));
         }
-        ui.label(RichText::new(&shown_name).font(t.semibold(15.0)).color(t.text));
+        ui.label(RichText::new(crate::bidi::visual(&shown_name)).font(t.semibold(15.0)).color(t.text));
         let count = if page.total == 1 { "1 face".to_string() } else { format!("{} faces", page.total) };
         ui.label(RichText::new(count).color(t.text_dim));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

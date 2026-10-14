@@ -23,6 +23,7 @@ lightcraft-engine = { workspace = true }
 lightcraft-preview = { workspace = true }
 egui = { workspace = true }
 serde = { workspace = true }
+unicode-bidi = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 

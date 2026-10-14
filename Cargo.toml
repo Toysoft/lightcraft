@@ -100,6 +100,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # Appearance Mode ▸ Auto). Pure Rust; the version accesskit already brings in, pinned to it.
 zbus = "=5.19.0"
 web-time = "1"
+unicode-bidi = "0.3.18" # Pure Rust; visual order for right-to-left interface labels and user text
 
 # web (apps/lightcraft-web)
 wasm-bindgen = "0.2.129"

@@ -69,7 +69,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         ui.painter().text(pos2(head.left() + PAD, head.center().y), Align2::LEFT_CENTER, crate::i18n::tr("Named People"), t.semibold(15.0), t.text);
     // the person page last left (a face opened from it, or its back button): one click returns to it
     if let Some(last) = app.ui.last_person.clone().filter(|n| people.iter().any(|p| &p.name == n)) {
-        let label = fit(ui.painter(), &format!("{last} ›"), t.font(13.0), 240.0);
+        let label = fit(ui.painter(), &format!("{} ›", crate::bidi::visual(&last)), t.font(13.0), 240.0);
         let width = ui.painter().layout_no_wrap(label.clone(), t.font(13.0), Color32::WHITE).size().x + 24.0;
         let r = Rect::from_min_size(pos2(title.right() + 14.0, head.center().y - 12.0), vec2(width, 24.0));
         let b = ui.put(r, egui::Button::new(RichText::new(label).font(t.font(13.0))).wrap_mode(egui::TextWrapMode::Extend));
@@ -177,7 +177,7 @@ fn card(app: &mut LightcraftApp, ui: &mut egui::Ui, person: &Person, r: Rect, ed
         p.rect_stroke(face, 3.0, Stroke::new(1.0, t.text_dim), StrokeKind::Outside);
     }
     // a long name must not run past the card
-    let name = fit(p, &person.name, t.semibold(13.0), edge);
+    let name = fit(p, &crate::bidi::visual(&person.name), t.semibold(13.0), edge);
     p.text(pos2(r.left() + 2.0, face.bottom() + 14.0), Align2::LEFT_CENTER, name, t.semibold(13.0), t.text);
     let photos = crate::i18n::tr_format!("{n} photo{}", if person.count == 1 { "" } else { "s" }, n = person.count);
     p.text(pos2(r.left() + 2.0, face.bottom() + 32.0), Align2::LEFT_CENTER, photos, t.font(12.0), t.text_dim);
