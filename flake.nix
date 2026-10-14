@@ -7,12 +7,12 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Optional build input of the repository: the CJK fonts (BIZ UDPGothic, BIZ UDMincho, Noto Sans CJK SC,
-    # Shippori Mincho) that `crates/engine/build.rs` embeds when `CRAFT_FONTS_DIR` is set. Official
-    # releases always build with them; without them everything works but Japanese text has no
-    # glyphs. Pinned to the revision the release workflow uses — bump deliberately
+    # Shippori Mincho, Pretendard) that `crates/engine/build.rs` embeds when `CRAFT_FONTS_DIR` is set. Official
+    # releases always build with them; without them everything works but CJK text has no glyphs.
+    # Pinned to the revision the release workflow uses — bump deliberately
     # (`nix flake update craft-fonts`); craftrules standards/fonts.md.
     craft-fonts = {
-      url = "github:storytold/craft-fonts/8dcdacd5153e64560d109541a47d806f26f048c0";
+      url = "github:storytold/craft-fonts/bccc31d26a2081449065b018799a6b990e348f70";
       flake = false;
     };
   };

@@ -3,9 +3,9 @@
 //! Recipe from craft-fonts' docs/integration.md; craft-fonts is never a Cargo dependency, and this
 //! script only reads a local directory (no network).
 //!
-//! wasm32 (the web build) embeds only the UI font, BIZ UDPGothic Regular (~4.5 MB), to keep the
-//! `.wasm` within the web size budget (Cloudflare serves at most 25 MiB per file); the export
-//! watermark falls back to it there. Native builds embed every font.
+//! wasm32 (the web build) embeds only the Japanese and Korean UI fonts, to keep the `.wasm` within
+//! the web size budget (Cloudflare serves at most 25 MiB per file); the export watermark falls back
+//! to the Japanese face there. Native builds embed every font.
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -31,11 +31,11 @@ fn main() {
         println!("cargo::error=CRAFT_FONTS_REQUIRED is set but CRAFT_FONTS_DIR is missing");
     }
     src.push_str("];\n");
-    // Without them the app still runs and every language still selectable, so Chinese and Japanese
-    // just paint boxes — the one failure a user cannot diagnose from what they see.
+    // Without them the app still runs and every language is selectable, so CJK text just paints
+    // boxes — the one failure a user cannot diagnose from what they see.
     if embedded == 0 {
         println!(
-            "cargo::warning=no craft-fonts embedded: Chinese and Japanese text will render as empty boxes. \
+            "cargo::warning=no craft-fonts embedded: Chinese, Japanese and Korean text will render as empty boxes. \
              Clone https://github.com/storytold/craft-fonts next to this repo and rebuild with \
              CRAFT_FONTS_DIR=../craft-fonts"
         );
@@ -69,6 +69,7 @@ fn craft_fonts(dir: &Path, required: bool) -> Result<String, String> {
     let mut out = String::new();
     let mut has_japanese_ui = false;
     let mut has_chinese_ui = false;
+    let mut has_korean_ui = false;
     for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
         let f: Vec<&str> = line.split(" | ").map(str::trim).collect();
         let [family, style, file, scripts, ..] = f.as_slice() else {
@@ -76,7 +77,8 @@ fn craft_fonts(dir: &Path, required: bool) -> Result<String, String> {
         };
         has_japanese_ui |= (*family, *style) == ("BIZ UDPGothic", "Regular");
         has_chinese_ui |= (*family, *style) == ("Noto Sans CJK SC", "Regular") && scripts.split(',').any(|script| script.trim() == "Hans");
-        if wasm && (*family, *style) != ("BIZ UDPGothic", "Regular") {
+        has_korean_ui |= (*family, *style) == ("Pretendard", "Regular") && scripts.split(',').any(|script| script.trim() == "Hang");
+        if wasm && ![("BIZ UDPGothic", "Regular"), ("Pretendard", "Regular")].contains(&(*family, *style)) {
             continue;
         }
         let path = dir.join(file).canonicalize().map_err(|e| format!("{file}: {e}"))?;
@@ -94,6 +96,9 @@ fn craft_fonts(dir: &Path, required: bool) -> Result<String, String> {
     }
     if required && !wasm && !has_chinese_ui {
         return Err("required Simplified Chinese UI face Noto Sans CJK SC Regular (Hans) is missing from fonts/manifest.txt".into());
+    }
+    if required && !has_korean_ui {
+        return Err("required Korean UI face Pretendard Regular (Hang) is missing from fonts/manifest.txt".into());
     }
     Ok(out)
 }

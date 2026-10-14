@@ -483,6 +483,33 @@ mod tests {
     }
 
     #[test]
+    fn korean_face_renders_hangul_when_craft_fonts_carry_one() {
+        let Some(korean) = lightcraft_engine::CRAFT_FONTS.iter().find(|font| font.covers("Hang")) else {
+            eprintln!("no Korean face in craft-fonts: nothing to check");
+            return;
+        };
+        set_language(Locale::Ko);
+        let definitions = font_definitions(lightcraft_engine::CRAFT_FONTS);
+        let name = craft_font_name(korean);
+        assert!(definitions.font_data.contains_key(&name));
+        for family in [FontFamily::Proportional, semibold_family(), FontFamily::Monospace] {
+            let names = definitions.families.get(&family).expect("UI font family");
+            let strong = format!("{name} strong");
+            assert!(names.contains(&name) || (family == semibold_family() && names.contains(&strong)), "{family:?} falls back on {name}");
+        }
+
+        let ctx = egui::Context::default();
+        ctx.set_fonts(definitions);
+        let mut frame = ctx.run_ui(egui::RawInput::default(), |_| {});
+        frame.textures_delta.clear();
+        ctx.fonts_mut(|fonts| {
+            let id = FontId::new(14.0, FontFamily::Proportional);
+            assert!("한국어 사진 편집 한글".chars().all(|ch| fonts.has_glyph(&id, ch)), "the Korean face draws the UI sample");
+        });
+        set_language(Locale::En);
+    }
+
+    #[test]
     fn native_chinese_face_falls_back_after_default_faces() {
         static FACES: &[lightcraft_engine::CraftFont] = &[
             lightcraft_engine::CraftFont {

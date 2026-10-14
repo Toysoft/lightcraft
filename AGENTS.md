@@ -69,7 +69,7 @@ of it. Full standard: `../craftrules/standards/never-crash.md`
 - **Never use any iconography, image, artwork, font, sound or other asset from Adobe products** (no Lightroom/Creative Cloud icons, no screenshots, no presets/profiles/LUTs, no UI bitmaps — not even as a temporary placeholder or "reference copy"). Observing Adobe's UI to imitate *layout and behaviour* is allowed; copying or tracing its assets is not.
 - **This includes Adobe's open-licensed assets**: no Source Sans/Serif/Code or Source Han fonts, no Adobe Fonts, no
   Adobe-published icon sets, sample photos, colour profiles or LUTs — even when OFL/MIT. The UI font is Inter (OFL);
-  Japanese and Chinese fonts come from craft-fonts (below). **One exception (maintainer decision, 2026-10-07): Noto
+  Japanese, Chinese and Korean fonts come from craft-fonts (below). **One exception (maintainer decision, 2026-10-07): Noto
   Sans/Serif CJK** (Google-branded, OFL, co-developed with Adobe as Source Han) is allowed via craft-fonts for Chinese
   text, because nearly every OFL Chinese face derives from it. Use it unmodified under its OFL; this does not open the
   door to Source Han under Adobe's name or to any other Adobe asset.
@@ -80,10 +80,10 @@ of it. Full standard: `../craftrules/standards/never-crash.md`
   font files here (Inter, already in `assets/fonts/`, is the one exception); add new fonts to craft-fonts. LightCraft
   uses it as the optional build input `CRAFT_FONTS_DIR`: `git clone https://github.com/storytold/craft-fonts ../craft-fonts`
   then `CRAFT_FONTS_DIR=../craft-fonts cargo run -p lightcraft` (or any cargo/xtask command). `crates/engine/build.rs`
-  embeds the manifest's fonts as `lightcraft_engine::CRAFT_FONTS` (wasm32: BIZ UDPGothic Regular only); `cargo xtask web`
+  embeds the manifest's fonts as `lightcraft_engine::CRAFT_FONTS` (wasm32: BIZ UDPGothic and Pretendard Regular); `cargo xtask web`
   ships Noto Sans CJK SC Regular as a separate asset loaded by the UI before startup. The UI
   (`theme::font_definitions`) and the export watermark renderer use CJK faces (picked by script) as fallbacks after Inter. Unset,
-  `CRAFT_FONTS` is empty: everything builds, tests and runs, but Chinese and Japanese text lack glyphs. Releases always build
+  `CRAFT_FONTS` is empty: everything builds, tests and runs, but Chinese, Japanese and Korean text lack glyphs. Releases always build
   with it (`release.yml`, `CRAFT_FONTS_REQUIRED=1`) and ship the fonts' OFL licences. Tests that need these fonts skip
   without it; the FreeBSD CI job runs them with it. Rules: craftrules
   [`standards/fonts.md`](https://github.com/storytold/craftrules/blob/main/standards/fonts.md).

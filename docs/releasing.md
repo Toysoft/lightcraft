@@ -56,13 +56,13 @@ their runtime dependencies.
 
 Release builds fetch the pinned [`storytold/craft-fonts`](https://github.com/storytold/craft-fonts)
 revision and require it (`CRAFT_FONTS_REQUIRED=1`). Keep that pin deliberate when updating the
-workflow, and bump it (in `release.yml`, five jobs, and `freebsd.yml`) whenever craft-fonts adds a face a
+workflow, and bump it (in `release.yml`, six jobs, and `freebsd.yml`) whenever craft-fonts adds a face a
 shipped language needs: a stale pin still builds, it just ships tofu (issue #319: v0.4.0 pinned a revision
 from before Noto Sans CJK SC, so Simplified Chinese had no glyphs). Before a release, check the pin against
 craft-fonts' `fonts/manifest.txt` and run `CRAFT_FONTS_DIR=../craft-fonts cargo test -p lightcraft-ui-egui i18n`,
-whose glyph-coverage test checks the characters in available faces. `CRAFT_FONTS_REQUIRED=1` now also makes
-the native build fail if the pinned manifest lacks Noto Sans CJK SC Regular (`Hans`) or BIZ UDPGothic Regular;
-the web build requires BIZ UDPGothic Regular and packages Noto Sans CJK SC as a separate asset.
+whose glyph-coverage test checks the characters in available faces. `CRAFT_FONTS_REQUIRED=1` now also makes the native build fail if the pinned manifest lacks Noto Sans
+CJK SC Regular (`Hans`), BIZ UDPGothic Regular or a Korean (`Hang`) Regular face; the web build
+requires BIZ UDPGothic Regular and a Korean face, and packages Noto Sans CJK SC as a separate asset.
 
 ## Signing credentials
 
