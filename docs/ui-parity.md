@@ -111,10 +111,13 @@ The scale doubles per 200 logical pixels of horizontal travel and is bounded fro
 
 Shift-drag temporarily uses the same gesture without selecting the tool, following Lightroom
 Classic's scrubby-zoom direction. Ordinary dragging still pans when the tool is off. Holding
-Space with the magnifier selected temporarily pans instead of invoking the Space zoom toggle;
-Space retains its existing toggle binding outside this tool and its pause behavior in slideshow.
-Clicking without dragging still toggles Fit / the chosen click-zoom ratio. A completed scrub
-does not trigger that click toggle on release.
+Space with the magnifier selected temporarily pans instead of invoking the Space zoom toggle,
+including when pressed after a scrub has already begun. That cancels the scrub anchor; releasing
+Space during the same held drag does not replay it. Space retains its existing toggle binding
+outside this tool and its pause behavior in slideshow. Clicking without dragging toggles Fit /
+the chosen click-zoom ratio in Detail and either Compare/Reference pane. Compare still selects
+the clicked photo; Reference keeps the active edit target. A completed scrub does not trigger
+that click toggle on release.
 
 Crop, Masking, Remove, Red Eye, pickers and targeted adjustments retain their editing gestures;
 Shift does not turn those tools into scrub zoom. Selecting the zoom tool leaves an editing tool

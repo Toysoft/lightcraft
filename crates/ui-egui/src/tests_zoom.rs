@@ -273,3 +273,84 @@ fn zoom_button_toggles_the_tool_and_command_preserves_comparison_views() {
         assert_eq!(h.app.ui.view, view);
     }
 }
+
+#[test]
+fn space_pressed_during_a_scrub_cancels_zoom_and_pans_without_restarting() {
+    use crate::panels::detail::Gesture;
+    use crate::state::Zoom;
+    let mut h = detail();
+    h.app.run("tool.zoom", json!({})).unwrap();
+    h.app.run("view.zoom100", json!({})).unwrap();
+    h.step();
+    let at = h.app.image_rect.unwrap().center();
+    let modifiers = egui::Modifiers::NONE;
+    h.app.synthetic.push(egui::Event::PointerMoved(at));
+    h.step();
+    h.app.synthetic.push(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers });
+    h.step();
+    let to = at + egui::vec2(100.0, 0.0);
+    h.app.synthetic.push(egui::Event::PointerMoved(to));
+    h.step();
+    assert!(matches!(h.app.gesture, Some(Gesture::ScrubZoom(_))));
+    let zoom = h.app.ui.zoom;
+    assert!(matches!(zoom, Zoom::Percent(p) if p > 100.0));
+    let pan = h.app.ui.pan;
+    let key = |pressed| egui::Event::Key { key: egui::Key::Space, physical_key: Some(egui::Key::Space), pressed, repeat: false, modifiers };
+    h.app.synthetic.push(key(true));
+    h.step();
+    h.app.synthetic.push(egui::Event::PointerMoved(to + egui::vec2(60.0, 20.0)));
+    h.step();
+    assert_eq!(h.app.ui.zoom, zoom, "Space stops the already-active scrub");
+    assert!(h.app.gesture.is_none());
+    assert!(h.app.ui.pan.0 < pan.0, "the held drag now pans");
+    h.app.synthetic.push(key(false));
+    h.step();
+    h.app.synthetic.push(egui::Event::PointerMoved(to + egui::vec2(80.0, 20.0)));
+    h.step();
+    assert_eq!(h.app.ui.zoom, zoom, "releasing Space must not replay the original scrub anchor");
+    h.app.synthetic.push(egui::Event::PointerButton {
+        pos: to + egui::vec2(80.0, 20.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers,
+    });
+    h.step();
+    assert_eq!(h.app.ui.zoom, zoom, "release must not become a zoom click");
+    assert_eq!(h.app.ui.tool, "zoom");
+}
+
+#[test]
+fn magnifier_clicks_toggle_the_chosen_ratio_in_both_compare_and_reference_panes() {
+    use crate::state::{ViewMode, Zoom};
+    let mut h = detail();
+    let ids: Vec<_> = h.app.session.visible_cloned().into_iter().take(2).map(|id| id.0).collect();
+    h.app.run("library.select", json!({"ids": ids, "active": ids[1]})).unwrap();
+    h.app.run("view.clickZoom", json!({"ratio": 2})).unwrap();
+    for view in [ViewMode::Compare, ViewMode::Reference] {
+        h.app.ui.view = view;
+        h.app.ui.compare = Some((ids[0], ids[1]));
+        h.app.ui.reference = Some(ids[0]);
+        h.app.run("tool.zoom", json!({})).unwrap();
+        for id in &ids {
+            h.app.ui.zoom = Zoom::Fit;
+            h.app.ui.pan = (0.5, 0.5);
+            h.step();
+            let before = h.app.session.active();
+            let r = h.request("ui.clickWidget", json!({"id": format!("cull:{id}")}), T);
+            assert_eq!(r["ok"], true, "{r}");
+            h.step();
+            assert_eq!(h.app.ui.zoom, Zoom::Percent(200.0), "{view:?}: single click uses the chosen ratio");
+            assert_eq!(h.app.ui.view, view);
+            assert_eq!(h.app.ui.reference, Some(ids[0]));
+            if view == ViewMode::Reference {
+                assert_eq!(h.app.session.active(), before, "reference navigation must not select a different edit target");
+            } else {
+                assert_eq!(h.app.session.active().map(|p| p.0), Some(*id));
+            }
+            let r = h.request("ui.clickWidget", json!({"id": format!("cull:{id}")}), T);
+            assert_eq!(r["ok"], true, "{r}");
+            h.step();
+            assert_eq!(h.app.ui.zoom, Zoom::Fit, "{view:?}: second click returns to Fit even when egui reports a double click");
+        }
+    }
+}

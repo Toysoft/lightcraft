@@ -162,6 +162,10 @@ fn scrub_zoom(app: &mut LightcraftApp, ui: &egui::Ui, resp: &egui::Response, are
         return true;
     }
     let (shift, space) = ui.input(|i| (i.modifiers.shift, i.key_down(egui::Key::Space)));
+    if active && !app.ui.zoom_scrub_allowed(shift, space) {
+        app.gesture = None;
+        return false;
+    }
     if !active
         && app.ui.zoom_scrub_allowed(shift, space)
         && resp.drag_started_by(egui::PointerButton::Primary)
