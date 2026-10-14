@@ -871,7 +871,7 @@ pub fn drag_feedback(app: &mut LightcraftApp, ctx: &egui::Context) {
         egui::Frame::NONE.fill(t.accent).corner_radius(10.0).inner_margin(egui::Margin::symmetric(9, 3)).show(ui, |ui| {
             ui.label(
                 egui::RichText::new(crate::i18n::tr_format!("{n} photo{}", if n == 1 { "" } else { "s" }, n = n))
-                    .color(Color32::WHITE)
+                    .color(t.on_accent())
                     .font(t.semibold(12.0)),
             );
         });

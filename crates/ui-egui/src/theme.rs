@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use craft_ui::theme::SuitePalette;
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, Visuals};
 
 pub const FONT_SEMIBOLD: &str = "semibold";
@@ -119,6 +120,13 @@ impl ThemeKind {
 
 impl Default for Tokens {
     fn default() -> Self {
+        Self::for_kind(ThemeKind::Charcoal)
+    }
+}
+
+impl Tokens {
+    // Keep the original palette as the inheritance base for Midnight, Silver and Paper.
+    fn legacy_base() -> Self {
         Tokens {
             chrome: Color32::from_rgb(0x2d, 0x2d, 0x2d),
             canvas: Color32::from_rgb(0x1c, 0x1c, 0x1c),
@@ -160,12 +168,38 @@ impl Default for Tokens {
 }
 
 impl Tokens {
+    /// Foreground for a filled accent control in the standard Charcoal palette.
+    pub fn on_accent(&self) -> Color32 {
+        let suite = SuitePalette::ARTCRAFT_DARK;
+        if self.chrome == suite.chrome { suite.on_accent } else { Color32::WHITE }
+    }
+
     /// The tokens of `kind`. Metrics are shared; only colours change.
     pub fn for_kind(kind: ThemeKind) -> Tokens {
         let rgb = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
-        let base = Tokens::default();
+        let base = Tokens::legacy_base();
+        let suite = SuitePalette::ARTCRAFT_DARK;
         match kind {
-            ThemeKind::Charcoal => base,
+            ThemeKind::Charcoal => Tokens {
+                // ArtCraft standard dark UI; photo, grid and label roles stay local.
+                chrome: suite.chrome,
+                divider: suite.border,
+                inset: suite.panel,
+                field: suite.input,
+                field_border: suite.border,
+                button: suite.raised,
+                button_border: suite.border,
+                hover: suite.hover,
+                pressed: suite.pressed,
+                tool_active: suite.selection,
+                text: suite.text,
+                text_label: suite.text,
+                text_dim: suite.text_secondary,
+                text_disabled: suite.text_disabled,
+                icon: suite.text_secondary,
+                accent: suite.accent,
+                ..base
+            },
             ThemeKind::Midnight => Tokens {
                 chrome: rgb(0x1e1e1e),
                 canvas: rgb(0x121212),
@@ -402,21 +436,22 @@ pub fn apply_kind(ctx: &egui::Context, kind: ThemeKind) {
         o.input_options.scroll_zoom_speed = WHEEL_ZOOM_PER_POINT;
     });
     let t = Tokens::for_kind(kind);
+    let suite = SuitePalette::ARTCRAFT_DARK;
     ctx.data_mut(|d| {
         d.insert_temp(egui::Id::NULL, t);
         d.insert_temp(theme_id(), kind);
     });
     let dark = kind.is_dark();
     let mut v = if dark { Visuals::dark() } else { Visuals::light() };
-    v.panel_fill = t.chrome;
-    v.window_fill = t.chrome;
+    v.panel_fill = if kind == ThemeKind::Charcoal { t.inset } else { t.chrome };
+    v.window_fill = if kind == ThemeKind::Charcoal { t.inset } else { t.chrome };
     v.extreme_bg_color = t.field;
     v.faint_bg_color = t.inset;
     v.window_stroke = Stroke::new(1.0, t.button_border);
     v.window_corner_radius = CornerRadius::same(6);
     v.menu_corner_radius = CornerRadius::same(6);
-    v.selection.bg_fill = t.accent.gamma_multiply(0.6);
-    v.selection.stroke = Stroke::new(1.0, t.accent);
+    v.selection.bg_fill = if kind == ThemeKind::Charcoal { suite.selection } else { t.accent.gamma_multiply(0.6) };
+    v.selection.stroke = Stroke::new(1.0, if kind == ThemeKind::Charcoal { suite.selection_text } else { t.accent });
     v.override_text_color = Some(t.text_label);
     let (popup, window) = if dark { (140, 160) } else { (50, 60) };
     v.popup_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(popup) };
@@ -448,6 +483,78 @@ pub fn apply_kind(ctx: &egui::Context, kind: ThemeKind) {
 mod tests {
     use super::*;
     use crate::i18n::{Locale, set_language};
+
+    #[test]
+    fn charcoal_maps_shared_ui_roles_and_keeps_photo_semantics() {
+        let suite = SuitePalette::ARTCRAFT_DARK;
+        let charcoal = Tokens::for_kind(ThemeKind::Charcoal);
+        for (actual, expected) in [
+            (charcoal.chrome, suite.chrome),
+            (charcoal.divider, suite.border),
+            (charcoal.inset, suite.panel),
+            (charcoal.field, suite.input),
+            (charcoal.field_border, suite.border),
+            (charcoal.button, suite.raised),
+            (charcoal.button_border, suite.border),
+            (charcoal.hover, suite.hover),
+            (charcoal.pressed, suite.pressed),
+            (charcoal.tool_active, suite.selection),
+            (charcoal.text, suite.text),
+            (charcoal.text_label, suite.text),
+            (charcoal.text_dim, suite.text_secondary),
+            (charcoal.text_disabled, suite.text_disabled),
+            (charcoal.icon, suite.text_secondary),
+            (charcoal.accent, suite.accent),
+            (charcoal.on_accent(), suite.on_accent),
+        ] {
+            assert_eq!(actual, expected);
+        }
+        assert_eq!(Tokens::default().chrome, charcoal.chrome);
+        let legacy = Tokens::legacy_base();
+        assert_eq!(charcoal.canvas, legacy.canvas);
+        assert_eq!(charcoal.grid_bg, legacy.grid_bg);
+        assert_eq!(charcoal.cell, legacy.cell);
+        assert_eq!(charcoal.cell_selected, legacy.cell_selected);
+        assert_eq!(charcoal.star, legacy.star);
+        assert_eq!(charcoal.pick, legacy.pick);
+        assert_eq!(charcoal.reject, legacy.reject);
+        assert_eq!(charcoal.caution, legacy.caution);
+        assert_eq!(charcoal.mask_overlay, legacy.mask_overlay);
+        let ctx = egui::Context::default();
+        apply_kind(&ctx, ThemeKind::Charcoal);
+        let visuals = ctx.style_of(egui::Theme::Dark).visuals.clone();
+        assert_eq!(visuals.panel_fill, suite.panel);
+        assert_eq!(visuals.selection.bg_fill, suite.selection);
+        assert_eq!(visuals.selection.stroke.color, suite.selection_text);
+        assert_eq!(visuals.widgets.inactive.bg_fill, suite.raised);
+        assert_eq!(visuals.widgets.inactive.bg_stroke, Stroke::new(1.0, suite.border));
+        assert_eq!(visuals.widgets.hovered.bg_fill, suite.hover);
+        assert_eq!(visuals.widgets.active.bg_fill, suite.pressed);
+    }
+
+    #[test]
+    fn alternate_presets_keep_their_palette_and_widget_selection() {
+        let rgb = |v: u32| Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8);
+        for (kind, chrome, accent, canvas) in [
+            (ThemeKind::Midnight, 0x1e1e1e, 0x0165dd, 0x121212),
+            (ThemeKind::Silver, 0xe6e6e6, 0x0a62d0, 0xcfcfcf),
+            (ThemeKind::Paper, 0xfafafa, 0x0a62d0, 0xececec),
+        ] {
+            let t = Tokens::for_kind(kind);
+            assert_eq!(t.chrome, rgb(chrome), "{kind:?}");
+            assert_eq!(t.accent, rgb(accent), "{kind:?}");
+            assert_eq!(t.canvas, rgb(canvas), "{kind:?}");
+            assert_eq!(t.on_accent(), Color32::WHITE, "{kind:?}");
+            let ctx = egui::Context::default();
+            apply_kind(&ctx, kind);
+            let visuals = ctx.style_of(egui::Theme::Dark).visuals.clone();
+            assert_eq!(visuals.panel_fill, t.chrome, "{kind:?}");
+            assert_eq!(visuals.selection.bg_fill, t.accent.gamma_multiply(0.6), "{kind:?}");
+            assert_eq!(visuals.selection.stroke.color, t.accent, "{kind:?}");
+            assert_eq!(visuals.widgets.inactive.bg_fill, t.button, "{kind:?}");
+            assert_eq!(visuals.widgets.inactive.bg_stroke, Stroke::new(1.0, t.button_border), "{kind:?}");
+        }
+    }
 
     /// Every theme scrolls 100 points a wheel notch, and a zoom notch stays egui's stock ~1.22x
     /// (`exp(40 / 200)`) instead of growing with the longer scroll.
