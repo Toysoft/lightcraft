@@ -450,9 +450,6 @@ pub fn try_render(
 ) -> Result<Rendered, Fallback> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // sections switched off with their eye render as if at their defaults (issue #316)
-        let effective = s.effective();
-        let s: &DevelopSettings = &effective;
         // the kernel writes 8-bit output: high-bit-depth exports (and soft proofs) render on the CPU
         // Visualize HDR needs the float HDR render: CPU too
         if !enabled()
@@ -462,7 +459,6 @@ pub fn try_render(
         {
             return Err(Fallback::NotTried);
         }
-        let s = &*lightcraft_pipeline::settings_for(s, req);
         // in flight until this returns; not tried once the process is ending (issue #620)
         let _work = exit::enter().ok_or(Fallback::NotTried)?;
         let gpu = device().ok_or(Fallback::NotTried)?;
