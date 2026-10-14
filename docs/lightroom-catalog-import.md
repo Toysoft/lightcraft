@@ -16,8 +16,8 @@ lightcraft-cli run --library "LightCraft Library" library.importLightroom path="
 ```
 
 Original files are referenced in place. Ratings, picks/rejects, color labels, XMP metadata,
-hierarchical keywords, regular collections/collection sets, virtual copies and mapped develop
-settings are imported. Missing originals remain catalogued for relinking. Existing LightCraft
+hierarchical keywords, regular collections/collection sets, smart collections, folder stacks,
+virtual copies and mapped develop settings are imported. Missing originals remain catalogued for relinking. Existing LightCraft
 edits are preserved by default; `updateExisting=true` explicitly replaces them. Persistent import
 identity prevents reimport from duplicating virtual copies and collections. One undo step reverses
 catalog changes; any saved recovery archives remain available.
@@ -45,8 +45,17 @@ models, some masking/retouch fields and process-version algorithms are not repro
 fields are reported. Lightroom's `ProcessVersion` is not mapped: newly imported photos are on
 LightCraft's latest rendering process, and photos already in the library keep theirs
 ([process-versions.md](process-versions.md)). When a recovery archive is saved, it retains source settings/history/snapshots
-and original smart-collection rules. Smart collections become regular albums with current
-membership. Archived history and snapshots are source data, not native LightCraft history yet.
+and original smart-collection rules. Smart collections become smart albums when every rule has an exact equivalent: rating, pick
+flag, color label, has-adjustments, ISO, focal length and aperture comparisons; text rules on
+keywords, filename, camera, lens, title, caption, creator, copyright, location fields and file
+format (contains all / any / none, begins/ends with, is, empty); and nested match-all / any /
+none groups. Any other rule (collection, dates, metadata status, …) keeps the collection as a
+regular album with its current membership, and the report names the rule. On reimport an album keeps
+its kind: an existing smart album keeps its current (possibly edited) rules, and a regular album
+made by an earlier import stays regular and gains new members, with a warning (delete it and
+reimport to get a smart album). The report counts albums by their resulting kind:
+`smartAlbums`, `smartAsStatic`, `smartKept` (existing smart albums left as they were) and `stacks`. Folder stacks become stacks in Lightroom's order
+and collapsed state; photos already in a stack keep it, so reimport doesn't duplicate them. Archived history and snapshots are source data, not native LightCraft history yet.
 A Custom white balance on a raw LightCraft develops relative to its as-shot look (ARW, NEF, RW2,
 RAF, CR3, CR2, PEF, SRW; Lightroom names them all `RAW`) can't be taken as Kelvin: the catalog keeps no
 as-shot white for Custom photos, so the photo stays As Shot and `Temperature, Tint` are reported
