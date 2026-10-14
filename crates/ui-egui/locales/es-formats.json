@@ -251,6 +251,7 @@
   "{task}: stopped unexpectedly": "{task}: se detuvo inesperadamente",
   "Show failed ({n})": "Mostrar los errores ({n})",
   "and {n} more": "y {n} más",
+  "{n} failed": "{n} fallaron",
   "took {n} s": "duró {n} s",
   "took {n} min": "duró {n} min",
   "took {h} h {m} min": "duró {h} h {m} min",

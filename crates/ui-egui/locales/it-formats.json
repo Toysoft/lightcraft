@@ -245,6 +245,7 @@
   "{task}: stopped unexpectedly": "{task}: interrotta inaspettatamente",
   "Show failed ({n})": "Mostra non riusciti ({n})",
   "and {n} more": "e altri {n}",
+  "{n} failed": "{n} non riusciti",
   "took {n} s": "durata {n} s",
   "took {n} min": "durata {n} min",
   "took {h} h {m} min": "durata {h} h {m} min",

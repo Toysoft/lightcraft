@@ -251,6 +251,7 @@
   "{task}: stopped unexpectedly": "{task}: неожиданно остановлено",
   "Show failed ({n})": "Показать ошибки ({n})",
   "and {n} more": "и ещё {n}",
+  "{n} failed": "Не удалось: {n}",
   "took {n} s": "заняло {n} с",
   "took {n} min": "заняло {n} мин",
   "took {h} h {m} min": "заняло {h} ч {m} мин",

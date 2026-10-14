@@ -251,6 +251,7 @@
   "{task}: stopped unexpectedly": "{task}: несподівано зупинено",
   "Show failed ({n})": "Показати помилки ({n})",
   "and {n} more": "і ще {n}",
+  "{n} failed": "Не вдалося: {n}",
   "took {n} s": "тривало {n} с",
   "took {n} min": "тривало {n} хв",
   "took {h} h {m} min": "тривало {h} год {m} хв",

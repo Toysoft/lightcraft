@@ -7,7 +7,7 @@ use lightcraft_engine::activity::{Cancel, Ending, Failure, Outcome, TaskInfo, Un
 use serde_json::json;
 
 use crate::headless::Headless;
-use crate::panels::activity::{WIDTH, count_text, failures_text, overall, readout_text, summary_of, took};
+use crate::panels::activity::{WIDTH, count_text, detail_of, failures_text, overall, readout_text, summary_of, took};
 use crate::{LightcraftApp, Services};
 
 // generous: merges and renders run on worker threads that a busy machine (a full workspace test run) slows a lot
@@ -590,6 +590,8 @@ fn scan_shows_a_row_and_cancel_closes_it() {
         h.step();
     }
     assert!(h.app.ui.dialog.is_none(), "no review opened");
+    let row = h.app.session.activity.last_finished().expect("a stopped scan leaves a row");
+    assert_eq!((row.label.as_str(), row.ending), ("Scanning folder", Ending::Stopped));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -632,6 +634,8 @@ fn final_merge_shows_a_row_and_cancels() {
     assert!(h.app.session.activity.list().is_empty());
     let toast = h.app.ui.toast.as_ref().map(|t| t.0.clone()).unwrap_or_default();
     assert_eq!(toast, "HDR merge cancelled");
+    let row = h.app.session.activity.last_finished().expect("a stopped merge leaves a row");
+    assert_eq!((row.ending, row.summary.as_str()), (Ending::Stopped, "HDR merge cancelled"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -683,6 +687,7 @@ fn batch_merge_runs_each_set_in_turn() {
 #[test]
 fn find_missing_shows_an_indeterminate_row() {
     let mut h = demo();
+    h.app.session.activity.keep_after(0);
     let dir = std::env::temp_dir().join(format!("lc-activity-findmissing-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // run directly, not through a request (which runs frames): the search of an empty folder is over at once, but its
@@ -695,6 +700,25 @@ fn find_missing_shows_an_indeterminate_row() {
     assert_eq!((rows[0].total, rows[0].cancellable), (0, false), "indeterminate, no ✕");
     assert!(h.step_until(T, |h| h.app.tasks.is_empty()));
     assert!(h.app.session.activity.list().is_empty(), "the row goes with the task");
+    let row = h.app.session.activity.last_finished().expect("and a row says what it found");
+    assert_eq!(row.ending, Ending::Done);
+    assert!(row.summary.starts_with("Found 0 missing photos"), "{:?}", row.summary);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A Lightroom catalog that can't be read leaves a row saying the task failed, and why.
+#[test]
+fn a_lightroom_catalog_that_cannot_be_read_leaves_a_failed_row() {
+    let mut h = demo();
+    let dir = std::env::temp_dir().join(format!("lc-activity-lrcat-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Not a catalog.lrcat");
+    std::fs::write(&path, b"this is not a Lightroom catalog").unwrap();
+    let r = crate::menus::run_ui_command(&mut h.app, "library.inspectLightroom", &json!({"path": path.to_string_lossy(), "wait": true}));
+    assert!(r.is_some(), "the command is the interface's");
+    let row = h.app.session.activity.last_finished().expect("a failed task always leaves a row");
+    assert_eq!((row.kind, row.ending), ("lightroom", Ending::Failed));
+    assert!(row.summary.starts_with("Lightroom inspection failed"), "{:?}", row.summary);
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -937,4 +961,33 @@ fn the_failed_files_copied_say_how_many_were_not_kept_and_stay_a_line_each() {
     g.finish(Outcome { ending: Ending::Problems, failures, failed: 700, ..Default::default() });
     let row = &h.app.session.activity.finished()[0];
     assert_eq!(failures_text(row), "IMG_1.jpg\tThe disk is full\nIMG 2.jpg\tNo permission\nand 698 more");
+}
+
+/// A task that only counted what it could not do (a preview build) has the count said under its name; one that said
+/// more keeps what it said.
+#[test]
+fn an_ended_task_that_only_counted_its_failures_says_how_many() {
+    let h = demo();
+    h.app.session.activity.keep_after(0);
+    let g = h.app.session.activity.start("previews", "Building previews", Cancel::Yes);
+    g.finish(Outcome { ending: Ending::Problems, failed: 3, ..Default::default() });
+    let f = h.app.session.activity.last_finished().unwrap();
+    assert_eq!((summary_of(&f), detail_of(&f)), ("Building previews: done, with problems".to_string(), "3 failed".to_string()));
+    let g = h.app.session.activity.start("import", "Importing", Cancel::Yes);
+    g.finish(Outcome { ending: Ending::Problems, failed: 2, detail: "2 not readable".into(), ..Default::default() });
+    assert_eq!(detail_of(&h.app.session.activity.last_finished().unwrap()), "2 not readable");
+}
+
+/// A scan that ran to its end says so, and says when it found nothing to import.
+#[test]
+fn a_scan_that_found_nothing_leaves_a_row_saying_so() {
+    let mut h = demo();
+    h.app.session.activity.keep_after(0);
+    let dir = std::env::temp_dir().join(format!("lc-activity-emptyscan-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    crate::import::open(&mut h.app, vec![dir.to_string_lossy().to_string()]).unwrap();
+    assert!(h.step_until(T, |h| h.app.scan.is_none()));
+    let row = h.app.session.activity.last_finished().expect("a row for the scan");
+    assert_eq!((row.label.as_str(), row.ending, row.detail.as_str()), ("Scanning folder", Ending::Done, "No photos found"));
+    let _ = std::fs::remove_dir_all(dir);
 }

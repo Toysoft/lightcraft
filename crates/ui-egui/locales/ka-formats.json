@@ -215,6 +215,7 @@
   "{task}: stopped unexpectedly": "{task}: მოულოდნელად შეჩერდა",
   "Show failed ({n})": "წარუმატებლების ჩვენება ({n})",
   "and {n} more": "და კიდევ {n}",
+  "{n} failed": "წარუმატებელი: {n}",
   "took {n} s": "გაგრძელდა {n} წმ",
   "took {n} min": "გაგრძელდა {n} წთ",
   "took {h} h {m} min": "გაგრძელდა {h} სთ {m} წთ",

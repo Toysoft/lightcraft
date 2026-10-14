@@ -2,6 +2,13 @@
 
 ## 2026-10-14
 
+### Every finished task leaves a row
+- Synchronize Folder, Build Previews and Smart Previews, Photo Merge, Lightroom catalogs, downloads, folder scans,
+  Fill Location from GPS, moving photos and Find Missing Photos now stay in the list under the bell when they end,
+  as exports and imports already did: until you dismiss them when they ran 10 seconds or more, were stopped or did
+  not go well. A Synchronize Folder lists the files it could not do, with the reason for each; a preview build says
+  how many photos it could not make.
+- The face scan and AI Denoise work through photos as they come: their row still goes when nothing is left.
 ### Lightroom radial masks on the right side
 - Radial masks brought over from Lightroom Classic (catalog import, XMP sidecars, edits inside DNGs and presets) now
   apply their effect inside the circle, as Lightroom does, instead of outside it (issue #1815). A mask inverted in

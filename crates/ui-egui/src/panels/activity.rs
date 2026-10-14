@@ -302,6 +302,12 @@ pub fn summary_of(f: &Finished) -> String {
     }
 }
 
+/// What else an ended task's row says: what the task said, or how many it could not do when it only counted them
+/// (a preview build).
+pub fn detail_of(f: &Finished) -> String {
+    if f.detail.is_empty() && f.failures.is_empty() && f.failed > 0 { tr_format!("{n} failed", n = f.failed) } else { f.detail.clone() }
+}
+
 /// "took 42 s", "took 12 min", "took 1 h 52 min".
 pub fn took(ran_ms: u64) -> String {
     let s = ran_ms / 1000;
@@ -509,7 +515,8 @@ fn finished_row(ui: &mut egui::Ui, t: &Tokens, f: &Finished, width: f32, rows: &
             }
         });
         let took = took(f.ran_ms);
-        let line = if f.detail.is_empty() { took } else { format!("{} · {took}", f.detail) };
+        let detail = detail_of(f);
+        let line = if detail.is_empty() { took } else { format!("{detail} · {took}") };
         ui.add(egui::Label::new(RichText::new(line).font(t.font(11.0)).color(t.text_dim)).truncate());
         // (the failed files can be listed when the job named them; an import only counts them, in the line above)
         let listed = !f.failures.is_empty();

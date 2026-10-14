@@ -236,6 +236,7 @@
   "{task}: stopped unexpectedly": "{task}: nieoczekiwanie zatrzymano",
   "Show failed ({n})": "Pokaż nieudane ({n})",
   "and {n} more": "i {n} więcej",
+  "{n} failed": "Nieudane: {n}",
   "took {n} s": "trwało {n} s",
   "took {n} min": "trwało {n} min",
   "took {h} h {m} min": "trwało {h} h {m} min",

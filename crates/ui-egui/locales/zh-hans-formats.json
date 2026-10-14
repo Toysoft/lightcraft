@@ -255,6 +255,7 @@
   "{task}: stopped unexpectedly": "{task}：意外停止",
   "Show failed ({n})": "显示失败项（{n}）",
   "and {n} more": "以及另外 {n} 项",
+  "{n} failed": "{n} 项失败",
   "took {n} s": "用时 {n} 秒",
   "took {n} min": "用时 {n} 分钟",
   "took {h} h {m} min": "用时 {h} 小时 {m} 分钟",

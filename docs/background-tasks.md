@@ -19,8 +19,12 @@ end leaves a row only when the task ran 10 s or more (a shorter one was watched 
 well always does: done with
 problems, failed, stopped, or stopped unexpectedly (its worker died). Those come first in the list, under "Needs
 attention", and put a mark on the bell until they are dismissed. With nothing running, a task that just ended is
-named beside the bell for a few seconds. Exports and imports report this way so far (an export names the files that
-failed, an import counts them); the other jobs still end in a toast only.
+named beside the bell for a few seconds. Every job that ends reports this way: exports, imports, folder scans,
+Synchronize Folder (its scan and its run, which names the files it could not do), Build / Smart Previews (they count
+the photos they could not make), Photo Merge, Lightroom catalog inspect / import, model and place-name downloads,
+Fill Location from GPS, moving photos and Find Missing Photos. The face scan and AI Denoise are queues that work
+through what arrives rather than jobs someone waits for: when one empties, its row goes and leaves nothing. A scan
+that another replaced, or whose dialog was closed, leaves nothing either: only the row's ✕ makes it a stopped task.
 Quitting asks first while a task that can stop is running. Agents see the same list through `activity.list` /
 `activity.cancel`, and `ui.inspect` reports it as `activity` (and whether the list is open as `activityOpen`).
 
@@ -50,8 +54,9 @@ guard.detail(&file_name);
   letting the guard drop. `ending` is `Done`, `Problems` (not for every file), `Failed`, `Stopped`, or `Died` when
   the job finds its worker gone; `summary` is the sentence the row shows (UI code passes it translated; engine code
   leaves it empty and the row is worded from the label); `failures` are the files with their reasons (`failed`
-  when the job only counts them); `path` is one of the files it made. Keep the toast that says how it went: the row
-  is the record, not the announcement. A guard that is only dropped leaves nothing, as before, unless a panic
+  when the job only counts them); `path` is one of the files it made. `Outcome::ended(ending)` and
+  `Outcome::failed(why)` cover the plain cases. Keep the toast that says how it went: the row is the record, not the
+  announcement. A guard that is only dropped leaves nothing, as before, unless a panic
   dropped it: then the row says the task stopped unexpectedly.
 - **Keep the guard for exactly as long as the job runs.** Put it in the struct the UI polls (`ExportTask`, `ScanTask`,
   `SyncRun`…), or move it into the worker thread. Dropping it removes the row, also when the worker panics, so a
