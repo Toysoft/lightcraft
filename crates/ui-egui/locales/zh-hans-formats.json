@@ -245,6 +245,8 @@
   "{n} added to Apple Photos album “{album}”": "已将 {n} 个添加到 Apple 照片相册“{album}”",
   "{n} added to Apple Photos": "已将 {n} 个添加到 Apple 照片",
   "{n} photos opened for editing; each is stacked with its original": "已打开 {n} 张照片进行编辑；每张都与其原片堆叠在一起",
+  "{n} photos · {frames} frames · {secs} s": "{n} 张照片 · {frames} 帧 · {secs} 秒",
+  "Exported timelapse: {photos} photos, {frames} frames": "已导出延时视频：{photos} 张照片，{frames} 帧",
   "{name} opened in the other editor": "已在其他编辑器中打开 {name}",
   "{n} originals opened in the other editor": "已在其他编辑器中打开 {n} 个原始文件",
   "· {in_source} identical copies": "· {in_source} 个相同副本"

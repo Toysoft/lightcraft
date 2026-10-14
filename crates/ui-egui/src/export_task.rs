@@ -132,6 +132,59 @@ pub fn start_contact_sheet(app: &mut LightcraftApp, params: &Value) -> Result<Va
     Ok(json!({"background": true, "total": total}))
 }
 
+/// Frame sizes the Timelapse Video dialog offers: (`size` value, label).
+pub const TIMELAPSE_SIZES: &[(&str, &str)] = &[
+    ("3840x2160", "4K UHD 3840×2160"),
+    ("1920x1080", "1080p 1920×1080"),
+    ("1280x720", "720p 1280×720"),
+    ("1080x1080", "Square 1080×1080"),
+    ("1080x1920", "Vertical 1080×1920"),
+];
+
+/// File ▸ Timelapse Video… with its defaults (issue #497).
+pub fn timelapse_dialog() -> crate::state::Dialog {
+    crate::state::Dialog::Timelapse { fps: 24, size: "1920x1080".into(), fill: false, hold: 1, crossfade: 0, prores: false, quality: 80 }
+}
+
+/// The Timelapse Video dialog's `export.timelapse` options.
+pub fn timelapse_params(d: &crate::state::Dialog) -> Option<Value> {
+    let crate::state::Dialog::Timelapse { fps, size, fill, hold, crossfade, prores, quality } = d else { return None };
+    Some(json!({
+        "fps": fps, "size": size, "fit": if *fill { "fill" } else { "fit" }, "hold": hold, "crossfade": crossfade,
+        "format": if *prores { "prores" } else { "h264" }, "quality": quality,
+    }))
+}
+
+/// Render and encode a timelapse movie (issue #497) on a worker, with the export's row in the
+/// activity stack (photos done, the file in progress, ✕ stops it and leaves no file).
+pub fn start_timelapse(app: &mut LightcraftApp, params: &Value) -> Result<Value, String> {
+    if app.export.is_some() {
+        return Err("an export is already running".into());
+    }
+    let prepared = lightcraft_engine::timelapse::prepare(&mut app.session, params)?;
+    let total = prepared.len();
+    let progress = Arc::new(Mutex::new((0, String::new())));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (p, c) = (progress.clone(), cancel.clone());
+    let (tx, rx) = channel();
+    let work = move || {
+        let r = prepared.run(&c, &mut |done, name| {
+            if let Ok(mut g) = p.lock() {
+                *g = (done, name.to_string());
+            }
+        });
+        let _ = tx.send(r.map(|rep| (vec![rep.json()], None, c.load(Ordering::Relaxed))));
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::Builder::new().name("timelapse".into()).spawn(work).map_err(|e| e.to_string())?;
+    #[cfg(target_arch = "wasm32")]
+    work();
+    let row = app.session.activity.start("export", "Exporting timelapse", Cancel::Flag(cancel.clone()));
+    row.progress(0, total as u64);
+    app.export = Some(ExportTask { total, progress, cancel, rx, guard: row });
+    Ok(json!({"background": true, "total": total}))
+}
+
 /// The toast's account of [`AfterExport::run`]'s Apple Photos outcome.
 pub fn apple_photos_note(outcome: &Value) -> String {
     if let Some(e) = outcome.get("error").and_then(Value::as_str) {
@@ -199,6 +252,13 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
                         crate::i18n::tr_format!("Exported {ok} of {total} photo{}", if total == 1 { "" } else { "s" }, ok = ok, total = total);
                     if let Some(sheet) = sheet {
                         m = format!("Exported contact sheet: {} photos, {} pages", sheet["photos"], sheet["pages"]);
+                    }
+                    if let Some(t) = files.first().filter(|f| f["timelapse"] == true) {
+                        m = crate::i18n::tr_format!(
+                            "Exported timelapse: {photos} photos, {frames} frames",
+                            photos = t["photos"].as_u64().unwrap_or(0),
+                            frames = t["frames"].as_u64().unwrap_or(0)
+                        );
                     }
                     if skipped > 0 {
                         m += &crate::i18n::tr_format!(" · {skipped} skipped (file exists)", skipped = skipped);
@@ -310,6 +370,59 @@ mod contact_sheet_tests {
         assert!(task.rx.recv_timeout(Duration::from_secs(20)).unwrap().is_err(), "a stopped sheet is not written");
         drop(task);
         assert!(app.session.activity.list().is_empty(), "the row goes with the export");
+    }
+
+    /// Issue #497: File ▸ Timelapse Video… → dialog → save picker → background movie with a row.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn timelapse_menu_dialog_picker_and_background_export() {
+        let dir = std::env::temp_dir().join(format!("lightcraft-ui-timelapse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("t.mp4").to_string_lossy().to_string();
+        let asked = Arc::new(Mutex::new(Vec::<PickRequest>::new()));
+        let requests = asked.clone();
+        let answer = out.clone();
+        let services = crate::Services {
+            picker: Some(Box::new(move |req| {
+                requests.lock().unwrap().push(req);
+                let (tx, rx) = channel();
+                tx.send(vec![answer.clone()]).unwrap();
+                Ok(rx)
+            })),
+            ..Default::default()
+        };
+        let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), services);
+        assert!(crate::menus::menu_entries(&app).iter().any(|e| e.id == "dialog.timelapse" && e.menu == ["File"]));
+        let ids: Vec<u64> = app.session.catalog.photos().take(3).map(|p| p.id.0).collect();
+        app.session.execute("library.select", &json!({"ids": ids})).unwrap();
+        app.run("dialog.timelapse", json!({})).unwrap();
+        let Some(Dialog::Timelapse { size, hold, .. }) = app.ui.dialog.as_mut() else { panic!("no timelapse dialog") };
+        *size = "64x48".into();
+        *hold = 2;
+        let mut h = crate::headless::Headless::new(app, [1000.0, 800.0], 1.0);
+        h.step();
+        let dialog = h.app.ui.dialog.take().unwrap();
+        crate::panels::dialogs::confirm_dialog(&mut h.app, &dialog).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut saw_row = false;
+        loop {
+            h.step();
+            saw_row |= h.app.session.activity.list().iter().any(|r| r.label == "Exporting timelapse" && r.total == 3);
+            if h.app.last_export_result.is_some() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "timelapse did not finish");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(saw_row, "the export shows in the activity stack");
+        let req = asked.lock().unwrap();
+        assert_eq!((req[0].kind, req[0].filter.as_ref().unwrap().1), (PickKind::Save, &["mp4"][..]));
+        let f = &h.app.last_export_result.as_ref().unwrap()["files"][0];
+        assert_eq!((f["frames"].as_u64(), f["photos"].as_u64(), f["width"].as_u64()), (Some(6), Some(3), Some(64)), "{f}");
+        assert!(std::path::Path::new(&out).exists());
+        assert!(h.app.session.activity.list().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

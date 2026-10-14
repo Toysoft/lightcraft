@@ -245,6 +245,8 @@
   "{n} added to Apple Photos album “{album}”": "{n} añadidas al álbum “{album}” de Fotos de Apple",
   "{n} added to Apple Photos": "{n} añadidas a Fotos de Apple",
   "{n} photos opened for editing; each is stacked with its original": "{n} fotos abiertas para editar; cada una está apilada con su original",
+  "{n} photos · {frames} frames · {secs} s": "{n} fotos · {frames} fotogramas · {secs} s",
+  "Exported timelapse: {photos} photos, {frames} frames": "Time-lapse exportado: {photos} fotos, {frames} fotogramas",
   "{name} opened in the other editor": "{name} abierto en el otro editor",
   "{n} originals opened in the other editor": "{n} originales abiertos en el otro editor",
   "· {in_source} identical copies": "· {in_source} copias idénticas"
