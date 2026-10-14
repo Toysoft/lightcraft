@@ -109,6 +109,9 @@
 - When Detail needs a sharp zoom window and the budget has room, it prepares native sources for
   adjacent filmstrip photos. Fit browsing and insufficient-budget preparation stay at preview
   resolution. First uncached loads and low-memory cache misses still require RAW development.
+- A protected previous-photo original no longer evicts affordable previews and thumbnails when
+  the newly selected photo has no native source, including at Fit. Its complete pinned cost is
+  excluded just like the foreground's; oversized originals are still released outside Detail.
 
 ### JPEG XL export
 - Export as JPEG XL (issue #247): Format ▸ JPEG XL in the Export dialog, `format: "jxl"` for agents and the CLI

@@ -106,10 +106,12 @@ left panel, canvas, right panel, which is sensible but not tuned).
 Detail, Compare and Reference reuse decoded originals within the existing shared cache byte
 budget instead of discarding them at one-/two-original count limits. Source pixels, decoder
 facts and denoised twins stay together. The current original is protected from late background
-completion; while its decode is pending, the newest original remains the single oversize fallback.
-The foreground's pinned bytes are excluded from the eviction budget, preserving the merged
-large-RAW fix without displacing its previews and thumbnails. Leaving Detail releases originals
-that cannot fit the budget; recent originals that fit remain reusable across views.
+completion; while the foreground has no native source, the newest original remains the single oversize fallback.
+The protected original's pinned bytes, including denoised twins and their reserved mix, are
+excluded from the eviction budget whether it is the foreground or the previous-photo fallback.
+Switching to a photo with no native source at Fit therefore keeps affordable previews and
+thumbnails instead of repeatedly evicting them. Leaving Detail releases originals that cannot
+fit the budget; recent originals that fit remain reusable across views.
 
 Detail prepares adjacent native sources only when a sharp zoom window is needed and the cache
 budget can accommodate the current photo, neighbours and preview rendering. Prefetched views

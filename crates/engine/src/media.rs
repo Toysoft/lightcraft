@@ -481,23 +481,23 @@ impl MediaCache {
     }
 
     /// Evict least recently used sources and rendered previews until they fit the budget. The
-    /// newest preview and foreground original (or its pending-decode fallback) are protected.
+    /// newest preview and foreground original (or its previous-photo fallback) are protected.
     /// Without a foreground, all originals count against the budget.
     pub fn enforce_budget(&mut self) {
-        // The on-screen original is never evicted here, so it does not count either: counted, a 64 MP original (760 MiB)
-        // nearly fills the default share (768 MiB) alone and everything else went instead — the photo's preview and
-        // thumbnail sources and the neighbours' were decoded again from the raw on every edit, zoom-out and step.
-        let protected_full = self.full.iter().find(|e| Some(e.0) == self.on_screen);
+        // The protected original cannot be evicted, so its complete cost (including twins)
+        // does not count against the budget. Apply that equally to the foreground and to the
+        // previous original kept while the foreground has no native source yet.
+        let protected_full =
+            self.full.iter().find(|e| Some(e.0) == self.on_screen).or_else(|| self.on_screen.and_then(|_| self.full.iter().max_by_key(|e| e.2)));
         let pinned = protected_full.map_or(0, |e| e.1.bytes());
         let protected_full = protected_full.map(|e| e.0);
-        let newest_full = if self.on_screen.is_some() && protected_full.is_none() { self.full.iter().map(|e| e.2).max() } else { None };
         let mut held = self.held().saturating_sub(pinned);
         while held > self.budget {
             let newest_preview = self.previews.iter().map(|e| e.2).max();
             let candidates = [
                 self.thumbs.oldest_tick().map(|t| (t, 0)),
                 self.previews.iter().filter(|e| Some(e.2) != newest_preview).map(|e| e.2).min().map(|t| (t, 1)),
-                self.full.iter().filter(|e| Some(e.0) != protected_full && Some(e.2) != newest_full).map(|e| e.2).min().map(|t| (t, 2)),
+                self.full.iter().filter(|e| Some(e.0) != protected_full).map(|e| e.2).min().map(|t| (t, 2)),
                 self.rendered.oldest_tick().map(|t| (t, 3)),
             ];
             let Some((tick, which)) = candidates.into_iter().flatten().min() else { break };
@@ -1924,6 +1924,45 @@ mod tests {
         assert!(!m.has_source(PhotoId(3), SourceLevel::Full));
         assert!(!m.has_source(PhotoId(4), SourceLevel::Full), "leaving Detail releases originals that cannot fit the budget");
         assert_eq!(m.usage().2.bytes, 0);
+    }
+
+    #[test]
+    fn protected_fallback_preserves_affordable_previews_thumbnails_and_rendered_views() {
+        for denoised in [false, true] {
+            let mut m = MediaCache::default();
+            let (a, b) = (PhotoId(1), PhotoId(2));
+            m.set_budget(1 << 20);
+            m.set_on_screen(Some(a));
+            let original = Arc::new(Rgb32f::new(512, 512));
+            let mut source = DecodedSource::new(original.clone(), None);
+            if denoised {
+                source.denoised = Some(Arc::new(Twin::new(original.clone())));
+            }
+            let pinned = source.bytes();
+            m.insert_source(a, SourceLevel::Full, source);
+            m.insert(a, SourceLevel::Preview, Arc::new(Rgb32f::new(128, 128)));
+            m.insert(b, SourceLevel::Preview, Arc::new(Rgb32f::new(128, 128)));
+            m.insert(b, SourceLevel::Thumb, Arc::new(Rgb32f::new(64, 64)));
+            let key = Hash128(1);
+            m.rendered.put(key, Arc::new(Rgba8::new(128, 128)));
+            assert!(m.held().saturating_sub(pinned) < m.budget());
+            m.set_on_screen(Some(b));
+            assert!(m.has_source(a, SourceLevel::Full), "keep the previous original until a native replacement arrives");
+            assert!(m.has_source(a, SourceLevel::Preview));
+            assert!(m.has_source(b, SourceLevel::Preview));
+            assert!(m.has_source(b, SourceLevel::Thumb));
+            assert!(m.rendered.get(key).is_some(), "affordable rendered views stay reusable");
+            m.insert(b, SourceLevel::Thumb, Arc::new(Rgb32f::new(64, 64)));
+            assert!(m.has_source(b, SourceLevel::Thumb), "reloading a thumbnail must not immediately evict it");
+            m.insert(b, SourceLevel::Full, original);
+            assert!(!m.has_source(a, SourceLevel::Full), "only the real foreground stays pinned once it arrives");
+            assert!(m.has_source(b, SourceLevel::Full));
+            assert!(m.has_source(b, SourceLevel::Thumb));
+            assert!(m.has_source(b, SourceLevel::Preview));
+            m.set_on_screen(None);
+            assert!(!m.has_source(b, SourceLevel::Full), "leaving Detail releases oversized originals");
+            assert!(m.held() <= m.budget());
+        }
     }
 
     #[test]
