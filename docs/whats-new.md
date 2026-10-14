@@ -2,6 +2,12 @@
 
 ## 2026-10-14
 
+### Report a Bug
+- Help ▸ Report a Bug… (issue #1015), next to Send Feedback…: describe what happened and LightCraft saves a report
+  file with the system info and the logs, shows it in Finder or Explorer, and opens a new GitHub issue already filled
+  in, for you to check, attach the file to and submit. Your home folder and photo file names are hidden unless you
+  untick the box, and the dialog shows exactly what goes in. Nothing is sent by the app.
+
 ### Hard-edged Heal and Clone spots
 - A spot with Feather at 0 no longer draws black pixels exactly on its radius. This also fixes spots at 0% Opacity
   changing pixels along their edge. The hard edge now leaves pixels on the radius unchanged.
