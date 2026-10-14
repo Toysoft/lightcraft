@@ -180,6 +180,8 @@ mod tests_wb_selector;
 #[cfg(test)]
 mod tests_welcome;
 #[cfg(test)]
+mod tests_welcome_access;
+#[cfg(test)]
 mod tests_zoom;
 #[cfg(test)]
 mod tests_zoom_keys;
@@ -491,6 +493,8 @@ pub struct LightcraftApp {
     pub(crate) welcome_samples: Option<panels::empty_library::SampleStrip>,
     /// The welcome was drawn this frame (its thumbnails go the frame after it isn't).
     pub(crate) welcome_drawn: bool,
+    /// The new library's welcome has put the keyboard on Import Photos… (once per session).
+    pub(crate) welcome_focused: bool,
     /// The activity stack shows every task, not just the first few ("+N more" was clicked).
     pub activity_expanded: bool,
 }
@@ -574,6 +578,7 @@ impl LightcraftApp {
             welcome_seen: None,
             welcome_samples: None,
             welcome_drawn: false,
+            welcome_focused: false,
             activity_expanded: false,
             model_setup: Default::default(),
         }
@@ -1495,7 +1500,8 @@ impl LightcraftApp {
         panels::keyword_list::drag_feedback(self, &ctx);
         panels::toast(self, &ctx);
         self.widgets = widgets::take_registry(&ctx);
-        self.text_focus = ctx.egui_wants_keyboard_input();
+        // a focused plain button (the welcome's) isn't a text field the person is typing in
+        self.text_focus = ctx.egui_wants_keyboard_input() && !crate::widgets::plain_button_has_focus(&ctx);
         self.end_frame(&ctx, t0);
     }
 }

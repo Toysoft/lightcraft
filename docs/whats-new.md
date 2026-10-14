@@ -151,6 +151,17 @@
   further ⇧-clicks carry on from the last point, as in Lightroom. Change the brush size, feather or flow before the
   ⇧-click and the line tapers from the old values to the new ones. The whole line is one undo step.
   `mask.brushStroke {connect: true}` does the same for agents.
+### The welcome reads for everyone
+- Screen readers now hear the empty library's welcome, not only its buttons: the title (as a heading), what it says,
+  the hint and the sample row's caption, and the right panel's note beside it.
+- A new library's welcome puts the keyboard on Import Photos…, so Enter or Space starts; the welcome's buttons show an
+  accent ring where the keyboard is.
+- Dimmed text (captions, hints, counts, the right panel's notes) is a shade stronger in every theme, most in the light
+  ones, so it reads at WCAG AA (4.5:1) on the panels, the canvas and the grid: Charcoal and Midnight #949494, Silver
+  #585858, Paper #6b6b6b.
+- The welcome also says that a folder can be looked through without importing it, under Local in the sidebar (the
+  desktop app).
+
 ### The welcome has the window
 - While the library is empty, the welcome is the one thing asking for attention: the Tools panel steps aside (it comes
   back as it was once photos arrive, an editing tool such as Crop as the Edit panel; opening it meanwhile keeps it

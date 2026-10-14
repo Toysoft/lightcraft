@@ -38,18 +38,25 @@ pub fn open_on_empty_library(app: &mut LightcraftApp) {
     }
 }
 
-/// The line under the buttons: dropping works anywhere in the window, and the shortcut is the
-/// one Import Photos… is bound to now, written as menus write it.
-pub fn hint(keymap: &Keymap, mac: bool) -> String {
-    // the browser build reads dropped files, not folders
+/// The lines under the buttons: dropping works anywhere in the window, with the shortcut Import
+/// Photos… is bound to now (written as menus write it); and, on the desktop while Local is in
+/// sight (`local`), that a folder can be looked through in place there without importing it (the
+/// way in for a library too large to import at once).
+pub fn hint(keymap: &Keymap, mac: bool, local: bool) -> String {
+    // the browser build reads dropped files, not folders, and has no Local
     let drop = if cfg!(target_arch = "wasm32") {
         crate::i18n::tr("or drop photos into this window")
     } else {
         crate::i18n::tr("or drop photos and folders into this window")
     };
-    match crate::shortcuts::shortcut_of(keymap, "file.addPhotos") {
+    let first = match crate::shortcuts::shortcut_of(keymap, "file.addPhotos") {
         Some(sc) => format!("{drop} · {}", crate::menubar::shortcut_text(sc, mac)),
         None => drop.to_string(),
+    };
+    if cfg!(target_arch = "wasm32") || !local {
+        first
+    } else {
+        format!("{first}\n{}", crate::i18n::tr("or look through a folder without importing it, under Local in the sidebar"))
     }
 }
 
@@ -121,8 +128,6 @@ const TILE_GAP: f32 = 10.0;
 const TILE_MIN_W: f32 = 96.0;
 const TILE_MAX_W: f32 = 150.0;
 const CAPTION_H: f32 = 26.0;
-/// Room the welcome's message, buttons and hint take above the row (at the widest, with margin).
-const WELCOME_H: f32 = 280.0;
 
 impl SampleStrip {
     /// Start drawing the thumbnails (desktop: a worker thread; the browser has none to spare, and
@@ -228,13 +233,9 @@ fn strip(strip: &mut SampleStrip, ui: &mut egui::Ui, area: Rect) -> Option<u32> 
     }
     strip.receive(ui.ctx());
     let p = ui.painter().clone();
-    p.text(
-        pos2(area.center().x, area.top() + 8.0),
-        egui::Align2::CENTER_CENTER,
-        crate::i18n::tr("Or try LightCraft on a sample photo"),
-        t.font(12.0),
-        t.text_label,
-    );
+    let caption = crate::i18n::tr("Or try LightCraft on a sample photo");
+    let caption_rect = p.text(pos2(area.center().x, area.top() + 8.0), egui::Align2::CENTER_CENTER, caption, t.font(12.0), t.text_label);
+    super::readable(ui, caption_rect, "welcome-caption", caption, false);
     let h = w * 2.0 / 3.0;
     let row_w = n as f32 * w + (n as f32 - 1.0) * TILE_GAP;
     let mut x = area.center().x - row_w / 2.0;
@@ -246,6 +247,7 @@ fn strip(strip: &mut SampleStrip, ui: &mut egui::Ui, area: Rect) -> Option<u32> 
         let label = crate::i18n::tr_format!("Open the sample photo “{title}”", title = tile.title);
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
         crate::widgets::register(ui.ctx(), format!("button:sample:{}", tile.scene), r);
+        crate::widgets::plain_button(ui.ctx(), resp.id);
         match &tile.texture {
             Some(tex) => {
                 egui::Image::new((tex.id(), r.size())).corner_radius(6.0).paint_at(ui, r);
@@ -277,9 +279,20 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, rect: Rect) {
     // nothing done in a temporary session is saved: samples there would only be lost
     let samples = !app.session.has_samples() && !temporary;
     let wrap = (rect.width() - 48.0).max(80.0);
+    let mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;
+    let local = app.ui.left_panel && app.ui.sidebar.shown().any(|s| s == crate::sidebar::SidebarSection::Local);
+    let hint = hint(&app.ui.settings.keymap, mac, local);
+    let title = title(&app.session, temporary);
+    let body = if welcomes(&app.session, temporary) {
+        "Start with photos of your own, or look around with a set of sample photos first. Nothing is copied or moved unless you choose to."
+    } else {
+        "Photos you import show up here. Nothing is copied or moved unless you choose to."
+    };
     // the row needs room both ways: a short view (Detail above its filmstrip, under the samples
-    // banner) offers the button instead of pushing the welcome past its edges
-    let room = rect.height() >= strip_height(wrap) + WELCOME_H;
+    // banner), or a long language wrapping the message, offers the button instead of pushing the
+    // welcome past its edges. Measured with the two buttons the row goes with.
+    let message = super::empty_state_height(ui, rect, title, body, &[IMPORT_PHOTOS, IMPORT_LIGHTROOM], Some(&hint));
+    let room = rect.height() >= message + super::EMPTY_EXTRA_GAP + strip_height(wrap) + 16.0;
     let row = samples && !cfg!(target_arch = "wasm32") && strip_layout(wrap).is_some() && room;
     app.welcome_drawn = true;
     if !row && let Some(samples_row) = app.welcome_samples.as_mut() {
@@ -294,16 +307,10 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, rect: Rect) {
         (false, true) => &[IMPORT_PHOTOS, IMPORT_LIGHTROOM, SAMPLES],
         (false, false) => &[IMPORT_PHOTOS, IMPORT_LIGHTROOM],
     };
-    let mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;
-    let hint = hint(&app.ui.settings.keymap, mac);
-    let title = title(&app.session, temporary);
-    let body = if welcomes(&app.session, temporary) {
-        "Start with photos of your own, or look around with a set of sample photos first. Nothing is copied or moved unless you choose to."
-    } else {
-        "Photos you import show up here. Nothing is copied or moved unless you choose to."
-    };
     let extra = if row { strip_height(wrap) } else { 0.0 };
-    let (clicked, below) = super::empty_state(ui, rect, title, body, actions, Some(&hint), extra);
+    // a new library's welcome puts the keyboard on Import Photos… once, so Enter or Space starts
+    let focus = welcomes(&app.session, temporary) && !std::mem::replace(&mut app.welcome_focused, true);
+    let (clicked, below) = super::empty_state(ui, rect, title, body, actions, Some(&hint), extra, focus);
     if let Some(command) = clicked
         && let Err(e) = app.run(command, json!({}))
     {

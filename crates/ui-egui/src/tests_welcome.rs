@@ -149,7 +149,7 @@ fn a_row_out_of_room_for_a_moment_keeps_its_thumbnails() {
 #[test]
 fn a_short_view_offers_the_button_instead_of_the_row() {
     // a wide but short window: the welcome's view is too low for the row under the message
-    let mut h = headless(library("short"), [1300.0, 440.0]);
+    let mut h = headless(library("short"), [1300.0, 380.0]);
     h.step();
     assert!(has(&h, "button:emptySamples"));
     assert!(!h.app.widgets.iter().any(|(w, _)| w.starts_with("button:sample:")));
@@ -214,4 +214,15 @@ fn a_temporary_session_offers_no_samples() {
     assert!(has(&h, "button:emptyImportPhotos"));
     assert!(!has(&h, "button:emptySamples"));
     assert!(!h.app.widgets.iter().any(|(w, _)| w.starts_with("button:sample:")));
+}
+
+#[test]
+fn the_welcome_keeps_clear_of_the_grid_header() {
+    // a short window: the welcome sits below "All Photos", never over it
+    for size in [[1300.0, 440.0], [1300.0, 900.0]] {
+        let h = headless(library(&format!("header-{}", size[1])), size);
+        let title = h.app.widgets.iter().find(|(w, _)| w == "text:emptyTitle").map(|(_, r)| *r).unwrap();
+        // the header is 44 points under the 42-point top bar
+        assert!(title.top() >= 42.0 + 44.0, "{size:?}: the title starts at {}", title.top());
+    }
 }
