@@ -140,9 +140,10 @@ impl<'a> Ctx<'a> {
         }
         entries.sort_by_key(|e| e.tag);
         entries.dedup_by_key(|e| e.tag);
-        let next_pos = table + (n as usize).saturating_mul(entry_size);
-        let next = if n as usize == n_read {
-            match self.read_off(next_pos) {
+        // the next-IFD pointer sits after the whole advertised table: only trust it when every entry
+        // was read, and keep the arithmetic checked (a hostile count must not overflow, #1516)
+        let next = if n == n_read as u64 {
+            match n_read.checked_mul(entry_size).and_then(|len| table.checked_add(len)).and_then(|pos| self.read_off(pos)) {
                 Some(0) | None => 0,
                 Some(v) => base.checked_add(v).unwrap_or(0),
             }

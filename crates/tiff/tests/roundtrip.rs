@@ -246,6 +246,22 @@ fn ifd_loops_are_detected() {
 }
 
 #[test]
+fn bigtiff_huge_entry_count_does_not_overflow() {
+    // advertises u64::MAX entries but holds one readable entry: the next-IFD arithmetic must not
+    // overflow before the truncated-table guard (#1516)
+    let mut b = b"II\x2b\0\x08\0\0\0".to_vec();
+    b.extend_from_slice(&16u64.to_le_bytes());
+    b.extend_from_slice(&u64::MAX.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes()); // tag
+    b.extend_from_slice(&4u16.to_le_bytes()); // type LONG
+    b.extend_from_slice(&1u64.to_le_bytes()); // count
+    b.extend_from_slice(&7u64.to_le_bytes()); // inline value (8-byte BigTIFF field)
+    let t = Tiff::parse(&b).unwrap();
+    assert_eq!(t.ifds.len(), 1);
+    assert_eq!(t.ifds[0].u32(1), Some(7));
+}
+
+#[test]
 fn out_of_range_entries_are_skipped() {
     let mut ifd = IfdBuilder::new();
     ifd.set(1, Value::Long(vec![1, 2, 3]));
