@@ -151,12 +151,18 @@ pub(crate) fn decode_huffman(src: &[u8], h: &Huffman, w: usize, hgt: usize, bits
         for (x, o) in row.iter_mut().enumerate() {
             let d = diff(&mut bits, h).ok_or_else(|| RawError::Corrupt(format!("PEF: invalid Huffman code at row {y}")))?;
             let p = if x < 2 {
-                vpred[y & 1][x] += d;
-                hpred[x] = vpred[y & 1][x];
-                hpred[x]
+                let v = vpred[y & 1][x]
+                    .checked_add(d)
+                    .ok_or_else(|| RawError::Corrupt(format!("PEF: predictor overflow at row {y}")))?;
+                vpred[y & 1][x] = v;
+                hpred[x] = v;
+                v
             } else {
-                hpred[x & 1] += d;
-                hpred[x & 1]
+                let v = hpred[x & 1]
+                    .checked_add(d)
+                    .ok_or_else(|| RawError::Corrupt(format!("PEF: predictor overflow at row {y}")))?;
+                hpred[x & 1] = v;
+                v
             };
             *o = p.clamp(0, max) as u16;
         }
@@ -388,6 +394,24 @@ mod tests {
         // truncated data is reported, not a panic
         assert!(decode_huffman(&src[..src.len() / 3], &h, w, hgt, 14).is_err());
         assert!(table(&tb[..20], ByteOrder::Big).is_err());
+    }
+
+    #[test]
+    fn predictor_overflow_is_reported_not_a_panic() {
+        // a hostile stream of maximal positive diffs drives the row predictor past i32::MAX (#1515)
+        let (tb, codes) = test_table();
+        let h = table(&tb, ByteOrder::Big).unwrap();
+        let (code, len) = codes[14]; // category 14: every diff is +16383
+        let (w, hgt) = (270_000usize, 1usize); // each hpred[x & 1] chain sums 135 000 diffs
+        let mut bits: Vec<bool> = Vec::with_capacity(w * (len as usize + 14));
+        for _ in 0..w {
+            (0..len).rev().for_each(|i| bits.push((code >> i) & 1 == 1));
+            (0..14).rev().for_each(|i| bits.push(16383 >> i & 1 == 1));
+        }
+        let src: Vec<u8> =
+            bits.chunks(8).map(|c| c.iter().enumerate().fold(0u8, |a, (i, &b)| a | (b as u8) << (7 - i))).collect();
+        // 135 000 × 16 383 ≈ 2.21e9 passes i32::MAX part-way along the row: Corrupt, not a panic
+        assert!(matches!(decode_huffman(&src, &h, w, hgt, 14), Err(RawError::Corrupt(_))));
     }
 
     /// A big-endian one-strip PEF-style TIFF of `w × h` 12-bit samples with the given compression tag and strip

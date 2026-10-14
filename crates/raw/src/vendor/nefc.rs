@@ -281,11 +281,15 @@ pub(crate) fn decode_rows(src: &[u8], w: usize, h: usize, rows: usize, bits: u32
             };
             let p = if x < 2 {
                 let s = seeds.get_mut(x).ok_or(RawError::Limit("NEF column"))?;
-                *s += d;
+                *s = s
+                    .checked_add(d)
+                    .ok_or_else(|| RawError::Corrupt(format!("NEF: predictor overflow at row {y}")))?;
                 hpred[x & 1] = *s;
                 *s
             } else {
-                hpred[x & 1] += d;
+                hpred[x & 1] = hpred[x & 1]
+                    .checked_add(d)
+                    .ok_or_else(|| RawError::Corrupt(format!("NEF: predictor overflow at row {y}")))?;
                 hpred[x & 1]
             };
             let v = p.clamp(0, max);
@@ -424,6 +428,22 @@ mod tests {
             let out = decode(&src, w, h, bits, &t).unwrap();
             assert_eq!(out, img.iter().map(|&v| v as u16).collect::<Vec<_>>(), "{bits}-bit");
         }
+    }
+
+    #[test]
+    fn predictor_overflow_is_reported_not_a_panic() {
+        // a hostile stream of maximal positive diffs drives the row predictor past i32::MAX (#1515)
+        let (w, h) = (270_000usize, 1usize); // each hpred[x & 1] chain sums 135 000 diffs
+        let t = lossless(14);
+        let (code, len) = LOSSLESS_14.codes()[14]; // category 14: every diff is +16383
+        let mut wr = Writer::default();
+        for _ in 0..w {
+            wr.put(code as u32 >> (12 - u32::from(len)), u32::from(len));
+            wr.put(16383, 14);
+        }
+        let src = wr.finish();
+        // 135 000 × 16 383 ≈ 2.21e9 passes i32::MAX part-way along the row: Corrupt, not a panic
+        assert!(matches!(decode(&src, w, h, 14, &t), Err(RawError::Corrupt(_))));
     }
 
     fn lossy_table(bits: u32, order: ByteOrder) -> Vec<u8> {
