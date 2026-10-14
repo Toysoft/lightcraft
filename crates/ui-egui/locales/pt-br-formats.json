@@ -247,5 +247,9 @@
   "{n} photos opened for editing; each is stacked with its original": "{n} fotos abertas para edição; cada uma está empilhada com a original",
   "{name} opened in the other editor": "{name} aberto no outro editor",
   "{n} originals opened in the other editor": "{n} originais abertos no outro editor",
-  "· {in_source} identical copies": "· {in_source} cópias idênticas"
+  "· {in_source} identical copies": "· {in_source} cópias idênticas",
+  "{n} without a location": "{n} sem localização",
+  "the first {limit} of {n} with a location": "as primeiras {limit} de {n} com localização",
+  "{n} photos at this place": "{n} fotos neste lugar",
+  "and {n} more": "e mais {n}"
 }

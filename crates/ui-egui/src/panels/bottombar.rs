@@ -17,6 +17,7 @@ const VIEW_MODES: &[(&str, Icon, ViewMode, &str)] = &[
     ("compare", Icon::Compare, ViewMode::Compare, "Compare (Shift+C)"),
     ("survey", Icon::Survey, ViewMode::Survey, "Survey (N)"),
     ("people", Icon::Subject, ViewMode::People, "People"),
+    ("map", Icon::MapPin, ViewMode::Map, "Map"),
 ];
 
 pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
@@ -328,6 +329,7 @@ mod visual_regressions {
                 ViewMode::Survey,
                 ViewMode::Reference,
                 ViewMode::People,
+                ViewMode::Map,
             ] {
                 for scale in [1.0, 1.5, 2.0] {
                     let mut app = LightcraftApp::new(lightcraft_engine::Session::new(), Default::default());
@@ -382,6 +384,7 @@ mod visual_regressions {
                 ViewMode::Survey,
                 ViewMode::Reference,
                 ViewMode::People,
+                ViewMode::Map,
             ] {
                 for scale in [1.0, 1.5, 2.0] {
                     let ctx = egui::Context::default();

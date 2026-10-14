@@ -1957,5 +1957,22 @@
   "Adding to Apple Photos": "Ajout à Apple Photos",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "Aucun processeur graphique trouvé : LightCraft effectue le rendu sur le processeur, ce qui est beaucoup plus lent. Détails dans Aide → Informations système.",
   "On NixOS, start it from `nix develop`.": "Sous NixOS, lancez-le depuis `nix develop`.",
-  "Files with the same content as another file in this import: only the first is imported.": "Fichiers au contenu identique à un autre fichier de cette importation : seul le premier est importé."
+  "Files with the same content as another file in this import: only the first is imported.": "Fichiers au contenu identique à un autre fichier de cette importation : seul le premier est importé.",
+  "Map": "Carte",
+  "Move Map": "Déplacer la carte",
+  "Online Map (OpenStreetMap)": "Carte en ligne (OpenStreetMap)",
+  "No location in these photos": "Ces photos n’ont pas de lieu",
+  "Photos with a GPS position appear on the map": "Les photos avec une position GPS apparaissent sur la carte",
+  "Show the detailed OpenStreetMap map. Its tiles are loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer.": "Afficher la carte détaillée d’OpenStreetMap. Ses tuiles sont chargées depuis openstreetmap.org, qui apprend ainsi la zone que vous regardez ; vos photos restent sur cet ordinateur.",
+  "Show all photos on the map": "Afficher toutes les photos sur la carte",
+  "Zoom in": "Zoom avant",
+  "Zoom out": "Zoom arrière",
+  "The online map could not be loaded; showing the offline map": "Impossible de charger la carte en ligne ; la carte hors ligne est affichée",
+  "Loading map tiles": "Chargement des tuiles de la carte",
+  "Show streets and place names?": "Afficher les rues et les noms de lieux ?",
+  "The detailed map is loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer. You can change this any time above the map.": "La carte détaillée est chargée depuis openstreetmap.org, qui apprend ainsi la zone que vous regardez ; vos photos restent sur cet ordinateur. Vous pouvez modifier ce choix à tout moment au-dessus de la carte.",
+  "Use OpenStreetMap": "Utiliser OpenStreetMap",
+  "Keep the Offline Map": "Garder la carte hors ligne",
+  "Photos on the map": "Photos sur la carte",
+  "At most this many photos of the filmstrip appear on the map: the first ones with a location. More take longer to draw.": "Au plus ce nombre de photos du film fixe apparaît sur la carte : les premières qui ont un lieu. Davantage de photos prennent plus de temps à dessiner."
 }

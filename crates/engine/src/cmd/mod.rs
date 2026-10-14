@@ -24,6 +24,7 @@ pub mod keywords;
 pub mod library;
 pub mod lut_profiles;
 pub mod manage;
+pub mod map;
 mod masks;
 mod merge;
 pub mod metadata;
@@ -160,6 +161,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(sync::specs());
         v.extend(metadata::specs());
         v.extend(geocode::specs());
+        v.extend(map::specs());
         v.extend(filters::specs());
         v.extend(denoise::specs());
         v.extend(face_models::specs());

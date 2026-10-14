@@ -48,6 +48,7 @@ pub mod lightroom_folder;
 pub mod lightroom_job;
 mod lightroom_sqlite;
 pub mod logging;
+pub mod map_tiles;
 pub mod media;
 pub mod memory;
 pub mod merge;
@@ -204,6 +205,8 @@ pub struct Session {
     pub face_downloads: face_download::Downloads,
     /// Reverse geocoding: the parsed place names and their download (`metadata.*PlaceNames`).
     pub place_names: cmd::geocode::PlaceNames,
+    /// The Map view's online tiles (off unless the user switched them on).
+    pub map_tiles: map_tiles::MapTiles,
     /// The user's own list of models to download (`catalog.json` in the models folder), as last read.
     pub(crate) face_catalog: lightcraft_faces::catalog::Catalog,
     /// The loaded recognition model and the face embeddings made with it.
@@ -347,6 +350,7 @@ impl Session {
             face_models_dir: None,
             face_downloads: Default::default(),
             place_names: Default::default(),
+            map_tiles: Default::default(),
             face_catalog: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             faces: Default::default(),

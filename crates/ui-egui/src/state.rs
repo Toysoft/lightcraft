@@ -18,6 +18,8 @@ pub enum ViewMode {
     Reference,
     /// A card per person named on faces (close-up, name, photo count).
     People,
+    /// The selected photos that have a GPS position, on a map.
+    Map,
 }
 
 /// The right-hand tool/panel shown next to the tool strip.
@@ -482,6 +484,35 @@ pub enum KeywordingView {
     WillExport,
 }
 
+/// The Map view's state: the map's centre (degrees) and zoom level, and whether OpenStreetMap tiles are
+/// loaded (off unless the user switched them on: loading them tells the tile server which area is viewed).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MapState {
+    pub lat: f64,
+    pub lon: f64,
+    pub zoom: f64,
+    pub online: bool,
+    /// The question whether to load OpenStreetMap tiles was answered (it is put once, the first time the map
+    /// is open), or the switch was used.
+    pub asked: bool,
+    /// How many photos the map shows at most (Settings ▸ Interface ▸ Map; read through
+    /// [`lightcraft_map::photo_limit`], which makes nonsense from a settings file usable).
+    pub limit: usize,
+    /// The map's size on screen last frame (points).
+    #[serde(skip)]
+    pub size: [f32; 2],
+    /// Which photos the view was last fitted to (0: none yet); other photos fit it again.
+    #[serde(skip)]
+    pub fitted: u64,
+}
+
+impl Default for MapState {
+    fn default() -> Self {
+        MapState { lat: 20.0, lon: 0.0, zoom: 0.0, online: false, asked: false, limit: lightcraft_map::MAX_PHOTOS, size: [0.0, 0.0], fitted: 0 }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UiState {
@@ -572,6 +603,8 @@ pub struct UiState {
     /// A face's name being typed in the loupe.
     #[serde(skip)]
     pub name_edit: Option<NameEdit>,
+    /// The Map view: where it looks and whether online tiles are on.
+    pub map: MapState,
     /// The person whose page the People view shows (their faces and the faces that look like them); `None`: everyone.
     #[serde(skip)]
     pub person_page: Option<String>,
@@ -1073,6 +1106,7 @@ impl Default for UiState {
             sidebar: Default::default(),
             collapsed_sidebar: Vec::new(),
             name_edit: None,
+            map: MapState::default(),
             person_page: None,
             person_from: None,
             last_person: None,

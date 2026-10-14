@@ -66,6 +66,8 @@ pub enum Icon {
     Radial,
     Sky,
     Subject,
+    /// A map pin (the Map view).
+    MapPin,
     Picker,
     Rotate,
     /// A curved line with an arrow at both ends: drag to rotate, either way (the crop tool's pointer).
@@ -496,6 +498,11 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
             pen.circle(10.0, 7.0, 3.0);
             pen.arc(10.0, 18.0, 6.5, 200.0, 340.0);
             pen.rect(2.5, 2.5, 17.5, 17.5, 2.0);
+        }
+        MapPin => {
+            pen.arc(10.0, 8.0, 5.5, 150.0, 390.0);
+            pen.line(&[(5.24, 10.75), (10.0, 17.8), (14.76, 10.75)]);
+            pen.circle(10.0, 8.0, 1.9);
         }
         FaceBox => {
             pen.line(&[(2.5, 7.0), (2.5, 2.5), (7.0, 2.5)]);

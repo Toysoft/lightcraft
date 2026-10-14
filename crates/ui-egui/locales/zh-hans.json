@@ -1997,5 +1997,22 @@
   "Adding to Apple Photos": "正在添加到 Apple 照片",
   "No graphics processor found: LightCraft renders on the CPU, which is much slower. Details in Help → System Info.": "未找到图形处理器：LightCraft 改用 CPU 渲染，速度会慢很多。详情见“帮助 → 系统信息”。",
   "On NixOS, start it from `nix develop`.": "在 NixOS 上，请从 `nix develop` 启动。",
-  "Files with the same content as another file in this import: only the first is imported.": "与本次导入中另一个文件内容相同的文件：只导入第一个。"
+  "Files with the same content as another file in this import: only the first is imported.": "与本次导入中另一个文件内容相同的文件：只导入第一个。",
+  "Map": "地图",
+  "Move Map": "移动地图",
+  "Online Map (OpenStreetMap)": "在线地图 (OpenStreetMap)",
+  "No location in these photos": "这些照片没有位置信息",
+  "Photos with a GPS position appear on the map": "带有 GPS 位置的照片会显示在地图上",
+  "Show the detailed OpenStreetMap map. Its tiles are loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer.": "显示详细的 OpenStreetMap 地图。其图块从 openstreetmap.org 加载，该服务器会得知您查看的区域；您的照片保留在此电脑上。",
+  "Show all photos on the map": "在地图上显示所有照片",
+  "Zoom in": "放大",
+  "Zoom out": "缩小",
+  "The online map could not be loaded; showing the offline map": "无法加载在线地图；正在显示离线地图",
+  "Loading map tiles": "正在加载地图图块",
+  "Show streets and place names?": "显示街道和地名？",
+  "The detailed map is loaded from openstreetmap.org, which learns the area you look at; your photos stay on this computer. You can change this any time above the map.": "详细地图从 openstreetmap.org 载入，该服务器会得知您查看的区域；您的照片仍保留在这台电脑上。您可以随时在地图上方更改此设置。",
+  "Use OpenStreetMap": "使用 OpenStreetMap",
+  "Keep the Offline Map": "保留离线地图",
+  "Photos on the map": "地图上的照片",
+  "At most this many photos of the filmstrip appear on the map: the first ones with a location. More take longer to draw.": "胶片显示窗格中最多这么多张照片会显示在地图上：即最前面带有位置信息的照片。照片越多，绘制越慢。"
 }

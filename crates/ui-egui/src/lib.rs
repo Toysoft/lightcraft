@@ -273,6 +273,8 @@ pub struct LightcraftApp {
     /// Per-catalog-revision caches of library-wide results the panels show every frame
     /// (expensive on big libraries).
     pub caches: Caches,
+    /// The Map view's pictures (basemap, tiles).
+    pub map: panels::map::MapCache,
     pub session: Session,
     pub ui: UiState,
     pub services: Services,
@@ -417,6 +419,7 @@ impl LightcraftApp {
             renderer: render::Renderer::default(),
             perf: Perf::default(),
             caches: Caches::default(),
+            map: Default::default(),
             integrated_titlebar: false,
             native_menu: false,
             native_shortcuts: Default::default(),

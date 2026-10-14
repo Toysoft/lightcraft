@@ -1193,6 +1193,182 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Settings ▸ Interface ▸ Map sets how many photos the map shows; the line above the map says when the limit
+    /// leaves some out, and a nonsense value from a settings file is made usable.
+    #[test]
+    fn the_map_limit_is_set_in_settings() {
+        let mut h = demo([1400.0, 900.0]);
+        let t = Duration::from_secs(10);
+        let ids: Vec<u64> = h.app.session.visible_cloned().iter().map(|i| i.0).collect();
+        assert!(ids.len() > 10, "the demo library has {} photos", ids.len());
+        let gps = json!({"command": "photo.setMeta", "params": {"ids": ids, "gps": [48.1374, 11.5755]}});
+        assert_eq!(h.request("engine.execute", gps, t)["ok"], true);
+        assert_eq!(h.app.ui.map.limit, lightcraft_map::MAX_PHOTOS);
+        let r = h.request("engine.execute", json!({"command": "app.settings", "params": {"tab": "interface"}}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        h.step();
+        // the first offer: 50
+        let r = h.request("ui.clickWidget", json!({"id": "button:settingsMapLimit-0"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        h.step();
+        assert_eq!(h.app.ui.map.limit, 50);
+        h.app.ui.dialog = None;
+        let view = h.request("engine.execute", json!({"command": "view.map", "params": {}}), t);
+        assert_eq!(view["ok"], true, "{view}");
+        h.settle(SETTLE);
+        h.step();
+        let r = h.request("engine.execute", json!({"command": "map.view", "params": {}}), t);
+        let shown = &r["result"];
+        assert_eq!((shown["shown"].as_u64(), shown["limit"].as_u64()), (Some(ids.len() as u64), Some(50)), "{shown}");
+        // fewer than the photos with a location (the demo library has less than the smallest offer): the first ones
+        h.app.ui.map.limit = 10;
+        h.step();
+        let r = h.request("engine.execute", json!({"command": "map.view", "params": {}}), t);
+        let shown = &r["result"];
+        assert_eq!((shown["shown"].as_u64(), shown["overLimit"].as_u64()), (Some(10), Some(ids.len() as u64 - 10)), "{shown}");
+        assert_eq!(shown["stacks"][0]["ids"][0].as_u64(), Some(ids[0]), "{shown}");
+        // a settings file with nonsense in it: the default, or the highest limit
+        h.app.ui.map.limit = 0;
+        h.step();
+        let r = h.request("engine.execute", json!({"command": "map.view", "params": {}}), t);
+        assert_eq!(r["result"]["limit"].as_u64(), Some(lightcraft_map::MAX_PHOTOS as u64), "{r}");
+        h.app.ui.map.limit = usize::MAX;
+        h.step();
+        let r = h.request("engine.execute", json!({"command": "map.view", "params": {}}), t);
+        assert_eq!(r["result"]["limit"].as_u64(), Some(lightcraft_map::MOST_PHOTOS as u64), "{r}");
+    }
+
+    /// The Map view shows the photos of the filmstrip that have a GPS position, whatever is selected: photos at the
+    /// same place as one stack, stacks that separate when zoomed in, a click on a marker selecting its photos, and
+    /// nothing fetched from anyone unless online tiles were switched on.
+    #[test]
+    fn the_map_shows_the_photos_of_the_filmstrip_stacked_by_place() {
+        use crate::state::ViewMode;
+        let mut h = demo([1400.0, 900.0]);
+        let t = Duration::from_secs(10);
+        let ids: Vec<u64> = h.app.session.visible_cloned().iter().map(|i| i.0).collect();
+        assert!(ids.len() >= 6);
+        let run = |h: &mut Headless, command: &str, params: Value| {
+            let mut request = json!({"command": command});
+            request["params"] = params;
+            let r = h.request("engine.execute", request, t);
+            assert_eq!(r["ok"], true, "{command}: {r}");
+            r["result"].clone()
+        };
+        let selection = |h: &Headless| -> Vec<u64> { h.app.session.selection.ids.iter().map(|i| i.0).collect() };
+        // nobody has a position
+        run(&mut h, "photo.setMeta", json!({"ids": ids, "gps": null}));
+        // Marienplatz twice, the English Garden 2.5 km away, Berlin; the others have no position
+        run(&mut h, "photo.setMeta", json!({"ids": [ids[0], ids[1]], "gps": [48.1374, 11.5755]}));
+        run(&mut h, "photo.setMeta", json!({"ids": [ids[2]], "gps": [48.1593, 11.6030]}));
+        run(&mut h, "photo.setMeta", json!({"ids": [ids[3]], "gps": [52.52, 13.405]}));
+        // one photo without a position is selected: the map shows the filmstrip's photos all the same
+        run(&mut h, "library.select", json!({"ids": [ids[4]]}));
+        run(&mut h, "view.map", json!({}));
+        h.settle(SETTLE);
+        h.step();
+        assert_eq!(h.app.ui.view, ViewMode::Map);
+        let widgets = |h: &mut Headless| -> Vec<String> {
+            let r = h.request("ui.widgets", json!({"filter": "map:"}), t);
+            r["result"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap().to_string()).collect()
+        };
+        // the first time, the map asks whether to load OpenStreetMap; "no" keeps the offline map and ends the question
+        assert!(widgets(&mut h).contains(&"map:ask-online".to_string()));
+        let r = h.request("ui.clickWidget", json!({"id": "button:map-ask-online-no"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        h.step();
+        assert!(!widgets(&mut h).contains(&"map:ask-online".to_string()));
+        assert!(h.app.ui.map.asked && !h.app.ui.map.online && !h.app.session.map_tiles.enabled());
+        // fitted to all of them: Munich's three photos are one stack from that far, Berlin another
+        let shown = run(&mut h, "map.view", json!({}));
+        assert_eq!(
+            (shown["total"].as_u64(), shown["located"].as_u64(), shown["shown"].as_u64()),
+            (Some(ids.len() as u64), Some(4), Some(4)),
+            "{shown}"
+        );
+        assert_eq!(shown["stacks"].as_array().map(Vec::len), Some(2), "{shown}");
+        assert_eq!(shown["stacks"][0]["ids"], json!([ids[0], ids[1], ids[2]]));
+        assert_eq!(shown["online"], false);
+        let w = widgets(&mut h);
+        assert!(w.contains(&"map:canvas".to_string()) && w.contains(&"map:stack:0".to_string()) && w.contains(&"map:stack:1".to_string()), "{w:?}");
+        assert!(!w.contains(&"map:stack:2".to_string()), "{w:?}");
+        // the picture is a map: Germany is land on the offline basemap
+        let img = h.snapshot(SETTLE);
+        let land = img.pixels.iter().filter(|p| [p.r(), p.g(), p.b()] == lightcraft_map::basemap::Colors::DARK.land).count();
+        assert!(land > 100_000, "land {land}");
+        // a marker stands on its position: the tip at its lower edge points at it
+        let boxes = h.request("ui.widgets", json!({"filter": "map:"}), t);
+        let rect = |id: &str| {
+            let w = boxes["result"].as_array().unwrap().iter().find(|w| w["id"] == id).unwrap().clone();
+            let n = |k: usize| w["rect"][k].as_f64().unwrap();
+            (n(0), n(1), n(2), n(3))
+        };
+        let (canvas, berlin) = (rect("map:canvas"), rect("map:stack:1"));
+        let at = &shown["stacks"][1];
+        assert!((berlin.0 + berlin.2 / 2.0 - (canvas.0 + at["x"].as_f64().unwrap())).abs() < 1.0, "{berlin:?} {at}");
+        assert!((berlin.1 + berlin.3 - (canvas.1 + at["y"].as_f64().unwrap())).abs() < 1.0, "{berlin:?} {at}");
+        // a click on Munich's stack selects its three photos (the filmstrip marks them); the map stays as it is
+        let r = h.request("ui.clickWidget", json!({"id": "map:stack:0"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        h.step();
+        assert_eq!(selection(&h), vec![ids[0], ids[1], ids[2]]);
+        assert_eq!(h.app.session.selection.active.map(|i| i.0), Some(ids[0]));
+        let after = run(&mut h, "map.view", json!({}));
+        assert_eq!((&after["view"], after["stacks"].as_array().map(Vec::len)), (&shown["view"], Some(2)), "{after}");
+        // a click on a single photo selects that one
+        let r = h.request("ui.clickWidget", json!({"id": "map:stack:1"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        h.step();
+        assert_eq!(selection(&h), vec![ids[3]]);
+        // zoomed in, the English Garden is a marker of its own; the two at the very same spot stay one stack
+        let closer = run(&mut h, "map.view", json!({"lat": 48.148, "lon": 11.589, "zoom": 13}));
+        let stacks = closer["stacks"].as_array().unwrap();
+        assert!(stacks.iter().any(|s| s["ids"] == json!([ids[0], ids[1]])) && stacks.iter().any(|s| s["ids"] == json!([ids[2]])), "{closer}");
+        let deep = run(&mut h, "map.view", json!({"lat": 48.1374, "lon": 11.5755, "zoom": 19}));
+        assert_eq!(deep["stacks"][0]["count"].as_u64(), Some(2), "{deep}");
+        h.settle(SETTLE);
+        h.step();
+        let r = h.request("ui.clickWidget", json!({"id": "map:stack:0"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        h.step();
+        assert_eq!(selection(&h), vec![ids[0], ids[1]]);
+        assert_eq!(h.app.ui.map.zoom, 19.0, "the view did not move");
+        // Fit: back to all of them
+        let r = h.request("ui.clickWidget", json!({"id": "button:map-fit"}), t);
+        assert_eq!(r["ok"], true, "{r}");
+        h.settle(SETTLE);
+        h.step();
+        assert_eq!(run(&mut h, "map.view", json!({}))["stacks"].as_array().map(Vec::len), Some(2));
+        // fewer photos in the filmstrip: the map follows it, fitted again
+        run(&mut h, "photo.setMeta", json!({"ids": [ids[0], ids[1], ids[2]], "gps": null}));
+        h.settle(SETTLE);
+        h.step();
+        let berlin = run(&mut h, "map.view", json!({}));
+        assert_eq!(berlin["stacks"].as_array().map(Vec::len), Some(1), "{berlin}");
+        assert!((berlin["view"]["lat"].as_f64().unwrap() - 52.52).abs() < 0.01, "{berlin}");
+        // no photo with a position: no map, and no marker left behind
+        run(&mut h, "photo.setMeta", json!({"ids": [ids[3]], "gps": null}));
+        h.settle(SETTLE);
+        h.step();
+        assert!(widgets(&mut h).is_empty());
+        // nonsense is refused or made usable, never fatal
+        let bad = h.request("engine.execute", json!({"command": "map.view", "params": {"zoom": "far"}}), t);
+        assert_eq!(bad["ok"], false, "{bad}");
+        let odd = run(&mut h, "map.view", json!({"lat": 1e300, "lon": -1e300, "zoom": 1e300}));
+        assert!(odd["view"]["zoom"].as_f64().is_some_and(|z| z <= 19.0), "{odd}");
+        h.step();
+        // all along, nothing was loaded from the network and nothing ran in the background for the map
+        assert!(!h.app.session.map_tiles.enabled());
+        assert_eq!(h.app.session.map_tiles.status().pending, 0);
+        assert!(h.app.session.activity.list().iter().all(|task| task.label != "Loading map tiles"));
+    }
+
     /// Until face recognition is set up, the People view and the loupe's name box say so and offer the next step: with no
     /// model, a button that opens Settings ▸ Faces; with a model installed but recognition off, one that switches it on.
     #[test]
