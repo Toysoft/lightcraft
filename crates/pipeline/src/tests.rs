@@ -732,40 +732,24 @@ fn the_three_detail_fields_that_were_dead_reach_the_image() {
     nr.detail.nr_luminance = 70.0;
     let nr_base = render(&src, &info, &nr, &req).image.data;
     nr.detail.nr_contrast = 100.0;
-    assert_ne!(
-        render(&src, &info, &nr, &req).image.data,
-        nr_base,
-        "nr_contrast must reach the image once the noise reduction is on"
-    );
+    assert_ne!(render(&src, &info, &nr, &req).image.data, nr_base, "nr_contrast must reach the image once the noise reduction is on");
 
     let mut sp = DevelopSettings::default();
     sp.detail.sharpen_amount = 120.0;
     let sp_base = render(&src, &info, &sp, &req).image.data;
     sp.detail.sharpen_detail = 100.0;
-    assert_ne!(
-        render(&src, &info, &sp, &req).image.data,
-        sp_base,
-        "sharpen_detail must reach the image once the sharpening is on"
-    );
+    assert_ne!(render(&src, &info, &sp, &req).image.data, sp_base, "sharpen_detail must reach the image once the sharpening is on");
 
     // Its Radius is a band of its own, at the scale the setting asks for.
     let mut rad = DevelopSettings::default();
     rad.detail.sharpen_amount = 120.0;
     let rad_base = render(&src, &info, &rad, &req).image.data;
     rad.detail.sharpen_radius = 3.0;
-    assert_ne!(
-        render(&src, &info, &rad, &req).image.data,
-        rad_base,
-        "sharpen_radius must reach the image once the sharpening is on"
-    );
+    assert_ne!(render(&src, &info, &rad, &req).image.data, rad_base, "sharpen_radius must reach the image once the sharpening is on");
 
     let mut off = DevelopSettings::default();
     off.detail.nr_contrast = 100.0;
     off.detail.sharpen_detail = 100.0;
     let plain = render(&src, &info, &DevelopSettings::default(), &req).image.data;
-    assert_eq!(
-        render(&src, &info, &off, &req).image.data,
-        plain,
-        "with both passes at zero neither field can change anything"
-    );
+    assert_eq!(render(&src, &info, &off, &req).image.data, plain, "with both passes at zero neither field can change anything");
 }

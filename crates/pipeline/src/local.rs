@@ -491,8 +491,8 @@ pub fn plane_sigmas(s: &DevelopSettings, px_per_long: f64, q: Quality) -> PlaneS
     // Sharpening's own radius: Lightroom's Sharpening Radius is 0.5..3, a multiplier of the same
     // 0.18% base scale the texture band uses, so it stays resolution-independent and a preview and
     // a full render agree.
-    let sharpen = (s.detail.sharpen_amount != 0.0 || local_any(|a| a.sharpness))
-        .then(|| (0.0018 * ppl * s.detail.sharpen_radius.max(0.1) as f32).max(0.6));
+    let sharpen =
+        (s.detail.sharpen_amount != 0.0 || local_any(|a| a.sharpness)).then(|| (0.0018 * ppl * s.detail.sharpen_radius.max(0.1) as f32).max(0.6));
     let dark = (s.effects.dehaze != 0.0 || local_any(|a| a.dehaze)).then(|| (0.02 * ppl).max(1.0));
     let chroma = (local_any(|a| a.moire) || s.masks.iter().any(|m| m.adjust.noise > 0.0)).then(|| (CHROMA_SIGMA * ppl).max(1.0));
     let base_detail = if base.is_some() { tone_base_detail(s, px_per_long) } else { 0 };
@@ -513,8 +513,15 @@ pub(crate) fn prepare(
     mattes: Option<&masks::Mattes>,
 ) -> Prepared {
     let log_l = planes.log_l.get_or_insert_with(|| Arc::new(timed("log_l", || img.map(log_lum)))).clone();
-    let PlaneSigmas { base: base_sigma, base_detail, clarity: clarity_sigma, texture: texture_sigma, sharpen: sharpen_sigma, dark: dark_sigma, chroma: chroma_sigma } =
-        plane_sigmas(s, px_per_long, q);
+    let PlaneSigmas {
+        base: base_sigma,
+        base_detail,
+        clarity: clarity_sigma,
+        texture: texture_sigma,
+        sharpen: sharpen_sigma,
+        dark: dark_sigma,
+        chroma: chroma_sigma,
+    } = plane_sigmas(s, px_per_long, q);
 
     let Planes { base: sb, clarity: sc, texture: st, sharpen: ss, dark: sd, chroma: sch, .. } = planes;
     let chroma_blur = chroma_sigma.map(|sg| match sch {
