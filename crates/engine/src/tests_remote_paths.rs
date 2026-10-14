@@ -125,9 +125,6 @@ fn writes_beside_the_original_refuse_remote_photos() {
     refused(s.execute("photo.convertToDng", &json!({"ids": [1]})), "Convert to DNG");
     refused(s.execute("photo.duplicate", &json!({"ids": [1]})), "Duplicate");
     refused(s.execute("photo.editExternal", &json!({"ids": [1]})), "Edit In");
-    let (kind, finish) = crate::merge::parse("merge.hdr", &json!({})).unwrap();
-    let e = s.plan_merge(kind, finish, &[PhotoId(1), PhotoId(2)], false).err().expect("refused").to_string();
-    assert!(e.contains("Photo Merge isn't available for Nextcloud photos"), "{e}");
 }
 
 #[test]

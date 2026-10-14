@@ -429,7 +429,8 @@ impl Remote {
         if self.lock().state(key) == AccountState::Unreachable { Err(offline()) } else { Ok(()) }
     }
 
-    /// `stat` of `path`, remembered (etag, size; not gone); a failure is noted ([`Remote::failed`]).
+    /// `stat` of `path`, remembered (etag, size; not gone; in its folder's listing, if one was made); a
+    /// failure is noted ([`Remote::failed`]).
     fn stat(&self, client: &Client, path: &RemotePath) -> Result<Entry, Error> {
         match client.stat(path) {
             Ok(entry) => {
@@ -437,6 +438,12 @@ impl Remote {
                 let mut inner = self.lock();
                 inner.gone.remove(path);
                 inner.known.insert(path.clone(), (entry.etag.clone(), entry.size));
+                // (a file made since the listing, e.g. uploaded)
+                if let (Some(dir), Some(name)) = (path.parent(), path.name())
+                    && let Some(names) = inner.listed.get_mut(&dir)
+                {
+                    names.insert(name.to_string());
+                }
                 Ok(entry)
             }
             Err(e) => {
@@ -444,6 +451,39 @@ impl Remote {
                 Err(e)
             }
         }
+    }
+
+    /// Upload `bytes` as a new file in the folder of `beside` (a `nextcloud://` path), under the first of
+    /// `names` the server doesn't have (a file there is never replaced), behind an `upload` activity row.
+    /// A copy goes into the originals cache, so opening the new file downloads nothing. Returns its path.
+    // ponytail: one PUT of the whole file, no progress or cancel; Nextcloud's chunked upload if files outgrow that
+    pub(crate) fn upload_beside(&self, beside: &str, names: &mut dyn Iterator<Item = String>, bytes: &[u8]) -> Result<String, String> {
+        let dir = RemotePath::parse(beside).map_err(|e| e.to_string())?.parent().ok_or_else(|| format!("{beside} isn't in a folder"))?;
+        let key = dir.account_key();
+        let client = self.client(&key)?;
+        self.reachable(&key)?;
+        // (a folder with a thousand of them has a problem a longer search won't fix)
+        let mut names = names.take(1000).peekable();
+        let first = names.peek().cloned().unwrap_or_default();
+        let _row = self.activity.start("upload", &format!("Uploading {first} ({})", megabytes(bytes.len() as u64)), Cancel::No);
+        for name in names {
+            let path = dir.join(&name).map_err(|e| e.to_string())?;
+            match client.create(&path, bytes) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => return Err(self.failed(&path, &e)),
+            }
+            // (uploaded either way: a failure here costs a download later, not the file)
+            let copy = self
+                .stat(&client, &path)
+                .map_err(|e| e.to_string())
+                .and_then(|entry| self.cache()?.insert(&path, &entry.etag, bytes).map_err(|e| e.to_string()));
+            if let Err(e) = copy {
+                log::warn!("Nextcloud: no local copy of {path}: {e}");
+            }
+            return Ok(path.to_string());
+        }
+        Err(format!("There is no free name for the new file beside {beside}"))
     }
 
     /// The etag and size of `path`: remembered, else asked (not while its server doesn't answer).

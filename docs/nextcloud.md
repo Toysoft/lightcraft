@@ -79,10 +79,14 @@ the Info panel open doesn't.
 - **Make Available Offline** (Photo menu) downloads the selected photos' originals and pins them, one at a time, behind
   a "Making photos available offline" row (N of M). **Remove Offline Copy** unpins them; the cache then evicts them
   like any other download when it needs the space.
-- **Not for Nextcloud photos:** Photo Merge (HDR, Panorama), Convert to DNG, Duplicate, Edit In, renaming and moving
-  files, folder operations, Synchronize Folder, Relink and Find Missing, writing XMP sidecars, and Show in Finder /
-  Explorer. They act on files beside the original or write to the server, and say "… isn't available for Nextcloud
-  photos". `library.import` refuses `nextcloud://` paths too (use `library.importNextcloud`).
+- **Photo Merge** (HDR, Panorama, HDR Panorama) downloads the originals it reads and uploads the merged DNG into the
+  first photo's folder on the server, under the next free name (`<name>-HDR.dng`, then `-HDR-2.dng`…; a file there is
+  never replaced), behind an "Uploading …" row. The DNG stays in the originals cache, so Auto Settings and Develop
+  open it without a download. Cancelling a merge stops the download it waits for.
+- **Not for Nextcloud photos:** Convert to DNG, Duplicate, Edit In, renaming and moving files, folder operations,
+  Synchronize Folder, Relink and Find Missing, writing XMP sidecars, and Show in Finder / Explorer. They act on files
+  beside the original or change files on the server, and say "… isn't available for Nextcloud photos". `library.import`
+  refuses `nextcloud://` paths too (use `library.importNextcloud`).
 
 ## Caching
 
@@ -158,8 +162,8 @@ Trust on first use, with no silent changes:
 
 ## Limits
 
-- **No write-back:** ratings, keywords and edits stay in the library; nothing is written to the server (no XMP sidecars
-  there).
+- **No write-back:** ratings, keywords and edits stay in the library; the only file written to the server is a Photo
+  Merge result (no XMP sidecars there). The upload is one request with no progress or cancel.
 - **Moved files go missing:** a photo moved or renamed on the server is a different path; relinking by file id is not
   done yet. Import the new folder again (the old record stays missing).
 - **No duplicate detection across folders:** Nextcloud photos have no content hash, so the same picture in two folders
@@ -282,9 +286,10 @@ MiB; CR3s that Memories hasn't indexed get their size from the file's header.
    copy), the cache's newest copy is used, so copies are found offline, after a restart too.
 9. **One download at a time,** behind one lock, interactive loads first. Per-path downloads can come if measurements
    show a waiting loupe.
-10. **Local-only actions refuse.** Merge, Convert to DNG, Duplicate, Edit In, file renames and moves, folder
-    operations, Synchronize Folder, sidecar writes and Show in Finder would write beside the original or act on a
-    local file, so they refuse Nextcloud photos. Export and denoise download the original instead, on their own
+10. **Local-only actions refuse.** Convert to DNG, Duplicate, Edit In, file renames and moves, folder operations,
+    Synchronize Folder, sidecar writes and Show in Finder would write beside the original or act on a local file, so
+    they refuse Nextcloud photos. Photo Merge uploads its result instead (`Client::create`, never replacing a file),
+    from the merge's own thread, and puts it in the originals cache (`OriginalsCache::insert`). Export and denoise download the original instead, on their own
     threads; "all metadata" reads the file's first MiB when the original isn't on this computer (the app's window
     never downloads).
 11. **End to end runs in process.** The MCP test drives the in-process server with an in-memory password store

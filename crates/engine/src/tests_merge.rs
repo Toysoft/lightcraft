@@ -92,3 +92,36 @@ fn panorama_command_with_auto_crop() {
     assert!(s.execute("merge.panorama", &json!({"ids": [ids[0]]})).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Photos on Nextcloud: their originals are downloaded, the DNG is uploaded beside the first (never replacing a file
+/// there) and imported from there, with a local copy, so Auto Settings and renders download nothing more.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn hdr_merge_of_nextcloud_photos_uploads_the_dng_beside_them() {
+    use crate::tests_nextcloud_hooks::{remote, signed_in};
+    let (mut s, fake, d) = signed_in("merge");
+    for (i, b) in lightcraft_merge::synth::bracket_dngs(240, 160, &[-1.0, 0.0, 1.0]).unwrap().into_iter().enumerate() {
+        fake.add_file(&format!("/Photos/IMG_{i}.dng"), b);
+    }
+    s.execute("library.importNextcloud", &json!({"dirs": [remote(&fake, "Photos")], "wait": true})).unwrap();
+    let ids: Vec<u64> = s.catalog.photos().map(|p| p.id.0).collect();
+    assert_eq!(ids.len(), 3);
+    fake.add_file("/Photos/IMG_0-HDR.dng", b"taken".to_vec());
+
+    let r = s.execute("merge.hdr", &json!({"ids": ids, "autoSettings": true})).unwrap();
+    let path = r["path"].as_str().unwrap();
+    assert_eq!(path, remote(&fake, "Photos/IMG_0-HDR-2.dng"));
+    assert_eq!(fake.file("/Photos/IMG_0-HDR.dng").unwrap(), b"taken", "never replaced");
+    assert_eq!(fake.file("/Photos/IMG_0-HDR-2.dng").unwrap().len() as u64, r["bytes"].as_u64().unwrap());
+    let id = lightcraft_catalog::PhotoId(r["id"].as_u64().unwrap());
+    let p = s.catalog.photo(id).unwrap();
+    assert_eq!(p.source, lightcraft_catalog::Source::File { path: path.into() });
+    assert_eq!((p.width, p.height, p.kind), (240, 160, lightcraft_catalog::MediaKind::Raw));
+    let d2 = s.develop_of(id).unwrap();
+    assert!(d2.light.exposure != 0.0 || d2.light.highlights != 0.0, "auto settings applied");
+    assert_eq!(fake.downloads(), 3, "the sources only");
+    s.render_now(id, 128, 128).unwrap();
+    assert_eq!(fake.downloads(), 3, "the DNG opens from its local copy");
+    assert_eq!(s.media.availability.exists(path), Some(true), "in its folder's listing");
+    let _ = std::fs::remove_dir_all(&d);
+}

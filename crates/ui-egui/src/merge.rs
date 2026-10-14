@@ -127,12 +127,15 @@ fn spawn(app: &LightcraftApp, options: &MergeDialog, ids: &[PhotoId], preview: b
     let (tx, rx) = channel();
     let (j, p, c) = (job.clone(), progress.clone(), cancel.clone());
     let work = move || {
+        // (cancelling also stops the download of a Nextcloud original it is reading)
         let run = || {
-            j.run(&|f, stage| {
-                if let Ok(mut g) = p.lock() {
-                    *g = (f, stage.to_string());
-                }
-                !c.load(Ordering::Relaxed)
+            lightcraft_engine::memory::cancellable(c.clone(), || {
+                j.run(&|f, stage| {
+                    if let Ok(mut g) = p.lock() {
+                        *g = (f, stage.to_string());
+                    }
+                    !c.load(Ordering::Relaxed)
+                })
             })
         };
         // a panicking merge reports an error instead of leaving "Merging…" up forever

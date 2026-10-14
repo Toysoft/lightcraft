@@ -4,7 +4,8 @@
 //! `Send` and self-contained), run anywhere (a worker thread in the app, inline for the CLI/MCP:
 //! [`MergeJob::run`], with progress and cancellation), and finished on the session
 //! ([`crate::Session::finish_merge`]): the DNG is written next to the first source photo
-//! (`<name>-HDR.dng`, `-Pano.dng`, `-HDR-Pano.dng`), imported, selected, and given Auto Settings /
+//! (`<name>-HDR.dng`, `-Pano.dng`, `-HDR-Pano.dng`; uploaded by the job when that photo is on Nextcloud),
+//! imported, selected, and given Auto Settings /
 //! the auto-crop rectangle when asked. A *preview* run works on ≤ 1024 px frames and returns a
 //! rendered image (with the deghost overlay when asked) instead of a file.
 
@@ -80,6 +81,9 @@ pub struct MergeJob {
     /// `Some(edge)`: preview at that frame size; `None`: the full-resolution merge.
     pub preview: Option<usize>,
     pub read: ByteReader,
+    /// Uploads the DNG beside a first source on Nextcloud.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub remote: Arc<crate::remote::Remote>,
 }
 
 /// What a merge produced.
@@ -92,6 +96,8 @@ pub struct MergeOutput {
     pub crop: Option<[f64; 4]>,
     /// Statistics for the caller (exposures, alignment, projection, …).
     pub info: Value,
+    /// Where the job saved the DNG already (beside a first source on Nextcloud).
+    pub saved: Option<String>,
 }
 
 pub type ProgressFn<'a> = dyn Fn(f32, &str) -> bool + Sync + 'a;
@@ -219,8 +225,21 @@ impl MergeJob {
             Some(edge) => Some(render_preview(&dng, edge, self.finish.auto_settings, crop, ghost.as_ref().filter(|_| self.finish.show_overlay))?),
             None => None,
         };
+        #[cfg(target_arch = "wasm32")]
+        let saved = None;
+        #[cfg(not(target_arch = "wasm32"))]
+        let saved = match self.sources.first() {
+            Some((_, first)) if self.preview.is_none() && lightcraft_catalog::is_remote(first) => {
+                if !progress(0.95, "Uploading DNG") {
+                    return Err("cancelled".into());
+                }
+                let mut names = output_names(first, self.kind.suffix()).filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
+                Some(self.remote.upload_beside(first, &mut names, &dng)?)
+            }
+            _ => None,
+        };
         progress(1.0, "Done");
-        Ok(MergeOutput { dng, preview, crop, info })
+        Ok(MergeOutput { dng, preview, crop, info, saved })
     }
 }
 
@@ -347,10 +366,7 @@ impl Session {
         for id in ids {
             let p = self.catalog.photo(*id).ok_or(lightcraft_catalog::CatalogError::NoPhoto(*id))?;
             match &p.source {
-                Source::File { path } => {
-                    crate::cmd::local_only(path, "Photo Merge")?;
-                    sources.push((*id, path.clone()))
-                }
+                Source::File { path } => sources.push((*id, path.clone())),
                 Source::Demo { .. } => return Err(EngineError::Other(format!("{} is a demo photo; Photo Merge needs photo files", p.file_name))),
             }
         }
@@ -361,7 +377,15 @@ impl Session {
             Some(r) => r.clone(),
             None => Arc::new(|path: &str| std::fs::read(path).map_err(|e| format!("{path}: {e}"))),
         };
-        Ok(MergeJob { kind, finish, sources, preview: preview.then_some(PREVIEW_EDGE), read })
+        Ok(MergeJob {
+            kind,
+            finish,
+            sources,
+            preview: preview.then_some(PREVIEW_EDGE),
+            read,
+            #[cfg(not(target_arch = "wasm32"))]
+            remote: self.remote.clone(),
+        })
     }
 
     /// Write a finished (non-preview) merge next to its first source, import it, select it and
@@ -369,10 +393,13 @@ impl Session {
     pub fn finish_merge(&mut self, job: &MergeJob, out: MergeOutput) -> Result<Value> {
         let first = &job.sources.first().ok_or_else(|| EngineError::Other("nothing merged".into()))?.1;
         // a new file under a free name (never replacing one), complete and synced before it appears
-        let path = lightcraft_catalog::safe_file::write_new_unique(&mut output_names(first, job.kind.suffix()), &out.dng)
-            .map_err(|e| EngineError::Other(format!("could not write the merged DNG next to {first}: {e}")))?
-            .to_string_lossy()
-            .to_string();
+        let path = match &out.saved {
+            Some(path) => path.clone(),
+            None => lightcraft_catalog::safe_file::write_new_unique(&mut output_names(first, job.kind.suffix()), &out.dng)
+                .map_err(|e| EngineError::Other(format!("could not write the merged DNG next to {first}: {e}")))?
+                .to_string_lossy()
+                .to_string(),
+        };
         let report = crate::import::import(self, std::slice::from_ref(&path), crate::import::ImportMode::Add)?;
         let id = report
             .imported
