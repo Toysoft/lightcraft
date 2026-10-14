@@ -200,10 +200,17 @@ pub fn apply(img: &mut Rgba8, o: Overlay, plan: &Plan<'_>, mask: Option<&Plane>,
         }
         Overlay::AllMasks { view, color, opacity } => {
             if let Some(planes) = masks {
-                for a in planes {
-                    if (a.width, a.height) == (img.width, img.height) {
-                        mask_view(img, a, view, color, opacity);
+                // one combined overlay: the union of the masks (a later plane must not erase an
+                // earlier one), drawn once
+                let mut all = planes.iter().filter(|a| (a.width, a.height) == (img.width, img.height));
+                if let Some(first) = all.next() {
+                    let mut union = first.clone();
+                    for a in all {
+                        for (u, v) in union.data.iter_mut().zip(&a.data) {
+                            *u = u.max(*v);
+                        }
                     }
+                    mask_view(img, &union, view, color, opacity);
                 }
             }
         }
@@ -435,7 +442,7 @@ mod tests {
         // a hidden mask is skipped
         s.masks[1].visible = false;
         let img2 = render(&src, &info, &s, &RenderRequest { overlay: o, ..RenderRequest::fit(80, 40) }).image;
-        assert_eq!(img2.data[in_r], plain.data[in_r], "hidden right mask not painted");
+        assert_eq!(img2.data[in_r], [0, 0, 0, 255], "hidden right mask not painted");
         assert_eq!(img2.data[in_l], [255; 4], "visible left mask still painted");
         // parts round trip and a stable, distinct cache key
         let (k, v) = o.to_parts();
