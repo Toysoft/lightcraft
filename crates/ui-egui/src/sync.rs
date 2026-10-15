@@ -146,6 +146,13 @@ pub fn body(app: &LightcraftApp, ui: &mut egui::Ui, dlg: &mut Dialog) {
     };
     if c.offline {
         ui.label(crate::i18n::tr("This folder isn't there: it was moved or renamed, or its disk isn't connected."));
+        // (the dialog's button is Locate Missing Folder… then, see `confirm`)
+        ui.label(
+            egui::RichText::new(crate::i18n::tr(
+                "If it is somewhere else now, locate it: its photos then point at the folder you choose. No file is touched.",
+            ))
+            .color(t.text_dim),
+        );
         return;
     }
     let choice = |ui: &mut egui::Ui, on: &mut bool, n: usize, text: String, widget: &str| {
@@ -180,9 +187,14 @@ pub fn body(app: &LightcraftApp, ui: &mut egui::Ui, dlg: &mut Dialog) {
 /// thread at once ([`SyncRun`]); nothing is read from disk on the UI thread. A scan that went
 /// stale (the folder's photos changed meanwhile) is refused and made again, keeping the choices.
 pub fn confirm(app: &mut LightcraftApp, dlg: &Dialog) -> Result<Value, String> {
-    let Dialog::SynchronizeFolder { path, name, disk, counts: Some(_), import_new, relink_moved, remove_missing, read_metadata, .. } = dlg else {
+    let Dialog::SynchronizeFolder { path, name, disk, counts: Some(counts), import_new, relink_moved, remove_missing, read_metadata, .. } = dlg
+    else {
         return Err("the folder is still being scanned".into());
     };
+    if counts.offline {
+        // nothing to synchronize with: ask where the folder is now, then scan it there (#1112)
+        return app.run("folder.locate", json!({"folder": path, "disk": disk, "synchronize": true}));
+    }
     if app.sync_run.is_some() {
         return Err(crate::i18n::tr("A folder is already being synchronized").to_string());
     }

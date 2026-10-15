@@ -221,6 +221,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("file.backupLibrary", "Back Up Library…", None, "File"),
     ("file.restoreLibrary", "Restore Library from Backup…", None, "File"),
     ("photo.locate", "Locate Missing File…", None, ""),
+    ("folder.locate", "Locate Missing Folder…", None, ""),
     ("dialog.saveMetadataPreset", "Save Metadata Preset…", None, ""),
     ("app.quit", "Quit LightCraft", Some("Cmd+Q"), "File"),
     ("file.importPresets", "Import Profiles & Presets…", None, "File"),
@@ -1732,6 +1733,70 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
                 Some(path) => app.run("photo.relink", json!({"id": id.0, "path": path})),
                 None => Ok(Value::Null),
             }
+        }
+        "folder.locate" => {
+            // where a folder of the library is now (issues #1112, #1116): {folder, path?, disk?,
+            // incomplete?, synchronize?} — without `path` a folder dialog asks; the files are
+            // then looked for there in the background and the photos relinked
+            // (`folder.updateLocation`)
+            let Some(folder) = p.get("folder").and_then(Value::as_str).filter(|x| !x.trim().is_empty()) else {
+                return Some(Err("folder.locate: missing `folder`".into()));
+            };
+            let to = match p.get("path").and_then(Value::as_str) {
+                Some(x) => Some(x.to_string()),
+                // (one folder dialog per command: a second folder asked about meanwhile would
+                // get the first one's answer)
+                None if app.pending_picks.iter().any(|pick| pick.command == id) => {
+                    return Some(Err(crate::i18n::tr("Choose the folder in the dialog that is already open").to_string()));
+                }
+                None => match crate::pick::ask(app, id, p, "path", PickRequest::folder(crate::i18n::tr("Locate Missing Folder…")), |s| {
+                    s.pick_folder.as_mut().and_then(|f| f()).map(|x| vec![x])
+                }) {
+                    Picked::Now(v) => v.into_iter().next(),
+                    Picked::Later => None,
+                    Picked::Unavailable => return Some(Err("no folder dialog on this platform".into())),
+                },
+            };
+            let flag = |key: &str| p.get(key).and_then(Value::as_bool).unwrap_or(false);
+            // Synchronize Folder afterwards only while its dialog still waits for the answer
+            // (closed meanwhile: it is not opened again unasked)
+            let synchronize =
+                flag("synchronize") && matches!(&app.ui.dialog, Some(crate::state::Dialog::SynchronizeFolder { path, .. }) if path == folder);
+            match to {
+                Some(to) => crate::relocate::start(
+                    app,
+                    crate::relocate::Request {
+                        path: folder.to_string(),
+                        to,
+                        disk: flag("disk"),
+                        incomplete: flag("incomplete"),
+                        synchronize,
+                        asks: true,
+                    },
+                ),
+                None => Ok(Value::Null),
+            }
+        }
+        "folder.updateLocation" => {
+            // the engine's command looks for the files on the calling thread, which here is the
+            // app's: an agent's call (control channel, `mcp --connect`) goes the way of the
+            // person's instead — a worker thread under a row in the activity stack — and is
+            // answered at once; `ui.inspect` → `relocate` says how it went
+            let text = |key: &str| p.get(key).and_then(Value::as_str).filter(|x| !x.trim().is_empty());
+            let (Some(folder), Some(to)) = (text("folder"), text("path")) else {
+                let key = if text("folder").is_none() { "folder" } else { "path" };
+                return Some(Err(format!("folder.updateLocation: missing `{key}`")));
+            };
+            let flag = |key: &str| p.get(key).and_then(Value::as_bool).unwrap_or(false);
+            let request = crate::relocate::Request {
+                path: folder.to_string(),
+                to: to.to_string(),
+                disk: flag("disk"),
+                incomplete: flag("incomplete"),
+                synchronize: false,
+                asks: false,
+            };
+            crate::relocate::start(app, request).map(|_| json!({"background": true}))
         }
         "file.addFromDevice" => {
             // a camera / card: review its DCIM folder, copying into the library by default

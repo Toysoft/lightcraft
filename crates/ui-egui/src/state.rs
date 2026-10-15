@@ -1236,6 +1236,24 @@ pub enum Dialog {
         remove_missing: bool,
         read_metadata: bool,
     },
+    /// Only some of a folder's files are where the person said the folder is now: locate it
+    /// there anyway (`folder.locate` with `incomplete`; see [`crate::relocate`])?
+    LocateFolder {
+        /// The folder as the library knows it.
+        path: String,
+        /// Where it is said to be now.
+        to: String,
+        #[serde(default)]
+        disk: bool,
+        /// Open Synchronize Folder on it afterwards.
+        #[serde(default)]
+        synchronize: bool,
+        found: usize,
+        total: usize,
+        /// Files there of another size than the library recorded (not among `found`).
+        #[serde(default)]
+        different: usize,
+    },
     About,
     Shortcuts,
 }
