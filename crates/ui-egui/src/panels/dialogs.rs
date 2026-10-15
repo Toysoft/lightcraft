@@ -2308,9 +2308,7 @@ pub fn confirm_style(dlg: &Dialog) -> ConfirmStyle {
         | Dialog::DeleteKeyword { .. }
         | Dialog::DeleteEffects { .. }
         | Dialog::DeleteLocation { .. }
-        | Dialog::RemoveFolder { .. } => {
-            ConfirmStyle::Plain
-        }
+        | Dialog::RemoveFolder { .. } => ConfirmStyle::Plain,
         _ if only_shows(dlg) => ConfirmStyle::Plain,
         _ => ConfirmStyle::Primary,
     }
