@@ -910,6 +910,40 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"deleted": ids.len()}))
             }
         ),
+        cmd!(
+            "library.addSamples",
+            "Add Sample Photos",
+            ["Help"],
+            None,
+            "{} → {added} — adds the procedural sample photos and their albums to the library, to try LightCraft on (one undo step)",
+            no_samples,
+            |s, _| {
+                let ops = crate::demo::ops(s);
+                let added = ops.iter().filter(|o| matches!(o, Op::AddPhoto { .. })).count();
+                s.commit("Add Sample Photos", Op::Batch { ops })?;
+                crate::demo::select_first(s);
+                Ok(json!({"added": added}))
+            }
+        ),
+        cmd!(
+            "library.removeSamples",
+            "Remove Sample Photos",
+            ["Help"],
+            None,
+            "{} → {removed, albums} — removes every sample photo and the albums only they filled; photos of your own and their albums stay (one undo step)",
+            has_samples,
+            |s, _| {
+                let (op, removed, albums) = crate::demo::remove_ops(&s.catalog);
+                s.commit("Remove Sample Photos", op)?;
+                // an album that went can't stay on screen (as `album.delete`)
+                if matches!(s.source, LibrarySource::Album(a) if albums.contains(&a)) {
+                    s.source = LibrarySource::All;
+                }
+                s.selection = Selection::default();
+                crate::demo::select_first(s);
+                Ok(json!({"removed": removed, "albums": albums.len()}))
+            }
+        ),
         cmd!("photo.deletePermanently", "Delete Permanently", ["Photo"], None, "{ids?}", has_selection, |s, p| {
             let before = s.visible_cloned();
             let t = s.targets(p)?;
@@ -1755,6 +1789,15 @@ mod gps_tests {
 #[path = "library/tests_relative_ratings.rs"]
 mod relative_rating_tests;
 
+/// `library.addSamples` is for a library without them.
+fn no_samples(s: &Session) -> std::result::Result<(), String> {
+    if s.has_samples() { Err("the sample photos are already in this library".into()) } else { Ok(()) }
+}
+
+/// `library.removeSamples` needs sample photos to remove.
+fn has_samples(s: &Session) -> std::result::Result<(), String> {
+    if s.has_samples() { Ok(()) } else { Err("this library has no sample photos".into()) }
+}
 #[cfg(test)]
 #[path = "library/tests_flag_cycle.rs"]
 mod flag_cycle_tests;

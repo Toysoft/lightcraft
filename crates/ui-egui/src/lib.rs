@@ -150,6 +150,8 @@ mod tests_rename_person;
 #[cfg(test)]
 mod tests_sam_setup;
 #[cfg(test)]
+mod tests_samples;
+#[cfg(test)]
 mod tests_scroll;
 #[cfg(test)]
 mod tests_slider_reset;
@@ -175,6 +177,10 @@ mod tests_unsaved;
 mod tests_view_cost;
 #[cfg(test)]
 mod tests_wb_selector;
+#[cfg(test)]
+mod tests_welcome;
+#[cfg(test)]
+mod tests_welcome_access;
 #[cfg(test)]
 mod tests_zoom;
 #[cfg(test)]
@@ -476,6 +482,19 @@ pub struct LightcraftApp {
     /// The library failed to open at launch: the blocking window, then the temporary-session
     /// banner (issue #100). Cleared once a library opens.
     pub library_problem: Option<panels::library_problem::LibraryProblem>,
+    /// Whether the library held sample photos last frame (`None` before the first): samples that
+    /// newly appear, however they came (the welcome, Help ▸ Add Sample Photos, an agent), bring
+    /// back a samples banner closed over earlier ones.
+    pub samples_present: Option<bool>,
+    /// Whether the empty library's welcome had the window last frame (`None` before the first):
+    /// becoming empty puts the Tools panel aside ([`panels::empty_library::follow`]).
+    pub welcome_seen: Option<bool>,
+    /// The welcome's sample thumbnails while they are shown (drawn by a worker as it starts).
+    pub(crate) welcome_samples: Option<panels::empty_library::SampleStrip>,
+    /// The welcome was drawn this frame (its thumbnails go the frame after it isn't).
+    pub(crate) welcome_drawn: bool,
+    /// The new library's welcome has put the keyboard on Import Photos… (once per session).
+    pub(crate) welcome_focused: bool,
     /// The activity stack shows every task, not just the first few ("+N more" was clicked).
     pub activity_expanded: bool,
 }
@@ -555,6 +574,11 @@ impl LightcraftApp {
             screen_profile: None,
             screen_profile_read: None,
             library_problem: None,
+            samples_present: None,
+            welcome_seen: None,
+            welcome_samples: None,
+            welcome_drawn: false,
+            welcome_focused: false,
             activity_expanded: false,
             model_setup: Default::default(),
         }
@@ -1432,6 +1456,7 @@ impl LightcraftApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         self.library_changed(&ctx);
+        panels::empty_library::follow(self);
         // panels set it again this frame while the pointer rests on a preset or profile
         self.hover_preview = None;
         self.ai_mask_detail(&ctx);
@@ -1454,6 +1479,7 @@ impl LightcraftApp {
         // right panels and left panel run to the bottom; the bottom bar sits between them).
         panels::topbar::show(self, ui);
         panels::library_problem::banner(self, ui);
+        panels::samples::banner(self, ui);
         panels::strip::show(self, ui);
         // filled: the gaps the dock leaves between its panes show chrome, not the dark clear colour
         let chrome = theme::Tokens::get(&ctx).chrome;
@@ -1474,7 +1500,8 @@ impl LightcraftApp {
         panels::keyword_list::drag_feedback(self, &ctx);
         panels::toast(self, &ctx);
         self.widgets = widgets::take_registry(&ctx);
-        self.text_focus = ctx.egui_wants_keyboard_input();
+        // a focused plain button (the welcome's) isn't a text field the person is typing in
+        self.text_focus = ctx.egui_wants_keyboard_input() && !crate::widgets::plain_button_has_focus(&ctx);
         self.end_frame(&ctx, t0);
     }
 }
