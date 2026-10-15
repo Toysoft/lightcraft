@@ -28,6 +28,7 @@ pub mod presets;
 pub mod profiles;
 pub mod right;
 pub mod rules_editor;
+pub mod samples;
 pub mod second;
 pub mod settings;
 pub mod slide_layout;
@@ -118,10 +119,34 @@ pub struct EmptyAction {
     pub widget: &'static str,
 }
 
+/// One dim line, centred: a panel's quiet empty state beside a louder one elsewhere (the Tools
+/// panel next to the empty library's welcome), so the window has one headline.
+pub fn empty_note(ui: &egui::Ui, rect: Rect, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let mut job = egui::text::LayoutJob::simple(crate::i18n::tr(text).to_string(), t.font(13.0), t.text_dim, (rect.width() - 32.0).max(60.0));
+    job.halign = egui::Align::Center;
+    let g = ui.painter().layout_job(job);
+    ui.painter().galley(pos2(rect.center().x, rect.center().y - g.size().y / 2.0), g, t.text_dim);
+}
+
+/// The space an empty state leaves under its hint for more of it (the welcome's sample photos):
+/// `height` tall, counted when the block is centred.
+pub const EMPTY_EXTRA_GAP: f32 = 28.0;
+
 /// [`empty_message`] with the next step under it: a row of buttons (the first is the primary
-/// one, filled with the accent) and an optional dimmed hint line below them. The block is
-/// centred in `rect` as one. Returns the command of the button clicked this frame.
-pub fn empty_state(ui: &mut egui::Ui, rect: Rect, title: &str, body: &str, actions: &[EmptyAction], hint: Option<&str>) -> Option<&'static str> {
+/// one, filled with the accent), an optional dimmed hint line below them, and `extra` points of
+/// room below that for more (0 for none). The block is centred in `rect` as one. Returns the
+/// command of the button clicked this frame, and the room left for the extra (as wide as the
+/// text may run).
+pub fn empty_state(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    title: &str,
+    body: &str,
+    actions: &[EmptyAction],
+    hint: Option<&str>,
+    extra: f32,
+) -> (Option<&'static str>, Rect) {
     let t = Tokens::get(ui.ctx());
     let wrap = (rect.width() - 48.0).max(80.0);
     let centred = |ui: &egui::Ui, text: &str, font: egui::FontId, color: egui::Color32| {
@@ -146,7 +171,8 @@ pub fn empty_state(ui: &mut egui::Ui, rect: Rect, title: &str, body: &str, actio
     };
     let gap_above_buttons = if actions.is_empty() { 0.0 } else { 20.0 };
     let hint_h = hint.as_ref().map_or(0.0, |g| 12.0 + g.size().y);
-    let block = title.size().y + 6.0 + body.size().y + gap_above_buttons + buttons_h + hint_h;
+    let extra_h = if extra > 0.0 { EMPTY_EXTRA_GAP + extra } else { 0.0 };
+    let block = title.size().y + 6.0 + body.size().y + gap_above_buttons + buttons_h + hint_h + extra_h;
     let top = rect.center().y - block / 2.0;
     let p = ui.painter().clone();
     let body_top = top + title.size().y + 6.0;
@@ -176,5 +202,6 @@ pub fn empty_state(ui: &mut egui::Ui, rect: Rect, title: &str, body: &str, actio
     if let Some(g) = hint {
         p.galley(pos2(rect.center().x, buttons_top + buttons_h + 12.0), g, t.text_dim);
     }
-    clicked
+    let extra_top = buttons_top + buttons_h + hint_h + EMPTY_EXTRA_GAP;
+    (clicked, Rect::from_min_size(pos2(rect.center().x - wrap / 2.0, extra_top), vec2(wrap, extra.max(0.0))))
 }
