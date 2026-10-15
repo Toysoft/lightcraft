@@ -293,9 +293,9 @@ fn fs_store_roundtrip() {
 fn a_volume_without_a_full_flush_still_gets_its_files() {
     let dir = std::env::temp_dir().join(format!("lc-journal-nofullsync-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let fsyncs = crate::store::plain_fsyncs();
+    let fsyncs = crate::safe_file::plain_fsyncs_on_this_thread();
     let c = {
-        let _smb = crate::store::full_sync_unsupported();
+        let _smb = crate::safe_file::full_sync_unsupported();
         let (mut j, mut c, r) = Journal::open(Box::new(FsStore::open(&dir).unwrap())).unwrap();
         assert!(r.created);
         assert!(dir.join(SNAPSHOT).exists(), "the new library's snapshot is written");
@@ -308,7 +308,7 @@ fn a_volume_without_a_full_flush_still_gets_its_files() {
         s.write_atomic("prefs.json", b"{}").unwrap();
         s.truncate(LOG, 0).unwrap();
         // the new library's snapshot, the append, the snapshot and the emptied log, prefs.json, the truncate
-        assert_eq!(crate::store::plain_fsyncs() - fsyncs, 6, "each sync falls back to fsync");
+        assert_eq!(crate::safe_file::plain_fsyncs_on_this_thread() - fsyncs, 6, "each sync falls back to fsync");
         c
     };
     let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();

@@ -9,6 +9,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::safe_file::sync_file;
+
 /// A flat namespace of named files with the few operations the journal needs.
 pub trait Store: Send {
     /// The whole file, or `None` if it doesn't exist.
@@ -182,76 +184,6 @@ impl Store for FsStore {
     #[cfg(not(target_arch = "wasm32"))]
     fn background_writer(&self) -> Option<Box<dyn Store>> {
         Some(Box::new(FsStore { dir: self.dir.clone(), appender: None }))
-    }
-}
-
-/// Flush a file to disk: `sync_all`, or `sync_data` when `data_only`.
-///
-/// On macOS both are `F_FULLFSYNC`, which an SMB share refuses with ENOTSUP (issue #1407) while a
-/// plain `fsync` works there: that is the fallback. If it fails too, the write fails.
-fn sync_file(f: &std::fs::File, data_only: bool) -> io::Result<()> {
-    #[cfg(test)]
-    let r = if NO_FULL_SYNC.with(std::cell::Cell::get) {
-        Err(enotsup())
-    } else if data_only {
-        f.sync_data()
-    } else {
-        f.sync_all()
-    };
-    #[cfg(not(test))]
-    let r = if data_only { f.sync_data() } else { f.sync_all() };
-    match r {
-        Err(e) if flush_unsupported(&e) => plain_fsync(f),
-        r => r,
-    }
-}
-
-fn plain_fsync(f: &std::fs::File) -> io::Result<()> {
-    #[cfg(test)]
-    PLAIN_FSYNCS.with(|c| c.set(c.get() + 1));
-    lightcraft_sysmem::fsync(f)
-}
-
-/// The volume can't flush a file to disk (ENOTSUP on macOS, `Unsupported` elsewhere).
-fn flush_unsupported(e: &io::Error) -> bool {
-    const ENOTSUP: i32 = 45;
-    e.kind() == io::ErrorKind::Unsupported || (cfg!(target_vendor = "apple") && e.raw_os_error() == Some(ENOTSUP))
-}
-
-#[cfg(test)]
-thread_local! {
-    static NO_FULL_SYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static PLAIN_FSYNCS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-/// Tests: how many plain `fsync` fallbacks [`FsStore`] made on the calling thread.
-#[cfg(test)]
-pub(crate) fn plain_fsyncs() -> u64 {
-    PLAIN_FSYNCS.with(std::cell::Cell::get)
-}
-
-/// What a volume without a full flush answers (macOS: ENOTSUP, os error 45, from `F_FULLFSYNC`).
-#[cfg(test)]
-fn enotsup() -> io::Error {
-    if cfg!(target_vendor = "apple") { io::Error::from_raw_os_error(45) } else { io::Error::from(io::ErrorKind::Unsupported) }
-}
-
-/// Tests: while the guard lives, every file sync [`FsStore`] makes on the calling thread fails
-/// as on an SMB share mounted by macOS (issue #1407).
-#[cfg(test)]
-pub(crate) fn full_sync_unsupported() -> NoFullSync {
-    NO_FULL_SYNC.with(|c| c.set(true));
-    NoFullSync(())
-}
-
-/// Ends a [`full_sync_unsupported`] when dropped.
-#[cfg(test)]
-pub(crate) struct NoFullSync(());
-
-#[cfg(test)]
-impl Drop for NoFullSync {
-    fn drop(&mut self) {
-        NO_FULL_SYNC.with(|c| c.set(false));
     }
 }
 
