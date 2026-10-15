@@ -297,6 +297,19 @@ impl<'a> Coded<'a> {
         let first = *ids.first().ok_or_else(|| Error::Malformed("grid lists no tiles".into()))?;
         let first_props = if first == id { p.clone() } else { ctx.props(first).map_err(err)? };
         let chroma_format = first_props.hvcc.as_ref().map_or(1, |c| c.chroma_format);
+        // A grid's displayed dimensions can be smaller than the sum of its decoded tiles.
+        // Bound the live tile set before Rayon starts allocating frames in parallel.
+        let mut tile_pixels = 0u64;
+        for tile in &ids {
+            let tp = ctx.props(*tile).map_err(err)?;
+            let hvcc = tp.hvcc.as_ref().ok_or(heic_rs::Error::MissingBox("hvcC")).map_err(err)?;
+            let info = heic_rs::hevc::probe(&hvcc.parameter_sets()).map_err(err)?;
+            let pixels = u64::from(info.width).checked_mul(u64::from(info.height)).ok_or_else(|| Error::Limit("HEIF tile size overflow".into()))?;
+            tile_pixels = tile_pixels.checked_add(pixels).ok_or_else(|| Error::Limit("HEIF grid size overflow".into()))?;
+            if tile_pixels > limit {
+                return Err(Error::Limit("the decoded HEIF grid exceeds the pixel limit".into()));
+            }
+        }
         let decode_one = |t: &u32| -> Result<Frame, Error> {
             let tp = ctx.props(*t).map_err(err)?;
             let hvcc = tp.hvcc.as_ref().ok_or(heic_rs::Error::MissingBox("hvcC")).map_err(err)?;

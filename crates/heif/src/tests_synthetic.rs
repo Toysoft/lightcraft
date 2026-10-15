@@ -147,6 +147,13 @@ fn limits_are_checked_before_decoding() {
 }
 
 #[test]
+fn grid_tile_memory_is_bounded_by_the_pixel_limit() {
+    let bytes = build(&Spec::new(100, 70, &grey));
+    let result = decode(&bytes, &Options { max_pixels: 100 * 70, ..Default::default() });
+    assert!(matches!(result, Err(Error::Limit(_))), "{result:?}");
+}
+
+#[test]
 fn truncated_and_corrupted_files_are_errors_not_panics() {
     let bytes = build(&Spec { props: vec![FULL_601, Prop::Irot(1)], thumbnail: Some(&grey), ..Spec::new(64, 64, &grey) });
     let full = decode(&bytes, &Options::default()).unwrap();
