@@ -9,6 +9,7 @@ mod ico;
 mod layers;
 mod parity;
 mod stats;
+mod typescale;
 mod version;
 mod web;
 
@@ -37,6 +38,8 @@ commands:
   corpus [--download]
                   show where test corpora live; --download fetches PngSuite and CC0 raw samples (raw.pixls.us) into corpus/ and checks their sha256
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
+  type [--list]   the interface gives no text a size past the scale of crates/ui-egui/src/theme.rs (TextSize);
+                  --list names the sizes asked by number that are drawn at the nearest one; part of ci
 ";
 
 fn main() -> ExitCode {
@@ -54,6 +57,7 @@ fn main() -> ExitCode {
         Some("ci") => cmd_ci(),
         Some("corpus") => cmd_corpus(rest.contains(&"--download")),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),
+        Some("type") => typescale::run(&root(), rest.contains(&"--list")),
         Some("-h" | "--help" | "help") | None => {
             print!("{USAGE}");
             Ok(())
@@ -243,6 +247,8 @@ fn cmd_wasm() -> Result<(), String> {
 fn cmd_ci() -> Result<(), String> {
     type Step = (&'static str, Box<dyn Fn() -> Result<(), String>>);
     let steps: Vec<Step> = vec![
+        // (first: it reads sources only, and says in a second what a build would take minutes to)
+        ("type", Box::new(|| typescale::run(&root(), false))),
         (
             "fmt",
             Box::new(|| {
