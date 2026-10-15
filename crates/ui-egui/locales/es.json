@@ -2331,5 +2331,8 @@
   "Animal Eye Tracking": "Seguimiento de ojos de animales",
   "Human Eye Tracking": "Seguimiento de ojos humanos",
   "Read Focus Points": "Leer puntos de enfoque",
-  "Reading focus points": "Leyendo puntos de enfoque"
+  "Reading focus points": "Leyendo puntos de enfoque",
+  "LightCraft lost its graphics device": "LightCraft ha perdido su dispositivo gráfico",
+  "The graphics driver stopped responding, so LightCraft can't draw its window any more. Your library and edits are saved.\n\nRestart LightCraft to continue.": "El controlador gráfico ha dejado de responder, así que LightCraft ya no puede dibujar su ventana. Su biblioteca y sus ediciones están guardadas.\n\nReinicie LightCraft para continuar.",
+  "Restart": "Reiniciar"
 }

@@ -402,7 +402,8 @@ fn request_window(app: &mut LightcraftApp, c: &WindowCtx, v: &WindowView) -> Opt
     let job = if c.interacting { job.draft() } else { job };
     let overlay = if v.before { lightcraft_pipeline::Overlay::None } else { c.overlay };
     let job = if v.before { job } else { job.with_hidden_grading(app.ui.grading_hidden_for(c.id)) };
-    let job = job.with_overlay(overlay);
+    // only drawn: stays on the GPU when it renders there (issue #1228)
+    let job = job.with_overlay(overlay).to_texture(app.renderer.takes_textures());
     // keyed as the renderer keys the texture (a display profile changes the key)
     let job = app.renderer.job_for(v.slot, job);
     // The overlay is part of the tile's identity too, so changing mask view/colour never leaves a

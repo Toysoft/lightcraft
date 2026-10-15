@@ -2324,5 +2324,8 @@
   "Animal Eye Tracking": "Слежение за глазами животных",
   "Human Eye Tracking": "Слежение за глазами людей",
   "Read Focus Points": "Прочитать точки фокусировки",
-  "Reading focus points": "Чтение точек фокусировки"
+  "Reading focus points": "Чтение точек фокусировки",
+  "LightCraft lost its graphics device": "LightCraft потерял графическое устройство",
+  "The graphics driver stopped responding, so LightCraft can't draw its window any more. Your library and edits are saved.\n\nRestart LightCraft to continue.": "Графический драйвер перестал отвечать, поэтому LightCraft больше не может отрисовывать окно. Ваша библиотека и правки сохранены.\n\nПерезапустите LightCraft, чтобы продолжить.",
+  "Restart": "Перезапустить"
 }
