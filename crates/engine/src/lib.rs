@@ -312,6 +312,8 @@ pub struct Session {
     /// The user's point-curve presets (`curve.*`; built-ins: [`cmd::curves::builtin_presets`]),
     /// persisted in prefs.json.
     pub curve_presets: Vec<cmd::curves::CurvePreset>,
+    /// The crop tool's saved and hidden aspect ratios (`crop.saveAspect`…), persisted in prefs.json.
+    pub crop_aspects: cmd::crop_aspects::CropAspects,
     /// Mask effect presets (the Masking panel's Effect menu).
     pub mask_effects: Vec<cmd::mask_effects::MaskEffect>,
     /// The effect a new mask of each kind (`brush`, `linear`…) starts with: the one last applied
@@ -465,6 +467,7 @@ impl Session {
             metadata_presets: Vec::new(),
             filter_presets: Vec::new(),
             curve_presets: Vec::new(),
+            crop_aspects: Default::default(),
             mask_effects: Vec::new(),
             mask_tool_effects: Default::default(),
             label_sets: Vec::new(),
@@ -1243,6 +1246,8 @@ mod tests_albums_local;
 mod tests_color;
 #[cfg(test)]
 mod tests_crop_angle;
+#[cfg(test)]
+mod tests_crop_aspects;
 #[cfg(test)]
 mod tests_denoise;
 #[cfg(test)]
