@@ -528,9 +528,11 @@ fn fit_dng_tone(raw: &RawImage, bytes: &[u8], transform: &CameraTransform, lens:
         }
         None
     };
-    let (pair, smaller_preview) = match proxies(raw, bytes, transform, PROXY, MIN_PREVIEW_FRACTION, None) {
+    let sensor_proxies = std::cell::Cell::new(None);
+    let sensor_proxy = |k, edge| sensor_proxy_with(raw, k, edge, Some(&sensor_proxies));
+    let (pair, smaller_preview) = match proxies_with_sensor(raw, bytes, transform, PROXY, MIN_PREVIEW_FRACTION, None, sensor_proxy) {
         Some(pair) => (pair, false),
-        None => match proxies(raw, bytes, transform, PROXY, 0.0, None) {
+        None => match proxies_with_sensor(raw, bytes, transform, PROXY, 0.0, None, sensor_proxy) {
             Some(pair) => (pair, true),
             None => return refuse("preview"),
         },
@@ -571,7 +573,7 @@ fn fit_dng_tone(raw: &RawImage, bytes: &[u8], transform: &CameraTransform, lens:
     let fine_proxies = || {
         fine.get_or_init(|| {
             let (mut fine_sensor, fine_reference, fine_clipped) =
-                proxies(raw, bytes, transform, FINE_PROXY, if smaller_preview { 0.0 } else { MIN_PREVIEW_FRACTION }, None)?;
+                proxies_with_sensor(raw, bytes, transform, FINE_PROXY, if smaller_preview { 0.0 } else { MIN_PREVIEW_FRACTION }, None, sensor_proxy)?;
             if let Some(tables) =
                 lightcraft_raw::profile::ProfileTables::new(&raw.color.profile, lightcraft_raw::color::illuminant_weight(&raw.color, xy))
             {
@@ -1211,6 +1213,18 @@ fn proxies(
     min_fraction: f64,
     lens: Option<&LensGeometry>,
 ) -> Option<(Rgb32f, Rgb32f, Vec<bool>)> {
+    proxies_with_sensor(raw, bytes, transform, size, min_fraction, lens, |k, edge| sensor_proxy(raw, k, edge))
+}
+
+fn proxies_with_sensor(
+    raw: &RawImage,
+    bytes: &[u8],
+    transform: &CameraTransform,
+    size: usize,
+    min_fraction: f64,
+    lens: Option<&LensGeometry>,
+    sensor_proxy: impl FnOnce(usize, usize) -> Option<Rgb32f>,
+) -> Option<(Rgb32f, Rgb32f, Vec<bool>)> {
     let edge = (2 * size).max(384) as u32;
     let (a, crop) = (raw.active_area, raw.crop.clipped(raw.active_area.width, raw.active_area.height));
     let opts = lightcraft_codecs::DecodeOptions { max_size: Some((edge, edge)), max_pixels: FIT_PREVIEW_MAX_PIXELS };
@@ -1257,7 +1271,7 @@ fn proxies(
     };
     // Fixed, bounded proxy: the selected look cannot depend on thumbnail/export resolution.
     let k = (crop.width.max(crop.height).div_ceil(edge as usize).max(2)).div_ceil(2) * 2;
-    let mut sensor = sensor_proxy(raw, k, edge as usize)?;
+    let mut sensor = sensor_proxy(k, edge as usize)?;
     let mut clipped = clip_mask(&sensor);
     // The camera may have corrected its JPEG with the lens warp the file carries (Nikon Z lenses always, at up to 9 %
     // zoom; other cameras when their correction setting is on): the sensor moved into that geometry is a candidate,
@@ -1571,12 +1585,47 @@ fn into_lens_geometry(img: &Rgb32f, raw: &RawImage, k: usize, lens: &LensGeometr
     Some(out)
 }
 
+/// One fit retains only the fine fallback intermediate, never a full developed frame.
+type SensorProxyCache = std::cell::Cell<Option<(usize, Rgb32f)>>;
+
+/// Build the two fallback intermediates independently: resizing one into the other changes pixels.
+/// Preparing the bounded fine image here lets the full frame drop before the coarse fit runs.
+fn fallback_sensor_proxy(edge: usize, cache: Option<&SensorProxyCache>, develop: impl FnOnce() -> Option<Rgb32f>) -> Option<Rgb32f> {
+    if let Some(cache) = cache
+        && let Some((cached_edge, image)) = cache.take()
+    {
+        if cached_edge == edge {
+            if lightcraft_pipeline::profiling() {
+                eprintln!("[profile] camera preview sensor: reused fallback at edge {edge}");
+            }
+            return Some(image);
+        }
+        cache.set(Some((cached_edge, image)));
+    }
+    if lightcraft_pipeline::profiling() {
+        eprintln!("[profile] camera preview sensor: full development at edge {edge}");
+    }
+    let full = develop()?;
+    let sensor = fit(&full, edge, edge, Filter::Box);
+    if edge == (2 * PROXY).max(384)
+        && let Some(cache) = cache
+    {
+        let fine_edge = (2 * FINE_PROXY).max(384);
+        cache.set(Some((fine_edge, fit(&full, fine_edge, fine_edge, Filter::Box))));
+    }
+    Some(sensor)
+}
+
 fn sensor_proxy(raw: &RawImage, k: usize, edge: usize) -> Option<Rgb32f> {
+    sensor_proxy_with(raw, k, edge, None)
+}
+
+fn sensor_proxy_with(raw: &RawImage, k: usize, edge: usize, cache: Option<&SensorProxyCache>) -> Option<Rgb32f> {
     Some(match raw.develop_binned(k, SENSOR_CLIP).ok()? {
         Some(sensor) => sensor,
         // Lens opcodes cannot be applied to a binned mosaic: they are defined at full resolution.
         None if (raw.cpp == 3 && raw.cfa.is_none()) || (raw.format == RawFormat::Dng && !raw.opcodes.list3.is_empty()) => {
-            fit(&raw.develop(lightcraft_raw::Method::Bilinear).ok()?, edge, edge, Filter::Box)
+            fallback_sensor_proxy(edge, cache, || raw.develop(lightcraft_raw::Method::Bilinear).ok())?
         }
         None => return None,
     })
@@ -2713,6 +2762,89 @@ mod tests {
         let sensor = fit(&Rgb32f::new(9504, 6336), PROXY, PROXY, Filter::Box);
         let r = reference_at(&Rgb32f::new(192, 129), &sensor);
         assert_eq!((r.width, r.height), (sensor.width, sensor.height));
+    }
+
+    #[test]
+    fn dng_fallback_develops_once_for_independent_bounded_proxies() {
+        let mut full = Rgb32f::new(1603, 997);
+        for (i, p) in full.data.iter_mut().enumerate() {
+            *p = std::array::from_fn(|c| (((i % 1009) * 7919 + c * 1543) % 1009) as f32 / 1009.0);
+        }
+        let coarse = fit(&full, 384, 384, Filter::Box);
+        let fine = fit(&full, 1536, 1536, Filter::Box);
+        assert_ne!(coarse.data, fit(&fine, 384, 384, Filter::Box).data, "chaining the resizes is not interchangeable");
+        let calls = std::cell::Cell::new(0);
+        let cache = SensorProxyCache::new(None);
+        let develop = || {
+            calls.set(calls.get() + 1);
+            Some(full.clone())
+        };
+        let got = fallback_sensor_proxy(384, Some(&cache), develop).unwrap();
+        assert_eq!((got.width, got.height, got.data), (coarse.width, coarse.height, coarse.data));
+        let (edge, retained) = cache.take().unwrap();
+        assert_eq!(edge, 1536);
+        assert!(retained.width <= edge && retained.height <= edge && retained.data.capacity() <= edge * edge);
+        assert_eq!((retained.width, retained.height), (fine.width, fine.height));
+        cache.set(Some((edge, retained)));
+        let got = fallback_sensor_proxy(1536, Some(&cache), develop).unwrap();
+        assert_eq!((got.width, got.height, got.data), (fine.width, fine.height, fine.data));
+        assert_eq!(calls.get(), 1, "the finer request must consume the saved proxy without developing again");
+        assert!(cache.take().is_none(), "the consumed buffer is no longer retained");
+    }
+
+    #[test]
+    fn dng_fallback_does_not_retain_a_cropped_full_frame_allocation() {
+        let full = Rgb32f::new(2048, 1537).into_crop(3, 5, 8, 5);
+        assert!(full.data.capacity() > 1536 * 1536, "fixture retains the original full-frame allocation");
+        let cache = SensorProxyCache::new(None);
+        let coarse = fallback_sensor_proxy(384, Some(&cache), || Some(full)).unwrap();
+        assert_eq!((coarse.width, coarse.height), (8, 5));
+        assert_eq!(coarse.data.capacity(), 8 * 5);
+        let (_, fine) = cache.take().unwrap();
+        assert_eq!((fine.width, fine.height), (8, 5));
+        assert_eq!(fine.data.capacity(), 8 * 5, "cached pixels must own only the bounded proxy storage");
+    }
+
+    #[test]
+    fn dng_fallback_cache_requires_the_requested_edge() {
+        let cache = SensorProxyCache::new(Some((1536, Rgb32f::new(15, 9))));
+        let got = fallback_sensor_proxy(417, Some(&cache), || Some(Rgb32f::new(43, 29))).unwrap();
+        assert_eq!((got.width, got.height), (43, 29), "an unrelated edge must use its own development");
+        let saved = fallback_sensor_proxy(1536, Some(&cache), || None).unwrap();
+        assert_eq!((saved.width, saved.height), (15, 9), "the unrelated request leaves the fine image available");
+        assert!(fallback_sensor_proxy(384, Some(&cache), || None).is_none());
+        assert!(cache.take().is_none(), "failed development cannot prepare a fine image");
+    }
+
+    #[test]
+    fn dng_preview_refusal_does_not_prepare_sensor_proxies() {
+        let raw = raw_of(RawFormat::Dng, "Make", "Model", Default::default());
+        let transform = lightcraft_raw::color::camera_transform(&raw, lightcraft_raw::color::as_shot_white_xy(&raw));
+        let calls = std::cell::Cell::new(0);
+        for fraction in [MIN_PREVIEW_FRACTION, 0.0] {
+            assert!(
+                proxies_with_sensor(&raw, b"invalid preview", &transform, PROXY, fraction, None, |_, _| {
+                    calls.set(calls.get() + 1);
+                    None
+                })
+                .is_none()
+            );
+        }
+        assert_eq!(calls.get(), 0, "both preview refusals precede full raw development and eager fine work");
+    }
+
+    #[test]
+    fn dng_proxy_reuse_preserves_binning_and_raw_validation() {
+        let bytes = crate::tests_xmp::synthetic_dng_with(None, Default::default());
+        let mut raw = lightcraft_raw::decode(&bytes).unwrap();
+        let cache = SensorProxyCache::new(None);
+        let binned = sensor_proxy_with(&raw, 2, 384, Some(&cache)).unwrap();
+        assert_eq!(binned.data, raw.develop_binned(2, SENSOR_CLIP).unwrap().unwrap().data);
+        assert!(cache.take().is_none(), "the binned path does not prepare an unused fine intermediate");
+        cache.set(Some((1536, Rgb32f::new(4, 4))));
+        raw.data = lightcraft_raw::RawData::U16(Vec::new());
+        assert!(sensor_proxy_with(&raw, 2, 1536, Some(&cache)).is_none(), "validation must run before consulting cached pixels");
+        assert!(cache.take().is_some(), "invalid raw data never reaches fallback reuse");
     }
 
     #[test]
