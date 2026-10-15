@@ -9,7 +9,7 @@ use std::sync::Arc;
 use lightcraft_engine::Session;
 use lightcraft_engine::catalog::Source;
 use lightcraft_engine::library::LibraryStores;
-use lightcraft_ui_egui::{LightcraftApp, Services, UiState};
+use lightcraft_ui_egui::{LightcraftApp, Services};
 use serde_json::json;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -200,7 +200,12 @@ fn services(originals: Originals, backend: Option<Backend>, files: Files, frozen
             let Some(b) = restore_backend.clone() else { return Err("nothing is stored in this browser session (?store=memory)".into()) };
             let frozen = frozen.clone();
             // once the backup is in place, stop saving the old library (the page reloads)
-            safety::pick_and_restore(b, move || frozen.set(true));
+            safety::pick_and_restore(b, move || {
+                frozen.set(true);
+                if let Some(storage) = window().and_then(|w| w.session_storage().ok().flatten()) {
+                    let _ = storage.set_item("lightcraft-rust-session:skip", "1");
+                }
+            });
             Ok(json!({"started": true}))
         })),
         pick_files: Some(Box::new(move || {
@@ -281,6 +286,10 @@ struct Boot {
 }
 
 async fn boot(opts: Options) -> Boot {
+    let session_id = window().and_then(|w| w.crypto().ok()).map(|c| c.random_uuid());
+    // Without secure randomness use memory rather than sharing a writer identity.
+    let opts = if session_id.is_none() { Options { store: "memory".into(), ..opts } } else { opts };
+    let session_id = session_id.unwrap_or_default();
     let t0 = perf_now();
     let backend = if opts.store == "memory" {
         None
@@ -319,13 +328,22 @@ async fn boot(opts: Options) -> Boot {
                 lib_dir = d;
             }
         }
+        let session_dir = format!("craft-sessions/{session_id}");
+        if b.read(&library_key(&session_dir, "catalog.snap")).await.ok().flatten().is_some() {
+            lib_dir = session_dir.clone();
+        }
         for name in LIBRARY_FILES {
+            if matches!(name, "view.json" | "ui.json") {
+                continue;
+            }
             match b.read(&library_key(&lib_dir, name)).await {
                 Ok(Some(data)) => files.preload(name, data),
                 Ok(None) => {}
                 Err(e) => log::error!("reading {name}: {e}"),
             }
         }
+        // Future writes cannot overwrite a different browser tab's library.
+        lib_dir = session_dir;
         if let Ok(Some(j)) = b.read(THUMB_INDEX).await {
             index = ThumbIndex::from_json(&j);
         }
@@ -382,11 +400,12 @@ struct WebApp {
     bench: Option<Bench>,
     first_frame_logged: bool,
     last_save: f64,
-    ui_written: Vec<u8>,
+    recovery_revision: u64,
 }
 
 impl WebApp {
     fn new(cc: &eframe::CreationContext<'_>, boot: Boot, chinese_font: Vec<u8>) -> Self {
+        craft_bridge::wake(cc.egui_ctx.clone());
         let Boot { opts, backend, files, index, lib_dir } = boot;
         let originals = Originals::default();
         let t = perf_now();
@@ -433,10 +452,7 @@ impl WebApp {
         let frozen = Rc::new(Cell::new(false));
         let mut app = LightcraftApp::new(session, services(originals.clone(), backend.clone(), files.clone(), frozen.clone(), cc.egui_ctx.clone()))
             .with_chinese_font(chinese_font);
-        let ui_written = files.get("ui.json").unwrap_or_default();
-        if let Ok(ui) = serde_json::from_slice::<UiState>(&ui_written) {
-            app.ui = ui;
-        }
+        // Workspace UI is restored exclusively by CraftSession.
         app.ui = app.ui.sanitized();
         app.library_problem = problem;
         let n = opts.workers.unwrap_or_else(|| {
@@ -461,7 +477,9 @@ impl WebApp {
         log::info!("lightcraft: {n} render workers");
         CTX.with(|c| *c.borrow_mut() = Some(cc.egui_ctx.clone()));
         let origin = lightcraft_ui_egui::now_ms() - perf_now();
+        let recovery_revision = app.session.catalog.revision;
         WebApp {
+            recovery_revision,
             app,
             originals,
             files,
@@ -474,7 +492,6 @@ impl WebApp {
             bench: opts.bench.then(|| Bench::new(origin)),
             first_frame_logged: false,
             last_save: 0.0,
-            ui_written,
         }
     }
 
@@ -538,13 +555,7 @@ impl WebApp {
         let now = perf_now();
         if now - self.last_save >= SAVE_EVERY_MS {
             self.last_save = now;
-            self.app.session.save_view();
-            if let Ok(ui) = serde_json::to_vec_pretty(&self.app.ui)
-                && ui != self.ui_written
-            {
-                self.files.write("ui.json", &ui);
-                self.ui_written = ui;
-            }
+            // CraftSession owns workspace view recovery.
             if let (Some(w), Some(b)) = (&self.workers, &self.backend)
                 && let Some(index) = w.take_index_if_dirty()
             {
@@ -623,6 +634,9 @@ impl WebApp {
 
 impl eframe::App for WebApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !craft_bridge::restore(self.app.session.catalog.revision == self.recovery_revision, |bytes| self.app.craft_restore(bytes)) {
+            return;
+        }
         for text in safety::take_notices() {
             let now = ctx.input(|i| i.time);
             self.app.ui.toast = Some((text, now + NOTICE_SECS, None));
@@ -653,11 +667,23 @@ impl eframe::App for WebApp {
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let typing = _ctx.egui_wants_keyboard_input() || self.app.ui.name_edit.is_some();
+        _ctx.data_mut(|data| {
+            let key = egui::Id::new("lightcraft-web-clipboard-gesture");
+            let mut gesture = data.remove_temp::<lightcraft_ui_egui::web_clipboard::ClipboardGesture>(key).unwrap_or_default();
+            gesture.normalize(raw, typing);
+            data.insert_temp(key, gesture);
+        });
         self.app.raw_input_hook(raw);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if !craft_bridge::restore(self.app.session.catalog.revision == self.recovery_revision, |bytes| self.app.craft_restore(bytes)) {
+            return;
+        }
         self.app.ui(ui);
+        craft_bridge::ui(self.app.session.catalog.revision == self.recovery_revision, ui.ctx());
+        craft_bridge::save(self.app.craft_signature(), || self.app.craft_capture(), ui.ctx());
         if !self.first_frame_logged && !self.app.widgets.is_empty() {
             self.first_frame_logged = true;
             log::info!("lightcraft first UI frame at {:.0} ms after navigation start", perf_now());
@@ -708,3 +734,13 @@ pub fn start(chinese_font: Vec<u8>) {
         }
     });
 }
+
+#[path = "craft_bridge.rs"]
+mod craft_bridge;
+
+#[path = "browser_store.rs"]
+mod browser_store;
+
+#[cfg(feature = "browser-storage-tests")]
+#[path = "browser_storage_checks.rs"]
+mod browser_storage_tests;

@@ -237,3 +237,25 @@ fn opening_numeric_release_keeps_keys_in_the_editor() {
         }
     }
 }
+
+#[test]
+fn paired_browser_events_paste_settings_once_and_cut_does_not_remove_photo() {
+    let mut h = demo();
+    h.events.extend([
+        egui::Event::Key { key: egui::Key::C, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND },
+        egui::Event::Copy,
+    ]);
+    h.settle(SETTLE);
+    assert!(h.app.session.clipboard.is_some());
+    let before = h.app.session.undo.len();
+    h.events.extend([
+        egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND },
+        egui::Event::Paste("text".into()),
+    ]);
+    h.settle(SETTLE);
+    assert_eq!(h.app.session.undo.len(), before + 1);
+    let before = h.app.session.undo.len();
+    h.events.push(egui::Event::Cut);
+    h.settle(SETTLE);
+    assert_eq!(h.app.session.undo.len(), before);
+}

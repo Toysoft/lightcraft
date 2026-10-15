@@ -513,7 +513,7 @@ fn move_one(fs: &dyn MoveFs, a: &Path, b: &Path) -> std::io::Result<()> {
 
 /// An unfinished sidecar operation. Keep its exact paths and any recorded copy requirement: the photo may
 /// already have followed its new path, so a retry cannot infer this work from the catalog.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SidecarMove {
     pub from: PathBuf,
     pub to: PathBuf,
@@ -524,9 +524,10 @@ pub(crate) struct SidecarMove {
 }
 
 /// A content version, not an assertion that a pathname still names the same packet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct PacketVersion {
     len: u64,
+    #[serde(with = "craft_hash")]
     hash: lightcraft_preview::Hash128,
 }
 
@@ -536,7 +537,7 @@ impl PacketVersion {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct RetainedPacket {
     path: PathBuf,
     // An unreadable observation remains untrusted even if a later read succeeds.
@@ -1137,6 +1138,18 @@ impl Session {
     }
 }
 
+// Recovery retains exact observed sidecar packet versions without adding serde to preview.
+mod craft_hash {
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S: Serializer>(hash: &lightcraft_preview::Hash128, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&hash.to_string())
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<lightcraft_preview::Hash128, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        lightcraft_preview::Hash128::parse(&text).ok_or_else(|| serde::de::Error::custom("Invalid sidecar packet hash"))
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1720,5 +1733,27 @@ pub(crate) mod tests {
         assert_eq!(expand("{folder}{name}{num}", &p, 1), "beach.NEF");
         // a bare {seq} is padded to the caller's width
         assert_eq!(expand_tokens("{seq}|{seq:2}", &p, 7, 3), "007|07");
+    }
+}
+
+#[cfg(test)]
+mod craft_packet_tests {
+    use super::*;
+    #[test]
+    fn recovery_preserves_partial_sidecar_moves_and_full_hash() {
+        let move_ = SidecarMove {
+            from: "before.xmp".into(),
+            to: "after.xmp".into(),
+            copied: true,
+            companions: vec![RetainedPacket {
+                path: "before.xmp".into(),
+                version: Some(PacketVersion { len: 17, hash: lightcraft_preview::Hash128(u128::MAX) }),
+            }],
+        };
+        let bytes = serde_json::to_vec(&move_).unwrap();
+        assert_eq!(serde_json::from_slice::<SidecarMove>(&bytes).unwrap(), move_);
+        let mut invalid = serde_json::to_value(&move_).unwrap();
+        invalid["companions"][0]["version"]["hash"] = serde_json::json!("invalid");
+        assert!(serde_json::from_value::<SidecarMove>(invalid).is_err());
     }
 }

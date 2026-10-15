@@ -115,7 +115,7 @@ pub enum EngineError {
 pub type Result<T> = std::result::Result<T, EngineError>;
 
 /// One undo step: the inverse op and a label.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct UndoEntry {
     pub label: String,
     pub op: Op,
@@ -152,7 +152,7 @@ fn single_photo(op: &Op, depth: usize) -> Option<PhotoId> {
 }
 
 /// A folder renamed or moved on disk as part of an undo step.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FolderMove {
     pub from: String,
     pub to: String,
@@ -1061,3 +1061,8 @@ mod tests_spots;
 mod tests_sync;
 #[cfg(test)]
 mod tests_xmp;
+
+mod craft_codec;
+mod craft_session;
+
+mod recovery_cmds;
