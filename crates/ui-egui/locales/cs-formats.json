@@ -316,5 +316,8 @@
   "{n} albums": "Alba: {n}",
   "{n} folders": "Složky: {n}",
   "Lists “{name}”, the folder this one is in": "Zobrazuje „{name}“, složku, ve které je tato",
-  "“{name}” is now a place in Local: open it there": "„{name}“ je nyní místem v části Místní: otevřete ji tam"
+  "“{name}” is now a place in Local: open it there": "„{name}“ je nyní místem v části Místní: otevřete ji tam",
+  "Showing {what}": "Zobrazeno: {what}",
+  "{title}, showing {what}": "{title}, zobrazeno: {what}",
+  "{first} and {n} more": "{first} a dalších {n}"
 }

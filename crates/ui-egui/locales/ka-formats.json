@@ -316,5 +316,8 @@
   "{n} albums": "ალბომები: {n}",
   "{n} folders": "საქაღალდეები: {n}",
   "Lists “{name}”, the folder this one is in": "აჩვენებს „{name}“-ს, საქაღალდეს, რომელშიც ეს არის",
-  "“{name}” is now a place in Local: open it there": "„{name}“ ახლა ადგილია „ლოკალურში“: გახსენით იქ"
+  "“{name}” is now a place in Local: open it there": "„{name}“ ახლა ადგილია „ლოკალურში“: გახსენით იქ",
+  "Showing {what}": "ნაჩვენებია: {what}",
+  "{title}, showing {what}": "{title}, ნაჩვენებია: {what}",
+  "{first} and {n} more": "{first} და კიდევ {n}"
 }
