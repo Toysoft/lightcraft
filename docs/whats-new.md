@@ -5,6 +5,12 @@
 ### Right As Shot temperature for Sony M and S raws
 - Sony's smaller lossless raws (M and S sizes) showed a wrong As Shot temperature: an α7 IV M raw read 1691 K with a
   strong tint. They now show the temperature the camera chose, as their full-size raws do. Their look is unchanged.
+### Colour for Sony raws whose camera colour can't be matched
+- A Sony raw whose colour can't be matched to its own camera JPEG (a night sky, where almost everything is too dark
+  to compare) no longer opens grey and washed out on cameras without colour data of their own in LightCraft, such as
+  the α1 and α1 II, α6700, the FX series and the older NEX, SLT and α DSLR bodies. Such a photo now starts from
+  another Sony sensor's measured colour: checked against the camera JPEGs of the public samples of 97 Sony models,
+  its colour is about half as far from the camera's. Photos whose colour could be matched look exactly as before.
 
 ## 2026-10-14
 

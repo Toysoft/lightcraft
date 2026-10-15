@@ -185,9 +185,10 @@ A raw starts from the first of these that is available (`camera_preview::startin
 2. a camera profile for its model (bundled or local), with tone and chroma fitted to the file's JPEG;
 3. the file-local fit to its own JPEG described above;
 4. the model's spectral matrices, with LightCraft's default tone curve and no JPEG fit;
-5. the neutral fallback.
+5. for an ARW whose body has no spectral matrices, the ILCE-7M3's as a stand-in (below), likewise;
+6. the neutral fallback.
 
-When the file's JPEG is black and white, step 2 fits the tone curve alone with the profile's colour; without a profile, or when that fit fails, 4 and 5 take the tone curve fitted to it (see the black-and-white JPEG paragraph above).
+When the file's JPEG is black and white, step 2 fits the tone curve alone with the profile's colour; without a profile, or when that fit fails, 4, 5 and 6 take the tone curve fitted to it (see the black-and-white JPEG paragraph above).
 
 The spectral matrices only replace the neutral fallback: a photo whose JPEG fit is accepted (with or without a
 profile) renders exactly as before, and a covered model takes its spectral matrices only when that fit fails the
@@ -198,6 +199,35 @@ still pools the uncorrected camera colour of covered models, so a profile can be
 
 No colour-difference measurement of the spectral matrices against the camera JPEG, or against the file-local fit,
 is recorded here yet. Whether they should come before the file-local fit for these models is open until one is.
+
+**A stand-in for Sony bodies outside the table** (`spectral::stand_in`). Most Sony bodies (the ILCE-1 and ILCE-1M2,
+ILCE-9M2 and ILCE-9M3, ILCE-6700, the FX series, every SLT, NEX and DSLR-A) have no spectral row, so a photo whose
+fit fails (a night sky with too few pixels above the fit's floors, for one) used to open in the neutral fallback,
+whose "camera RGB ≈ linear sRGB" keeps about a third of the colour. Such an ARW now takes the ILCE-7M3's spectral
+matrices instead, with the default tone curve, exactly as a covered model's failed fit does. Two measurements:
+
+- On the table's own rows (each row's white-balanced camera RGB of 146 sRGB-gamut test colours of moderate chroma,
+  rendered through another row's forward matrix or through the neutral model; mean CIE76 against the row's own
+  rendering, under D65 and Illuminant A): the neutral model is 14.0–16.0 off on all 11 Sony rows, one modern Sony
+  full-frame row rendering another 0.2–2.0 (the ILCE-7SM2 is the outlier, 2.8–5.7), and the ILCE-7M3 row has the
+  lowest worst case on the other ten (mean 1.2, worst 3.4). It also beats the neutral model on every one of the
+  table's 51 other cameras, every make back to the 2004 Nikon D70 (mean 2.8–2.9, worst 7.5, against 11.7–17.2), so it
+  is used for every ARW, old bodies included. A test pins these figures.
+- Against the camera JPEGs of the public raw.pixls.us samples (158 decodable ARWs of 97 bodies, the 2007 DSLR-A700
+  to the ILCE-1M2): every file's sensor proxy through
+  each candidate with the default tone curve, compared on its mid-tone pixels in CIE 1976 u′v′ (colour alone, as the
+  default tone curve differs from the camera's). Median distance ×1000: neutral 19.1, stand-in 10.2, the other Sony
+  rows 9.6–10.3; on the 40 files of bodies with their own row, 12.3 for it and 11.8 for the stand-in. The stand-in is
+  closer than the neutral model on 145 of the 158: on 122 of the 125 shot in the Standard creative style (20.8 →
+  10.2; the three others are ILCE-7RM4 files whose own row does no better) and on all 10 Vivid ones, but on only 9 of
+  the 17 Neutral ones, a style that mutes colour as the neutral model does. In CIE76 the median goes 17.7 → 16.1, the
+  tone curve's difference dominating.
+
+It only replaces the neutral fallback: photos whose fit is accepted, and every other format, render as before (on the
+public samples the fit or the partial look takes 156 of the 158; the stand-in reaches a DSC-RX10 shot and a NEX-3
+shot whose JPEG is black and white, which then takes its tone curve on top). It doesn't decide the white-balance scale
+either: the presets or the measured matrices do, read before it is applied (`WbScaleOf`). Look version 10 and render
+cache version 65.
 
 ## Smart previews and the look version
 
