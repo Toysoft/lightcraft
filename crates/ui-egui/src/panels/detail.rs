@@ -1593,12 +1593,17 @@ fn crop_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Respons
             return;
         }
         let d = app.session.develop_of(id).unwrap_or_default();
-        app.gesture = Some(match handles.iter().position(|h| h.distance(q) < 12.0) {
+        // Which handle was grabbed is decided by where the button went *down*, not by where the
+        // pointer has got to by the time egui reports the drag. Past 12 px — the handle's own hit
+        // radius — the live position misses it, and a handle drag silently becomes a rotate, which
+        // then runs into the ±45° clamp. `press_origin` is where the user's hand actually is.
+        let at = ui.input(|i| i.pointer.press_origin()).unwrap_or(q);
+        app.gesture = Some(match handles.iter().position(|h| h.distance(at) < 12.0) {
             Some(h) => Gesture::CropHandle { handle: h as u8, start: d.crop.geometry.rect, angle: d.crop.geometry.angle },
-            None if inside(q) => Gesture::CropHandle { handle: 8, start: d.crop.geometry.rect, angle: d.crop.geometry.angle },
+            None if inside(at) => Gesture::CropHandle { handle: 8, start: d.crop.geometry.rect, angle: d.crop.geometry.angle },
             None => {
                 let c = map.screen(d.crop.geometry.rect.center());
-                Gesture::CropRotate { start_angle: d.crop.geometry.angle, a0: (q - c).angle(), start_rect: d.crop.geometry.rect }
+                Gesture::CropRotate { start_angle: d.crop.geometry.angle, a0: (at - c).angle(), start_rect: d.crop.geometry.rect }
             }
         });
     }
