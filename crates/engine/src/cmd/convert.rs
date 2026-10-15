@@ -281,32 +281,35 @@ pub(crate) fn as_shot_wb_op(id: lightcraft_catalog::PhotoId, ph: &lightcraft_cat
     (ph.develops_raw() && !ph.relative_wb() && ph.as_shot_wb != Some(read)).then_some(Op::SetAsShotWb { id, wb: Some(read) })
 }
 
-/// The ops that bring photo `id` and its virtual copies up to date with what their file is now
-/// (`info`, a fresh probe), appended to `ops`; the photos they change are appended to `changed`.
+/// The ops that bring photo `id` and its same-file virtual-copy family up to date with a
+/// fresh probe. Only explicit `targets` receive missing metadata; file facts follow the source.
 /// Reload and the preview-only recheck (`library.recheckPreviewOnly`) share it.
 pub(crate) fn reload_ops(
     cat: &lightcraft_catalog::Catalog,
     id: lightcraft_catalog::PhotoId,
     info: &crate::media::ProbeInfo,
+    targets: &std::collections::HashSet<lightcraft_catalog::PhotoId>,
     ops: &mut Vec<Op>,
     changed: &mut Vec<lightcraft_catalog::PhotoId>,
 ) {
     let Some(ph) = cat.photo(id) else { return };
-    // camera fields the catalog lacks (e.g. a raw imported before its format was read) are filled in;
-    // nothing already set is overwritten
-    let meta_ops = fill_missing_meta(id, ph, info);
-    let mut mine: Vec<Op> =
-        content_op(id, ph, info.clone()).into_iter().chain(meta_ops).chain(lens_ops(id, ph, info)).chain(as_shot_wb_op(id, ph, info)).collect();
-    if !mine.is_empty() {
-        ops.append(&mut mine);
-        changed.push(id);
-    }
-    // virtual copies share the file
-    for c in cat.photos().filter(|c| c.copy_of == Some(id)) {
-        let theirs: Vec<Op> =
-            content_op(c.id, c, info.clone()).into_iter().chain(lens_ops(c.id, c, info)).chain(as_shot_wb_op(c.id, c, info)).collect();
-        if !theirs.is_empty() {
-            ops.extend(theirs);
+    // Any family member can be selected. A separately relinked copy has its own file facts.
+    let family = ph.copy_of.unwrap_or(ph.id);
+    for c in cat.photos().filter(|c| c.copy_of.unwrap_or(c.id) == family && c.source == ph.source) {
+        if changed.contains(&c.id) {
+            continue;
+        }
+        // Include every explicitly selected member even when another selected sibling is the
+        // one whose file was probed. Never overwrite a user's existing camera metadata.
+        let meta_ops = if targets.contains(&c.id) { fill_missing_meta(c.id, c, info) } else { Vec::new() };
+        let changes: Vec<Op> = content_op(c.id, c, info.clone())
+            .into_iter()
+            .chain(meta_ops)
+            .chain(lens_ops(c.id, c, info))
+            .chain(as_shot_wb_op(c.id, c, info))
+            .collect();
+        if !changes.is_empty() {
+            ops.extend(changes);
             changed.push(c.id);
         }
     }
@@ -316,15 +319,16 @@ pub(crate) fn reload_ops(
 /// dimensions and content hash, cached sources dropped. → {reloaded: [ids]}
 fn reload(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = s.targets(p)?;
+    let targets = ids.iter().copied().collect();
     let mut seen = std::collections::HashSet::new();
     let paths: Vec<(lightcraft_catalog::PhotoId, String)> = ids
         .iter()
         .filter_map(|id| {
             let ph = s.catalog.photo(*id)?;
-            // Reload the shared file once, even when only copies (or several siblings) are selected.
-            let ph = ph.copy_of.and_then(|id| s.catalog.photo(id)).unwrap_or(ph);
+            // Probe each source in a family once, preserving separately relinked copies.
+            let family = ph.copy_of.unwrap_or(ph.id);
             match &ph.source {
-                Source::File { path } if seen.insert(ph.id) => Some((ph.id, path.clone())),
+                Source::File { path } if seen.insert((family, path.clone())) => Some((ph.id, path.clone())),
                 _ => None,
             }
         })
@@ -334,7 +338,7 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
     let mut reloaded = Vec::new();
     for ((id, _), info) in paths.into_iter().zip(probed) {
         let Ok(info) = info else { continue };
-        reload_ops(&s.catalog, id, &info, &mut ops, &mut reloaded);
+        reload_ops(&s.catalog, id, &info, &targets, &mut ops, &mut reloaded);
     }
     for id in &reloaded {
         s.media.forget(*id);

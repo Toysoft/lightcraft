@@ -1469,6 +1469,114 @@ fn reload_smart_preview_transition(from_copy: bool, unplug: bool, rebuild_after_
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Reloading any member updates its same-file family, not copies relinked to another file.
+#[test]
+fn reload_virtual_copy_updates_only_its_source_family() {
+    check_reload_source_family(false);
+}
+
+#[test]
+fn reload_original_updates_only_its_source_family() {
+    check_reload_source_family(true);
+}
+
+fn check_reload_source_family(from_original: bool) {
+    use lightcraft_catalog::PhotoId;
+    let dir = temp_dir(if from_original { "reload-original-family" } else { "reload-copy-family" });
+    let path = dir.join("photo.png");
+    let other = dir.join("other.png");
+    write_png(&path, 10);
+    write_png(&other, 90);
+    let mut s = Session::new().with_fs();
+    s.execute("library.import", &json!({"paths": [path.to_string_lossy()]})).unwrap();
+    let master = s.active().unwrap();
+    let mut copies = Vec::new();
+    for _ in 0..3 {
+        let r = s.execute("photo.virtualCopy", &json!({"ids": [master.0]})).unwrap();
+        copies.push(PhotoId(r["ids"][0].as_u64().unwrap()));
+    }
+    let (selected, sibling, detached) = (copies[0], copies[1], copies[2]);
+    s.execute("photo.relink", &json!({"id": detached.0, "path": other.to_string_lossy()})).unwrap();
+    let detached_before = s.catalog.photo(detached).unwrap().clone();
+    let family = [master, selected, sibling];
+    for (i, id) in family.iter().enumerate() {
+        s.execute("develop.set", &json!({"ids": [id.0], "control": "light.exposure", "value": i as f64 * 0.3})).unwrap();
+    }
+    let before: Vec<_> = family.iter().map(|id| s.catalog.photo(*id).unwrap().clone()).collect();
+    write_png(&path, 200);
+    let probe = s.media.file_probe.clone().unwrap();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let probe_calls = calls.clone();
+    s.media.file_probe = Some(std::sync::Arc::new(move |path| {
+        probe_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut info = probe(path)?;
+        info.meta.camera = "Procedural camera".into();
+        Ok(info)
+    }));
+    let expected = s.media.file_probe.as_ref().unwrap()(path.to_str().unwrap()).unwrap();
+    assert_ne!(expected.content_hash, before[0].content_hash);
+    let target = if from_original { master } else { selected };
+    for requested in [vec![target.0], vec![selected.0, master.0, sibling.0, selected.0]] {
+        calls.store(0, std::sync::atomic::Ordering::SeqCst);
+        let r = s.execute("photo.reload", &json!({"ids": requested})).unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1, "probe the shared source once");
+        assert_eq!(r["reloaded"], json!([master.0, selected.0, sibling.0]), "each same-file member appears once");
+        for (id, old) in family.iter().zip(&before) {
+            let photo = s.catalog.photo(*id).unwrap();
+            assert_eq!(photo.content_hash, expected.content_hash);
+            assert_eq!(photo.develop, old.develop, "each copy keeps its own edits");
+            assert_eq!(photo.meta.camera, if requested.contains(&id.0) { "Procedural camera" } else { "" });
+        }
+        assert_eq!(s.catalog.photo(detached).unwrap(), &detached_before, "a relinked copy keeps its own file facts");
+        s.execute("edit.undo", &json!({})).unwrap();
+        for (id, old) in family.iter().zip(&before) {
+            assert_eq!(s.catalog.photo(*id).unwrap(), old, "one Undo restores the whole family");
+        }
+        s.execute("edit.redo", &json!({})).unwrap();
+        for id in family {
+            assert_eq!(s.catalog.photo(id).unwrap().content_hash, expected.content_hash);
+        }
+        assert_eq!(s.catalog.photo(detached).unwrap(), &detached_before);
+        s.execute("edit.undo", &json!({})).unwrap();
+    }
+    // Selecting a separately relinked copy reads its own file, not the original's.
+    write_png(&other, 40);
+    let expected = s.media.file_probe.as_ref().unwrap()(other.to_str().unwrap()).unwrap();
+    let r = s.execute("photo.reload", &json!({"ids": [detached.0]})).unwrap();
+    assert_eq!(r["reloaded"], json!([detached.0]));
+    assert_eq!(s.catalog.photo(detached).unwrap().content_hash, expected.content_hash);
+    for (id, old) in family.iter().zip(&before) {
+        assert_eq!(s.catalog.photo(*id).unwrap(), old, "reloading the detached copy preserves its former family");
+    }
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.catalog.photo(detached).unwrap(), &detached_before);
+    // Mixed selections include both sources once; copies made from a relinked copy retain
+    // the same family root but must follow the relinked source.
+    let r = s.execute("photo.virtualCopy", &json!({"ids": [detached.0]})).unwrap();
+    let detached_sibling = PhotoId(r["ids"][0].as_u64().unwrap());
+    let detached_sibling_before = s.catalog.photo(detached_sibling).unwrap().clone();
+    calls.store(0, std::sync::atomic::Ordering::SeqCst);
+    let r = s.execute("photo.reload", &json!({"ids": [selected.0, detached.0, detached_sibling.0, master.0, selected.0]})).unwrap();
+    assert_eq!(r["reloaded"], json!([master.0, selected.0, sibling.0, detached.0, detached_sibling.0]));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2, "probe each selected family source once");
+    for id in [detached, detached_sibling] {
+        assert_eq!(s.catalog.photo(id).unwrap().content_hash, expected.content_hash);
+    }
+    let main_hash = &s.catalog.photo(master).unwrap().content_hash;
+    assert_ne!(main_hash, &expected.content_hash);
+    for id in [selected, sibling] {
+        assert_eq!(&s.catalog.photo(id).unwrap().content_hash, main_hash);
+    }
+    s.execute("edit.undo", &json!({})).unwrap();
+    for (id, old) in family.iter().zip(&before) {
+        assert_eq!(s.catalog.photo(*id).unwrap(), old);
+    }
+    assert_eq!(s.catalog.photo(detached).unwrap(), &detached_before);
+    assert_eq!(s.catalog.photo(detached_sibling).unwrap(), &detached_sibling_before);
+    drop(s);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Relinking unchanged bytes after a decoder upgrade changes the source interpretation too.
 #[test]
 fn relink_invalidates_preview_only_smart_previews() {

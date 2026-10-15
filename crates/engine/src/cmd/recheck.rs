@@ -90,7 +90,7 @@ pub fn apply(s: &mut Session, results: Vec<(Stale, std::result::Result<ProbeInfo
             continue;
         }
         let first = out.updated.len();
-        crate::cmd::convert::reload_ops(&s.catalog, item.id, &info, &mut ops, &mut out.updated);
+        crate::cmd::convert::reload_ops(&s.catalog, item.id, &info, &std::collections::HashSet::from([item.id]), &mut ops, &mut out.updated);
         if info.preview_only.is_none() {
             out.cleared.extend_from_slice(&out.updated[first..]);
         }

@@ -144,6 +144,25 @@ fn virtual_copies_follow_their_photo() {
     assert!(x.s.catalog.photo(copy).unwrap().develops_raw());
 }
 
+/// A recheck uses the same source-aware family matching as manual Reload.
+#[test]
+fn recheck_preserves_relinked_members_of_the_source_family() {
+    let mut x = library("relinked-copy");
+    let r = x.s.execute("photo.virtualCopy", &json!({"ids": [x.id.0]})).unwrap();
+    let linked = PhotoId(r["ids"][0].as_u64().unwrap());
+    let r = x.s.execute("photo.virtualCopy", &json!({"ids": [x.id.0]})).unwrap();
+    let detached = PhotoId(r["ids"][0].as_u64().unwrap());
+    let other = x.dir.join("other.cr3");
+    std::fs::write(&other, cr3_with_preview(48, 32)).unwrap();
+    x.s.execute("photo.relink", &json!({"id": detached.0, "path": other.to_string_lossy()})).unwrap();
+    let before = x.s.catalog.photo(detached).unwrap().clone();
+    decodable_now(&x);
+    let r = x.s.execute("library.recheckPreviewOnly", &json!({})).unwrap();
+    assert_eq!(r["cleared"], json!([x.id.0, linked.0]));
+    assert!(x.s.catalog.photo(linked).unwrap().develops_raw());
+    assert_eq!(x.s.catalog.photo(detached).unwrap(), &before);
+}
+
 /// Without file access every probe would "succeed" knowing nothing and clear every flag: refused.
 #[test]
 fn session_without_file_access_refuses() {
