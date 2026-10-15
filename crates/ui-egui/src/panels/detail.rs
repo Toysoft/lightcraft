@@ -1597,7 +1597,7 @@ fn crop_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Respons
             Some(h) => Gesture::CropHandle { handle: h as u8, start: d.crop.geometry.rect, angle: d.crop.geometry.angle },
             None if inside(q) => Gesture::CropHandle { handle: 8, start: d.crop.geometry.rect, angle: d.crop.geometry.angle },
             None => {
-                let c = map.screen(Point::new(0.5, 0.5));
+                let c = map.screen(d.crop.geometry.rect.center());
                 Gesture::CropRotate { start_angle: d.crop.geometry.angle, a0: (q - c).angle(), start_rect: d.crop.geometry.rect }
             }
         });
@@ -1619,7 +1619,9 @@ fn crop_overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, resp: &egui::Respons
                 );
             }
             Some(Gesture::CropRotate { start_angle, a0, start_rect }) => {
-                let c = map.screen(Point::new(0.5, 0.5));
+                // about the crop box's own centre, not the photo's: a box off-centre in the frame
+                // would otherwise swing around the photo's middle and slide off its own axis
+                let c = map.screen(start_rect.center());
                 let a = (q - c).angle();
                 // Negate the angle delta because straighten angle is opposite to rotation direction:
                 // dragging clockwise (positive delta) should rotate image clockwise,
