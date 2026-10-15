@@ -507,6 +507,8 @@ pub struct LightcraftApp {
     pub sync_run: Option<sync::SyncRun>,
     /// A Synchronize Folder that waited in line, scanning its folder again before it runs.
     pub sync_queued: Option<sync::SyncRescan>,
+    /// The scans of the Synchronize N Folders dialog, one folder after another.
+    pub sync_scans: Option<sync::ManyScan>,
     /// A Lightroom catalog inspect/import in progress.
     pub lightroom: Option<lightroom_import::LightroomTask>,
     /// Last terminal Lightroom result, exposed by the command's status/wait response.
@@ -615,6 +617,7 @@ impl LightcraftApp {
             sync_owns_changes: false,
             sync_run: None,
             sync_queued: None,
+            sync_scans: None,
             lightroom: None,
             lightroom_last: None,
             lightroom_result: None,
@@ -1277,6 +1280,7 @@ impl LightcraftApp {
         merge::poll(self, ctx);
         import::poll_scan(self, ctx);
         sync::poll(self, ctx);
+        sync::poll_many(self, ctx);
         sync::poll_rescan(self, ctx);
         sync::poll_run(self, ctx);
         import::tick(self, ctx);

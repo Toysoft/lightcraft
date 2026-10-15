@@ -119,7 +119,7 @@ fn a_build_that_could_not_start_says_why_and_the_line_goes_on() {
     let ids: Vec<u64> = s.catalog.photos().take(1).map(|p| p.id.0).collect();
     let h = hold(&mut s);
     // (a request no build accepts: as if what it needs went away while it waited)
-    let bad = Request { command: "library.buildPreviews".into(), params: json!({"size": "huge"}) };
+    let bad = Request { command: "library.buildPreviews".into(), params: json!({"size": "huge"}), ..Default::default() };
     let (bad_id, _) = s.activity.enqueue("previews", "Building previews", bad).unwrap();
     let good = s.execute("library.buildPreviews", &json!({"ids": ids, "edge": 256, "queue": true})).unwrap()["queued"].as_u64().unwrap();
     release(h);
@@ -195,7 +195,7 @@ fn another_library_drops_what_waits_and_what_could_be_retried() {
     let mut s = Session::with_demo();
     let ids: Vec<u64> = s.catalog.photos().take(1).map(|p| p.id.0).collect();
     let h = hold(&mut s);
-    let r = Request { command: "library.buildPreviews".into(), params: json!({"size": "huge"}) };
+    let r = Request { command: "library.buildPreviews".into(), params: json!({"size": "huge"}), ..Default::default() };
     let g = s.activity.start("previews", "Building previews", Cancel::Yes);
     g.set_request(r.clone());
     let failed = g.id();

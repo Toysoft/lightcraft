@@ -1242,6 +1242,21 @@ pub enum Dialog {
         remove_missing: bool,
         read_metadata: bool,
     },
+    /// Synchronize N Folders: the folders chosen in the sidebar, scanned one after another, then synchronized with one
+    /// set of choices, one after another in the library lane (the scans run in [`crate::sync`]).
+    SynchronizeFolders {
+        /// In the sidebar's order; a folder inside another chosen one is left out (the other covers it).
+        folders: Vec<SyncFolder>,
+        import_new: bool,
+        #[serde(default = "yes")]
+        relink_moved: bool,
+        remove_missing: bool,
+        read_metadata: bool,
+        /// The library the folders were scanned in (`Session::library_generation`): photo ids are numbered per
+        /// library, so in another one they name other photos.
+        #[serde(default)]
+        library: u64,
+    },
     About,
     Shortcuts,
 }
@@ -1264,6 +1279,32 @@ pub struct SyncCounts {
     pub metadata: usize,
     #[serde(default)]
     pub moved: usize,
+}
+
+/// One folder of the Synchronize N Folders dialog.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncFolder {
+    pub path: String,
+    /// What the dialog calls it (a folder's last two names).
+    pub name: String,
+    /// What its scan found (`None` until it was scanned).
+    pub counts: Option<SyncCounts>,
+    /// Why it is left out (a whole disk, a folder that can't be scanned); it isn't scanned then.
+    #[serde(default)]
+    pub skipped: Option<String>,
+    /// The missing and moved photos its scan found: the only ones its synchronize may remove or relink.
+    #[serde(default)]
+    pub missing: Vec<u64>,
+    #[serde(default)]
+    pub moved: Vec<u64>,
+}
+
+impl SyncFolder {
+    /// Whether it was scanned, or left out.
+    pub fn settled(&self) -> bool {
+        self.counts.is_some() || self.skipped.is_some()
+    }
 }
 
 impl Default for UiState {
