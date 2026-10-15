@@ -251,11 +251,15 @@ fn row_need(indent: f32, name_w: f32, mark_w: f32, count_w: Option<f32>) -> f32 
 
 /// The disclosure chevron at the left of a tree row (`indent` is the row's): right-pointing
 /// when closed, down when open, registered as widget `widget` for the control channel. Returns
-/// its response: the caller flips the open state on `clicked()`.
+/// its response: the caller flips the open state on `clicked()`. Its box starts where the bar of
+/// what is shown ends ([`current_mark`]): on a top-level row the 16 pt box reached over the bar,
+/// and a click on the bar folded the row. The box narrows on both sides, so it stays centred on
+/// the glyph, which is drawn where it was: chevrons and section headers still line up.
 fn disclosure_chevron(ui: &mut egui::Ui, row: &egui::Response, indent: f32, open: bool, id: egui::Id, widget: String) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = pos2(row.rect.left() + 10.0 + indent, row.rect.center().y);
-    let tri = Rect::from_center_size(c, vec2(16.0, 16.0));
+    let over_bar = (ui.clip_rect().left() + CURRENT_MARK_W - (c.x - 8.0)).clamp(0.0, 8.0);
+    let tri = Rect::from_center_size(c, vec2(16.0 - 2.0 * over_bar, 16.0));
     let tr = ui.interact(tri, id, Sense::click());
     register(ui.ctx(), widget, tri);
     let col = if tr.hovered() { t.text } else { t.text_dim };
