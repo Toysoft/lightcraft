@@ -98,7 +98,8 @@ fn export_dialog_is_unchanged_in_a_tall_window() {
     // (#236), so it is 876 tall there)
     let height = if cfg!(target_os = "macos") { 876.0 } else { 846.0 };
     assert!((dialog.height() - height).abs() <= 1.0, "{dialog:?}");
-    assert!((dialog.width() - 615.2).abs() <= 1.0, "{dialog:?}");
+    // (602 wide since the format row's choices are set at caption size, 11 pt where they were 11.5)
+    assert!((dialog.width() - 602.0).abs() <= 1.0, "{dialog:?}");
 }
 
 // Scenario: other long dialogs fit a short window too, with their buttons on screen
