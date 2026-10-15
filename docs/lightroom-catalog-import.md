@@ -44,11 +44,16 @@ retained. Oldest managed archives are retired; legacy `.json` archives remain un
 `Interop/lightroom-index.json` records imported identities. Source catalogs and originals are
 never overwritten.
 
-Each native `.lrcat` database and WAL file is independently limited to 1 GiB
-(1,073,741,824 bytes). This bounds the current whole-file reader; referenced photo sizes and
-photo counts are not part of that limit. XMP packets are capped at 16 MiB and each table at one million rows.
-The in-tree, read-only Rust SQLite B-tree reader follows SQLite’s public file-format
-specification; it introduces no dependency or C runtime. Table payloads are capped at 256 MiB.
+Native import reads referenced database pages on demand (at most 64 KiB per page), rather than
+loading the whole `.lrcat`. Database files are capped at 16 GiB and 16,777,216 pages; the WAL
+remains capped at 1 GiB. Tables still have a 256 MiB encoded-payload budget and one million rows,
+individual records are capped at 64 MiB, and XMP packets at 16 MiB. These limits can still reject
+large catalogs with dense tables; file size alone no longer determines the memory allocation.
+The open file and source path are checked again after all tables are read. Close Lightroom before
+importing: metadata checks detect ordinary concurrent changes, but are not SQLite snapshot isolation.
+
+The in-tree, read-only Rust SQLite B-tree reader follows SQLite's public file-format
+specification; it introduces no dependency or C runtime.
 Optional history, keyword and collection tables that exceed limits are skipped with warnings;
 required photo tables still report errors. Unrelated unsupported schemas are ignored. A needed
 WITHOUT ROWID or virtual table produces an explicit error, handled as a warning when optional.
@@ -97,3 +102,7 @@ the path relative to the catalog that Lightroom records for root folders on the 
 (`relativePathFromCatalog`), when that is a folder, and reports the remapping as a warning. Copying
 a project folder with its catalog inside it therefore keeps its originals linked. Other moved
 originals stay missing; use LightCraft's missing-photo relinking tools to update their paths.
+
+## Local validation
+
+Validated in a local Linux environment after upstream reconciliation: 47 catalog-focused tests, nine pipeline spot tests, the exact sparse-catalog regression, and all eight `cargo xtask ci` stages passed. The full gate recorded 3,166 passing test executions, zero failures, and 28 ignored tests. An original synthetic sparse catalog with a required image-table page beyond 1 GiB also passed headless application import and selection; its expected missing-original placeholder retained its five-star rating. This snapshot check does not establish native-window coverage or dense-catalog performance.
