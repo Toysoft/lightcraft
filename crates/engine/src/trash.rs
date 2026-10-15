@@ -454,6 +454,7 @@ mod tests {
         assert_eq!(available().is_ok(), cfg!(all(unix, not(target_os = "macos"))));
     }
 
+    #[test]
     fn windows_records_and_drives() {
         let r = recycle_record("C:\\a.jpg", 10, 7);
         assert_eq!(r.len(), 28 + 9 * 2);

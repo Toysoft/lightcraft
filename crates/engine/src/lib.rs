@@ -38,6 +38,8 @@ mod faces_index;
 #[cfg(not(target_arch = "wasm32"))]
 mod faces_worker;
 pub mod files;
+#[cfg(not(target_arch = "wasm32"))]
+mod focus_scan;
 pub mod fonts;
 pub mod guard;
 pub mod import;
@@ -59,6 +61,10 @@ mod pdf;
 pub mod preset_import;
 pub mod preset_luminar;
 pub mod presets;
+pub mod print;
+pub mod print_color;
+pub mod print_pdf;
+pub mod profile_refs;
 pub mod proof;
 pub mod rename;
 pub mod segment;
@@ -249,6 +255,9 @@ pub struct Session {
     /// The loaded recognition model and the face embeddings made with it.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) faces: faces_index::FacesState,
+    /// Reading focus points for photos imported before they were read (`photo.readFocusPoints`, `focus.pump`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) focus_scan: focus_scan::FocusScan,
     /// Copied develop settings (partial JSON) for Paste.
     pub clipboard: Option<Value>,
     /// The folder on disk the [`LibrarySource::Folder`] view browses.
@@ -292,6 +301,11 @@ pub struct Session {
     pub last_export: Option<serde_json::Value>,
     /// The user's export presets (built-ins: [`export::builtin_presets`]), persisted in prefs.json.
     pub export_presets: Vec<export::ExportPreset>,
+    /// The Print module's current layout, image settings, page, guides and job (`print.*`). Lives
+    /// with the session, so the app, CLI, control channel and MCP all see the same print.
+    pub print: print::template::PrintSettings,
+    /// Saved print templates (`print.template.*`), persisted in prefs.json.
+    pub print_templates: Vec<print::template::PrintTemplate>,
     /// Metadata presets (`metadata.*`), persisted in prefs.json.
     pub metadata_presets: Vec<cmd::metadata::MetadataPreset>,
     /// Saved filter-bar settings (`filter.*`), persisted in prefs.json.
@@ -426,6 +440,8 @@ impl Session {
             face_catalog: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             faces: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            focus_scan: Default::default(),
             clipboard: None,
             meta_clipboard: None,
             browse: None,
@@ -448,6 +464,8 @@ impl Session {
             xmp: sidecar::XmpPrefs::default(),
             last_export: None,
             export_presets: Vec::new(),
+            print: Default::default(),
+            print_templates: Vec::new(),
             metadata_presets: Vec::new(),
             filter_presets: Vec::new(),
             curve_presets: Vec::new(),
@@ -505,7 +523,11 @@ impl Session {
         }
         let empty = Value::Object(Default::default());
         let params = if params.is_null() { &empty } else { params };
-        self.run_command(id, spec.journal.then_some(params), |s| (spec.run)(s, params))
+        self.run_command(id, spec.journal.then_some(params), |s| (spec.run)(s, params)).map_err(|e| match e {
+            // a shared parameter check ([`Session::targets`]) names the command it ran for
+            EngineError::BadParams { cmd, msg } if cmd.is_empty() => EngineError::BadParams { cmd: id.to_string(), msg },
+            e => e,
+        })
     }
 
     /// Run `f` as command `id` with what [`Session::execute`] does around every command: the
@@ -1032,8 +1054,12 @@ impl Session {
                 && !al.is_smart()
                 && self.filter == Filter::default()
             {
-                let order = al.photos.clone();
-                visible.sort_by_key(|id| order.iter().position(|x| x == id).unwrap_or(usize::MAX));
+                // each photo's place looked up, not searched for (a big album sorted in O(n log n))
+                let mut place: std::collections::HashMap<PhotoId, usize> = std::collections::HashMap::with_capacity(al.photos.len());
+                for (i, id) in al.photos.iter().enumerate() {
+                    place.entry(*id).or_insert(i);
+                }
+                visible.sort_by_key(|id| place.get(id).copied().unwrap_or(usize::MAX));
                 if !self.sort.ascending {
                     visible.reverse();
                 }
@@ -1172,14 +1198,24 @@ impl Session {
         (self.visible_gen, self.visible.clone())
     }
 
-    /// Targets of photo commands: explicit `ids`/`id` param, else the selection.
-    pub fn targets(&self, p: &Value) -> Vec<PhotoId> {
-        if let Some(a) = p.get("ids").and_then(Value::as_array) {
-            return a.iter().filter_map(Value::as_u64).map(PhotoId).collect();
+    /// Targets of photo commands: the explicit `ids` (photo ids) or `id` (a photo id) param, else [`Self::selected`].
+    /// An `ids` or `id` that is there but isn't photo ids is an error, never the selection or part of the list
+    /// (issue #1506): a mistyped target mustn't turn a command meant for one photo into one for every selected photo.
+    pub fn targets(&self, p: &Value) -> Result<Vec<PhotoId>> {
+        let invalid = |what: &str| EngineError::BadParams { cmd: String::new(), msg: format!("`{what}` must be photo ids (whole numbers)") };
+        match p.get("ids") {
+            None | Some(Value::Null) => {}
+            Some(Value::Array(a)) => return a.iter().map(|v| v.as_u64().map(PhotoId).ok_or_else(|| invalid("ids"))).collect(),
+            Some(_) => return Err(invalid("ids")),
         }
-        if let Some(id) = p.get("id").and_then(Value::as_u64) {
-            return vec![PhotoId(id)];
+        match p.get("id") {
+            None | Some(Value::Null) => Ok(self.selected()),
+            Some(v) => v.as_u64().map(|id| vec![PhotoId(id)]).ok_or_else(|| invalid("id")),
         }
+    }
+
+    /// The photos commands act on when a call names none: the selection, else the active photo.
+    pub fn selected(&self) -> Vec<PhotoId> {
         if self.selection.ids.is_empty() { self.selection.active.into_iter().collect() } else { self.selection.ids.clone() }
     }
 }
@@ -1228,6 +1264,8 @@ mod tests_face_recognize;
 mod tests_face_tiles;
 #[cfg(test)]
 mod tests_filesystem_history;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests_focus_scan;
 #[cfg(test)]
 mod tests_folders;
 #[cfg(test)]
@@ -1253,6 +1291,8 @@ mod tests_mask_effects;
 #[cfg(test)]
 mod tests_merge;
 #[cfg(test)]
+mod tests_move_to_share;
+#[cfg(test)]
 mod tests_organize;
 #[cfg(test)]
 mod tests_persist;
@@ -1260,6 +1300,8 @@ mod tests_persist;
 mod tests_prefs;
 #[cfg(test)]
 mod tests_presets_scale;
+#[cfg(test)]
+mod tests_print;
 #[cfg(test)]
 mod tests_process;
 #[cfg(test)]

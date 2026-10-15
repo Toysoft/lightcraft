@@ -26,6 +26,7 @@ pub const LANGUAGE_COMMANDS: &[UiCommand] = &[
     ("app.language.ukrainian", crate::i18n::Locale::Uk.name(), None, "Edit>Language"),
     ("app.language.polish", crate::i18n::Locale::Pl.name(), None, "Edit>Language"),
     ("app.language.czech", crate::i18n::Locale::Cs.name(), None, "Edit>Language"),
+    ("app.language.italian", crate::i18n::Locale::It.name(), None, "Edit>Language"),
 ];
 
 /// Every UI command: the languages, then everything else. `xtask parity` reads both tables from
@@ -50,6 +51,7 @@ pub fn language_from_command(id: &str) -> Option<crate::i18n::Locale> {
         "app.language.ukrainian" => Some(crate::i18n::Locale::Uk),
         "app.language.polish" => Some(crate::i18n::Locale::Pl),
         "app.language.czech" => Some(crate::i18n::Locale::Cs),
+        "app.language.italian" => Some(crate::i18n::Locale::It),
         _ => None,
     }
 }
@@ -70,6 +72,8 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("view.people", "People", None, "View"),
     ("view.person", "Show Person", None, ""),
     ("view.faceBoxes", "Face Boxes", None, "View"),
+    ("view.focusPoint", "Show Focus Point", Some("Alt+F"), "View"),
+    ("view.zoomToFocus", "Zoom to Focus Point", None, "View"),
     ("view.reference", "Reference View", Some("Shift+R"), "View"),
     ("photo.setReference", "Set as Reference Photo", None, ""),
     ("compare.swap", "Swap Compare Photos", None, "View"),
@@ -192,6 +196,8 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("dialog.pasteSettings", "Paste Selected Settings…", Some("Cmd+Shift+V"), "Edit"),
     ("view.focusSearch", "Find…", Some("Cmd+F"), "Edit"),
     ("dialog.export", "Export…", None, "File"),
+    ("dialog.print", "Print…", Some("Cmd+P"), "File"),
+    ("app.print", "Print to PDF", None, ""),
     ("dialog.contactSheet", "Contact Sheet PDF…", None, "File"),
     ("app.contactSheet", "Export Contact Sheet PDF", None, ""),
     ("photo.editInPhotoCraft", "Edit in PhotoCraft", Some("Cmd+Shift+E"), "Photo>Edit In"),
@@ -537,6 +543,16 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "view.compare" => crate::panels::compare::enter_compare(app),
+        "view.focusPoint" => {
+            // {on?}; no params toggles. The camera's focus point (Sony, from the file) over the photo.
+            app.ui.settings.focus_point = p.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.settings.focus_point);
+            Ok(json!({"on": app.ui.settings.focus_point}))
+        }
+        "view.zoomToFocus" => {
+            // {on?}; no params toggles. Toggle Zoom (Z) centres on the focus point when there is one.
+            app.ui.settings.zoom_to_focus = p.get("on").and_then(Value::as_bool).unwrap_or(!app.ui.settings.zoom_to_focus);
+            Ok(json!({"on": app.ui.settings.zoom_to_focus}))
+        }
         "view.faceBoxes" => {
             app.ui.face_boxes = p.get("show").and_then(Value::as_bool).unwrap_or(!app.ui.face_boxes);
             Ok(json!({"show": app.ui.face_boxes}))
@@ -596,7 +612,7 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
         "compare.makeSelect" => crate::panels::compare::make_select(app),
         "view.autoAdvance" => {
             app.ui.auto_advance = !app.ui.auto_advance;
-            app.toast(&ctx, if app.ui.auto_advance { "Auto Advance On" } else { "Auto Advance Off" });
+            app.toast(&ctx, crate::i18n::tr(if app.ui.auto_advance { "Auto Advance On" } else { "Auto Advance Off" }));
             Ok(json!({"autoAdvance": app.ui.auto_advance}))
         }
         "view.back" => {
@@ -802,9 +818,18 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "view.zoomToggle" => {
-            // the same ratio a click on the photo zooms to
-            app.ui.zoom = if app.ui.zoom == Zoom::Fit { Zoom::Percent(app.ui.click_zoom as f32) } else { Zoom::Fit };
+            // the same ratio a click on the photo zooms to; zooming in centres on the camera's focus
+            // point when the photo has one (View ▸ Zoom to Focus Point)
+            let zoom_in = app.ui.zoom == Zoom::Fit;
+            app.ui.zoom = if zoom_in { Zoom::Percent(app.ui.click_zoom as f32) } else { Zoom::Fit };
             app.ui.zoom_anim = true;
+            if zoom_in
+                && app.ui.settings.zoom_to_focus
+                && let Some(pan) = app.session.active().and_then(|id| crate::panels::detail::focus_pan(app, id))
+            {
+                app.ui.pan = pan;
+                return Some(Ok(json!({"focus": [pan.0, pan.1]})));
+            }
             Ok(Value::Null)
         }
         "view.clickZoom" => {
@@ -1297,7 +1322,7 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
             Ok(Value::Null)
         }
         "dialog.deleteFromDisk" => {
-            let ids: Vec<u64> = app.session.targets(&json!({})).iter().map(|id| id.0).collect();
+            let ids: Vec<u64> = app.session.selected().iter().map(|id| id.0).collect();
             if !open_delete_dialog(app, ids, false) {
                 return Some(Err("no photos selected".into()));
             }
@@ -1349,6 +1374,28 @@ pub fn run_ui_command(app: &mut LightcraftApp, id: &str, p: &Value) -> Option<Re
         "dialog.contactSheet" => {
             app.ui.dialog = Some(Dialog::ContactSheet { options: lightcraft_engine::contact_sheet::Options::default() });
             Ok(Value::Null)
+        }
+        "dialog.print" => {
+            app.ui.print = Default::default();
+            app.ui.dialog = Some(Dialog::Print);
+            Ok(Value::Null)
+        }
+        "app.print" => {
+            if app.export.is_some() {
+                return Some(Err("an export is already running".into()));
+            }
+            let mut params = p.clone();
+            if p.get("path").is_none() {
+                let req = PickRequest::save("Print to PDF", "PDF", &["pdf"], "Print.pdf");
+                let paths = match crate::pick::ask(app, id, p, "path", req, |_| None) {
+                    Picked::Now(paths) => paths,
+                    Picked::Later => return Some(Ok(Value::Null)),
+                    Picked::Unavailable => return Some(Err("no save dialog on this platform; supply path".into())),
+                };
+                let Some(path) = paths.first() else { return Some(Ok(Value::Null)) };
+                params["path"] = json!(path);
+            }
+            crate::export_task::start_print(app, &params)
         }
         "app.contactSheet" => {
             if app.export.is_some() {
@@ -2090,7 +2137,9 @@ pub fn ui_enabled(app: &LightcraftApp, id: &str) -> bool {
     match id {
         "library.selectOnlyActive" => app.session.active().is_some(),
         "view.thumbSizeUp" | "view.thumbSizeDown" => thumb_size_view(app),
-        "dialog.contactSheet" | "app.contactSheet" => !cfg!(target_arch = "wasm32") && app.session.active().is_some() && app.export.is_none(),
+        "dialog.contactSheet" | "app.contactSheet" | "dialog.print" | "app.print" => {
+            !cfg!(target_arch = "wasm32") && app.session.active().is_some() && app.export.is_none()
+        }
         "dialog.slideshowExport" | "app.slideshowExport" => {
             !cfg!(target_arch = "wasm32") && !app.session.slideshow_export.as_ref().is_some_and(|r| r.running())
         }
@@ -2099,7 +2148,7 @@ pub fn ui_enabled(app: &LightcraftApp, id: &str) -> bool {
             app.session.active().is_some()
         }
         "photo.tagFromTracklog" => app.session.active().is_some() && app.services.pick_tracklog.is_some(),
-        "dialog.deleteFromDisk" => lightcraft_engine::trash::available().is_ok() && !app.session.targets(&json!({})).is_empty(),
+        "dialog.deleteFromDisk" => lightcraft_engine::trash::available().is_ok() && !app.session.selected().is_empty(),
         "photo.editInPhotoCraft" | "photo.editInExternal" => app.session.active().is_some() && app.services.open_with.is_some(),
         "app.exportPrevious" => app.session.active().is_some() && app.session.last_export.is_some(),
         "dialog.pasteSettings" => app.session.active().is_some() && app.session.clipboard.is_some(),
@@ -2135,7 +2184,7 @@ pub fn ui_enabled(app: &LightcraftApp, id: &str) -> bool {
         "compare.swap" | "compare.makeSelect" | "compare.set" => app.ui.view == ViewMode::Compare,
         "slideshow.togglePause" | "slideshow.next" | "slideshow.previous" | "slideshow.end" => app.ui.slideshow.is_some(),
         s if s.starts_with("dialog.merge") || (s.starts_with("merge.") && s.ends_with("Last")) => {
-            app.session.targets(&serde_json::json!({})).len() >= 2 && app.merge.final_task.is_none()
+            app.session.selected().len() >= 2 && app.merge.final_task.is_none()
         }
         _ => true,
     }
@@ -2187,7 +2236,7 @@ pub fn delete_in_album(app: &mut LightcraftApp, ctx: &egui::Context) -> bool {
         app.toast(ctx, crate::i18n::tr("Smart albums update automatically: change their rules, or use Photo ▸ Delete Photo"));
         return true;
     }
-    if app.session.targets(&json!({})).is_empty() {
+    if app.session.selected().is_empty() {
         return true;
     }
     match app.run("album.removePhotos", json!({"id": aid.0})) {
@@ -2209,7 +2258,7 @@ pub fn confirm_delete(app: &mut LightcraftApp) -> bool {
     if !app.ui.settings.confirm_delete {
         return false;
     }
-    let ids: Vec<u64> = app.session.targets(&json!({})).iter().map(|id| id.0).collect();
+    let ids: Vec<u64> = app.session.selected().iter().map(|id| id.0).collect();
     open_delete_dialog(app, ids, false)
 }
 
@@ -2360,7 +2409,7 @@ fn open_original_in(app: &mut LightcraftApp, ctx: &egui::Context, p: &Value) -> 
 }
 
 fn open_originals(app: &mut LightcraftApp, p: &Value) -> Result<Value, String> {
-    let mut ids = app.session.targets(p);
+    let mut ids = app.session.targets(p).map_err(|e| e.to_string())?;
     ids.dedup();
     if ids.is_empty() {
         return Err("no photo selected".into());
