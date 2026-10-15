@@ -155,7 +155,11 @@ const ASPECT_PRESETS: [(&str, &str); 10] = [
 /// What the aspect button says for the stored lock (`aspect` = width × 100, height × 100):
 /// a preset's name when the ratio matches one in either orientation, "Original" for the photo's own
 /// shape, otherwise the ratio as `1.37 : 1`.
-fn aspect_label(aspect: Option<(u32, u32)>, original: Option<f64>) -> String {
+pub(crate) fn aspect_label(
+    aspect: Option<(u32, u32)>,
+    original: Option<f64>,
+    _custom: &[lightcraft_engine::cmd::crop_aspects::CustomAspect],
+) -> String {
     let Some((w, h)) = aspect else { return "Free".into() };
     if w == 0 || h == 0 {
         return "Free".into();
@@ -216,7 +220,7 @@ fn crop(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         });
         ui.horizontal(|ui| {
             ui.label(crate::i18n::tr("Aspect Ratio"));
-            let cur = aspect_label(app.crop_tool_aspect(), original);
+            let cur = aspect_label(app.crop_tool_aspect(), original, &app.session.crop_aspects.custom);
             let t = Tokens::get(ui.ctx());
             let r = crate::widgets::dropdown(ui, "cropAspect", crate::i18n::tr(&cur), t.font(12.5), t.text);
 
@@ -1422,18 +1426,18 @@ mod tests {
     // Feature: the aspect button tells what is locked
     #[test]
     fn aspect_label_names_presets_in_either_orientation() {
-        assert_eq!(super::aspect_label(None, Some(1.5)), "Free");
-        assert_eq!(super::aspect_label(Some((1600, 900)), None), "16 × 9");
-        assert_eq!(super::aspect_label(Some((900, 1600)), None), "16 × 9", "portrait 16:9");
-        assert_eq!(super::aspect_label(Some((400, 500)), None), "4 × 5 / 8 × 10");
+        assert_eq!(super::aspect_label(None, Some(1.5), &[]), "Free");
+        assert_eq!(super::aspect_label(Some((1600, 900)), None, &[]), "16 × 9");
+        assert_eq!(super::aspect_label(Some((900, 1600)), None, &[]), "16 × 9", "portrait 16:9");
+        assert_eq!(super::aspect_label(Some((400, 500)), None, &[]), "4 × 5 / 8 × 10");
     }
 
     #[test]
     fn aspect_label_prefers_original_over_a_coinciding_preset_and_never_shows_pixel_sizes() {
-        assert_eq!(super::aspect_label(Some((300, 200)), Some(1.5)), "Original");
-        assert_eq!(super::aspect_label(Some((600_000, 400_000)), Some(1.5)), "Original");
-        assert_eq!(super::aspect_label(Some((137, 100)), Some(1.5)), "1.37 : 1");
-        assert_eq!(super::aspect_label(Some((0, 5)), None), "Free");
+        assert_eq!(super::aspect_label(Some((300, 200)), Some(1.5), &[]), "Original");
+        assert_eq!(super::aspect_label(Some((600_000, 400_000)), Some(1.5), &[]), "Original");
+        assert_eq!(super::aspect_label(Some((137, 100)), Some(1.5), &[]), "1.37 : 1");
+        assert_eq!(super::aspect_label(Some((0, 5)), None, &[]), "Free");
     }
 
     #[test]
