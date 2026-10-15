@@ -11,6 +11,11 @@
   the α1 and α1 II, α6700, the FX series and the older NEX, SLT and α DSLR bodies. Such a photo now starts from
   another Sony sensor's measured colour: checked against the camera JPEGs of the public samples of 97 Sony models,
   its colour is about half as far from the camera's. Photos whose colour could be matched look exactly as before.
+### Focus points for 44 Sony cameras
+- The focus point (View ▸ Show Focus Point, ⌥F; Toggle Zoom centres on it) now shows for 44 Sony cameras: the α6300
+  to α6700, the α7 III to α7 V, α7R II to α7R V, α7S II, α7C series, the α9 series, the α1 II, the α99 II, the FX2,
+  FX3 and FX30, the ZV series and recent RX compacts, besides the α1 and A7S III it showed for until now. Photos already in a library get their point in the
+  background the next time the library opens. Older bodies that don't record where they focused show none.
 
 ## 2026-10-14
 
