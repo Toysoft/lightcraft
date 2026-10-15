@@ -56,9 +56,17 @@ impl TrashRoot {
     }
 }
 
-/// Whether files can be trashed in this build at all.
+/// Whether files can be trashed in this build at all. Only Linux and the BSDs have it on: the
+/// Windows and macOS code is written but not yet tested on those systems, so it stays off until it is
+/// (the command, the menu and the dialog all ask here).
 pub fn available() -> Result<(), String> {
-    if cfg!(target_arch = "wasm32") { Err("Delete from Disk isn't available in the web version".into()) } else { Ok(()) }
+    if cfg!(target_arch = "wasm32") {
+        Err("Delete from Disk isn't available in the web version".into())
+    } else if cfg!(any(windows, target_os = "macos")) {
+        Err("Delete from Disk is turned off on Windows and macOS until it has been tested there".into())
+    } else {
+        Ok(())
+    }
 }
 
 /// Move `path` (a file or a link, not a folder) to the trash; the place it went. `now` is the
@@ -442,6 +450,10 @@ mod tests {
     }
 
     #[test]
+    fn the_gate_is_on_only_where_the_trash_is_tested() {
+        assert_eq!(available().is_ok(), cfg!(all(unix, not(target_os = "macos"))));
+    }
+
     fn windows_records_and_drives() {
         let r = recycle_record("C:\\a.jpg", 10, 7);
         assert_eq!(r.len(), 28 + 9 * 2);
