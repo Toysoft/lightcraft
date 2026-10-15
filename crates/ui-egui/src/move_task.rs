@@ -35,15 +35,24 @@ fn name_of(path: &str) -> String {
 
 /// Start moving photos into a folder on disk: `params` as `photo.moveToFolder` takes them
 /// (`{folder, ids?}`; the selection by default). Returns at once: `{background: true, files}`
-/// while it runs, or `{moved: 0}` when every photo is there already (said in a toast). An error
-/// when the move can't begin (Local photos, another move running…).
+/// while it runs, or `{moved: 0, of: 0, folder, stopped: false}` when every photo is there
+/// already (said in a toast). An error when the move can't begin (Local photos, another move
+/// running…), also logged and shown in the status line, as `LightcraftApp::run` does.
 pub fn start(app: &mut LightcraftApp, ctx: &egui::Context, params: &Value) -> Result<Value, String> {
-    let path = params.get("folder").and_then(Value::as_str).unwrap_or_default().to_string();
-    let name = name_of(&path);
+    start_inner(app, ctx, params).inspect_err(|e| {
+        log::warn!("photo.moveToFolder: {e}");
+        app.ui.status = e.clone();
+    })
+}
+
+fn start_inner(app: &mut LightcraftApp, ctx: &egui::Context, params: &Value) -> Result<Value, String> {
+    let raw = params.get("folder").and_then(Value::as_str).unwrap_or_default();
+    let path = raw.trim_end_matches(['/', '\\']).to_string();
+    let name = name_of(raw);
     let started = lightcraft_engine::move_job::start(&mut app.session, params, true).map_err(|e| e.to_string())?;
     let Some((work, finish)) = started else {
         app.toast(ctx, crate::panels::left::moved_text(0, &name));
-        return Ok(json!({"moved": 0, "folder": path}));
+        return Ok(json!({"moved": 0, "of": 0, "folder": path, "stopped": false}));
     };
     let files = finish.files();
     let (tx, rx) = std::sync::mpsc::channel();

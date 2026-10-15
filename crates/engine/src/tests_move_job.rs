@@ -172,6 +172,9 @@ fn a_running_move_holds_back_other_file_moves_and_another_library() {
     let other = dir.0.join("other-library");
     let e = Session::open_library(&mut s, &other, false).map(|_| ()).unwrap_err().to_string();
     assert!(e.contains("being moved"), "{e}");
+    // a switch checks before it closes anything: refused there, the library stays open as it is
+    let e = s.check_library(&other).unwrap_err().to_string();
+    assert!(e.contains("being moved"), "{e}");
     // an edit that moves no file still goes
     s.execute("photo.rate", &json!({"ids": [b.0], "rating": 3})).unwrap();
     let out = work.run();
@@ -192,6 +195,7 @@ fn a_moving_photos_sidecar_is_written_once_it_arrives_where_it_arrives() {
     s.execute("photo.rate", &json!({"ids": [a.0], "rating": 4})).unwrap();
     assert_eq!(s.catalog.photo(a).unwrap().rating, 4, "the edit is kept");
     assert!(!Path::new(&dir.path("local/a.xmp")).exists(), "nothing is written behind the moving file");
+    assert_eq!(s.unsaved_sidecars(), 0, "held for the move, not a failed write to warn about");
     let out = work.run();
     s.execute_fn("photo.moveToFolder", |s| finish.finish(s, out)).unwrap();
     let xmp = std::fs::read_to_string(dir.path("share/a.xmp")).expect("written at the new place");
@@ -276,7 +280,7 @@ fn the_record_is_on_disk_before_the_first_file_moves_and_gone_once_saved() {
 #[test]
 fn a_move_cut_short_is_followed_when_the_library_opens_again() {
     let dir = Scratch::new("crash");
-    let (a, b, c, d);
+    let (a, b, c, d, e);
     {
         let mut s = open(&dir);
         a = add(&mut s, &dir.path("local/a.jpg"), "A");
@@ -284,15 +288,21 @@ fn a_move_cut_short_is_followed_when_the_library_opens_again() {
         b = add(&mut s, &dir.path("local/b.jpg"), "B");
         c = add(&mut s, &dir.path("local/c.jpg"), "C");
         d = add(&mut s, &dir.path("local/d.jpg"), "D");
-        let moves: Vec<(String, String)> =
+        std::fs::create_dir_all(dir.path("usb")).unwrap();
+        e = add(&mut s, &dir.path("usb/e.jpg"), "E");
+        let mut moves: Vec<(String, String)> =
             ["a", "b", "c", "d"].iter().map(|f| (dir.path(&format!("local/{f}.jpg")), dir.path(&format!("share/{f}.jpg")))).collect();
+        moves.push((dir.path("usb/e.jpg"), dir.path("share/e.jpg")));
         crate::move_intent::write(&dir.library(), &moves).unwrap();
         // killed part-way: a's file arrived and its sidecar didn't; b's copy arrived and the
-        // original wasn't removed yet; c never started; d's disk isn't connected now
+        // original wasn't removed yet; c never started; d's disk isn't connected now; e's copy
+        // arrived (maybe never checked) and its drive is unplugged now
         std::fs::rename(dir.path("local/a.jpg"), dir.path("share/a.jpg")).unwrap();
         std::fs::copy(dir.path("local/b.jpg"), dir.path("share/b.jpg")).unwrap();
         std::fs::write(dir.path("share/.b.jpg.lc-partial-1-0"), "cut off").unwrap();
         std::fs::remove_file(dir.path("local/d.jpg")).unwrap();
+        std::fs::copy(dir.path("usb/e.jpg"), dir.path("share/e.jpg")).unwrap();
+        std::fs::rename(dir.path("usb"), dir.path("usb-unplugged")).unwrap();
         // (the app is gone: no finish, no save of a move)
     }
     let mut s = open(&dir);
@@ -304,13 +314,14 @@ fn a_move_cut_short_is_followed_when_the_library_opens_again() {
     assert!(!Path::new(&dir.path("share/.b.jpg.lc-partial-1-0")).exists(), "a partial copy is removed");
     assert_eq!(file_of(&s, c), dir.path("local/c.jpg"));
     assert_eq!(file_of(&s, d), dir.path("local/d.jpg"));
+    assert_eq!(file_of(&s, e), dir.path("usb/e.jpg"), "a source whose folder is gone may only be unplugged: not followed");
     let notice = s.take_library_warnings().join(" ");
-    assert!(notice.contains("1 photo were being moved") && notice.contains("can't be found at either place"), "{notice}");
-    // d's move is kept for the next open; the rest of the record is done
+    assert!(notice.contains("1 photo was being moved") && notice.contains("2 files that were being moved"), "{notice}");
+    // d's and e's moves are kept for the next open; the rest of the record is done
     let records = dir.records();
     assert_eq!(records.len(), 1);
     let text = std::fs::read_to_string(&records[0]).unwrap();
-    assert!(text.contains("d.jpg") && !text.contains("a.jpg"), "{text}");
+    assert!(text.contains("d.jpg") && text.contains("e.jpg") && !text.contains("a.jpg"), "{text}");
     // the relink is one undo step that moves the file back
     assert_eq!(s.undo.last().unwrap().label, "Finish Moving 1 Photo");
     s.execute("edit.undo", &json!({})).unwrap();

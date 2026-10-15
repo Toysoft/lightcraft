@@ -301,6 +301,9 @@ pub struct Session {
     pub(crate) moving: std::sync::Weak<move_job::MoveTicket>,
     /// Records of file moves now in the catalog ([`move_intent`]), removed once it is saved.
     pub(crate) settled_moves: Vec<std::path::PathBuf>,
+    /// Photos whose automatic sidecar write waits for their file to arrive at the folder it is
+    /// being moved to ([`move_job`]); written when the move ends. Not a failure: no notice.
+    pub(crate) held_sidecars: std::collections::BTreeSet<PhotoId>,
     /// XMP sidecar preferences (persisted with the library).
     pub xmp: sidecar::XmpPrefs,
     /// Parameters of the last export (`app.export` params, minus targets), persisted in prefs.json.
@@ -466,6 +469,7 @@ impl Session {
             library_identity: Arc::new(()),
             moving: std::sync::Weak::new(),
             settled_moves: Vec::new(),
+            held_sidecars: Default::default(),
             xmp: sidecar::XmpPrefs::default(),
             last_export: None,
             export_presets: Vec::new(),

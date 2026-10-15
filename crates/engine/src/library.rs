@@ -376,6 +376,9 @@ impl Session {
     /// Nothing is created; a library folder that exists gets its lock taken and released again.
     /// Opening can still fail afterwards (a damaged catalog, a disk going away).
     pub fn check_library(&self, dir: impl AsRef<Path>) -> Result<PathBuf> {
+        // a switch checks first and only then closes this library: a move running in it is
+        // refused here, before anything is closed (closing itself stays open to quitting)
+        self.refuse_while_moving()?;
         let dir = dir.as_ref().to_path_buf();
         if let Some(place) = crate::lightroom_folder::lightroom_catalog_at(&dir) {
             return Err(EngineError::LightroomCatalog { path: dir, catalog: place.catalog });

@@ -353,7 +353,7 @@ fn a_question_left_open_while_another_library_opens_moves_nothing() {
 }
 
 #[test]
-fn a_move_runs_in_the_background_with_a_row_that_can_stop_it() {
+fn a_background_move_has_a_cancellable_row_and_holds_back_other_moves_until_it_ends() {
     let (root, trip, home) = folders("background");
     let mut h = app(&[(trip.join("beach.png"), false), (home.join("garden.png"), false)]);
     let (beach, garden) = (id_of(&h, "beach.png"), id_of(&h, "garden.png"));

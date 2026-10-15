@@ -88,7 +88,15 @@ pub fn start(s: &mut Session, p: &Value, cancellable: bool) -> Result<Option<(Mo
     let folder = crate::cmd::browse::folder_param(p, "folder").ok_or_else(|| bad(C, "missing folder"))?;
     let dir = Path::new(folder);
     s.refuse_while_moving()?;
-    let ids = s.targets(p)?;
+    // refused before anything touches the disk, as it always was (one look at one folder; the
+    // worker looks again before the first file moves)
+    if !dir.is_dir() {
+        return Err(bad(C, format!("{folder} is not a folder (create it first with folder.create)")));
+    }
+    let ids = s.targets(p).map_err(|e| match e {
+        EngineError::BadParams { cmd, msg } if cmd.is_empty() => bad(C, msg),
+        e => e,
+    })?;
     if ids.is_empty() {
         return Err(bad(C, "no photos to move: select some or give ids"));
     }
@@ -203,19 +211,15 @@ impl MoveFinish {
     }
 
     /// Point the photos whose files moved at their new place, as one undo step (labelled as
-    /// before: "Move 3 Photos to “Porto”"). `{moved, of, folder, stopped}`; an error when nothing
-    /// moved (`Refused`, `Failed`: the files went back, or the library follows those that couldn't).
+    /// before: "Move 3 Photos to “Porto”", counting virtual copies). `{moved, of, folder, stopped}`
+    /// (in files); an error when nothing moved (`Refused`, `Failed`: the files went back, or the
+    /// library follows those that couldn't). The sidecars held back meanwhile are written after.
     pub fn finish(self, s: &mut Session, out: MoveOutcome) -> Result<Value> {
         let MoveFinish { folder, plans, identity, ticket, guard } = self;
         // the move is over for the session: other file work, and these photos' sidecars, may go on
-        let waiting: Vec<PhotoId> = s
-            .unsaved_sidecars
-            .iter()
-            .copied()
-            .filter(|id| s.catalog.photo(*id).is_some_and(|p| matches!(&p.source, Source::File { path } if ticket.holds(path))))
-            .collect();
         drop(ticket);
         drop(guard);
+        let held: Vec<PhotoId> = std::mem::take(&mut s.held_sidecars).into_iter().collect();
         if !Arc::ptr_eq(&identity, &s.library_identity) {
             // (opening a library is refused while a move runs; the record stays for that library)
             return Err(EngineError::Other(
@@ -234,7 +238,7 @@ impl MoveFinish {
             Ran::Moved { moved, record } => {
                 let done = plans.get(..moved).unwrap_or(&plans);
                 let ops = s.set_file_ops(done);
-                let committed = if ops.is_empty() { Ok(()) } else { s.commit(&label(moved, &folder), Op::Batch { ops }) };
+                let committed = if ops.is_empty() { Ok(()) } else { s.commit(&label(ops.len(), &folder), Op::Batch { ops }) };
                 match committed {
                     Ok(()) => {
                         s.settle_moves(record);
@@ -254,7 +258,7 @@ impl MoveFinish {
                 }
             }
         };
-        s.auto_write_sidecar_ids(waiting);
+        s.auto_write_sidecar_ids(held);
         r
     }
 }

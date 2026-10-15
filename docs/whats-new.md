@@ -8,7 +8,8 @@
   and ✕ stops the move after that file: the photos that moved stay moved, as one step Edit ▸ Undo takes back, and
   the rest stay where they were. A toast says how it ended.
 - While a move runs, editing, rating and keywording go on as usual; the moving photos' XMP sidecars are written once
-  they arrive. Another move, a rename, Undo or Redo of a file move and opening another library wait for it.
+  they arrive. Another move, a rename, Undo or Redo of a file move and opening another library are refused until it
+  ends, with a message saying so.
 - If LightCraft is force-quit or crashes part-way, nothing is lost: the next time the library opens, the photos whose
   files reached the new folder point there (their sidecars follow), the others stay, and you are told how many.
 

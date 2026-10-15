@@ -14,11 +14,12 @@
 //! The records live in `<library>/moves/`, one file per batch, so a background move and a move
 //! the session makes itself (a rename, an Undo) never share one.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lightcraft_catalog::store::{FsStore, Store};
-use lightcraft_catalog::{Op, Source};
+use lightcraft_catalog::{Op, PhotoId, Source};
 use serde::{Deserialize, Serialize};
 
 use crate::rename::{MoveFs, folded_path};
@@ -82,16 +83,16 @@ impl Recovered {
         }
         let mut text = String::new();
         if self.relinked > 0 {
-            let s = if self.relinked == 1 { "" } else { "s" };
+            let (s, were) = if self.relinked == 1 { ("", "was") } else { ("s", "were") };
             text.push_str(&format!(
-                "{} photo{s} were being moved when LightCraft last closed: the library now points at where their files are. Edit → Undo moves them back.",
+                "{} photo{s} {were} being moved when LightCraft last closed: the library now points at where the files are. Edit → Undo moves them back.",
                 self.relinked
             ));
         }
         if self.waiting > 0 {
-            let s = if self.waiting == 1 { "" } else { "s" };
+            let (s, were) = if self.waiting == 1 { ("", "was") } else { ("s", "were") };
             text.push_str(&format!(
-                " {} file{s} that were being moved can't be found at either place (a disk that isn't connected?): LightCraft looks again the next time this library opens.",
+                " {} file{s} that {were} being moved can't be told apart from a disk that isn't connected: LightCraft looks again the next time this library opens.",
                 self.waiting
             ));
         }
@@ -161,6 +162,13 @@ impl Session {
         let Ok(entries) = std::fs::read_dir(&dir) else { return out };
         let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
         files.sort();
+        // the photos pointing at each file (a master and its virtual copies), looked up once
+        let mut at: HashMap<PathBuf, Vec<(PhotoId, String)>> = HashMap::new();
+        for p in self.catalog.photos() {
+            if let Source::File { path } = &p.source {
+                at.entry(PathBuf::from(path)).or_default().push((p.id, p.file_name.clone()));
+            }
+        }
         let mut ops = Vec::new();
         // (record, the moves to keep in it): written back, or removed when none is left
         let mut done: Vec<(PathBuf, Vec<(String, String)>)> = Vec::new();
@@ -171,7 +179,8 @@ impl Session {
                 let _ = std::fs::remove_file(&path);
                 continue;
             }
-            if !name.ends_with(".json") {
+            // this session's own records whose moves wait to be saved (they go once they are)
+            if !name.ends_with(".json") || self.settled_moves.contains(&path) {
                 continue;
             }
             let record = match read_record(&path) {
@@ -183,7 +192,7 @@ impl Session {
             };
             let mut keep = Vec::new();
             for (from, to) in record.moves {
-                match self.recover_one(fs, &from, &to, &mut ops, &mut out) {
+                match recover_one(fs, &mut at, &from, &to, &mut ops, &mut out) {
                     Found::Moved | Found::Stayed => {}
                     Found::Unknown => {
                         out.waiting += 1;
@@ -222,56 +231,78 @@ impl Session {
         }
         out
     }
+}
 
-    /// One recorded move: where the file is, and what the library does about it.
-    fn recover_one(&mut self, fs: &dyn MoveFs, from: &str, to: &str, ops: &mut Vec<Op>, out: &mut Recovered) -> Found {
-        let (f, t) = (Path::new(from), Path::new(to));
-        // the photos still pointing at the old place (a master and its virtual copies)
-        let ids: Vec<_> = self
-            .catalog
-            .photos()
-            .filter(|p| matches!(&p.source, Source::File { path } if Path::new(path) == f))
-            .map(|p| (p.id, p.file_name.clone()))
-            .collect();
-        if ids.is_empty() {
-            // the library already follows the move (it was saved), or the photo is gone
-            return Found::Stayed;
-        }
-        // the same file spelled another way (a change of letter case only): nothing to remove, ever
-        let respelling = folded_path(from) == folded_path(to) && fs.same_file(f, t);
-        let moved = if respelling {
-            fs.listed(t) && !fs.listed(f)
-        } else {
-            match (fs.exists(f), fs.is_file(t)) {
-                (false, true) => true,
-                (true, false) => false,
-                (true, true) => {
-                    // the copy at `to` is ours: drop it when that loses nothing
-                    let same = fs.same_file(f, t) || crate::rename::same_contents(f, t).unwrap_or(false);
-                    if same && fs.remove_file(t).is_ok() {
-                        out.copies_removed += 1;
-                    } else {
-                        out.problems.push(format!("{to} was being moved and is now at both places: the library keeps {from}."));
-                    }
-                    false
+/// One recorded move: where the file is, and what the library does about it. `at`: the photos
+/// pointing at each file, kept up to date as moves are followed.
+fn recover_one(
+    fs: &dyn MoveFs,
+    at: &mut HashMap<PathBuf, Vec<(PhotoId, String)>>,
+    from: &str,
+    to: &str,
+    ops: &mut Vec<Op>,
+    out: &mut Recovered,
+) -> Found {
+    let (f, t) = (Path::new(from), Path::new(to));
+    if at.get(f).is_none_or(Vec::is_empty) {
+        // the library already follows the move (it was saved), or the photo is gone
+        return Found::Stayed;
+    }
+    // the same file spelled another way (a change of letter case only): nothing to remove, ever
+    let respelling = folded_path(from) == folded_path(to) && fs.same_file(f, t);
+    let moved = if respelling {
+        fs.listed(t) && !fs.listed(f)
+    } else {
+        match (fs.exists(f), fs.is_file(t)) {
+            // gone from a folder that is still there: it moved. With the folder gone too, its
+            // disk may just not be connected, and the copy at `to` was maybe never checked
+            (false, true) if f.parent().is_some_and(|d| fs.exists(d)) => true,
+            (false, true) => return Found::Unknown,
+            (true, false) => false,
+            (true, true) => {
+                // the copy at `to` is ours: drop it when that loses nothing. One file under two
+                // names is dropped only when it really has two (a move cut between link and unlink)
+                let same = if fs.same_file(f, t) { two_links(t) } else { crate::rename::same_contents(f, t).unwrap_or(false) };
+                if same && fs.remove_file(t).is_ok() {
+                    out.copies_removed += 1;
+                } else {
+                    out.problems.push(format!("{to} was being moved and is now at both places: the library keeps {from}."));
                 }
-                (false, false) => return Found::Unknown,
+                false
             }
-        };
-        remove_partials(t);
-        if !moved {
-            return Found::Stayed;
+            (false, false) => return Found::Unknown,
         }
-        if !respelling && let Err(e) = crate::rename::finish_sidecars(fs, from, to) {
-            out.problems.push(format!("A sidecar of {to} couldn't follow it ({e})."));
-        }
-        let (old_name, new_name) = (file_name(f), file_name(t));
-        for (id, file_name) in ids {
-            // a rename changes the name the library shows; a move to another folder keeps it
-            let file_name = if file_name == old_name { new_name.clone() } else { file_name };
-            ops.push(Op::SetFile { id, file_name, source: Source::File { path: to.to_string() } });
-        }
-        Found::Moved
+    };
+    remove_partials(t);
+    if !moved {
+        return Found::Stayed;
+    }
+    if !respelling && let Err(e) = crate::rename::finish_sidecars(fs, from, to) {
+        out.problems.push(format!("A sidecar of {to} couldn't follow it ({e})."));
+    }
+    let (old_name, new_name) = (file_name(f), file_name(t));
+    let photos = at.remove(f).unwrap_or_default();
+    for (id, file_name) in &photos {
+        // a rename changes the name the library shows; a move to another folder keeps it
+        let file_name = if *file_name == old_name { new_name.clone() } else { file_name.clone() };
+        ops.push(Op::SetFile { id: *id, file_name, source: Source::File { path: to.to_string() } });
+    }
+    at.entry(t.to_path_buf()).or_default().extend(photos.into_iter().map(|(id, _)| (id, new_name.clone())));
+    Found::Moved
+}
+
+/// The file at `p` has more than one name on disk (a hard link left by a move cut short between
+/// linking the new name and unlinking the old). Where that can't be told: no.
+fn two_links(p: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(p).is_ok_and(|m| m.nlink() > 1)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = p;
+        false
     }
 }
 

@@ -731,6 +731,11 @@ impl Session {
         }
         let owners = StemOwners::among(&self.catalog, &ids);
         for id in ids {
+            // on its way to another folder: written once it arrives (`move_job`), not a failure
+            if self.catalog.photo(id).and_then(|p| file_path(p)).is_some_and(|f| self.is_moving(f)) {
+                self.held_sidecars.insert(id);
+                continue;
+            }
             if self.catalog.photo(id).is_some_and(|p| file_path(p).is_some() && p.copy_of.is_none()) {
                 match self.save_sidecar_with(id, &owners) {
                     Ok(_) => {
@@ -766,6 +771,7 @@ impl Session {
                 None => {
                     self.unsaved_sidecars.remove(&id);
                 }
+                Some(path) if self.is_moving(&path) => {}
                 Some(path) if self.media.availability.exists(&path) == Some(true) => ready.push(id),
                 Some(_) => {}
             }
