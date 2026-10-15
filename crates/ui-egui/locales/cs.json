@@ -2069,5 +2069,11 @@
   "Open Settings": "Otevřít nastavení",
   "Select none": "Zrušit celý výběr",
   "Select all": "Vybrat vše",
-  "Visualize HDR": "Zobrazit rozsah HDR"
+  "Visualize HDR": "Zobrazit rozsah HDR",
+  "Waiting": "Čeká",
+  "Starts next": "Začne jako další",
+  "Remove from Queue": "Odebrat z fronty",
+  "Retry": "Zkusit znovu",
+  "Queued: it starts when the task ahead of it ends": "Ve frontě: začne, až skončí úloha před ní",
+  "1 task waiting in line won't run.": "1 úloha čekající ve frontě se nespustí."
 }

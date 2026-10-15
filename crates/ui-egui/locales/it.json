@@ -1996,5 +1996,11 @@
   "Test Face Model": "Testa il modello dei volti",
   "This build cannot run recognition models: they can be added and chosen, not used.": "Questa versione non può eseguire modelli di riconoscimento: si possono aggiungere e scegliere, non usare.",
   "This build has nowhere to keep face models, so the model list is not available. (The desktop app has.)": "Questa versione non ha dove tenere i modelli dei volti, quindi l'elenco dei modelli non è disponibile. (L'app desktop ce l'ha.)",
-  "Unnamed Faces": "Volti senza nome"
+  "Unnamed Faces": "Volti senza nome",
+  "Waiting": "In attesa",
+  "Starts next": "Parte subito dopo",
+  "Remove from Queue": "Rimuovi dalla coda",
+  "Retry": "Riprova",
+  "Queued: it starts when the task ahead of it ends": "In coda: parte quando finisce l'attività precedente",
+  "1 task waiting in line won't run.": "1 attività in coda non verrà eseguita."
 }

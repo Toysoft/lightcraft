@@ -2185,5 +2185,11 @@
   "Checking the GPU…": "正在检查 GPU…",
   "CPU": "CPU",
   "A face model uses the GPU only when a check shows it gives the same results faster.": "只有检查表明 GPU 能更快给出相同结果时，人脸模型才会使用 GPU。",
-  "Checking the GPU for faces": "正在检查用于人脸的 GPU"
+  "Checking the GPU for faces": "正在检查用于人脸的 GPU",
+  "Waiting": "等待中",
+  "Starts next": "下一个开始",
+  "Remove from Queue": "从队列中移除",
+  "Retry": "重试",
+  "Queued: it starts when the task ahead of it ends": "已加入队列：前一个任务结束后开始",
+  "1 task waiting in line won't run.": "队列中等待的 1 个任务不会运行。"
 }

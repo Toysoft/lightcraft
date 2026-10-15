@@ -25,8 +25,26 @@ the photos they could not make), Photo Merge, Lightroom catalog inspect / import
 Fill Location from GPS, moving photos and Find Missing Photos. The face scan and AI Denoise are queues that work
 through what arrives rather than jobs someone waits for: when one empties, its row goes and leaves nothing. A scan
 that another replaced, or whose dialog was closed, leaves nothing either: only the row's ✕ makes it a stopped task.
-Quitting asks first while a task that can stop is running. Agents see the same list through `activity.list` /
-`activity.cancel`, and `ui.inspect` reports it as `activity` (and whether the list is open as `activityOpen`).
+Quitting asks first while a task that can stop is running, or one waits in line. Agents see the same list through
+`activity.list` / `activity.cancel`, and `ui.inspect` reports it as `activity` (and whether the list is open as
+`activityOpen`).
+
+## Waiting in line
+
+Some jobs must not run side by side: they share a **lane** (`activity::Lane`). Today that is the preview lane: Build
+Previews and Build / Discard Smart Previews in the background, one preview build at a time. One asked for while its
+lane is busy waits in line instead of being refused (the File ▸ Previews items, `queue: true` for agents): its row is
+listed under "Waiting", below the running tasks, saying when it starts ("Starts next", "Starts after 2 more"), with
+✕ to take it out of the line; the line beside the bell counts them ("Building previews · 40 % · 2 waiting"), and a
+toast says it was queued. It keeps what it was asked, with everything that depends on the moment written out (the
+photos chosen then, not those chosen when its turn comes), and plans its work when it starts. It starts by itself
+once the tasks ahead of it in its lane have ended (`Session::start_waiting`, after every command and every frame),
+under the id it had while it waited, so an agent follows one id from the line to its row in `activity.finished`.
+One that can't start leaves a failed row saying why, and the next in line goes on. A task that kept what it was
+asked and did not end well has Retry in its row (`activity.retry`): the row goes and the same request waits at the
+end of its lane. Nothing waits across another library (photo ids and folders belong to one library: the line is
+dropped and old rows can't be retried) or a quit (the files may change before the next launch; the quit question
+says how many would not run). At most 100 tasks wait in all.
 
 The registry is `lightcraft_engine::activity` (`crates/engine/src/activity.rs`, `Session::activity`). The stack is
 `crates/ui-egui/src/panels/activity.rs`. Every job that can last more than a moment uses it; **don't add a progress
@@ -78,6 +96,10 @@ guard.detail(&file_name);
   - `set_cancellable(false)` for a phase that has to finish once started (a Lightroom import adding its photos).
 - **Quiet periodic work** shows no row: the auto-import folder listing runs every few seconds through
   `tasks::spawn(.., None, ..)`.
+- **Waiting in line** (for a job of a lane): give `Lane::of` its kind, write out what it was asked
+  (`activity::Request`: the command and its parameters, with the photos named) and keep it on the guard
+  (`guard.set_request`) so a failed run can be retried; while the lane is busy, `activity.enqueue(kind, label,
+  request)` instead of refusing. `start_waiting` runs the request through `Session::execute` when its turn comes.
 
 ## Examples in the code
 
@@ -102,5 +124,6 @@ the bell), and its row is on screen only while the list is open: tests that clic
 (`view.tasks` with `{"show": true}`, or a click on `icon:bell`) and wait for `activity:cancel:<id>`. For a job that
 reports how it ended, assert `session.activity.finished()` (ending, summary, failures);
 `session.activity.keep_after(0)` keeps a clean end's row however short the test's job.
-Ended rows are `activity:done:<id>` with `activity:dismiss:<id>`, `activity:failures:<id>`, `activity:copy:<id>` and
-`activity:reveal:<id>`; `activity:clear` is Clear all and `activity:attention` the mark on the bell.
+Ended rows are `activity:done:<id>` with `activity:dismiss:<id>`, `activity:failures:<id>`, `activity:copy:<id>`,
+`activity:reveal:<id>` and `activity:retry:<id>`; `activity:clear` is Clear all and `activity:attention` the mark on the
+bell. A waiting task's row is `activity:row:<id>` with `activity:cancel:<id>`.

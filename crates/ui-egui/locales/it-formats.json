@@ -307,5 +307,9 @@
   "Already in “{}”": "Already in “{}”",
   "Move {n} photo{} to “{}”": "Move {n} photo{} to “{}”",
   "Move {n} photo{} to “{}”?": "Move {n} photo{} to “{}”?",
-  "Moved {n} photo{} to “{}”. Edit → Undo moves them back.": "Moved {n} photo{} to “{}”. Edit → Undo moves them back."
+  "Moved {n} photo{} to “{}”. Edit → Undo moves them back.": "Moved {n} photo{} to “{}”. Edit → Undo moves them back.",
+  "{n} waiting": "{n} in attesa",
+  "Starts after {n} more": "Parte dopo altre {n}",
+  "Queued: it starts after {n} more": "In coda: parte dopo altre {n}",
+  "{n} tasks waiting in line won't run.": "{n} attività in coda non verranno eseguite."
 }

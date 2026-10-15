@@ -2163,5 +2163,11 @@
   "This is a Lightroom catalog, not a LightCraft library. Import it into a LightCraft library instead?": "To jest katalog Lightrooma, a nie biblioteka LightCraft. Zaimportować go zamiast tego do biblioteki LightCraft?",
   "Unnamed Faces": "Nienazwane twarze",
   "Vertical inset (% of short edge)": "Margines pionowy (% krótszego boku)",
-  "not added to Apple Photos (cancelled)": "nie dodano do aplikacji Zdjęcia (anulowano)"
+  "not added to Apple Photos (cancelled)": "nie dodano do aplikacji Zdjęcia (anulowano)",
+  "Waiting": "Oczekujące",
+  "Starts next": "Rozpocznie się jako następne",
+  "Remove from Queue": "Usuń z kolejki",
+  "Retry": "Ponów",
+  "Queued: it starts when the task ahead of it ends": "W kolejce: rozpocznie się po zakończeniu poprzedniego zadania",
+  "1 task waiting in line won't run.": "1 zadanie oczekujące w kolejce nie zostanie uruchomione."
 }

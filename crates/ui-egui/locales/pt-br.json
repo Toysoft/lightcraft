@@ -2186,5 +2186,11 @@
   "Checking the GPU…": "Verificando a GPU…",
   "CPU": "CPU",
   "A face model uses the GPU only when a check shows it gives the same results faster.": "Um modelo de rostos só usa a GPU quando uma verificação mostra que ela dá os mesmos resultados mais rápido.",
-  "Checking the GPU for faces": "Verificando a GPU para rostos"
+  "Checking the GPU for faces": "Verificando a GPU para rostos",
+  "Waiting": "Aguardando",
+  "Starts next": "Começa em seguida",
+  "Remove from Queue": "Remover da fila",
+  "Retry": "Tentar novamente",
+  "Queued: it starts when the task ahead of it ends": "Na fila: começa quando a tarefa anterior terminar",
+  "1 task waiting in line won't run.": "1 tarefa na fila não será executada."
 }
