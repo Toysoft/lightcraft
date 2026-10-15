@@ -128,7 +128,7 @@ fn gps_targets(s: &Session, p: &Value, id: &str) -> Result<Vec<PhotoId>> {
         return Err(bad(id, "`ids` is a list of photo ids"));
     }
     let mut seen = std::collections::HashSet::new();
-    let t: Vec<PhotoId> = s.targets(p).into_iter().filter(|i| s.catalog.photo(*i).is_some() && seen.insert(*i)).collect();
+    let t: Vec<PhotoId> = s.targets(p)?.into_iter().filter(|i| s.catalog.photo(*i).is_some() && seen.insert(*i)).collect();
     if t.is_empty() {
         return Err(bad(id, if named { "no such photo" } else { "no photos selected" }));
     }
@@ -251,7 +251,7 @@ fn location_add(s: &mut Session, p: &Value) -> Result<Value> {
     let (lat, lon, radius) = match (lat, lon) {
         (Some(lat), Some(lon)) => (lat, lon, radius.unwrap_or(1000.0)),
         (None, None) if from => {
-            let ids = s.targets(p);
+            let ids = s.targets(p)?;
             let (la, lo, r) = around_photos(s, &ids).ok_or_else(|| bad(C, "none of the selected photos has a GPS position"))?;
             (la, lo, radius.unwrap_or(r))
         }

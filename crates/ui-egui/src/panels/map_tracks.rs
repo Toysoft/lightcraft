@@ -307,7 +307,7 @@ fn menu(app: &mut LightcraftApp, ui: &mut egui::Ui, r: &Value) {
         run(app, ui, "map.trackLog.setOffset", json!({}));
     }
     ui.separator();
-    let n = app.session.targets(&json!({})).len();
+    let n = app.session.targets(&json!({})).unwrap_or_default().len();
     let on_track = app.map.trk.ticks.len();
     let label =
         if n == 1 { crate::i18n::tr("Auto-Tag Selected Photo").to_string() } else { crate::i18n::tr_format!("Auto-Tag {n} Selected Photos", n = n) };
