@@ -106,7 +106,8 @@ fn bad_files_are_refused_and_the_loaded_log_stays() {
             json!({"gpx": "<gpx><trk><trkseg><trkpt lat=\"NaN\" lon=\"2\"><time>2026-01-01T00:00:00Z</time></trkpt></trkseg></trk></gpx>"}),
             "no track points",
         ),
-        (json!({"gpx": "<gpx><trk>"}), "no track points"),
+        // an unclosed document is refused as malformed before its points are counted
+        (json!({"gpx": "<gpx><trk>"}), "malformed"),
         (
             json!({"gpx": "<gpx><trk><trkseg><trkpt lat=\"1\" lon=\"2\"><time>2026-01-01T00:00:00Z</time></trkpt></trkseg></trk><!-- never closed"}),
             "malformed",
