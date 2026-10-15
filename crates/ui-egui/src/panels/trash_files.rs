@@ -55,7 +55,7 @@ pub fn open(app: &mut LightcraftApp, p: &Value) -> Result<Value, String> {
     let ids: Vec<u64> = if emptying {
         cat.photos().filter(|p| p.deleted).map(|p| p.id.0).collect()
     } else {
-        app.session.targets(p).into_iter().filter(|id| cat.photo(*id).is_some_and(|p| !p.local)).map(|id| id.0).collect()
+        app.session.targets(p).map_err(|e| e.to_string())?.into_iter().filter(|id| cat.photo(*id).is_some_and(|p| !p.local)).map(|id| id.0).collect()
     };
     if ids.is_empty() {
         return Err(crate::i18n::tr(if emptying { "Recently Deleted is empty" } else { "No photos of the library are selected" }).to_string());

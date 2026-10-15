@@ -2146,7 +2146,7 @@ pub fn ui_enabled(app: &LightcraftApp, id: &str) -> bool {
         // (photos of the library, on a system that has a Trash to move files to)
         "dialog.trashFiles" => {
             crate::panels::trash_files::available()
-                && app.session.targets(&json!({})).iter().any(|id| app.session.catalog.photo(*id).is_some_and(|p| !p.local))
+                && app.session.selected().iter().any(|id| app.session.catalog.photo(*id).is_some_and(|p| !p.local))
         }
         "photo.editInPhotoCraft" | "photo.editInExternal" => app.session.active().is_some() && app.services.open_with.is_some(),
         "app.exportPrevious" => app.session.active().is_some() && app.session.last_export.is_some(),

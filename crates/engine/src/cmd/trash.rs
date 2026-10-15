@@ -334,7 +334,7 @@ pub fn specs() -> Vec<CommandSpec> {
                     return Err(bad(C, format!("`ids` must be a list of photo ids, not {x}")));
                 }
             }
-            let ids = s.targets(p);
+            let ids = s.targets(p)?;
             trash_files(s, &ids, no_trash, C)
         }
     )]
