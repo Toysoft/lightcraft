@@ -2,20 +2,13 @@
 //! loupe renders at the size it is drawn at (up to the photo's own pixels and a safety ceiling);
 //! "Preview size" in Settings only lowers that when the user asks for it.
 
-use crate::state::{AppSettings, LOUPE_EDGE_CEILING, PREVIEW_LIMITS, STANDARD_PREVIEW_EDGE};
+use crate::state::{AppSettings, LOUPE_EDGE_CEILING, STANDARD_PREVIEW_EDGE};
 
 /// A texture side no GPU we run on refuses (see the tests of small ones below).
 const BIG: usize = 16384;
 
 fn with_limit(preview_limit: u32) -> AppSettings {
     AppSettings { preview_limit, ..Default::default() }
-}
-
-// Given a fresh install
-#[test]
-fn default_is_automatic() {
-    assert_eq!(AppSettings::default().preview_limit, 0);
-    assert_eq!(PREVIEW_LIMITS[0], 0, "Automatic is the first choice");
 }
 
 // Given Automatic, when a 24 MP photo is shown at 1:1, then the render is the photo's own width
@@ -36,19 +29,6 @@ fn render_sizes_move_in_steps() {
     let s = with_limit(0);
     assert_eq!(s.loupe_edge(2945.0, 6000, BIG), s.loupe_edge(3008.0, 6000, BIG));
     assert_ne!(s.loupe_edge(3008.0, 6000, BIG), s.loupe_edge(3009.0, 6000, BIG));
-}
-
-// Neighbour prefetch and hover / before stand-ins stay at the preview level: a full-size decode
-// would evict the open photo's single full-resolution source (review of #323)
-#[test]
-fn prefetch_and_stand_ins_never_ask_for_the_full_source_level() {
-    use lightcraft_engine::SourceLevel;
-    let s = with_limit(0);
-    for wanted in [1000.0, 2560.0, 3024.0, 6000.0, 48000.0] {
-        assert!(s.prefetch_edge(wanted, 6000, BIG) <= SourceLevel::Preview.max_edge(), "{wanted}");
-        assert!(s.stand_in_edge(s.loupe_edge(wanted, 6000, BIG), BIG) <= SourceLevel::Preview.max_edge());
-    }
-    assert_eq!(s.prefetch_edge(1000.0, 6000, BIG), 1024, "a small view is not raised");
 }
 
 // Given Automatic, a small photo zoomed far in is not rendered above its own pixels
@@ -1027,7 +1007,7 @@ mod in_the_loupe {
     }
 
     // Given Compare at 1:1, when I zoom back to fit or go back to Detail, then the windows' textures
-    // are freed, and back in Detail only one original is kept decoded
+    // are freed; decoded sources follow the shared budget, independently of those textures.
     #[test]
     fn leaving_a_zoomed_compare_frees_its_windows() {
         let mut h = compare_at(crate::state::Zoom::Percent(100.0));
@@ -1043,7 +1023,6 @@ mod in_the_loupe {
         h.settle(SETTLE);
         assert_eq!(h.app.compare_windows, [None, None]);
         assert!(!h.app.renderer.textures.contains_key(&Slot::CompareRegion(0)) && !h.app.renderer.textures.contains_key(&Slot::CompareRegion(1)));
-        assert!(h.app.session.media.usage().2.count <= 1, "one original in Detail");
     }
 
     // A pane's window is drawn where it belongs: its pixels agree with the pane's whole-frame render

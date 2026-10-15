@@ -593,8 +593,8 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         }),
         _ => None,
     };
-    // once this photo is on screen: prepare its neighbours in filmstrip order (source decoded and
-    // kept, view render cached) so stepping to them is instant
+    // Once this photo is on screen, prepare its neighbours in filmstrip order. Warm their native
+    // sources at sharp zoom only when the shared memory budget has room; keep view renders small.
     if !interacting && !app.renderer.is_pending(Slot::Main) && app.renderer.textures.get(&Slot::Main).is_some_and(|t| t.photo == id) {
         let ids = app.session.visible_cloned();
         if let Some(i) = ids.iter().position(|p| *p == id) {
@@ -609,7 +609,7 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 let nw =
                     app.ui.settings.prefetch_edge(nr.width().max(nr.height()) * ppp, output_px(&nf).into_iter().max().unwrap_or(1), texture_side);
                 let (w, h) = if na >= 1.0 { (nw, (nw as f32 / na) as usize) } else { ((nw as f32 * na) as usize, nw) };
-                if let Some(job) = app.session.loupe_job(nid, w.max(8), h.max(8), !crop_tool) {
+                if let Some(job) = app.session.prefetch_job(nid, w.max(8), h.max(8), !crop_tool, plan.window_edge.is_some()) {
                     app.renderer.prefetch(Slot::Prefetch(n as u8), job, PREFETCH_PRIORITY);
                 }
             }
