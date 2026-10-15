@@ -144,6 +144,25 @@ fn virtual_copies_follow_their_photo() {
     assert!(x.s.catalog.photo(copy).unwrap().develops_raw());
 }
 
+/// A recheck uses the same source-aware family matching as manual Reload.
+#[test]
+fn recheck_preserves_relinked_members_of_the_source_family() {
+    let mut x = library("relinked-copy");
+    let r = x.s.execute("photo.virtualCopy", &json!({"ids": [x.id.0]})).unwrap();
+    let linked = PhotoId(r["ids"][0].as_u64().unwrap());
+    let r = x.s.execute("photo.virtualCopy", &json!({"ids": [x.id.0]})).unwrap();
+    let detached = PhotoId(r["ids"][0].as_u64().unwrap());
+    let other = x.dir.join("other.cr3");
+    std::fs::write(&other, cr3_with_preview(48, 32)).unwrap();
+    x.s.execute("photo.relink", &json!({"id": detached.0, "path": other.to_string_lossy()})).unwrap();
+    let before = x.s.catalog.photo(detached).unwrap().clone();
+    decodable_now(&x);
+    let r = x.s.execute("library.recheckPreviewOnly", &json!({})).unwrap();
+    assert_eq!(r["cleared"], json!([x.id.0, linked.0]));
+    assert!(x.s.catalog.photo(linked).unwrap().develops_raw());
+    assert_eq!(x.s.catalog.photo(detached).unwrap(), &before);
+}
+
 /// Without file access every probe would "succeed" knowing nothing and clear every flag: refused.
 #[test]
 fn session_without_file_access_refuses() {
@@ -152,4 +171,37 @@ fn session_without_file_access_refuses() {
     let e = x.s.execute("library.recheckPreviewOnly", &json!({})).unwrap_err().to_string();
     assert!(e.contains("no file access"), "{e}");
     assert!(x.s.catalog.photo(x.id).unwrap().preview_only.is_some());
+}
+
+/// Automatic rechecks use system operations, but must discard old JPEG proxies just as Reload
+/// does even when the original bytes and their content-addressed proxy name have not changed.
+#[test]
+fn recheck_invalidates_unchanged_file_smart_previews() {
+    let mut x = library("smart-preview");
+    decodable_now(&x);
+    let info = recheck::file_probe(&x.s).unwrap()(&x.file.to_string_lossy()).unwrap();
+    x.s.catalog
+        .apply(Op::SetContent {
+            id: x.id,
+            width: info.width,
+            height: info.height,
+            file_size: info.file_size,
+            content_hash: info.content_hash,
+            preview_only: Some("old decoder".into()),
+            preview_checked: OTHER.into(),
+        })
+        .unwrap();
+    let ph = x.s.catalog.photo(x.id).unwrap().clone();
+    let dir = x.s.media.smart_dir.clone().unwrap();
+    let sharded = crate::smart::sharded_file_path(&dir, &ph);
+    let flat = dir.join(crate::smart::file_name(&ph));
+    std::fs::create_dir_all(sharded.parent().unwrap()).unwrap();
+    std::fs::write(&sharded, b"old JPEG proxy").unwrap();
+    std::fs::write(&flat, b"old flat JPEG proxy").unwrap();
+    let result = x.s.execute("library.recheckPreviewOnly", &json!({})).unwrap();
+    assert_eq!(result["cleared"], json!([x.id.0]));
+    let updated = x.s.catalog.photo(x.id).unwrap();
+    assert!(updated.develops_raw());
+    assert_eq!(updated.content_hash, ph.content_hash, "only the decoder interpretation changed");
+    assert!(!sharded.exists() && !flat.exists(), "both old proxy layouts must be discarded");
 }
