@@ -8,16 +8,73 @@ use crate::convert::{Buf, Meta, Model, Raw, check_size, finish};
 use crate::space::{NamedSpace, SourceSpace, SpaceOrigin, Trc};
 use crate::{DecodeOptions, Decoded, Error, Format, Result};
 use jxl_oxide::color::{ColourSpace, EnumColourEncoding, Primaries, RenderingIntent, TransferFunction, WhitePoint};
-use jxl_oxide::{AuxBoxData, JxlImage};
+use jxl_oxide::{AllocTracker, AuxBoxData, InitializeResult, JxlImage};
 
 const F: Format = Format::Jxl;
+const DECODER_BYTES_PER_PIXEL: usize = 16 * 4;
+const DECODER_MARGIN_BYTES: usize = 64 << 10;
+
+fn decoder_budget(max_pixels: u64) -> usize {
+    usize::try_from(max_pixels).unwrap_or(usize::MAX).saturating_mul(DECODER_BYTES_PER_PIXEL).saturating_add(DECODER_MARGIN_BYTES)
+}
+
+fn shift_buffer(buf: &mut [u8], valid: &mut usize, consumed: usize) -> Result<()> {
+    let remaining = valid.checked_sub(consumed).ok_or_else(|| err("invalid JPEG XL parser offset"))?;
+    let tail = buf.get(consumed..*valid).ok_or_else(|| err("invalid JPEG XL parser offset"))?.to_vec();
+    buf.get_mut(..remaining).ok_or_else(|| err("invalid JPEG XL parser offset"))?.copy_from_slice(&tail);
+    *valid = remaining;
+    Ok(())
+}
+
+fn load(bytes: &[u8], opts: &DecodeOptions) -> Result<JxlImage> {
+    let tracker = AllocTracker::with_limit(decoder_budget(opts.max_pixels));
+    let mut uninit = JxlImage::builder().alloc_tracker(tracker).build_uninit();
+    let mut buf = [0u8; 4096];
+    let (mut pos, mut valid) = (0usize, 0usize);
+    let mut img = loop {
+        if valid < buf.len() {
+            let count = (buf.len() - valid).min(bytes.len().saturating_sub(pos));
+            if count == 0 {
+                return Err(err("truncated JPEG XL image header"));
+            }
+            let source = bytes.get(pos..pos + count).ok_or_else(|| err("invalid JPEG XL input offset"))?;
+            buf.get_mut(valid..valid + count).ok_or_else(|| err("invalid JPEG XL buffer offset"))?.copy_from_slice(source);
+            pos += count;
+            valid += count;
+        }
+        let consumed = uninit.feed_bytes(buf.get(..valid).ok_or_else(|| err("invalid JPEG XL buffer length"))?).map_err(err)?;
+        shift_buffer(&mut buf, &mut valid, consumed)?;
+        match uninit.try_init().map_err(err)? {
+            InitializeResult::NeedMoreData(next) => uninit = next,
+            InitializeResult::Initialized(image) => break image,
+        }
+    };
+    check_size(F, img.width() as u64, img.height() as u64, opts)?;
+
+    while pos < bytes.len() || valid > 0 {
+        if valid < buf.len() && pos < bytes.len() {
+            let count = (buf.len() - valid).min(bytes.len() - pos);
+            let source = bytes.get(pos..pos + count).ok_or_else(|| err("invalid JPEG XL input offset"))?;
+            buf.get_mut(valid..valid + count).ok_or_else(|| err("invalid JPEG XL buffer offset"))?.copy_from_slice(source);
+            pos += count;
+            valid += count;
+        }
+        let consumed = img.feed_bytes(buf.get(..valid).ok_or_else(|| err("invalid JPEG XL buffer length"))?).map_err(err)?;
+        if consumed == 0 && pos == bytes.len() {
+            return Err(err("truncated JPEG XL image"));
+        }
+        shift_buffer(&mut buf, &mut valid, consumed)?;
+    }
+    img.finalize().map_err(err)?;
+    Ok(img)
+}
 
 fn err(e: impl std::fmt::Display) -> Error {
     Error::Malformed(F, e.to_string())
 }
 
 pub(crate) fn decode(bytes: &[u8], opts: &DecodeOptions) -> Result<Decoded> {
-    let mut img = JxlImage::builder().read(std::io::Cursor::new(bytes)).map_err(err)?;
+    let mut img = load(bytes, opts)?;
     let (w, h) = (img.width(), img.height());
     check_size(F, w as u64, h as u64, opts)?;
     let header = img.image_header();

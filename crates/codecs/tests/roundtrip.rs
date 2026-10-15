@@ -833,3 +833,14 @@ fn jxl_bad_input_is_an_error() {
         encode_jxl(&EncodeImage::new(1, 1, 3, Samples::U8(&one)), &JxlOptions { quality: 1, ..Default::default() }, &EncodeMeta::default()).unwrap();
     assert_eq!(decode(&b, DecodeOptions::default()).unwrap().width, 1);
 }
+
+#[test]
+#[cfg(feature = "jxl")]
+fn jxl_intermediate_allocations_are_bounded_by_decode_options() {
+    let px = vec![0u8; 256 * 256 * 3];
+    let bytes =
+        encode_jxl(&EncodeImage::new(256, 256, 3, Samples::U8(&px)), &JxlOptions { lossless: true, ..Default::default() }, &EncodeMeta::default())
+            .unwrap();
+    let result = decode(&bytes, DecodeOptions { max_size: None, max_pixels: 1 });
+    assert!(matches!(result, Err(Error::TooLarge(256, 256))), "{result:?}");
+}
