@@ -91,8 +91,7 @@ pub fn poll(app: &mut LightcraftApp, ctx: &egui::Context) {
         Some(out) => app.session.execute_fn("photo.moveToFolder", |s| finish.finish(s, out)).map_err(|e| e.to_string()),
         None => {
             // the worker died part-way (logged): the move is over; the library follows what moved
-            drop(finish);
-            let r = app.session.execute_fn("photo.moveToFolder", |s| Ok(json!(s.recover_moves()))).map_err(|e| e.to_string());
+            let r = app.session.execute_fn("photo.moveToFolder", |s| Ok(json!(finish.abandon(s)))).map_err(|e| e.to_string());
             log::warn!("move to {}: stopped by an error; recovered: {r:?}", run.folder);
             Err(crate::i18n::tr("Moving was stopped by an error (see the log). The library follows the files that had moved.").to_string())
         }

@@ -483,6 +483,8 @@ impl Session {
         }
         self.undo.clear();
         self.redo.clear();
+        // photo ids are per library: none held back for a move carries over
+        self.held_sidecars.clear();
         self.interaction = None;
         self.pending_log.clear();
         self.selection = Selection::default();

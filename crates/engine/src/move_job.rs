@@ -210,6 +210,17 @@ impl MoveFinish {
         self.guard.id()
     }
 
+    /// The worker died part-way (a panic, logged) and left no outcome: the move is over for the
+    /// session, the library follows whatever had moved from the move's record, and the sidecars
+    /// held back meanwhile are written where their photos now are.
+    pub fn abandon(self, s: &mut Session) -> crate::move_intent::Recovered {
+        drop(self);
+        let recovered = s.recover_moves();
+        let held: Vec<PhotoId> = std::mem::take(&mut s.held_sidecars).into_iter().collect();
+        s.auto_write_sidecar_ids(held);
+        recovered
+    }
+
     /// Point the photos whose files moved at their new place, as one undo step (labelled as
     /// before: "Move 3 Photos to “Porto”", counting virtual copies). `{moved, of, folder, stopped}`
     /// (in files); an error when nothing moved (`Refused`, `Failed`: the files went back, or the

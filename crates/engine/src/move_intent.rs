@@ -7,9 +7,12 @@
 //!   and its XMP sidecars follow it;
 //! * a file still at its old place and not at the new one: nothing to do;
 //! * a file at both places: the copy at the new place is ours (nothing was there when the record
-//!   was written, and moves never replace a file). It is removed when it is the same file or holds
-//!   the same bytes; the library keeps the original. Otherwise both stay and the person is told;
-//! * a file at neither place (its disk isn't connected): the record keeps it for the next time.
+//!   was written, and moves never replace a file). It is removed when it is the same file under a
+//!   second name or holds the same bytes; the library keeps the original. Otherwise both stay and
+//!   the person is told;
+//! * a file at neither place, or gone from a folder that is gone too (its disk may just not be
+//!   connected, and a copy at the new place may never have been checked): the record keeps it
+//!   for the next time.
 //!
 //! The records live in `<library>/moves/`, one file per batch, so a background move and a move
 //! the session makes itself (a rename, an Undo) never share one.
@@ -71,7 +74,7 @@ pub struct Recovered {
     /// Files whose two places couldn't be decided on (named in the notice), or whose sidecars
     /// couldn't follow.
     pub problems: Vec<String>,
-    /// Moves kept for the next time: neither place could be read (a disk not connected).
+    /// Moves kept for the next time: the old place can't be read (a disk not connected?).
     pub waiting: usize,
 }
 
@@ -110,7 +113,7 @@ enum Found {
     Moved,
     /// Still at `from` only, or settled already: nothing to do.
     Stayed,
-    /// Neither place answers: keep the move for next time.
+    /// The old place doesn't answer (a disk not connected?): keep the move for next time.
     Unknown,
 }
 
@@ -162,13 +165,9 @@ impl Session {
         let Ok(entries) = std::fs::read_dir(&dir) else { return out };
         let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
         files.sort();
-        // the photos pointing at each file (a master and its virtual copies), looked up once
-        let mut at: HashMap<PathBuf, Vec<(PhotoId, String)>> = HashMap::new();
-        for p in self.catalog.photos() {
-            if let Source::File { path } = &p.source {
-                at.entry(PathBuf::from(path)).or_default().push((p.id, p.file_name.clone()));
-            }
-        }
+        // the photos pointing at each file (a master and its virtual copies), looked up once a
+        // record is there to read
+        let mut at: Option<HashMap<PathBuf, Vec<(PhotoId, String)>>> = None;
         let mut ops = Vec::new();
         // (record, the moves to keep in it): written back, or removed when none is left
         let mut done: Vec<(PathBuf, Vec<(String, String)>)> = Vec::new();
@@ -191,8 +190,17 @@ impl Session {
                 }
             };
             let mut keep = Vec::new();
+            let at = at.get_or_insert_with(|| {
+                let mut at: HashMap<PathBuf, Vec<(PhotoId, String)>> = HashMap::new();
+                for p in self.catalog.photos() {
+                    if let Source::File { path } = &p.source {
+                        at.entry(PathBuf::from(path)).or_default().push((p.id, p.file_name.clone()));
+                    }
+                }
+                at
+            });
             for (from, to) in record.moves {
-                match recover_one(fs, &mut at, &from, &to, &mut ops, &mut out) {
+                match recover_one(fs, at, &from, &to, &mut ops, &mut out) {
                     Found::Moved | Found::Stayed => {}
                     Found::Unknown => {
                         out.waiting += 1;
@@ -254,15 +262,17 @@ fn recover_one(
         fs.listed(t) && !fs.listed(f)
     } else {
         match (fs.exists(f), fs.is_file(t)) {
-            // gone from a folder that is still there: it moved. With the folder gone too, its
-            // disk may just not be connected, and the copy at `to` was maybe never checked
-            (false, true) if f.parent().is_some_and(|d| fs.exists(d)) => true,
+            // gone from a folder that is still there: it moved. With the folder gone too (a link
+            // to it is followed), its disk may just not be connected, and the copy at `to` was
+            // maybe never checked
+            (false, true) if f.parent().is_some_and(Path::is_dir) => true,
             (false, true) => return Found::Unknown,
             (true, false) => false,
             (true, true) => {
-                // the copy at `to` is ours: drop it when that loses nothing. One file under two
-                // names is dropped only when it really has two (a move cut between link and unlink)
-                let same = if fs.same_file(f, t) { two_links(t) } else { crate::rename::same_contents(f, t).unwrap_or(false) };
+                // the copy at `to` is ours: drop it when that loses nothing. One file is dropped
+                // from `to` only when both names are really there (a move cut between link and
+                // unlink), never when they are one name spelled two ways
+                let same = if fs.same_file(f, t) { fs.listed(f) && fs.listed(t) } else { crate::rename::same_contents(f, t).unwrap_or(false) };
                 if same && fs.remove_file(t).is_ok() {
                     out.copies_removed += 1;
                 } else {
@@ -289,21 +299,6 @@ fn recover_one(
     }
     at.entry(t.to_path_buf()).or_default().extend(photos.into_iter().map(|(id, _)| (id, new_name.clone())));
     Found::Moved
-}
-
-/// The file at `p` has more than one name on disk (a hard link left by a move cut short between
-/// linking the new name and unlinking the old). Where that can't be told: no.
-fn two_links(p: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        std::fs::metadata(p).is_ok_and(|m| m.nlink() > 1)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = p;
-        false
-    }
 }
 
 fn file_name(p: &Path) -> String {

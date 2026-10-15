@@ -205,6 +205,26 @@ fn a_moving_photos_sidecar_is_written_once_it_arrives_where_it_arrives() {
 }
 
 #[test]
+fn a_move_whose_worker_dies_is_followed_and_its_held_sidecars_are_written() {
+    let dir = Scratch::new("abandon");
+    let mut s = open(&dir);
+    s.xmp.auto_write = true;
+    let a = add(&mut s, &dir.path("local/a.jpg"), "A");
+    let (work, finish) = crate::move_job::start(&mut s, &json!({"ids": [a.0], "folder": dir.path("share")}), true).unwrap().unwrap();
+    s.selection = crate::Selection::single(a);
+    s.execute("photo.rate", &json!({"ids": [a.0], "rating": 5})).unwrap();
+    // the files moved, then the worker died before saying so: no outcome reaches the session
+    drop(work.run());
+    let r = s.execute_fn("photo.moveToFolder", |s| Ok(json!(finish.abandon(s)))).unwrap();
+    assert_eq!(r["relinked"], 1, "{r}");
+    assert_eq!(file_of(&s, a), dir.path("share/a.jpg"), "the library follows the file");
+    let xmp = std::fs::read_to_string(dir.path("share/a.xmp")).expect("the held sidecar is written where the photo is");
+    assert!(xmp.contains("xmp:Rating=\"5\"") || xmp.contains("<xmp:Rating>5</xmp:Rating>"), "{xmp}");
+    assert!(!s.move_running() && s.activity.list().is_empty());
+    assert!(dir.records().is_empty(), "{:?}", dir.records());
+}
+
+#[test]
 fn checks_that_read_the_disk_refuse_on_the_worker_before_anything_moves() {
     let dir = Scratch::new("refuse");
     let mut s = open(&dir);
@@ -280,7 +300,7 @@ fn the_record_is_on_disk_before_the_first_file_moves_and_gone_once_saved() {
 #[test]
 fn a_move_cut_short_is_followed_when_the_library_opens_again() {
     let dir = Scratch::new("crash");
-    let (a, b, c, d, e);
+    let (a, b, c, d, e, h);
     {
         let mut s = open(&dir);
         a = add(&mut s, &dir.path("local/a.jpg"), "A");
@@ -290,9 +310,11 @@ fn a_move_cut_short_is_followed_when_the_library_opens_again() {
         d = add(&mut s, &dir.path("local/d.jpg"), "D");
         std::fs::create_dir_all(dir.path("usb")).unwrap();
         e = add(&mut s, &dir.path("usb/e.jpg"), "E");
+        h = add(&mut s, &dir.path("local/h.jpg"), "H");
         let mut moves: Vec<(String, String)> =
             ["a", "b", "c", "d"].iter().map(|f| (dir.path(&format!("local/{f}.jpg")), dir.path(&format!("share/{f}.jpg")))).collect();
         moves.push((dir.path("usb/e.jpg"), dir.path("share/e.jpg")));
+        moves.push((dir.path("local/h.jpg"), dir.path("share/h.jpg")));
         crate::move_intent::write(&dir.library(), &moves).unwrap();
         // killed part-way: a's file arrived and its sidecar didn't; b's copy arrived and the
         // original wasn't removed yet; c never started; d's disk isn't connected now; e's copy
@@ -303,6 +325,8 @@ fn a_move_cut_short_is_followed_when_the_library_opens_again() {
         std::fs::remove_file(dir.path("local/d.jpg")).unwrap();
         std::fs::copy(dir.path("usb/e.jpg"), dir.path("share/e.jpg")).unwrap();
         std::fs::rename(dir.path("usb"), dir.path("usb-unplugged")).unwrap();
+        // h: cut between linking the new name and unlinking the old (same volume)
+        std::fs::hard_link(dir.path("local/h.jpg"), dir.path("share/h.jpg")).unwrap();
         // (the app is gone: no finish, no save of a move)
     }
     let mut s = open(&dir);
@@ -315,6 +339,8 @@ fn a_move_cut_short_is_followed_when_the_library_opens_again() {
     assert_eq!(file_of(&s, c), dir.path("local/c.jpg"));
     assert_eq!(file_of(&s, d), dir.path("local/d.jpg"));
     assert_eq!(file_of(&s, e), dir.path("usb/e.jpg"), "a source whose folder is gone may only be unplugged: not followed");
+    assert_eq!(file_of(&s, h), dir.path("local/h.jpg"));
+    assert!(Path::new(&dir.path("local/h.jpg")).is_file() && !Path::new(&dir.path("share/h.jpg")).exists(), "the second name goes, the file stays");
     let notice = s.take_library_warnings().join(" ");
     assert!(notice.contains("1 photo was being moved") && notice.contains("2 files that were being moved"), "{notice}");
     // d's and e's moves are kept for the next open; the rest of the record is done
