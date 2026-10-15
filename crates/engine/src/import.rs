@@ -39,7 +39,7 @@ pub const EXTENSIONS: &[&str] = &[
     // Decoded when built with the codecs' `heif` feature; otherwise the import reports them as
     // failed with the reason ("HEIC/HEIF support isn't included in this build").
     "heic", "heif", "avif", // no AV1 decoder yet: reported as failed, like a HEIC without the feature
-    "iiq", "crw", "mrw", "x3f", "kdc", "mos", "erf", "3fr", "fff",
+    "iiq", "crw", "mrw", "x3f", "kdc", "mos", "erf", "3fr", "fff", "mef",
 ];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -312,6 +312,8 @@ pub struct ImportDefaults {
     pub auto_album: Option<String>,
     /// Auto import also looks in the watched folder's subfolders (off: its top level only).
     pub auto_subfolders: bool,
+    /// Open the import review when a camera or memory card is connected.
+    pub show_on_card: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -470,6 +472,12 @@ pub fn launch_path(arg: &str, cwd: Option<&Path>, home: Option<&Path>, dcim: imp
 pub(crate) fn probe_paths(s: &Session, paths: &[String]) -> Vec<Result<ProbeInfo, String>> {
     let progress = ScanProgress::default();
     probe_all(s.media.file_probe.as_ref(), paths, &progress.done, &progress.cancel)
+}
+
+/// Probe files with `probe` (a clone of the session's file probe), off the session: on a worker thread.
+pub(crate) fn probe_with(probe: &crate::media::FileProbe, paths: &[String]) -> Vec<Result<ProbeInfo, String>> {
+    let progress = ScanProgress::default();
+    probe_all(Some(probe), paths, &progress.done, &progress.cancel)
 }
 
 /// Probe `paths` (several at once), counting each in `done`. Stops before the next file once
@@ -1388,7 +1396,7 @@ pub fn commit_prepared(s: &mut Session, opts: &ImportOptions, now: &str, prepare
                 p.as_shot_wb = info.as_shot_wb;
                 p.content_hash = info.content_hash;
                 p.embedded_lens = info.embedded_lens;
-                p.preview_only = info.preview_only.clone();
+                p.set_preview_only(info.preview_only.clone());
                 apply_import_defaults(s, &mut p);
                 if let Some(sc) = &sidecar {
                     crate::sidecar::merge_into(&mut p, sc, &now);
@@ -1534,6 +1542,7 @@ impl Session {
             stages: None,
             view_cache: None,
             display: None,
+            slide: None,
             preview_cut: None,
         };
         let embedded = match (&self.media.preview_loader, c.kind) {
