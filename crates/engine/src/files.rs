@@ -248,6 +248,7 @@ pub(crate) struct CameraColourModel<'a> {
     pub tables: Option<&'a lightcraft_raw::profile::ProfileTables>,
     /// A fitted camera look's hue/saturation table.
     pub hue_sat: Option<&'a crate::camera_preview::HueSat<'a>>,
+    pub bands: Option<&'a crate::camera_preview::ChromaBands>,
 }
 
 impl CameraColourModel<'_> {
@@ -266,7 +267,7 @@ impl CameraColourModel<'_> {
     /// White balance, matrix, tables and baseline exposure, in place.
     pub fn apply(&self, img: &mut Rgb32f) {
         let (wb, m, gain) = (self.wb, self.matrix.to_f32(), self.gain);
-        if let (None, Some(hue_sat)) = (self.tables, self.hue_sat) {
+        if let (None, Some(hue_sat), None) = (self.tables, self.hue_sat, self.bands) {
             // a fitted camera look: `pixel`, `LANES` pixels at a time so the table step vectorises (same bits)
             const LANES: usize = 16;
             lightcraft_raster::par_rows(&mut img.data, img.width, |_, row| {
@@ -302,7 +303,8 @@ impl CameraColourModel<'_> {
             Some(tables) => tables.apply(rgb, gain),
             None => rgb.map(|v| v * gain),
         };
-        self.hue_sat.map_or(rgb, |h| h.apply(rgb)).map(|v| v.max(0.0))
+        let rgb = self.hue_sat.map_or(rgb, |h| h.apply(rgb));
+        self.bands.map_or(rgb, |b| b.apply(rgb)).map(|v| v.max(0.0))
     }
 }
 
@@ -426,13 +428,26 @@ fn load_bytes_now(
         let lens = crate::lens_profiles::for_raw(&info, || lightcraft_meta::extract(&bytes));
         // (the camera look still pairs the sensor with the camera JPEG through the warp the camera applied to it)
         let lens_geometry = crate::camera_preview::lens_geometry(&raw.opcodes.list3);
+        // A DNG's preview already has its lens opcodes applied. Keep them for its single tone fit,
+        // then remove them again: the rendered source leaves those corrections to the pipeline.
+        let dng_lens_ops = (raw.format == lightcraft_raw::RawFormat::Dng && raw.opcodes.list3.iter().any(|op| op.is_lens_correction()))
+            .then(|| raw.opcodes.list3.clone());
         raw.opcodes.list3.retain(|op| !op.is_lens_correction());
         // Which scale white balance is edited on, and the as-shot white on it, from the file's own colour tags or
         // the camera's measured matrices (`Photo::relative_wb` decides the same from the catalog's camera)
         let scale = WbScaleOf::new(raw.format, &raw.color, raw.wb_multipliers, &raw.metadata);
         // the source's segmentation mattes (DNG semantic masks), read while the starting colour is fitted
         let ((xy, t, camera_look), mattes) = rayon::join(
-            || crate::camera_preview::starting_colour(&mut raw, &bytes, lens_geometry.as_ref(), lens.as_ref()),
+            || {
+                let removed = dng_lens_ops.map(|ops| std::mem::replace(&mut raw.opcodes.list3, ops));
+                // With the opcodes restored, the proxy already includes vignetting; do not apply it twice.
+                let embedded = if removed.is_some() { None } else { lens.as_ref() };
+                let colour = crate::camera_preview::starting_colour(&mut raw, &bytes, lens_geometry.as_ref(), embedded);
+                if let Some(ops) = removed {
+                    raw.opcodes.list3 = ops;
+                }
+                colour
+            },
             || dng_mattes(&bytes, &info),
         );
         drop(bytes);
@@ -466,6 +481,7 @@ fn load_bytes_now(
             gain: 2f32.powf(t.baseline_exposure as f32),
             tables: tables.as_ref(),
             hue_sat: hue_sat.as_ref(),
+            bands: camera_look.as_ref().and_then(|p| p.bands.as_ref()),
         };
         // camera RGB → what the pipeline takes: clipped highlights rebuilt, white balance and the colour model applied,
         // fitted to `max_edge` and upright (the same for the plain and the denoised picture)
@@ -1830,6 +1846,98 @@ pub(crate) mod tests {
         assert!((mean(&dim) / mean(&before) - 0.5).abs() < 0.02, "{} vs {}", mean(&dim), mean(&before));
     }
 
+    /// Corrections used while fitting a DNG's preview must not be baked into its editable source.
+    /// The pipeline applies them once from SourceInfo, and a file-defined tone stays authoritative.
+    #[test]
+    fn dng_preview_corrections_leave_the_render_source_uncorrected() {
+        let plain = crate::tests_xmp::synthetic_dng_with(None, Default::default());
+        let mut raw = lightcraft_raw::decode(&plain).unwrap();
+        raw.color.profile.tone_curve = lightcraft_raw::profile::ToneCurve::from_tag(&[0.0, 0.0, 0.18, 0.4, 1.0, 1.0]);
+        let before = lightcraft_raw::write_dng(&raw, &Default::default()).unwrap();
+        raw.opcodes.list3 = vec![lightcraft_raw::Opcode::FixVignetteRadial { k: [1.0, 0.0, 0.0, 0.0, 0.0], center: [0.5, 0.5] }];
+        let corrected = lightcraft_raw::write_dng(&raw, &Default::default()).unwrap();
+        let (before, expected) = load_bytes(&before, 64).unwrap();
+        let (after, info) = load_bytes(&corrected, 64).unwrap();
+        assert_eq!(before.data, after.data, "lens correction belongs to the pipeline");
+        assert!(info.lens.as_ref().is_some_and(|l| l.vignette.is_some()));
+        assert_eq!(info.camera_tone, expected.camera_tone, "the file's own tone is preserved");
+    }
+
+    /// A camera JPEG made from the corrected scene teaches one tone to the DNG's existing fit.
+    /// The source pixels stay uncorrected, including when the file is rotated.
+    #[test]
+    fn dng_lens_corrected_preview_teaches_one_tone_without_baking_in_the_lens() {
+        use lightcraft_color::{REC2020, SRGB, luminance_2020, transfer::linear_to_srgb};
+        use lightcraft_raw::{Opcode, Orientation};
+        let (w, h) = (384usize, 256usize);
+        let data = (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                let v = 0.02 + 0.2 * (0.5 + 0.5 * (x * 0.045).sin() * (y * 0.06).cos()) + 0.1 * x / w as f32;
+                let colour = match (i / w % 2, i % w % 2) {
+                    (0, 0) => 1.2,
+                    (1, 1) => 0.8,
+                    _ => 1.0,
+                };
+                256 + (v * colour * 15744.0) as u16
+            })
+            .collect();
+        let bytes = crate::tests_xmp::synthetic_dng_of(w, h, "RGGB", data, None, Default::default());
+        let mut raw = lightcraft_raw::decode(&bytes).unwrap();
+        raw.color = lightcraft_raw::ColorData {
+            illuminant: [21, 0],
+            color_matrix: [Some(REC2020.from_xyz()), None],
+            as_shot_neutral: Some([1.0; 3]),
+            ..Default::default()
+        };
+        let plain = lightcraft_raw::write_dng(&raw, &Default::default()).unwrap();
+        raw.opcodes.list3 = vec![
+            Opcode::FixVignetteRadial { k: [0.8, 0.0, 0.0, 0.0, 0.0], center: [0.5, 0.5] },
+            Opcode::WarpRectilinear { planes: vec![[0.7, 0.2, 0.0, 0.0, 0.0, 0.0]], center: [0.5, 0.5] },
+        ];
+        let t = lightcraft_raw::color::camera_transform(&raw, lightcraft_raw::color::as_shot_white_xy(&raw));
+        let corrected = raw.develop(lightcraft_raw::Method::Bilinear).unwrap();
+        let to_srgb = REC2020.to_space(&SRGB);
+        let pixels: Vec<u8> = corrected
+            .data
+            .iter()
+            .flat_map(|p| {
+                let p = t.matrix.apply_f32(std::array::from_fn(|i| p[i] * t.wb[i]));
+                let y = luminance_2020(p).max(1e-6);
+                let gain = (1.0 - (-3.0 * y).exp()) / y;
+                to_srgb.apply_f32(p.map(|v| v * gain)).map(|v| (255.0 * linear_to_srgb(v).clamp(0.0, 1.0)).round() as u8)
+            })
+            .collect();
+        let image = lightcraft_codecs::EncodeImage::new(w as u32, h as u32, 3, lightcraft_codecs::Samples::U8(&pixels));
+        let jpeg = lightcraft_codecs::encode_jpeg(&image, 98, lightcraft_codecs::ChromaSubsampling::S444, &Default::default()).unwrap();
+        for orientation in [Orientation::Normal, Orientation::Rotate90] {
+            raw.orientation = orientation;
+            let mut file = lightcraft_raw::write_dng(&raw, &Default::default()).unwrap();
+            // Append a preview IFD to the little-endian DNG written above.
+            let root = u32::from_le_bytes(file[4..8].try_into().unwrap()) as usize;
+            let count = u16::from_le_bytes(file[root..root + 2].try_into().unwrap()) as usize;
+            let next = root + 2 + 12 * count;
+            let start = file.len() as u32;
+            file[next..next + 4].copy_from_slice(&start.to_le_bytes());
+            let jpeg_at = start + 2 + 4 * 12 + 4;
+            file.extend(4u16.to_le_bytes());
+            for (tag, value) in [(256u16, w as u32), (257, h as u32), (0x201, jpeg_at), (0x202, jpeg.len() as u32)] {
+                file.extend(tag.to_le_bytes());
+                file.extend(4u16.to_le_bytes());
+                file.extend(1u32.to_le_bytes());
+                file.extend(value.to_le_bytes());
+            }
+            file.extend(0u32.to_le_bytes());
+            file.extend(&jpeg);
+            let (source, info) = load_bytes(&file, 96).unwrap();
+            let tone = info.camera_tone.expect("one DNG look fitted to the lens-corrected preview");
+            let target = 1.0 - (-3.0f32 * 0.18).exp();
+            assert!((tone.apply(0.18) - target).abs() < 0.04, "one tone: {} vs {target}", tone.apply(0.18));
+            let expected = load_bytes(&plain, 96).unwrap().0.into_oriented(orientation);
+            assert_eq!(source.data, expected.data, "the editable source is not lens-corrected");
+        }
+    }
+
     /// A look fitted to a camera's JPEG, as `camera_preview` makes them: its rows don't sum to one, so the camera's
     /// own white-balanced neutral comes out yellow (blue 12 % low).
     fn yellowing_look() -> lightcraft_color::Mat3 {
@@ -1843,7 +1951,8 @@ pub(crate) mod tests {
         let data = (0..72 * 5 * 5).map(|i| [((i * 37) % 61) as f32 - 30.0, 0.6 + ((i * 11) % 13) as f32 / 13.0, 1.0]).collect();
         let table = lightcraft_raw::profile::HsvTable { hue_divisions: 72, sat_divisions: 5, val_divisions: 5, data, srgb_value: true };
         let hue_sat = crate::camera_preview::HueSat::new(&table).unwrap();
-        let colour = CameraColourModel { wb: [2.1, 1.0, 1.5], matrix: yellowing_look(), gain: 1.3, tables: None, hue_sat: Some(&hue_sat) };
+        let colour =
+            CameraColourModel { wb: [2.1, 1.0, 1.5], matrix: yellowing_look(), gain: 1.3, tables: None, hue_sat: Some(&hue_sat), bands: None };
         let special = [0.0, -0.0, -0.01, 1e-30, 0.3, 1.0, 5.0, 1e30, f32::INFINITY, f32::NAN];
         let img = Rgb32f::from_fn(37, 5, |x, y| {
             let k = y * 37 + x;
@@ -1884,7 +1993,7 @@ pub(crate) mod tests {
             let m = model.to_f32();
             let out: [f32; 3] = std::array::from_fn(|i| m[i][0] * w[0] + m[i][1] * w[1] + m[i][2] * w[2]);
             assert!(out.iter().all(|v| (v - out[1]).abs() <= 1e-3 * out[1]), "{w:?} renders {out:?}");
-            let colour = CameraColourModel { wb: [2.5, 1.0, 1.6], matrix: model, gain: 1.0, tables: None, hue_sat: None };
+            let colour = CameraColourModel { wb: [2.5, 1.0, 1.6], matrix: model, gain: 1.0, tables: None, hue_sat: None, bands: None };
             let mut img = Rgb32f::filled(4, 4, [1.0; 3]);
             colour.rebuild_highlights(&mut img);
             colour.apply(&mut img);
@@ -1899,7 +2008,7 @@ pub(crate) mod tests {
     fn clipped_highlights_stay_neutral_when_darkened() {
         use lightcraft_pipeline::{RenderRequest, render};
         let wb = [2.4f32, 1.0, 1.6];
-        let colour = CameraColourModel { wb, matrix: yellowing_look(), gain: 1.0, tables: None, hue_sat: None };
+        let colour = CameraColourModel { wb, matrix: yellowing_look(), gain: 1.0, tables: None, hue_sat: None, bands: None };
         // a grey wall (camera neutral) with a fully clipped light and a light clipped in green only
         let mut img = Rgb32f::from_fn(96, 64, |x, y| {
             let d = |cx: f32| ((x as f32 - cx).powi(2) + (y as f32 - 32.0).powi(2)).sqrt();
@@ -1935,7 +2044,7 @@ pub(crate) mod tests {
     fn darkened_ramp(rows: std::ops::Range<usize>, height: usize) -> ([[u8; 4]; 3], u8) {
         use lightcraft_pipeline::{RenderRequest, render};
         let wb = [2.5f32, 1.0, 1.6];
-        let colour = CameraColourModel { wb, matrix: lightcraft_color::Mat3::IDENTITY, gain: 1.0, tables: None, hue_sat: None };
+        let colour = CameraColourModel { wb, matrix: lightcraft_color::Mat3::IDENTITY, gain: 1.0, tables: None, hue_sat: None, bands: None };
         let w = 1600usize;
         let k = |x: usize| 0.8 + 0.55 * x as f32 / (w - 1) as f32;
         let sensor =
@@ -1993,7 +2102,7 @@ pub(crate) mod tests {
     fn second_clip(top: usize, strip: usize, band: usize) -> ([[u8; 4]; 2], u8) {
         use lightcraft_pipeline::{RenderRequest, render};
         let wb = [2.5f32, 1.0, 1.6];
-        let colour = CameraColourModel { wb, matrix: lightcraft_color::Mat3::IDENTITY, gain: 1.0, tables: None, hue_sat: None };
+        let colour = CameraColourModel { wb, matrix: lightcraft_color::Mat3::IDENTITY, gain: 1.0, tables: None, hue_sat: None, bands: None };
         let (w, h) = (320usize, top + strip + band);
         let sensor = Rgb32f::from_fn(w, h, |x, y| {
             if y < top {
