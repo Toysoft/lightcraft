@@ -240,14 +240,14 @@ fn space_keeps_zoom_toggle_and_slideshow_pause_outside_pan_override() {
     h.app.run("tool.zoom", json!({})).expect("magnifier during slideshow");
     assert_eq!(h.app.ui.tool, "zoom");
     let zoom = h.app.ui.zoom;
-    assert!(h.app.ui.slideshow.is_some_and(|(_, _, paused)| !paused));
+    assert!(h.app.ui.slideshow.as_ref().is_some_and(|run| !run.play.is_paused()));
     h.request("ui.key", json!({"key": "Space"}), T);
     h.step();
-    assert!(h.app.ui.slideshow.is_some_and(|(_, _, paused)| paused), "Space pauses even with the magnifier selected");
+    assert!(h.app.ui.slideshow.as_ref().is_some_and(|run| run.play.is_paused()), "Space pauses even with the magnifier selected");
     assert_eq!(h.app.ui.zoom, zoom);
     h.request("ui.key", json!({"key": "Space"}), T);
     h.step();
-    assert!(h.app.ui.slideshow.is_some_and(|(_, _, paused)| !paused));
+    assert!(h.app.ui.slideshow.as_ref().is_some_and(|run| !run.play.is_paused()));
     assert_eq!(h.app.ui.zoom, zoom);
 }
 
@@ -326,6 +326,18 @@ fn magnifier_clicks_toggle_the_chosen_ratio_in_both_compare_and_reference_panes(
     let ids: Vec<_> = h.app.session.visible_cloned().into_iter().take(2).map(|id| id.0).collect();
     h.app.run("library.select", json!({"ids": ids, "active": ids[1]})).unwrap();
     h.app.run("view.clickZoom", json!({"ratio": 2})).unwrap();
+    h.app.ui.settings.zoom_to_focus = true;
+    for id in &ids {
+        let id = lightcraft_catalog::PhotoId(*id);
+        let mut meta = h.app.session.catalog.photo(id).unwrap().meta.clone();
+        meta.focus = Some(lightcraft_meta::FocusPoint {
+            rect: lightcraft_geom::Rect { x0: 0.70, y0: 0.20, x1: 0.74, y1: 0.26 },
+            mode: None,
+            area: None,
+            tracking: None,
+        });
+        h.app.session.catalog.apply(lightcraft_catalog::Op::SetMeta { id, meta: Box::new(meta) }).unwrap();
+    }
     for view in [ViewMode::Compare, ViewMode::Reference] {
         h.app.ui.view = view;
         h.app.ui.compare = Some((ids[0], ids[1]));
@@ -340,6 +352,10 @@ fn magnifier_clicks_toggle_the_chosen_ratio_in_both_compare_and_reference_panes(
             assert_eq!(r["ok"], true, "{r}");
             h.step();
             assert_eq!(h.app.ui.zoom, Zoom::Percent(200.0), "{view:?}: single click uses the chosen ratio");
+            assert!(
+                (h.app.ui.pan.0 - 0.5).abs() < 1e-3 && (h.app.ui.pan.1 - 0.5).abs() < 1e-3,
+                "a pane click targets its centre, not the active photo's AF point"
+            );
             assert_eq!(h.app.ui.view, view);
             assert_eq!(h.app.ui.reference, Some(ids[0]));
             if view == ViewMode::Reference {
