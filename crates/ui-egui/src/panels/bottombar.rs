@@ -77,8 +77,13 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
 }
 
 /// Five 19-point stars, three 22-point flags, seven 3-point gaps, a 6-point group gap
-/// and 10-point padding at both ends.
-const PILL_W: f32 = 208.0;
+/// and 14-point padding at both ends, keeping the rounded edge away from the last flag.
+const STAR_SIZE: f32 = 19.0;
+const FLAG_SIZE: f32 = 22.0;
+const PILL_GAP: f32 = 3.0;
+const PILL_PADDING: f32 = 14.0;
+const GROUP_GAP: f32 = 6.0;
+const PILL_W: f32 = 5.0 * STAR_SIZE + 3.0 * FLAG_SIZE + 7.0 * PILL_GAP + GROUP_GAP + 2.0 * PILL_PADDING;
 
 /// The rating/flag pill and copy/paste settings, between `from` and `to` (the side groups): the
 /// copy buttons go first when there is no room (they are in the Edit menu too), then the pill.
@@ -99,19 +104,20 @@ fn centre(app: &mut LightcraftApp, ui: &mut egui::Ui, full: Rect, from: f32, to:
     let active = app.session.active().and_then(|id| app.session.catalog.photo(id).cloned());
     let pill = Rect::from_min_size(pos2(left, full.center().y - 15.0), vec2(PILL_W, 30.0));
     ui.painter().rect_filled(pill, 15.0, t.canvas);
+    register(ui.ctx(), "group:ratingFlags", pill);
     let mut pill_ui =
-        ui.new_child(egui::UiBuilder::new().max_rect(pill.shrink2(vec2(10.0, 4.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    pill_ui.spacing_mut().item_spacing.x = 3.0;
+        ui.new_child(egui::UiBuilder::new().max_rect(pill.shrink2(vec2(PILL_PADDING, 4.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    pill_ui.spacing_mut().item_spacing.x = PILL_GAP;
     let rating = active.as_ref().map(|p| p.rating).unwrap_or(0);
-    if let Some(r) = stars(&mut pill_ui, "bottom", rating, 19.0) {
+    if let Some(r) = stars(&mut pill_ui, "bottom", rating, STAR_SIZE) {
         let mut params = json!({"rating": r});
         crate::panels::compare::target_active(app, &mut params);
         let _ = app.run("photo.rate", params);
     }
-    pill_ui.add_space(6.0);
+    pill_ui.add_space(GROUP_GAP);
     let flag = active.as_ref().map(|p| p.flag).unwrap_or_default();
     for (id, icon, f) in [("unflag", Icon::Circle, Flag::None), ("pick", Icon::FlagPick, Flag::Pick), ("reject", Icon::FlagReject, Flag::Reject)] {
-        let (r, resp) = pill_ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+        let (r, resp) = pill_ui.allocate_exact_size(vec2(FLAG_SIZE, FLAG_SIZE), Sense::click());
         register(pill_ui.ctx(), format!("flag:{id}"), r);
         let on = flag == f && f != Flag::None;
         let c = if on {
@@ -385,7 +391,8 @@ mod visual_regressions {
                     output.textures_delta.clear();
                     assert_eq!(ctx.content_rect().size(), vec2(width, 100.0));
                     assert_eq!(ctx.pixels_per_point(), scale);
-                    let controls = crate::widgets::take_registry(&ctx);
+                    // Containers legitimately contain their children; compare interactive controls.
+                    let controls: Vec<_> = crate::widgets::take_registry(&ctx).into_iter().filter(|(id, _)| !id.starts_with("group:")).collect();
                     assert!(!controls.is_empty());
                     for (index, (id, rect)) in controls.iter().enumerate() {
                         assert!(rect.left() >= 0.0 && rect.right() <= width, "{view:?} at {width}: {id} outside viewport: {rect:?}");
@@ -478,7 +485,7 @@ mod tests {
                             _ => None,
                         })
                         .unwrap();
-                    let inner = pill.shrink2(vec2(10.0, 4.0));
+                    let inner = pill.shrink2(vec2(PILL_PADDING, 4.0));
                     for (id, rect) in &widgets {
                         if id.starts_with("star:bottom:") || id.starts_with("flag:") {
                             assert!(inner.contains_rect(*rect), "{id} {rect:?} exceeds the pill's padded bounds {inner:?} at scale {scale}");

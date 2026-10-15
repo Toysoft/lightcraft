@@ -51,9 +51,9 @@ fn kind_label(s: &MaskShape) -> (&'static str, Icon) {
         MaskShape::DepthRange { .. } => ("Depth Range", Icon::Sliders),
         MaskShape::Subject => ("Subject", Icon::Subject),
         MaskShape::Sky => ("Sky", Icon::Sky),
-        MaskShape::Background => ("Background", Icon::Subject),
-        MaskShape::Object { .. } => ("Object", Icon::Subject),
-        MaskShape::Prompt { .. } => ("Describe", Icon::Subject),
+        MaskShape::Background => ("Background", Icon::Background),
+        MaskShape::Object { .. } => ("Object", Icon::Object),
+        MaskShape::Prompt { .. } => ("Describe", Icon::Describe),
         MaskShape::People { .. } => ("People", Icon::Subject),
         MaskShape::Landscape { .. } => ("Landscape", Icon::Sky),
     }
@@ -94,11 +94,11 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         ui.label(egui::RichText::new(crate::i18n::tr("Create New Mask")).color(t.text_dim));
         ui.add_space(6.0);
         let tiles: [(&str, &str, Icon); 10] = [
-            ("object", "Object", Icon::Subject),
-            ("prompt", "Describe", Icon::Subject),
+            ("object", "Object", Icon::Object),
+            ("prompt", "Describe", Icon::Describe),
             ("subject", "Subject", Icon::Subject),
             ("sky", "Sky", Icon::Sky),
-            ("background", "Background", Icon::Subject),
+            ("background", "Background", Icon::Background),
             ("brush", "Brush", Icon::Brush),
             ("linear", "Linear", Icon::Linear),
             ("radial", "Radial", Icon::Radial),
@@ -283,8 +283,10 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             if sel {
                 // right under the selected mask: ＋ adds to it, − takes away from it (any mask
                 // type; Describe… opens its field here)
+                ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.add_space(30.0);
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    ui.add_space(8.0);
                     let plus = text_button(ui, &format!("maskPlus:{}", m.id), "+", false).on_hover_text(crate::i18n::tr("Add to this mask"));
                     egui::Popup::menu(&plus).show(|ui| component_menu(app, ui, "add"));
                     let minus = text_button(ui, &format!("maskMinus:{}", m.id), "−", false).on_hover_text(crate::i18n::tr("Subtract from this mask"));
@@ -294,7 +296,9 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
             }
         }
         if !d.masks.is_empty() {
-            ui.add_space(6.0);
+            ui.add_space(12.0);
+            ui.separator();
+            ui.add_space(8.0);
             overlay_options(app, ui);
         }
     });
@@ -409,7 +413,8 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
     };
     let out = slider(ui, &refine, m.refine, true, None);
     apply_slider_out(app, &refine, out, |app, v| app.run("mask.refine", json!({"value": v})));
-    ui.add_space(30.0);
+    ui.spacing_mut().item_spacing.x = 8.0;
+    ui.add_space(8.0);
     let _ = Stroke::NONE;
 }
 
@@ -452,8 +457,9 @@ fn overlay_options(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     use lightcraft_pipeline::MaskView;
     let t = Tokens::get(ui.ctx());
     let view = MaskView::parse(&app.ui.mask_overlay_mode).unwrap_or_default();
+    ui.label(egui::RichText::new(crate::i18n::tr("Overlay")).color(t.text_dim));
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(crate::i18n::tr("Overlay")).color(t.text_dim));
         let r = crate::widgets::dropdown(ui, "maskOverlayMode", menu_label(view.label()), t.font(12.5), t.text_label);
         egui::Popup::menu(&r).show(|ui| {
             for v in MaskView::ALL {
@@ -463,6 +469,7 @@ fn overlay_options(app: &mut LightcraftApp, ui: &mut egui::Ui) {
             }
         });
     });
+    ui.add_space(8.0);
     let colored = matches!(view, MaskView::Color | MaskView::ColorOnBw);
     if colored {
         ui.horizontal(|ui| {
