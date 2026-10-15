@@ -560,7 +560,8 @@ pub fn overlay(app: &mut LightcraftApp, ui: &mut egui::Ui, canvas: Rect) {
         if b.clicked() {
             new_location(app, false);
         }
-        let any = app.session.targets(&json!({})).unwrap_or_default().iter().any(|id| app.session.catalog.photo(*id).is_some_and(|p| p.meta.gps.is_some()));
+        let any =
+            app.session.targets(&json!({})).unwrap_or_default().iter().any(|id| app.session.catalog.photo(*id).is_some_and(|p| p.meta.gps.is_some()));
         let b = ui.add_enabled(any, egui::Button::new(crate::i18n::tr("New Location from Selection…")));
         register(ui.ctx(), "map:locationNew:selection", b.rect);
         if b.clicked() {

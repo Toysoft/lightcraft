@@ -1167,11 +1167,13 @@ impl Session {
     #[cfg(test)]
     pub(crate) fn visible_in_full(&mut self) -> Vec<PhotoId> {
         let kept = (self.base.clone(), self.visible_key.clone(), self.visible.clone(), self.visible_gen, self.view_followed, self.view_worked_out);
+        let kept_narrow = (self.visible_base.clone(), self.visible_base_gen, self.narrow_key.clone());
         self.never_follow = true;
         self.visible_key = None;
         let whole = self.visible().to_vec();
         self.never_follow = false;
         (self.base, self.visible_key, self.visible, self.visible_gen, self.view_followed, self.view_worked_out) = kept;
+        (self.visible_base, self.visible_base_gen, self.narrow_key) = kept_narrow;
         whole
     }
 
