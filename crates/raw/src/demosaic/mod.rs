@@ -429,9 +429,12 @@ mod tests {
     /// moves the pattern's phase, and sensor noise is what the denoiser is given the result for):
     /// `LC_XTRANS_RAW=<file> cargo test --release -p lightcraft-raw --lib -- --ignored --nocapture remosaic_a_real_file`
     #[test]
-    #[ignore]
+    #[ignore = "needs LC_XTRANS_RAW pointing at a real non-Bayer raw file"]
     fn remosaic_a_real_file() {
-        let Some(path) = std::env::var_os("LC_XTRANS_RAW") else { return };
+        let Some(path) = std::env::var_os("LC_XTRANS_RAW") else {
+            lightcraft_testkit::skip!(Input, "set LC_XTRANS_RAW=<path to a non-Bayer raw file>");
+            return;
+        };
         let raw = crate::decode(&std::fs::read(&path).unwrap()).unwrap();
         let n = raw.normalized().unwrap();
         let cfa = n.cfa.clone().unwrap();
