@@ -632,6 +632,10 @@ impl Session {
             return Err(EngineError::Other(format!("{} is a virtual copy: its settings live only in the library", p.file_name)));
         }
         let orig = file_path(p).ok_or_else(|| EngineError::Other(format!("{} is not a file on disk", p.file_name)))?;
+        if self.is_moving(orig) {
+            // the file and its sidecar are on their way: a write now would land behind them
+            return Err(EngineError::Other(format!("{} is being moved: its sidecar is written once it arrives", p.file_name)));
+        }
         let naming = owners.naming(p, self.xmp.naming);
         let preferred = sidecar_path(orig, naming);
         let other = if naming == SidecarNaming::Stem { SidecarNaming::Full } else { SidecarNaming::Stem };
@@ -721,7 +725,7 @@ impl Session {
         self.auto_write_sidecar_ids(ids);
     }
 
-    fn auto_write_sidecar_ids(&mut self, ids: Vec<PhotoId>) {
+    pub(crate) fn auto_write_sidecar_ids(&mut self, ids: Vec<PhotoId>) {
         if ids.is_empty() {
             return;
         }

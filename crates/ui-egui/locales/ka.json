@@ -2718,5 +2718,8 @@
   "≥  at least": "≥  არანაკლებ",
   "⌘-drag to straighten, ⇧G Guided Upright, a grid while transforming.": "⌘-გადათრევა გასასწორებლად, ⇧G მართვადი Upright, ბადე გარდაქმნისას.",
   "日本語": "日本語",
-  "繁體中文（台灣）": "繁體中文（台灣）"
+  "繁體中文（台灣）": "繁體中文（台灣）",
+  "Moving photos": "ფოტოების გადატანა",
+  "Stopped: no photo was moved": "შეჩერდა: არცერთი ფოტო არ გადატანილა",
+  "Moving was stopped by an error (see the log). The library follows the files that had moved.": "გადატანა შეცდომამ შეაჩერა (იხ. ჟურნალი). ბიბლიოთეკა მიჰყვება უკვე გადატანილ ფაილებს."
 }

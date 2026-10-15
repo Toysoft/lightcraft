@@ -32,7 +32,7 @@ guard.detail(&file_name);
   `SyncRun`…), or move it into the worker thread. Dropping it removes the row, also when the worker panics, so a
   dead job never leaves a stuck bar. A worker that only reports progress takes a `TaskHandle` (`guard.handle()`,
   `Clone + Send`).
-- **`kind`** is a stable camelCase id that agents filter by (`export`, `import`, `scan`, `sync`, `previews`,
+- **`kind`** is a stable camelCase id that agents filter by (`export`, `import`, `scan`, `sync`, `move`, `previews`,
   `download`, `faces`, `cache`, `focus`…). **`label`** is a short English name in sentence case ("Building previews"). The stack shows it
   translated, so add it to every catalog in `crates/ui-egui/locales/`.
 - **Progress:** `progress(done, total)`. A `total` of 0 means the amount of work isn't known yet, and the bar sweeps.
@@ -61,6 +61,7 @@ guard.detail(&file_name);
 | Face scan, AI Denoise | `crates/engine/src/cmd/face_recognize.rs`, `crates/engine/src/denoise.rs` | a continuous job with no ✕, kept in session state |
 | Find Missing Photos | `crates/ui-egui/src/tasks.rs` | a generic background task with a row (`kind: Some(..)`) |
 | Reading focus points | `crates/engine/src/focus_scan.rs` | a worker paced by the UI's per-frame pump (`focus.pump {pace}`); `Cancel::Flag`; commits in batches without undo steps |
+| Moving photos to another folder | `crates/engine/src/move_job.rs`, `crates/ui-egui/src/move_task.rs` | split a job into a session half (plan, row, finish) and a `Send` worker half; `Cancel::Yes` checked between files, keeping what is done; hold back conflicting commands while it runs; a record on disk so a force-quit part-way is followed at the next open (`crates/engine/src/move_intent.rs`) |
 
 ## Testing
 

@@ -2338,5 +2338,8 @@
   "Checking the GPU…": "Перевірка ГП…",
   "CPU": "ЦП",
   "A face model uses the GPU only when a check shows it gives the same results faster.": "Модель облич використовує ГП, лише якщо перевірка показала, що він дає ті самі результати швидше.",
-  "Checking the GPU for faces": "Перевірка ГП для облич"
+  "Checking the GPU for faces": "Перевірка ГП для облич",
+  "Moving photos": "Переміщення фото",
+  "Stopped: no photo was moved": "Зупинено: жодне фото не переміщено",
+  "Moving was stopped by an error (see the log). The library follows the files that had moved.": "Переміщення зупинила помилка (див. журнал). Бібліотека слідує за вже переміщеними файлами."
 }

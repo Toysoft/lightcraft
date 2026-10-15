@@ -1,5 +1,17 @@
 # What's new in LightCraft
 
+## 2026-10-15
+
+### Moving photos to a NAS no longer freezes the window
+- Moving photos to another folder (dropping them on a Folders row, Move Selected Photos Here, Move to Folder…) now
+  runs in the background. The activity stack shows "Moving photos" with how many have moved and the file in hand,
+  and ✕ stops the move after that file: the photos that moved stay moved, as one step Edit ▸ Undo takes back, and
+  the rest stay where they were. A toast says how it ended.
+- While a move runs, editing, rating and keywording go on as usual; the moving photos' XMP sidecars are written once
+  they arrive. Another move, a rename, Undo or Redo of a file move and opening another library wait for it.
+- If LightCraft is force-quit or crashes part-way, nothing is lost: the next time the library opens, the photos whose
+  files reached the new folder point there (their sidecars follow), the others stay, and you are told how many.
+
 ## 2026-10-14
 
 ### Lightroom radial masks on the right side

@@ -449,6 +449,8 @@ impl Session {
     /// Open `stores`; the new library takes `lock` once nothing can fail any more.
     fn open_stores(&mut self, stores: LibraryStores, seed_demo: bool, lock: &mut Option<LibraryLock>) -> Result<()> {
         let LibraryStores { dir, catalog, mut files, on_disk } = stores;
+        // a move in progress belongs to the open library: it finishes (or is stopped) first
+        self.refuse_while_moving()?;
         self.media.smart_dir = on_disk.then(|| crate::smart::dir(&dir));
         // the current library may be these same files: let its background snapshot land first
         if let Some(old) = self.library.as_mut()
@@ -583,6 +585,14 @@ impl Session {
             blocked: settings.blocked,
             lock: lock.take(),
         });
+        // moves an earlier run left unfinished (stopped part-way: a force-quit, a crash)
+        let recovered = self.recover_moves();
+        if let Some(text) = recovered.notice() {
+            log::warn!("library: {text}");
+            if let Some(lib) = self.library.as_mut() {
+                lib.settings_warnings.push(text);
+            }
+        }
         // forget untouched Local records of folders not browsed for a while (journaled at once)
         if self.forget_local_days > 0 {
             let plan = self.forget_local(false, None);
