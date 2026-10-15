@@ -36,7 +36,7 @@ pub enum Icon {
     /// [`Icon::Tag`] filled: a selected keyword.
     TagFilled,
     Info,
-    /// Photo Grid view (Tabler `layout-board`).
+    /// Photo Grid view (Tabler `layout-board`, turned so its columns are rows).
     GridPhoto,
     /// [`Icon::GridPhoto`] filled: the Photo Grid view is on.
     GridPhotoFilled,
@@ -209,8 +209,8 @@ impl Icon {
             Icon::TrashFilled => svg::TRASH_FILL,
             Icon::FlagPick => svg::FLAG,
             Icon::FlagPickFilled => svg::FLAG_FILL,
-            Icon::GridPhoto => svg::LAYOUT_BOARD,
-            Icon::GridPhotoFilled => svg::LAYOUT_BOARD_FILL,
+            Icon::GridPhoto => svg::LAYOUT_BOARD_ROWS,
+            Icon::GridPhotoFilled => svg::LAYOUT_BOARD_ROWS_FILL,
             Icon::GridSquare => svg::LAYOUT_GRID,
             Icon::GridSquareFilled => svg::LAYOUT_GRID_FILL,
             Icon::Single => svg::RECTANGLE,

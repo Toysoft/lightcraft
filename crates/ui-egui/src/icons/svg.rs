@@ -9,16 +9,29 @@ use std::collections::HashMap;
 use egui::{Color32, ColorImage, Painter, Rect, TextureHandle, TextureOptions, pos2, vec2};
 use kurbo::{BezPath, Cap, Join, PathEl, Point, Stroke, StrokeOpts};
 
-/// An icon file: its name (the texture cache key) and its SVG text.
+/// An icon file: its name (the texture cache key), its SVG text, and whether it is drawn turned a
+/// quarter turn clockwise (the file itself is unchanged).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Svg {
     pub name: &'static str,
     pub text: &'static str,
+    pub turned: bool,
 }
 
 macro_rules! tabler {
     ($style:literal, $name:literal) => {
-        Svg { name: concat!($style, "/", $name), text: include_str!(concat!("../../../../assets/icons/tabler/", $style, "/", $name, ".svg")) }
+        Svg {
+            name: concat!($style, "/", $name),
+            text: include_str!(concat!("../../../../assets/icons/tabler/", $style, "/", $name, ".svg")),
+            turned: false,
+        }
+    };
+    ($style:literal, $name:literal, turned) => {
+        Svg {
+            name: concat!($style, "/", $name, " turned"),
+            text: include_str!(concat!("../../../../assets/icons/tabler/", $style, "/", $name, ".svg")),
+            turned: true,
+        }
     };
 }
 
@@ -37,8 +50,9 @@ pub(super) const TRASH: Svg = tabler!("outline", "trash");
 pub(super) const TRASH_FILL: Svg = tabler!("filled", "trash");
 pub(super) const FLAG: Svg = tabler!("outline", "flag");
 pub(super) const FLAG_FILL: Svg = tabler!("filled", "flag");
-pub(super) const LAYOUT_BOARD: Svg = tabler!("outline", "layout-board");
-pub(super) const LAYOUT_BOARD_FILL: Svg = tabler!("filled", "layout-board");
+/// `layout-board` turned so its columns become rows: the Photo Grid's justified rows.
+pub(super) const LAYOUT_BOARD_ROWS: Svg = tabler!("outline", "layout-board", turned);
+pub(super) const LAYOUT_BOARD_ROWS_FILL: Svg = tabler!("filled", "layout-board", turned);
 pub(super) const LAYOUT_GRID: Svg = tabler!("outline", "layout-grid");
 pub(super) const LAYOUT_GRID_FILL: Svg = tabler!("filled", "layout-grid");
 pub(super) const RECTANGLE: Svg = tabler!("outline", "rectangle");
@@ -89,7 +103,7 @@ pub(super) fn paint(p: &Painter, rect: Rect, svg: Svg, color: Color32) {
     let tex = match cached {
         Some(id) => id,
         None => {
-            let image = ColorImage::new([px, px], mask(svg.text, px).into_iter().map(Color32::from_white_alpha).collect());
+            let image = ColorImage::new([px, px], mask_turned(svg.text, svg.turned, px).into_iter().map(Color32::from_white_alpha).collect());
             let tex = ctx.load_texture(format!("icon-{}-{px}", svg.name), image, TextureOptions::LINEAR);
             let id = tex.id();
             ctx.data_mut(|d| {
@@ -214,8 +228,20 @@ fn attr<'a>(text: &'a str, name: &str) -> Option<&'a str> {
 
 /// The coverage (0–255) of each pixel of a `px`×`px` mask the SVG `svg` paints, its `viewBox`
 /// scaled to the whole mask. Empty when the file does not parse.
+#[cfg(test)]
 fn mask(svg: &str, px: usize) -> Vec<u8> {
-    let Some(([vx, vy, vw, vh], regions)) = parse(svg) else { return vec![0; px * px] };
+    mask_turned(svg, false, px)
+}
+
+/// [`mask`], turned a quarter turn clockwise about the `viewBox`'s centre when `turned`.
+fn mask_turned(svg: &str, turned: bool, px: usize) -> Vec<u8> {
+    let Some(([vx, vy, vw, vh], mut regions)) = parse(svg) else { return vec![0; px * px] };
+    if turned {
+        let turn = kurbo::Affine::rotate_about(std::f64::consts::FRAC_PI_2, Point::new(vx + vw / 2.0, vy + vh / 2.0));
+        for region in &mut regions {
+            region.apply_affine(turn);
+        }
+    }
     let k = px as f64 / vw.max(vh);
     let mut total = vec![0.0f32; px * px];
     let mut cover = vec![0.0f32; px * px];
@@ -327,7 +353,7 @@ mod tests {
         (CLOCK, CLOCK_FILL),
         (TRASH, TRASH_FILL),
         (FLAG, FLAG_FILL),
-        (LAYOUT_BOARD, LAYOUT_BOARD_FILL),
+        (LAYOUT_BOARD_ROWS, LAYOUT_BOARD_ROWS_FILL),
         (LAYOUT_GRID, LAYOUT_GRID_FILL),
         (RECTANGLE, RECTANGLE_FILL),
         (COLUMNS_2, COLUMNS_2_FILL),
@@ -346,7 +372,7 @@ mod tests {
     }
 
     fn ink(svg: Svg, px: usize) -> f64 {
-        mask(svg.text, px).iter().map(|&a| f64::from(a) / 255.0).sum::<f64>() / (px * px) as f64
+        mask_turned(svg.text, svg.turned, px).iter().map(|&a| f64::from(a) / 255.0).sum::<f64>() / (px * px) as f64
     }
 
     #[test]
@@ -389,6 +415,21 @@ mod tests {
         assert_eq!(m[5 * 10 + 5], 255, "the stroked line");
         // SVG's defaults: filled, not stroked
         assert!(mask("<svg viewBox=\"0 0 10 10\"><path d=\"M0 0h10v10H0z\"/></svg>", 10).iter().all(|&a| a == 255));
+    }
+
+    #[test]
+    fn a_turned_icon_has_its_columns_as_rows() {
+        // layout-board's divider runs down the middle (x 11–13 at one pixel a unit); turned, across it
+        let px = 24;
+        let upright = mask(LAYOUT_BOARD_ROWS.text, px);
+        let turned = mask_turned(LAYOUT_BOARD_ROWS.text, true, px);
+        let row = |m: &[u8]| (6..18).all(|x| m[11 * px + x] == 255);
+        let column = |m: &[u8]| (6..18).all(|y| m[y * px + 11] == 255);
+        assert!(column(&upright) && !row(&upright), "the file's divider is upright");
+        assert!(row(&turned) && !column(&turned), "turned, the divider lies across");
+        // the Photo Grid's top row is split right of centre and its bottom row left of it
+        assert_eq!(turned[7 * px + 15], 255, "top row split at x = 15");
+        assert_eq!(turned[16 * px + 9], 255, "bottom row split at x = 9");
     }
 
     #[test]
