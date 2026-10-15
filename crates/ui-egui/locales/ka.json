@@ -2718,5 +2718,22 @@
   "≥  at least": "≥  არანაკლებ",
   "⌘-drag to straighten, ⇧G Guided Upright, a grid while transforming.": "⌘-გადათრევა გასასწორებლად, ⇧G მართვადი Upright, ბადე გარდაქმნისას.",
   "日本語": "日本語",
-  "繁體中文（台灣）": "繁體中文（台灣）"
+  "繁體中文（台灣）": "繁體中文（台灣）",
+  "Auto-Tag Selected Photo": "მონიშნული ფოტოსთვის მდებარეობის მინიჭება",
+  "Auto-Tag Selected Photos from Map Tracklog": "მონიშნული ფოტოებისთვის მდებარეობის მინიჭება რუკის მარშრუტის ჟურნალიდან",
+  "Clear Tracklog": "მარშრუტის ჟურნალის გასუფთავება",
+  "Duration:": "ხანგრძლივობა:",
+  "End:": "დასასრული:",
+  "Fit Map to Tracklog": "რუკის მარშრუტის ჟურნალზე მორგება",
+  "Load Another Tracklog…": "სხვა მარშრუტის ჟურნალის ჩატვირთვა…",
+  "Load Tracklog": "მარშრუტის ჟურნალის ჩატვირთვა",
+  "Load Tracklog…": "მარშრუტის ჟურნალის ჩატვირთვა…",
+  "Load a GPS track log (GPX) to show it on the map and tag photos from it": "ჩატვირთეთ GPS მარშრუტის ჟურნალი (GPX), რომ რუკაზე გამოჩნდეს და ფოტოებს მისგან მიენიჭოთ მდებარეობა",
+  "Set Time Zone Offset": "სასაათო სარტყლის წანაცვლების დაყენება",
+  "Set Time Zone Offset…": "სასაათო სარტყლის წანაცვლების დაყენება…",
+  "Set Tracklog Time Zone Offset…": "მარშრუტის ჟურნალის სასაათო სარტყლის წანაცვლების დაყენება…",
+  "Start:": "დასაწყისი:",
+  "Tracklog": "მარშრუტის ჟურნალი",
+  "UTC: no time zone offset set": "UTC: სასაათო სარტყლის წანაცვლება არ არის დაყენებული",
+  "points": "წერტილი"
 }
