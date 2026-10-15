@@ -1355,6 +1355,7 @@ mod tests_spots;
 mod tests_sync;
 #[cfg(test)]
 mod tests_view_follow;
+#[cfg(test)]
 mod tests_view_reconcile;
 #[cfg(test)]
 mod tests_xmp;

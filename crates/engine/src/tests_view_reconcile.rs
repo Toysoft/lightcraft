@@ -240,7 +240,7 @@ fn a_selected_photo_that_is_gone_is_acted_on_nowhere() {
     run(&mut s, "edit.undo", json!({}));
     assert!(s.catalog.photo(late).is_none());
     assert_eq!(s.active(), None, "no photo to act on alone");
-    assert_eq!(s.targets(&json!({})), [PhotoId(1)], "the selection, as far as it is there");
+    assert_eq!(s.targets(&json!({})).unwrap(), [PhotoId(1)], "the selection, as far as it is there");
     assert_eq!(run(&mut s, "album.addPhotos", json!({"id": album}))["added"], 1);
     assert_eq!(s.catalog.album(AlbumId(album)).unwrap().photos, [PhotoId(1)]);
     run(&mut s, "photo.rate", json!({"rating": 3}));
