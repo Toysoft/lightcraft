@@ -2832,7 +2832,7 @@ mod tests {
             let raw = HeadlessView::raw_input(egui::vec2(300.0, 200.0), 1.0, frame as f64 / 60.0, vec![]);
             view.run(raw, |ui| {
                 super::row(&mut app, ui, "all", super::Icon::Photos, "All Photos", None, false, 0.0);
-                super::folder_tree(&mut app, ui, path, "Pictures", path, 0.0, None, false, false);
+                super::folder_tree(&mut app, ui, path, "Pictures", path, 0.0, None, false, false, None);
             });
             widgets = crate::widgets::take_registry(&view.ctx);
         }
