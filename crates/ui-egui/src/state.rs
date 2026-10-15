@@ -37,6 +37,8 @@ pub enum RightPanel {
     Info,
     /// The profile browser (part of Edit).
     Profiles,
+    /// Craft AI: the ArtCraft family's built-in local assistant (see `crate::craft_ai`).
+    CraftAi,
 }
 
 impl RightPanel {

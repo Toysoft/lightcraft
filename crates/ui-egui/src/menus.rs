@@ -121,6 +121,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     ("panel.presets", "Presets", Some("Shift+P"), "Window"),
     ("panel.info", "Info", Some("I"), "Window"),
     ("panel.keywords", "Keywords", Some("K"), "Window"),
+    ("panel.craftAi", "Craft AI", None, "Window"),
     ("panel.versions", "Versions", Some("Shift+V"), "Window"),
     ("panel.activity", "History", None, "Window"),
     ("panel.close", "Close Panel", None, ""),
