@@ -116,7 +116,7 @@ pub fn warp(img: &Rgb32f, h: &Homography) -> (Rgb32f, Vec<bool>) {
             let p = h.apply(Point::new(x as f64 + 0.5, y as f64 + 0.5));
             let (sx, sy) = (p.x as f32, p.y as f32);
             if sx >= 0.0 && sy >= 0.0 && sx <= w as f32 && sy <= ht as f32 {
-                row[x] = img.sample_bilinear(sx, sy);
+                row[x] = img.sample_lanczos3(sx, sy);
                 vrow[x] = true;
             }
         }
