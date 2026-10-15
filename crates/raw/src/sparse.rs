@@ -255,7 +255,7 @@ fn tiff_plan(bytes: &[u8], loaded: &Ranges, preview: bool, pointed_holes: bool) 
         return plan;
     }
     // (the Make is usually in the first kilobytes: a NEF, PEF or ORF is known before the rest is read)
-    if matches!(crate::probe(bytes), Some(RawFormat::Nef | RawFormat::Nrw | RawFormat::Orf | RawFormat::Pef)) {
+    if matches!(crate::probe(bytes), Some(RawFormat::Nef | RawFormat::Nrw | RawFormat::Orf | RawFormat::Pef | RawFormat::Erf | RawFormat::Mef)) {
         return HeaderPlan::Whole("its header probe reads samples");
     }
     let Ok(tiff) = Tiff::parse(bytes) else { return HeaderPlan::Whole("TIFF structure") };
@@ -299,7 +299,9 @@ fn tiff_plan(bytes: &[u8], loaded: &Ranges, preview: bool, pointed_holes: bool) 
         }
     }
     finish(len, loaded, &holes, &meta, || match crate::probe(bytes) {
-        Some(RawFormat::Nef | RawFormat::Nrw | RawFormat::Orf | RawFormat::Pef) => HeaderPlan::Whole("its header probe reads samples"),
+        Some(RawFormat::Nef | RawFormat::Nrw | RawFormat::Orf | RawFormat::Pef | RawFormat::Erf | RawFormat::Mef) => {
+            HeaderPlan::Whole("its header probe reads samples")
+        }
         Some(f) if f.is_supported() => HeaderPlan::Ready,
         _ => HeaderPlan::Whole("not a supported raw"),
     })

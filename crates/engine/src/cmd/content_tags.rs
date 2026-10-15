@@ -757,12 +757,13 @@ fn round(x: f32) -> f64 {
     (f64::from(x) * 1e4).round() / 1e4
 }
 
-/// The photos a command acts on: `ids`, `id`, else the selection; only photos in the library.
-fn photos(s: &Session, p: &Value) -> Vec<PhotoId> {
-    let mut out = s.targets(p);
+/// The photos a command acts on: `ids`, `id`, else the selection; only photos in the library. An `ids` or `id` that
+/// isn't photo ids is an error ([`Session::targets`]).
+fn photos(s: &Session, p: &Value) -> Result<Vec<PhotoId>> {
+    let mut out = s.targets(p)?;
     out.retain(|id| s.catalog.photo(*id).is_some_and(|ph| ph.in_library() && !ph.deleted));
     out.dedup();
-    out
+    Ok(out)
 }
 
 /// Bring tags up to date for a command that answers at once.
@@ -785,7 +786,7 @@ pub(crate) fn tags(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let (state, error) = state(s);
-    let list: Vec<Value> = photos(s, p)
+    let list: Vec<Value> = photos(s, p)?
         .into_iter()
         .take(10_000)
         .map(|id| {
@@ -850,7 +851,7 @@ pub(crate) fn accept(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "content.acceptTags";
     settle(s);
     let tags = resolve(s, C, p)?;
-    let ids = photos(s, p);
+    let ids = photos(s, p)?;
     if ids.is_empty() {
         return Err(bad(C, "no photos: give `ids` of photos in the library, or select some"));
     }
@@ -892,7 +893,7 @@ pub(crate) fn dismiss(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "content.dismissTags";
     settle(s);
     let tags = resolve(s, C, p)?;
-    let ids = photos(s, p);
+    let ids = photos(s, p)?;
     if ids.is_empty() {
         return Err(bad(C, "no photos: give `ids` of photos in the library, or select some"));
     }

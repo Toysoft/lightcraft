@@ -191,8 +191,8 @@ fn preview_covering(bytes: &[u8], min_edge: Option<u32>) -> Option<Vec<u8>> {
     }
     let found = tiff_candidates(bytes)?;
     let best = choose(&found, min_edge).map(|s| if is_jxl(s) { s.to_vec() } else { trim_eoi(s).to_vec() });
-    // a TIFF raw we can't decode whose preview no tag points to (Leaf MOS, Epson ERF)
-    best.or_else(|| format.filter(|f| !f.is_supported()).and_then(|_| scan_for_jpeg(bytes)))
+    // a TIFF raw whose preview no tag points to: one we can't decode (Leaf MOS), or Epson ERF (in its maker note)
+    best.or_else(|| format.filter(|f| !f.is_supported() || *f == crate::RawFormat::Erf).and_then(|_| scan_for_jpeg(bytes)))
 }
 
 /// Every preview a TIFF-based raw's tags point at (IFD strips and `JPEGInterchangeFormat` pointers, maker-note preview

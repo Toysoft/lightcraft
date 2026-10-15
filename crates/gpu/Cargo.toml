@@ -32,6 +32,8 @@ denoise = ["dep:lightcraft-denoise", "lightcraft-denoise/runtime"]
 vision = ["dep:lightcraft-vision"]
 
 [dev-dependencies]
+# tests record why they skip (`cargo xtask ci` lists the skips)
+lightcraft-testkit = { workspace = true }
 lightcraft-scenes = { workspace = true }
 lightcraft-raw = { workspace = true }
 serde_json = { workspace = true }

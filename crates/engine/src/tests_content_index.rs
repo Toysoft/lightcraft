@@ -301,6 +301,7 @@ fn a_replaced_original_is_queued_again_and_deleted_photos_are_compacted_away() {
         file_size: p.file_size,
         content_hash: Some("replaced".into()),
         preview_only: None,
+        preview_checked: String::new(),
     };
     s.commit("Reload", op).unwrap();
     // (an edit is not a new original: nothing to do for it)
