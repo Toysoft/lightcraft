@@ -2745,5 +2745,12 @@
   "Remove Folder Color Label": "საქაღალდის ფერადი იარლიყის მოხსნა",
   "Remove Folders from Library": "საქაღალდეების ბიბლიოთეკიდან ამოღება",
   "That includes the photos in the folders inside them.": "ეს მოიცავს მათში არსებული საქაღალდეების ფოტოებსაც.",
-  "The photos stay in All Photos. Undo brings the albums back.": "ფოტოები „ყველა ფოტოში“ რჩება. „დაბრუნება“ ალბომებს აღადგენს."
+  "The photos stay in All Photos. Undo brings the albums back.": "ფოტოები „ყველა ფოტოში“ რჩება. „დაბრუნება“ ალბომებს აღადგენს.",
+  "Show Parent Folder": "მშობელი საქაღალდის ჩვენება",
+  "Hide This Parent": "ამ მშობელი საქაღალდის დამალვა",
+  "Hides this row. Nothing on disk or in the library changes": "მალავს ამ მწკრივს. დისკზე და ბიბლიოთეკაში არაფერი იცვლება",
+  "Go Deeper": "უფრო ღრმად",
+  "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further": "ამ სიღრმის საქაღალდეები აქ არ ჩანს. დააწკაპეთ, რომ ეს საქაღალდე „ლოკალურს“ ცალკე ადგილად დაემატოს და შემდგომ გახსნათ",
+  "This folder stays listed while the grid shows its photos": "ეს საქაღალდე სიაში რჩება, სანამ ბადე მის ფოტოებს აჩვენებს",
+  "Opens as its own place": "იხსნება როგორც ცალკე ადგილი"
 }

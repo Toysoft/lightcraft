@@ -2186,5 +2186,12 @@
   "Remove Folders from Library": "Usuń foldery z biblioteki",
   "Set Folder Color Label": "Ustaw etykietę kolorystyczną folderu",
   "That includes the photos in the folders inside them.": "Obejmuje to też zdjęcia w folderach wewnątrz nich.",
-  "The photos stay in All Photos. Undo brings the albums back.": "Zdjęcia zostają we „Wszystkich zdjęciach”. Cofnij przywróci albumy."
+  "The photos stay in All Photos. Undo brings the albums back.": "Zdjęcia zostają we „Wszystkich zdjęciach”. Cofnij przywróci albumy.",
+  "Show Parent Folder": "Pokaż folder nadrzędny",
+  "Hide This Parent": "Ukryj ten folder nadrzędny",
+  "Hides this row. Nothing on disk or in the library changes": "Ukrywa ten wiersz. Nic nie zmienia się na dysku ani w bibliotece",
+  "Go Deeper": "Przejdź głębiej",
+  "Folders this deep are not listed here. Click to add this folder to Local as a place of its own, so you can open it further": "Tak głęboko położone foldery nie są tu wyświetlane. Kliknij, aby dodać ten folder do Lokalne jako osobne miejsce i otwierać go dalej",
+  "This folder stays listed while the grid shows its photos": "Ten folder pozostaje na liście, dopóki siatka pokazuje jego zdjęcia",
+  "Opens as its own place": "Otwiera się jako osobne miejsce"
 }

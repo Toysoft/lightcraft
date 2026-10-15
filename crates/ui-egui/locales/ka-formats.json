@@ -314,5 +314,7 @@
   "…and {n} more": "…და კიდევ {n}",
   "{n} keywords": "საკვანძო სიტყვები: {n}",
   "{n} albums": "ალბომები: {n}",
-  "{n} folders": "საქაღალდეები: {n}"
+  "{n} folders": "საქაღალდეები: {n}",
+  "Lists “{name}”, the folder this one is in": "აჩვენებს „{name}“-ს, საქაღალდეს, რომელშიც ეს არის",
+  "“{name}” is now a place in Local: open it there": "„{name}“ ახლა ადგილია „ლოკალურში“: გახსენით იქ"
 }
