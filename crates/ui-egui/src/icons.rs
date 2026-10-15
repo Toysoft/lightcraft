@@ -35,6 +35,8 @@ pub enum Icon {
     Sort,
     Star,
     StarFilled,
+    /// The Craft AI sparkle: a four-point star with deep concavity.
+    Sparkle,
     Circle,
     FlagPick,
     FlagReject,
@@ -157,6 +159,18 @@ fn star_pts(cx: f32, cy: f32, r: f32) -> Vec<(f32, f32)> {
         .map(|i| {
             let a = (-90.0 + i as f32 * 36.0f32).to_radians();
             let rr = if i % 2 == 0 { r } else { r * 0.45 };
+            (cx + rr * a.cos(), cy + rr * a.sin())
+        })
+        .collect()
+}
+
+/// The Craft AI sparkle's points: a four-point star, concavity deeper than the five-point
+/// `star_pts` one.
+fn sparkle_pts(cx: f32, cy: f32, r: f32) -> Vec<(f32, f32)> {
+    (0..8)
+        .map(|i| {
+            let a = (-90.0 + i as f32 * 45.0f32).to_radians();
+            let rr = if i % 2 == 0 { r } else { r * 0.34 };
             (cx + rr * a.cos(), cy + rr * a.sin())
         })
         .collect()
@@ -359,6 +373,7 @@ fn paint_with(p: &Painter, rect: Rect, icon: Icon, color: Color32, turn: Option<
             pen.line(&[(3.0, 15.0), (9.0, 15.0)]);
         }
         Star => pen.closed(&star_pts(10.0, 10.5, 7.5)),
+        Sparkle => pen.closed(&sparkle_pts(10.0, 10.5, 8.0)),
         StarFilled => {
             let pts = star_pts(10.0, 10.5, 7.5);
             // convex fan: fill triangles from the centre

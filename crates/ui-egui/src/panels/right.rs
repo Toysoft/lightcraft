@@ -16,6 +16,15 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
     let frame = egui::Frame::NONE.fill(t.chrome).stroke(egui::Stroke::new(1.0, t.divider));
     frame.show(ui, |ui| {
         let Some(id) = app.session.active() else {
+            // Craft AI is the family's assistant, not a photo's: it is there without a selection
+            if app.ui.right == RightPanel::CraftAi {
+                egui::ScrollArea::vertical().id_salt("right-scroll").auto_shrink([false, false]).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    header(ui, "Craft AI");
+                    padded(ui, |ui| crate::craft_ai::show(app, ui));
+                });
+                return;
+            }
             // the Keyword List is the library's, not a photo's: it is there without a selection
             if app.ui.right == RightPanel::Keywords {
                 egui::ScrollArea::vertical().id_salt("right-scroll").auto_shrink([false, false]).show(ui, |ui| {
@@ -45,6 +54,8 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 RightPanel::Keywords => keywords(app, ui, id),
                 RightPanel::Versions => versions(app, ui, id),
                 RightPanel::Activity => activity(app, ui, id),
+                // Reached only if the no-photo branch above is ever removed.
+                RightPanel::CraftAi => crate::craft_ai::show(app, ui),
                 RightPanel::None => {}
             }
         });

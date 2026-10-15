@@ -68,6 +68,9 @@ pub fn show(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 if icon_button(ui, "info", Icon::Info, sz, app.ui.right == RightPanel::Info, has_photo, "Info (I)").clicked() {
                     let _ = app.run("panel.info", json!({}));
                 }
+                if icon_button(ui, "craft-ai", Icon::Sparkle, sz, app.ui.right == RightPanel::CraftAi, true, "Craft AI").clicked() {
+                    let _ = app.run("panel.craftAi", json!({}));
+                }
             });
         });
 }
