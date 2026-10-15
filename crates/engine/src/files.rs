@@ -578,9 +578,11 @@ impl WbScaleOf {
         let model = meta.model.as_deref().filter(|_| fitted);
         let camera = model.and_then(|model| lightcraft_raw::spectral::find(meta.make.as_deref(), model));
         let presets = camera.is_none() && model.is_some_and(|model| lightcraft_raw::kelvin_presets::covers(meta.make.as_deref(), model));
+        // data the camera balanced already (unit multipliers) read As Shot from the levels it balanced them with
+        let shot = color.balanced_as_shot.or(wb_multipliers);
         let scale_white = match camera {
-            Some(c) => lightcraft_raw::spectral::as_shot_white_through(c, color, wb_multipliers),
-            None if presets => lightcraft_raw::kelvin_presets::as_shot_white(color, wb_multipliers),
+            Some(c) => lightcraft_raw::spectral::as_shot_white_through(c, color, shot),
+            None if presets => lightcraft_raw::kelvin_presets::as_shot_white(color, shot),
             None => None,
         };
         let covered = camera.is_some() || presets;
@@ -1184,6 +1186,17 @@ pub(crate) mod tests {
         assert!(!lightcraft_catalog::relative_wb_camera("ARW", "SONY ILCA-99M2"));
         let bare = WbScaleOf::new(RawFormat::Arw, &ColorData::default(), mul, &meta("SONY", "ILCA-99M2"));
         assert!(bare.legacy_relative && bare.scale_white.is_none());
+        // data the camera balanced already (Sony's downsized lossless ARW: unit multipliers) read As Shot from the
+        // levels it balanced them with, through the presets and through measured matrices alike; read as unit
+        // multipliers, the ILCE-7M3's matrices would put them near 1700 K
+        let balanced = ColorData { balanced_as_shot: Some(g(2500.0, 1668.0)), ..with.clone() };
+        let ycbcr = WbScaleOf::new(RawFormat::Arw, &balanced, Some([1.0; 3]), &meta("SONY", "ILCA-99M2"));
+        assert_eq!(ycbcr.as_shot(d65), a99m2.as_shot(d65));
+        let balanced = ColorData { balanced_as_shot: mul, ..Default::default() };
+        let ycbcr = WbScaleOf::new(RawFormat::Arw, &balanced, Some([1.0; 3]), &meta("SONY", "ILCE-7M3"));
+        assert_eq!(ycbcr.as_shot(d65), a7m3.as_shot(d65));
+        let unit = WbScaleOf::new(RawFormat::Arw, &ColorData::default(), Some([1.0; 3]), &meta("SONY", "ILCE-7M3"));
+        assert!(unit.as_shot(d65).0 < 2500.0, "{:?}", unit.as_shot(d65));
         // presets in a file of a camera not listed: relative, as the catalog decides from the camera alone
         let other = WbScaleOf::new(RawFormat::Arw, &with, mul, &meta("SONY", "ILCE-1"));
         assert!(other.relative && other.scale_white.is_none());

@@ -1,5 +1,11 @@
 # What's new in LightCraft
 
+## 2026-10-15
+
+### Right As Shot temperature for Sony M and S raws
+- Sony's smaller lossless raws (M and S sizes) showed a wrong As Shot temperature: an α7 IV M raw read 1691 K with a
+  strong tint. They now show the temperature the camera chose, as their full-size raws do. Their look is unchanged.
+
 ## 2026-10-14
 
 ### Lightroom radial masks on the right side
