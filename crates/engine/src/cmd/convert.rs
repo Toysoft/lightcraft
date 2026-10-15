@@ -59,7 +59,7 @@ pub(crate) fn write_dng_with(file_bytes: Option<&crate::merge::ByteReader>, path
 
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "photo.convertToDng";
-    let ids = s.targets(p);
+    let ids = s.targets(p)?;
     let mut ops = Vec::new();
     let mut converted = Vec::new();
     let mut skipped = Vec::new();
@@ -125,7 +125,7 @@ pub fn specs() -> Vec<CommandSpec> {
 /// the library and stack it on top of the original. The host opens the file in the editor.
 fn edit_external(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "photo.editExternal";
-    let mut ids = s.targets(p);
+    let mut ids = s.targets(p)?;
     ids.dedup();
     if ids.is_empty() {
         return Err(bad(C, "no active photo"));
@@ -240,6 +240,10 @@ fn fill_missing_meta(id: lightcraft_catalog::PhotoId, ph: &lightcraft_catalog::P
     m.aperture = m.aperture.or(src.aperture);
     m.iso = m.iso.or(src.iso);
     m.gps = m.gps.or(src.gps);
+    // the camera's focus point: photos imported before it was read get it here
+    if m.focus.is_none() {
+        m.focus = src.focus.clone();
+    }
     let mut ops = Vec::new();
     if m != before {
         ops.push(Op::SetMeta { id, meta: Box::new(m) });
@@ -311,7 +315,7 @@ pub(crate) fn reload_ops(
 /// Re-read photos whose files changed on disk (an external editor saved them): new size,
 /// dimensions and content hash, cached sources dropped. → {reloaded: [ids]}
 fn reload(s: &mut Session, p: &Value) -> Result<Value> {
-    let ids = s.targets(p);
+    let ids = s.targets(p)?;
     let paths: Vec<(lightcraft_catalog::PhotoId, String)> = ids
         .iter()
         .filter_map(|id| match s.catalog.photo(*id).map(|ph| ph.source.clone()) {
@@ -340,7 +344,7 @@ fn reload(s: &mut Session, p: &Value) -> Result<Value> {
 fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
     const C: &str = "photo.duplicate";
     let mut made = Vec::new();
-    for id in s.targets(p) {
+    for id in s.targets(p)? {
         let Some(ph) = s.catalog.photo(id).map(|p| (**p).clone()) else { continue };
         let Source::File { path } = &ph.source else { return Err(bad(C, "a generated demo photo has no file to duplicate")) };
         let src = Path::new(path);
@@ -441,6 +445,27 @@ mod tests {
         assert!(fill_missing_meta(PhotoId(1), &ph, &info).is_empty());
     }
 
+    /// Reload from Disk gives a photo imported before focus points were read its camera focus point,
+    /// and never replaces one it has.
+    #[test]
+    fn reload_fills_a_missing_focus_point() {
+        let fp = |x: f64| lightcraft_meta::FocusPoint {
+            rect: lightcraft_meta::Rect { x0: x, y0: 0.4, x1: x + 0.02, y1: 0.42 },
+            mode: Some("AF-C".into()),
+            area: None,
+            tracking: None,
+        };
+        let mut ph = Photo::new(PhotoId(1), Source::File { path: "/x.arw".into() }, "x.arw", "ARW", 8640, 5760, "2026-10-06T00:00:00");
+        ph.captured = Some("2026-10-04T08:16:11".into());
+        let mut info = crate::media::ProbeInfo { captured: ph.captured.clone(), ..Default::default() };
+        info.meta.focus = Some(fp(0.3));
+        let ops = fill_missing_meta(PhotoId(1), &ph, &info);
+        let Some(Op::SetMeta { meta, .. }) = ops.first() else { panic!("{ops:?}") };
+        assert_eq!(meta.focus, Some(fp(0.3)));
+        ph.meta.focus = Some(fp(0.1));
+        assert!(fill_missing_meta(PhotoId(1), &ph, &info).is_empty(), "a known focus point is kept");
+    }
+
     fn lens() -> lightcraft_develop::EmbeddedLens {
         lightcraft_develop::EmbeddedLens {
             warp: Some(lightcraft_develop::EmbeddedWarp { planes: [[1.0, -0.1, 0.03, 0.0, 0.0, 0.0]; 3], ..Default::default() }),
@@ -514,7 +539,7 @@ mod tests {
             .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus"));
         let f = root.join("raw/rw2-panasonic-gx80.rw2");
         if !f.exists() {
-            eprintln!("skip: {} absent", f.display());
+            lightcraft_testkit::skip!(Corpus, "{} absent", f.display());
             return;
         }
         let mut s = Session::new().with_fs();

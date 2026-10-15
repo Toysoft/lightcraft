@@ -8,6 +8,7 @@
 
 pub mod album_picker;
 pub mod brush_live;
+pub mod button;
 pub mod canvas_keys;
 mod command_error;
 pub mod control;
@@ -15,6 +16,7 @@ pub mod credits;
 pub mod date_picker;
 pub mod docking;
 pub mod export_task;
+mod focus_scan;
 pub mod headless;
 pub mod i18n;
 pub mod icons;
@@ -28,6 +30,7 @@ pub mod merge;
 mod model_setup;
 pub mod panels;
 pub mod pick;
+pub mod print_view;
 pub mod recheck;
 pub mod region;
 pub mod render;
@@ -57,6 +60,8 @@ mod tests_before_after;
 #[cfg(test)]
 mod tests_browse_active;
 #[cfg(test)]
+mod tests_button;
+#[cfg(test)]
 mod tests_canvas_keys;
 #[cfg(test)]
 mod tests_compare;
@@ -73,11 +78,21 @@ mod tests_date_picker;
 #[cfg(test)]
 mod tests_dialog_fit;
 #[cfg(test)]
+mod tests_dialog_primary;
+#[cfg(test)]
 mod tests_dialogs;
+#[cfg(test)]
+mod tests_edit_layout;
+#[cfg(test)]
+mod tests_empty_library;
 #[cfg(test)]
 mod tests_error_kinds;
 #[cfg(test)]
 mod tests_filmstrip;
+#[cfg(test)]
+mod tests_focus_point;
+#[cfg(test)]
+mod tests_folder_drop;
 #[cfg(test)]
 mod tests_grading;
 #[cfg(test)]
@@ -122,6 +137,8 @@ mod tests_panels;
 mod tests_preset_import;
 #[cfg(test)]
 mod tests_preview_limit;
+#[cfg(test)]
+mod tests_print;
 #[cfg(test)]
 mod tests_profiles_layout;
 #[cfg(test)]
@@ -765,7 +782,7 @@ impl LightcraftApp {
             }
             (None, true) => {
                 self.ui.unsaved_seen = false;
-                self.toast(ctx, "Library saved");
+                self.toast(ctx, crate::i18n::tr("Library saved"));
             }
             (Some(_), true) => ctx.request_repaint_after(std::time::Duration::from_secs(2)), // retry
             (None, false) => {}
@@ -1071,13 +1088,17 @@ impl LightcraftApp {
         if ctx.input(|i| i.viewport().close_requested()) && !panels::notices::may_close(self) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
-        let now = ctx.input(|i| i.time);
-        let dt = now - self.last_time;
-        if dt > 0.0 {
-            self.perf.fps = self.perf.fps * 0.9 + (1.0 / dt).min(240.0) * 0.1;
+        // (once a frame: a pass drawn again after a discard has no input of its own, and still the
+        // widgets of the pass thrown away, where a request would find them out of place)
+        if ctx.current_pass_index() == 0 {
+            let now = ctx.input(|i| i.time);
+            let dt = now - self.last_time;
+            if dt > 0.0 {
+                self.perf.fps = self.perf.fps * 0.9 + (1.0 / dt).min(240.0) * 0.1;
+            }
+            self.last_time = now;
+            self.drain_control(ctx);
         }
-        self.last_time = now;
-        self.drain_control(ctx);
         self.apply_settings(ctx);
         if !self.synthetic.is_empty() {
             ctx.request_repaint();
@@ -1102,7 +1123,7 @@ impl LightcraftApp {
             if let Ok(r) = self.session.execute("photo.reload", &serde_json::json!({"ids": ids}))
                 && r["reloaded"].as_array().is_some_and(|a| !a.is_empty())
             {
-                self.toast(ctx, "Updated the edits saved in the external editor");
+                self.toast(ctx, crate::i18n::tr("Updated the edits saved in the external editor"));
             }
         }
         self.ui.was_focused = focused;
@@ -1184,6 +1205,7 @@ impl LightcraftApp {
         panels::denoise::pump(self, ctx);
         model_setup::pump(self, ctx);
         panels::faces::pump(self, ctx);
+        focus_scan::pump(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         if self.fonts_ready {
@@ -1632,6 +1654,9 @@ pub struct Caches {
     /// What the open smart-album rule dialog shows besides the rules ([`Caches::rules_view`]).
     rules_view: Option<(u64, std::sync::Arc<RulesView>)>,
     pub rules_view_scans: usize,
+    /// A count an open dialog shows ([`Caches::dialog_count`]), by what it counts.
+    dialog_count: Option<(u64, usize)>,
+    pub dialog_count_scans: usize,
     /// The problems of every saved smart album that has some ([`Caches::smart_album_problems`]).
     smart_problems: Option<(u64, std::sync::Arc<std::collections::HashMap<lightcraft_catalog::AlbumId, Vec<lightcraft_catalog::rules::Problem>>>)>,
     pub smart_problem_scans: usize,
@@ -1647,6 +1672,8 @@ pub struct Caches {
     pub faces_indexed: u64,
     pub faces_pending: u64,
     pub faces_next_pump: f64,
+    /// When to ask the focus-point reader again (`focus_scan::pump`).
+    pub focus_next_pump: f64,
     /// When the user last dragged, typed or scrolled, and when they last moved the pointer (egui time).
     pub last_input: f64,
     /// The pace the face scan was last given, and whether the window was in front then (for `ui.inspect`).
@@ -1951,6 +1978,21 @@ impl Caches {
         self.rules_view_scans += 1;
         self.rules_view = Some((k, v.clone()));
         v
+    }
+
+    /// A count an open dialog shows (photos a filter matches, photos with a keyword…): `count` runs
+    /// again only when the catalog or `what` (what is counted) changes, not every frame.
+    pub(crate) fn dialog_count(&mut self, cat: &lightcraft_catalog::Catalog, what: impl std::hash::Hash, count: impl FnOnce() -> usize) -> usize {
+        let k = key_of((cat.revision, what));
+        if let Some((key, n)) = self.dialog_count
+            && key == k
+        {
+            return n;
+        }
+        let n = count();
+        self.dialog_count_scans += 1;
+        self.dialog_count = Some((k, n));
+        n
     }
 
     /// The problems of every saved smart album that has some (`Catalog::smart_album_problems`),
