@@ -470,7 +470,7 @@ pub fn handle(app: &mut LightcraftApp, ctx: &egui::Context) {
     for f in fire {
         // a slideshow: ←/→ step (a cut)
         if app.ui.slideshow.is_some() && matches!(f.as_str(), "library.next" | "library.previous") {
-            let _ = app.run(if f == "library.next" { "slideshow.next" } else { "slideshow.previous" }, json!({}));
+            key_act(app, if f == "library.next" { "slideshow.next" } else { "slideshow.previous" }, json!({}));
             continue;
         }
         if let Some(rest) = f.strip_prefix("rate:") {

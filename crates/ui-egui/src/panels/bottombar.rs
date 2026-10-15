@@ -292,7 +292,7 @@ fn sort_menu(app: &mut LightcraftApp, ui: &mut egui::Ui) {
         let r = ui.button(crate::i18n::tr("Refresh View"));
         crate::widgets::register(ui.ctx(), "button:refreshView", r.rect);
         if r.clicked() {
-            let _ = app.run("library.refresh", json!({}));
+            app.act("library.refresh", json!({}));
         }
     }
     ui.separator();

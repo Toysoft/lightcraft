@@ -269,8 +269,8 @@ pub fn tile(app: &mut LightcraftApp, ui: &mut egui::Ui, list: &Unnamed, i: usize
     }
     // a double click opens the photo, as in the grid; its second click must not undo the first one's selection
     if resp.double_clicked() {
-        let _ = app.run("library.select", json!({"ids": [f.photo], "active": f.photo}));
-        let _ = app.run("view.detail", json!({}));
+        app.act("library.select", json!({"ids": [f.photo], "active": f.photo}));
+        app.act("view.detail", json!({}));
         // Escape comes back to the faces
         app.ui.person_from = Some((None, f.photo));
     } else if resp.clicked() {

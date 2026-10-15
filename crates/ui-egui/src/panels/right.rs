@@ -549,7 +549,7 @@ pub(crate) fn tool_overlay_options(app: &mut LightcraftApp, ui: &mut egui::Ui) {
                 let item = ui.selectable_label(m == current, crate::i18n::tr(m.label()));
                 register(ui.ctx(), format!("toolOverlay:{}", m.name()), item.rect);
                 if item.clicked() {
-                    let _ = app.run("view.toolOverlay", json!({"mode": m.name()}));
+                    app.act("view.toolOverlay", json!({"mode": m.name()}));
                 }
             }
         });

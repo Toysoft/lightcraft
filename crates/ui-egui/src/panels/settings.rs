@@ -369,7 +369,7 @@ fn import_tab(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
         heading(ui, t, crate::i18n::tr("Cameras and Cards"));
         let mut on_card = d.show_on_card;
         if check(ui, "settings.importOnCard", &mut on_card, "Show the import review when a camera or card is connected") {
-            let _ = app.run("library.preferences", json!({"import": {"showOnCard": on_card}}));
+            app.act("library.preferences", json!({"import": {"showOnCard": on_card}}));
         }
         heading(ui, t, crate::i18n::tr("Auto Import"));
         hint(ui, t, crate::i18n::tr("Photos that arrive in this folder (tethering, a scanner, a sync app) are added as soon as they're complete."));
@@ -703,7 +703,7 @@ fn duration_slider(app: &mut LightcraftApp, ui: &mut egui::Ui, id: &str, key: &s
         app.session.slideshow = next;
     }
     if r.drag_stopped() || (r.changed() && !r.dragged()) {
-        let _ = app.run("slideshow.playback", json!({ key: v }));
+        app.act("slideshow.playback", json!({ key: v }));
     }
 }
 
@@ -753,7 +753,7 @@ fn export_section(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             let r = ui.add_enabled(!running, egui::Button::new(crate::i18n::tr(label)));
             register(ui.ctx(), format!("button:{id}"), r.rect);
             if r.clicked() {
-                let _ = app.run("dialog.slideshowExport", json!({"format": format}));
+                app.act("dialog.slideshowExport", json!({"format": format}));
             }
         }
     });
@@ -793,7 +793,7 @@ fn playback_section(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
                 Fade::White => json!("#ffffff"),
                 Fade::Color => json!([64, 64, 64]),
             };
-            let _ = app.run("slideshow.playback", json!({"fadeColor": c}));
+            app.act("slideshow.playback", json!({"fadeColor": c}));
         }
         if f == Fade::Color
             && let Some(mut c) = s.fade_color
@@ -801,21 +801,21 @@ fn playback_section(app: &mut LightcraftApp, ui: &mut egui::Ui, t: &Tokens) {
             let r = egui::color_picker::color_edit_button_srgb(ui, &mut c);
             register(ui.ctx(), "button:slideshowFadeColor", r.rect);
             if r.changed() {
-                let _ = app.run("slideshow.playback", json!({"fadeColor": c}));
+                app.act("slideshow.playback", json!({"fadeColor": c}));
             }
         }
     });
     let mut v = s.random_order;
     if check(ui, "settings.slideshowRandom", &mut v, "Random order") {
-        let _ = app.run("slideshow.playback", json!({"randomOrder": v}));
+        app.act("slideshow.playback", json!({"randomOrder": v}));
     }
     let mut v = s.repeat;
     if check(ui, "settings.slideshowRepeat", &mut v, "Repeat (off: the slideshow ends after the last photo)") {
-        let _ = app.run("slideshow.playback", json!({"repeat": v}));
+        app.act("slideshow.playback", json!({"repeat": v}));
     }
     let mut v = s.prepare_previews;
     if check(ui, "settings.slideshowPrepare", &mut v, "Prepare previews in advance") {
-        let _ = app.run("slideshow.playback", json!({"preparePreviews": v}));
+        app.act("slideshow.playback", json!({"preparePreviews": v}));
     }
     hint(
         ui,

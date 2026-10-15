@@ -752,7 +752,7 @@ fn histogram(app: &mut LightcraftApp, ui: &mut egui::Ui, id: PhotoId) {
         ));
     }
     if clicked {
-        let _ = app.run("view.clipping", json!({}));
+        app.act("view.clipping", json!({}));
     }
     // EXIF strip
     if let Some(ph) = app.session.catalog.photo(id) {
