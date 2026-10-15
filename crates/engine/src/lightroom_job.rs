@@ -241,6 +241,8 @@ pub struct LightroomJob {
     queue: VecDeque<CatalogPhoto>,
     /// The shape of each master prepared so far (its virtual copies share it).
     shapes: HashMap<i64, Shape>,
+    /// The originals looked for so far (by [`key`]).
+    seen: HashSet<String>,
 }
 
 impl LightroomJob {
@@ -274,6 +276,7 @@ impl LightroomJob {
             progress,
             queue: VecDeque::new(),
             shapes: HashMap::new(),
+            seen: HashSet::new(),
         })
     }
 
@@ -350,9 +353,24 @@ impl LightroomJob {
         let photos: Vec<CatalogPhoto> = self.queue.drain(..n).collect();
         let before = self.progress.read_done.load(Ordering::Relaxed);
         let is_master = |p: &CatalogPhoto| lightroom_catalog::number_for_job(&p.image, "masterImage") == 0;
-        let paths: Vec<String> = photos.iter().filter(|p| is_master(p)).map(|p| p.path.clone()).collect();
-        let masters = paths.len();
-        let missing_sources = photos.iter().filter(|p| is_master(p) && !Path::new(&p.path).is_file()).map(|p| key(&p.path)).collect();
+        // Each original is looked for once. A missing one is not read: its catalog record is
+        // enough for a placeholder, and probing it would only add failed I/O and errors.
+        let (mut paths, mut missing_sources, mut masters) = (Vec::new(), HashSet::new(), 0);
+        for p in photos.iter().filter(|p| is_master(p)) {
+            if cancel.load(Ordering::Relaxed) {
+                return Some(Err(cancelled()));
+            }
+            masters += 1;
+            let k = key(&p.path);
+            if !self.seen.insert(k.clone()) {
+                continue;
+            }
+            if Path::new(&p.path).is_file() {
+                paths.push(p.path.clone());
+            } else {
+                missing_sources.insert(k);
+            }
+        }
         let normal = self.import.prepare_files(paths, cancel);
         if cancel.load(Ordering::Relaxed) {
             normal.rollback();
