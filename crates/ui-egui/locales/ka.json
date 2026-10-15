@@ -2718,5 +2718,10 @@
   "≥  at least": "≥  არანაკლებ",
   "⌘-drag to straighten, ⇧G Guided Upright, a grid while transforming.": "⌘-გადათრევა გასასწორებლად, ⇧G მართვადი Upright, ბადე გარდაქმნისას.",
   "日本語": "日本語",
-  "繁體中文（台灣）": "繁體中文（台灣）"
+  "繁體中文（台灣）": "繁體中文（台灣）",
+  "Lock Markers": "მარკერების ჩაკეტვა",
+  "Pins can't be dragged to move photos": "ქინძისთავების გადათრევით ფოტოების გადაადგილება შეუძლებელია",
+  "Remove GPS Coordinates": "GPS კოორდინატების წაშლა",
+  "Remove GPS Coordinates of These Photos": "ამ ფოტოების GPS კოორდინატების წაშლა",
+  "Set GPS Coordinates": "GPS კოორდინატების დაყენება"
 }
