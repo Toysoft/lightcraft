@@ -28,10 +28,11 @@ impl CraftFont {
     }
 
     /// Whether the font can stand in for `script`: it is meant for it, or — until craft-fonts has a
-    /// Traditional Chinese face — it is a Simplified Chinese face, which carries the Traditional
-    /// characters too (with mainland glyph forms; still closer than the Japanese faces).
+    /// Traditional Chinese or a Korean face — it is a Simplified Chinese face, which carries the
+    /// Traditional characters (with mainland glyph forms; still closer than the Japanese faces) and,
+    /// Noto Sans CJK SC being the full CJK set, every hangul syllable.
     pub fn serves(&self, script: &str) -> bool {
-        self.covers(script) || (script == "Hant" && self.covers("Hans"))
+        self.covers(script) || (matches!(script, "Hant" | "Kore") && self.covers("Hans"))
     }
 }
 
