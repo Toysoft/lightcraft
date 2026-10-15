@@ -10,6 +10,64 @@ use std::sync::Arc;
 use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Stroke, Visuals};
 
 pub const FONT_SEMIBOLD: &str = "semibold";
+
+/// The sizes text is set in, one per job. Two sizes on a screen are always told apart (the steps
+/// are a point or more), and the same job is the same size on every panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextSize {
+    /// A badge or a pill on a thumbnail or an icon.
+    Micro,
+    /// An explanation, the caption over a field, a line of status; in semibold, a chip or a
+    /// choice.
+    Caption,
+    /// What stands by something larger: a count, the title of a tab, a control of the filter bar.
+    Label,
+    /// Controls, rows, values and menus.
+    Body,
+    /// The header of a section in a panel.
+    Title,
+    /// The name of a panel or of a window.
+    PanelTitle,
+    /// The title over the photos, and what an empty screen says.
+    Display,
+}
+
+impl TextSize {
+    /// Smallest first.
+    pub const ALL: [TextSize; 7] =
+        [TextSize::Micro, TextSize::Caption, TextSize::Label, TextSize::Body, TextSize::Title, TextSize::PanelTitle, TextSize::Display];
+
+    /// The size in points.
+    pub const fn points(self) -> f32 {
+        match self {
+            TextSize::Micro => 10.0,
+            TextSize::Caption => 11.0,
+            TextSize::Label => 12.0,
+            TextSize::Body => 13.0,
+            TextSize::Title => 14.0,
+            TextSize::PanelTitle => 15.0,
+            TextSize::Display => 18.0,
+        }
+    }
+
+    /// The size nearest a number of points; of two equally near, the one nearer [`TextSize::Body`]
+    /// (12.5 is 13 and so is 13.5). Anything past the ends is the end: a huge number or infinity
+    /// the largest, a negative one the smallest. Not a number: the size of a control.
+    pub fn nearest(points: f32) -> TextSize {
+        // (far from the scale every size is as near as the next in an f32)
+        let points = points.clamp(0.0, 1000.0);
+        let body = TextSize::Body.points();
+        let mut best = TextSize::Body;
+        let mut least = f32::INFINITY;
+        for size in TextSize::ALL {
+            let off = (size.points() - points).abs();
+            if off < least || (off == least && (size.points() - body).abs() < (best.points() - body).abs()) {
+                (best, least) = (size, off);
+            }
+        }
+        best
+    }
+}
 const WEB_CHINESE_FONT: &str = "web Noto Sans CJK SC";
 
 /// Shared colour-label palette for badges, thumbnail surrounds and feedback.
@@ -249,11 +307,78 @@ impl Tokens {
     pub fn get(ctx: &egui::Context) -> Tokens {
         ctx.data(|d| d.get_temp::<Tokens>(egui::Id::NULL)).unwrap_or_default()
     }
-    pub fn font(&self, size: f32) -> FontId {
-        FontId::proportional(size)
+    /// The regular face at a size of the scale.
+    pub fn regular(&self, size: TextSize) -> FontId {
+        FontId::proportional(size.points())
     }
+    /// The semibold face at a size of the scale.
+    pub fn strong(&self, size: TextSize) -> FontId {
+        FontId::new(size.points(), FontFamily::Name(FONT_SEMIBOLD.into()))
+    }
+    /// The regular face at the size of the scale nearest `size` ([`TextSize::nearest`]): text
+    /// asked for by a number is on the scale too. New code names the size (`t.body()`, …).
+    pub fn font(&self, size: f32) -> FontId {
+        self.regular(TextSize::nearest(size))
+    }
+    /// The semibold face at the size of the scale nearest `size`.
     pub fn semibold(&self, size: f32) -> FontId {
-        FontId::new(size, FontFamily::Name(FONT_SEMIBOLD.into()))
+        self.strong(TextSize::nearest(size))
+    }
+    /// Micro: a badge or a pill on a thumbnail or an icon.
+    pub fn micro(&self) -> FontId {
+        self.regular(TextSize::Micro)
+    }
+    /// [`Self::micro`] in semibold.
+    pub fn micro_strong(&self) -> FontId {
+        self.strong(TextSize::Micro)
+    }
+    /// Caption: an explanation, the caption over a field, a line of status; in semibold, a chip.
+    pub fn caption(&self) -> FontId {
+        self.regular(TextSize::Caption)
+    }
+    /// [`Self::caption`] in semibold.
+    pub fn caption_strong(&self) -> FontId {
+        self.strong(TextSize::Caption)
+    }
+    /// Label: what stands by something larger: a count, the title of a tab.
+    pub fn label(&self) -> FontId {
+        self.regular(TextSize::Label)
+    }
+    /// [`Self::label`] in semibold.
+    pub fn label_strong(&self) -> FontId {
+        self.strong(TextSize::Label)
+    }
+    /// Body: controls, rows, values and menus.
+    pub fn body(&self) -> FontId {
+        self.regular(TextSize::Body)
+    }
+    /// [`Self::body`] in semibold.
+    pub fn body_strong(&self) -> FontId {
+        self.strong(TextSize::Body)
+    }
+    /// Title: the header of a section in a panel (set strong; plain is for a value at its size).
+    pub fn title(&self) -> FontId {
+        self.regular(TextSize::Title)
+    }
+    /// [`Self::title`] in semibold.
+    pub fn title_strong(&self) -> FontId {
+        self.strong(TextSize::Title)
+    }
+    /// PanelTitle: the name of a panel or of a window (set strong).
+    pub fn panel_title(&self) -> FontId {
+        self.regular(TextSize::PanelTitle)
+    }
+    /// [`Self::panel_title`] in semibold.
+    pub fn panel_title_strong(&self) -> FontId {
+        self.strong(TextSize::PanelTitle)
+    }
+    /// Display: the title over the photos, and what an empty screen says (set strong).
+    pub fn display(&self) -> FontId {
+        self.regular(TextSize::Display)
+    }
+    /// [`Self::display`] in semibold.
+    pub fn display_strong(&self) -> FontId {
+        self.strong(TextSize::Display)
     }
 }
 
@@ -378,6 +503,32 @@ fn theme_id() -> egui::Id {
     egui::Id::new("lightcraft-theme")
 }
 
+impl Tokens {
+    /// `color` as it is where it stands `ratio`:1 or more against `on`, as WCAG measures it (4.5
+    /// for text, 3 for a line or a mark that says where something is); else moved toward the text
+    /// colour, which stands furthest from every surface, in small steps until it does, and the
+    /// text colour itself when nothing on the way does (or `ratio` is no number).
+    ///
+    /// For text and marks drawn in a token chosen for its hue or its quietness (the dim text, the
+    /// accent, the caution and reject colours, a border) on a surface where a theme's value for it
+    /// is too close to read: the token keeps its value for everything else that uses it.
+    pub fn legible(&self, color: Color32, on: Color32, ratio: f32) -> Color32 {
+        fn luminance(c: Color32) -> f32 {
+            let linear = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+            };
+            0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+        }
+        let stands = |c: Color32| {
+            let (a, b) = (luminance(c), luminance(on));
+            (a.max(b) + 0.05) / (a.min(b) + 0.05) >= ratio
+        };
+        const STEPS: u8 = 32;
+        (0..STEPS).map(|step| color.lerp_to_gamma(self.text, f32::from(step) / f32::from(STEPS))).find(|c| stands(*c)).unwrap_or(self.text)
+    }
+}
+
 /// The theme `ctx` is styled with (none before the first [`apply_kind`]).
 pub fn current(ctx: &egui::Context) -> Option<ThemeKind> {
     ctx.data(|d| d.get_temp::<ThemeKind>(theme_id()))
@@ -436,10 +587,10 @@ pub fn apply_kind(ctx: &egui::Context, kind: ThemeKind) {
         s.spacing.item_spacing = egui::vec2(6.0, 4.0);
         s.spacing.button_padding = egui::vec2(8.0, 3.0);
         s.spacing.interact_size.y = 22.0;
-        s.text_styles.insert(egui::TextStyle::Body, FontId::proportional(13.0));
-        s.text_styles.insert(egui::TextStyle::Button, FontId::proportional(13.0));
-        s.text_styles.insert(egui::TextStyle::Small, FontId::proportional(11.0));
-        s.text_styles.insert(egui::TextStyle::Heading, FontId::new(16.0, FontFamily::Name(FONT_SEMIBOLD.into())));
+        s.text_styles.insert(egui::TextStyle::Body, t.body());
+        s.text_styles.insert(egui::TextStyle::Button, t.body());
+        s.text_styles.insert(egui::TextStyle::Small, t.caption());
+        s.text_styles.insert(egui::TextStyle::Heading, t.panel_title_strong());
         s.animation_time = 0.08;
     });
 }

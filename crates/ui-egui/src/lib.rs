@@ -63,6 +63,22 @@ mod tests_date_picker;
 #[cfg(test)]
 mod tests_dialog_fit;
 #[cfg(test)]
+mod tests_dialog_settings;
+#[cfg(test)]
+mod tests_dialog_settings_contrast;
+#[cfg(test)]
+mod tests_dialog_settings_filter;
+#[cfg(test)]
+mod tests_dialog_settings_filter_words;
+#[cfg(test)]
+mod tests_dialog_settings_groups;
+#[cfg(test)]
+mod tests_dialog_settings_keys;
+#[cfg(test)]
+mod tests_dialog_settings_tabs;
+#[cfg(test)]
+mod tests_dialog_settings_trust;
+#[cfg(test)]
 mod tests_dialogs;
 #[cfg(test)]
 mod tests_error_kinds;
@@ -122,6 +138,8 @@ mod tests_sync;
 mod tests_temp_slider;
 #[cfg(test)]
 mod tests_titlebar;
+#[cfg(test)]
+mod tests_type_scale;
 #[cfg(test)]
 mod tests_unsaved;
 #[cfg(test)]
@@ -221,7 +239,7 @@ pub struct Services {
     /// The host's current log file (`<settings>/logs/lightcraft.log`), which Help ▸ Open Log
     /// Folder reveals (#260). None where no log is kept: the web, `--memory`, `LIGHTCRAFT_NO_PREFS`.
     pub log_file: Option<String>,
-    /// Choose a folder (Settings → General → Open Library…; desktop only).
+    /// Choose a folder (Settings → Library → Open Library…; desktop only).
     pub pick_folder: Option<PickFolder>,
     /// Open a Lightroom Classic `.lrcat` catalog for read-only import.
     pub pick_lightroom_catalog: Option<PickFolder>,
