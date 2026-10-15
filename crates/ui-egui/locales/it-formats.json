@@ -268,6 +268,7 @@
   "Skipped {problem}": "Skipped {problem}",
   "Updated {name}": "Updated {name}",
   "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.": "The XMP sidecars of {n} photos couldn't be written (is their folder offline?). LightCraft keeps trying.",
+  "Removed {n} sample photos. Edit → Undo brings them back.": "Rimosse {n} foto di esempio. Modifica → Annulla le ripristina.",
   "Apply to “{mask}” on Selected Photos": "Apply to “{mask}” on Selected Photos",
   "Update “{name}” with Current Settings": "Update “{name}” with Current Settings",
   "Slideshow exported: {what}": "Slideshow exported: {what}",

@@ -151,6 +151,15 @@
   further ⇧-clicks carry on from the last point, as in Lightroom. Change the brush size, feather or flow before the
   ⇧-click and the line tapers from the old values to the new ones. The whole line is one undo step.
   `mask.brushStroke {connect: true}` does the same for agents.
+### A new library asks how to begin
+- A new library made by the desktop app now starts empty instead of quietly filling with the 24 procedural demo
+  photos. Its first screen, "Welcome to LightCraft", offers Import Photos…, Import Lightroom Catalog… and Try Sample
+  Photos. `--memory` still starts with the demo photos (`--no-demo` for none), as do `lightcraft-cli --demo` and the
+  web build.
+- While sample photos are in a library, a banner says so and offers Import Photos… and Remove Sample Photos; once
+  photos of your own are in, it offers Remove Sample Photos or Keep Them. Removing them takes the sample photos and
+  the albums only they filled (an album holding a photo of yours stays, with it), in one step Edit ▸ Undo reverses.
+  Help ▸ Add Sample Photos and Help ▸ Remove Sample Photos do the same at any time.
 
 ### Hard-edged Heal and Clone spots
 - A spot with Feather at 0 no longer draws black pixels exactly on its radius. This also fixes spots at 0% Opacity
