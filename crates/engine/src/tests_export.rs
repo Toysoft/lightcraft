@@ -638,6 +638,33 @@ mod apple_photos {
         files
     }
 
+    /// "Same folder as original photo" (issue #956): with no folder chosen, each export lands
+    /// beside the file it came from, so photos in different folders are not forced into one
+    /// directory. A chosen folder still wins.
+    #[test]
+    fn an_empty_folder_sends_each_export_beside_its_own_file() {
+        use crate::export::Destination;
+
+        use super::library_with_jpeg;
+        let (mut s, id, dir, src, _) = library_with_jpeg("export-same-folder");
+        let o = ExportOptions::default();
+        // no folder: the export belongs next to the original
+        let beside = Destination { dir: String::new(), exact: None };
+        let files = disk_batch(&mut s, id, &o, &beside).unwrap();
+        let written = std::path::PathBuf::from(files[0]["path"].as_str().unwrap());
+        assert_eq!(written.parent().unwrap(), src.parent().unwrap(), "exported beside its original: {}", written.display());
+
+        // a chosen folder is not overridden by the original's own
+        let elsewhere = temp_dir("export-chosen-folder");
+        let chosen = Destination { dir: elsewhere.to_string_lossy().into_owned(), exact: None };
+        let files = disk_batch(&mut s, id, &o, &chosen).unwrap();
+        let written = std::path::PathBuf::from(files[0]["path"].as_str().unwrap());
+        assert_eq!(written.parent().unwrap(), elsewhere.as_path(), "a chosen folder wins: {}", written.display());
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
     #[test]
     fn exported_files_go_to_photos_in_order() {
         let mut s = Session::with_demo();
