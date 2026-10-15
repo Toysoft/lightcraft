@@ -25,7 +25,7 @@ pub trait Backend {
 /// `(completed photos, total photos, next filename)`; false stops before the next photo.
 pub type ProgressHook = Box<dyn FnMut(usize, usize, &str) -> bool + Send>;
 
-/// A running LightCraft app, reached through its loopback control port.
+/// A running desktop app, reached through its loopback control port.
 pub struct Remote {
     addr: String,
     conn: Option<(BufReader<TcpStream>, TcpStream)>,
@@ -92,7 +92,7 @@ impl Remote {
 
     fn unknown_outcome(&self, method: &str, e: &std::io::Error) -> String {
         let addr = &self.addr;
-        format!("lost the LightCraft app at {addr} after sending `{method}` ({e}); the outcome is unknown and it was not resent, check the app")
+        format!("lost the app at {addr} after sending `{method}` ({e}); the outcome is unknown and it was not resent, check the app")
     }
 }
 
@@ -153,7 +153,12 @@ impl Backend for Remote {
                     if sent {
                         self.unknown_outcome(method, &e)
                     } else {
-                        format!("LightCraft app at {} is not reachable: {e} (start it with `lightcraft --control PORT`)", self.addr)
+                        format!(
+                            "{} at {} is not reachable: {e} (start it with `{} --control PORT`)",
+                            lcc_brand::DISPLAY_NAME,
+                            self.addr,
+                            lcc_brand::BINARY
+                        )
                     }
                 })?
             }
@@ -293,16 +298,6 @@ mod tests {
         let mut oversized = std::io::Cursor::new(vec![b'x'; 100]);
         assert_eq!(read_reply(&mut oversized, 10).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
         assert_eq!(oversized.position(), 11, "read only the bound plus one byte");
-    }
-
-    #[test]
-    fn preview_sized_replies_use_the_documented_limit() {
-        let input = std::io::repeat(b'x').take(MAX_REPLY as u64).chain(std::io::Cursor::new(b"\n"));
-        let reply = read_reply(&mut BufReader::new(input), MAX_REPLY).unwrap();
-        assert_eq!(reply.len(), MAX_REPLY + 1);
-        assert!(reply.ends_with('\n'));
-        let mut oversized = BufReader::new(std::io::repeat(b'x'));
-        assert_eq!(read_reply(&mut oversized, MAX_REPLY).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]

@@ -1,11 +1,11 @@
 //! Parameter blocks: the per-pixel stage's [`FinishParams`] packed into the 32-bit words the
 //! `finish` kernel reads (`F_*` constants, generated from [`FIELDS`]), plus its auxiliary tables.
 
-use lightcraft_develop::VignetteStyle;
-use lightcraft_pipeline::colorops::POINT_WORDS;
-use lightcraft_pipeline::finish::{FinishParams, MASK_TERMS, srgb_lut};
+use lcc_develop::VignetteStyle;
+use lcc_pipeline::colorops::POINT_WORDS;
+use lcc_pipeline::finish::{FinishParams, MASK_TERMS, srgb_lut};
 
-/// Entries per tone-curve table (`lightcraft_pipeline::finish` builds them at this size).
+/// Entries per tone-curve table (`lcc_pipeline::finish` builds them at this size).
 pub const CURVE_N: u32 = 1024;
 
 /// Field name and number of 32-bit words.
@@ -26,8 +26,14 @@ const FIELDS: &[(&str, usize)] = &[
     ("CLAR", 1),
     ("TEX", 1),
     ("DEHAZE", 1),
+    ("DEHAZE_V3", 1),
+    ("SHARPEN_V4", 1),
     ("SHARPEN", 1),
     ("SHARPEN_MASK", 1),
+    ("SHARPEN_LIMIT", 1),
+    ("SHARPEN_FADE", 1),
+    ("SHP_OFF", 1),
+    ("HAS_SHP", 1),
     ("HAS_CLAR", 1),
     ("HAS_TEX", 1),
     ("HAS_DARK", 1),
@@ -133,6 +139,8 @@ impl Block {
 pub struct Present {
     pub clarity: bool,
     pub texture: bool,
+    /// The sharpening blur plane (after the texture plane in `tex` when both are present).
+    pub sharpen: bool,
     pub dark: bool,
     /// The blurred chromaticity follows the mask planes in the `masks` buffer.
     pub chroma: bool,
@@ -175,8 +183,14 @@ pub fn finish_block(fp: &FinishParams, masks: &[[f32; MASK_TERMS]], present: &Pr
     p.f("CLAR", fp.clar);
     p.f("TEX", fp.tex);
     p.f("DEHAZE", fp.dehaze);
+    p.b("DEHAZE_V3", fp.dehaze_v3);
+    p.b("SHARPEN_V4", fp.sharpen_v4);
     p.f("SHARPEN", fp.sharpen);
     p.f("SHARPEN_MASK", fp.sharpen_mask);
+    p.f("SHARPEN_LIMIT", fp.sharpen_limit);
+    p.f("SHARPEN_FADE", fp.sharpen_fade);
+    p.u("SHP_OFF", if present.texture { (fp.w * fp.h) as u32 } else { 0 });
+    p.b("HAS_SHP", present.sharpen);
     p.b("HAS_CLAR", present.clarity);
     p.b("HAS_TEX", present.texture);
     p.b("HAS_DARK", present.dark);
@@ -203,7 +217,7 @@ pub fn finish_block(fp: &FinishParams, masks: &[[f32; MASK_TERMS]], present: &Pr
         p.f("BALANCE", *balance);
     }
     p.f("SKIN", ops.skin);
-    p.fs("BANDH", lightcraft_pipeline::colorops::band_hues());
+    p.fs("BANDH", lcc_pipeline::colorops::band_hues());
 
     if let Some(v) = &fp.vig {
         p.b("VIG", true);

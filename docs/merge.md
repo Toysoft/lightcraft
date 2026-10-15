@@ -1,5 +1,8 @@
 # Photo Merge (HDR, Panorama, HDR Panorama)
 
+> Names in angle brackets (`<app>`, `<binary>`, `<cli>`, `<PREFIX>`, `<settings_dir>`, …) are the values set in
+> [`brand.toml`](../brand.toml); see the README.
+
 `crates/merge` (layer L3, no UI dependencies) implements the algorithms; `crates/engine/src/merge.rs`
 plans, runs and finishes merges in the library; the desktop UI shows a dialog with a live preview.
 All algorithms are our own implementations from published papers (cited in the module docs).
@@ -19,9 +22,9 @@ All algorithms are our own implementations from published papers (cited in the m
   - `merge.panorama {ids?, projection=auto|spherical|cylindrical|perspective, boundaryWarp=0..100, autoCrop=false, fillEdges=false, autoSettings=true, maxMegapixels (default: the photos' own resolution), preview, previewPath?}`
   - `merge.hdrPanorama {ids?, bracket=0 (from EXIF), …both sets of options}`
   - `merge.hdrBatch {ids?, align, deghost, autoSettings, stack}` → `{merged: [{id, path, …}], failed: [{photos, error}]}`
-- **CLI:** `lightcraft-cli merge hdr|panorama|hdr-panorama|hdr-batch [options] FILES…` (`hdr-batch` finds the brackets
+- **CLI:** `<cli> merge hdr|panorama|hdr-panorama|hdr-batch [options] FILES…` (`hdr-batch` finds the brackets
   among the files, e.g. a whole folder);
-  `lightcraft-cli synth-merge hdr|panorama -o DIR` writes synthetic inputs (procedural scene).
+  `<cli> synth-merge hdr|panorama -o DIR` writes synthetic inputs (procedural scene).
 
 ## What it does
 
@@ -59,7 +62,7 @@ push–pull diffusion. Output: 16-bit integer DNG (16-bit float for HDR panorama
 scale in `BaselineExposure`; raw sources keep their DNG colour tags (camera RGB), other sources get
 `ColorMatrix1`/`ForwardMatrix1` of their RGB space.
 
-## Measured (synthetic tests, `cargo test -p lightcraft-merge`)
+## Measured (synthetic tests, `cargo test -p lcc-merge`)
 
 - HDR, 3 brackets ±2 EV with 14-bit noise and handheld shifts: alignment error < 0.3 px, exposure
   error < 0.02 EV, radiance median log error < 0.03 (noise-limited, bias < 0.01), recovered

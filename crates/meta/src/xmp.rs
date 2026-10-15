@@ -6,16 +6,16 @@
 //! a packet that binds `http://purl.org/dc/elements/1.1/` to `foo:` still yields `dc:title`.
 //!
 //! Writing emits the interchange subset in standard namespaces (dc, xmp, photoshop, exif, exifEX, tiff, lr) and
-//! LightCraft's full develop settings as an opaque JSON string in `lc:settings`.
+//! The app's full develop settings as an opaque JSON string in `lc:settings`.
 
 use crate::{DateTime, Flash, Gps, Metadata, Orientation, Region, RegionKind, parse_number};
-use lightcraft_geom::{Point, Rect};
+use lcc_geom::{Point, Rect};
 use quick_xml::escape::{escape, partial_escape};
 use quick_xml::events::Event;
 use std::collections::BTreeMap;
 
-/// LightCraft's XMP namespace URI (prefix `lc`).
-pub const LC_NS: &str = "http://ns.lightcraft.app/lc/1.0/";
+/// The app's XMP namespace URI (prefix `lc`).
+pub use crate::legacy::LC_NS;
 
 const NAMESPACES: &[(&str, &str)] = &[
     ("x", "adobe:ns:meta/"),
@@ -165,6 +165,9 @@ fn canonical(qname: &str, scopes: &[Vec<(String, String)>]) -> String {
     match uri {
         Some(u) => match NAMESPACES.iter().find(|(_, nu)| *nu == u) {
             Some((p, _)) => format!("{p}:{local}"),
+            None if u == video_ns() => format!("{VIDEO_PREFIX}:{local}"),
+            None if u == plugin_fields_ns() => format!("lcpf:{local}"),
+            None if u == plugin_filters_ns() => format!("{FILTERS_PREFIX}:{local}"),
             None if prefix.is_empty() => local.to_string(),
             None => qname.to_string(),
         },
@@ -552,12 +555,12 @@ fn frac(v: f64) -> String {
             return format!("1/{}", inv.round() as u64);
         }
     }
-    let (n, d) = lightcraft_tiff::writer::rational(v);
+    let (n, d) = lcc_tiff::writer::rational(v);
     format!("{n}/{d}")
 }
 
 fn sfrac(v: f64) -> String {
-    let (n, d) = lightcraft_tiff::writer::srational(v);
+    let (n, d) = lcc_tiff::writer::srational(v);
     format!("{n}/{d}")
 }
 
@@ -568,8 +571,121 @@ pub fn write_xmp(meta: &Metadata, lc_settings: Option<&str>) -> String {
     write_xmp_lc(meta, &lc)
 }
 
+/// Namespace of plug-in custom metadata fields in sidecars (prefix `lcpf`): `lcpf:fields`, a bag of
+/// `{lcpf:plugin, lcpf:key, lcpf:value}`. Under the app's homepage (`lcc_brand::HOMEPAGE`):
+/// `<homepage>/ns/plugin-fields/1.0/`.
+pub fn plugin_fields_ns() -> String {
+    format!("{}/ns/plugin-fields/1.0/", lcc_brand::HOMEPAGE.trim_end_matches('/'))
+}
+
+/// Prefix of the pixel-filter stack namespace ([`plugin_filters_ns`]) as [`parse_xmp`] reports it.
+pub const FILTERS_PREFIX: &str = "lcpx";
+
+/// Namespace of a photo's pixel-filter plug-in stack in sidecars (prefix [`FILTERS_PREFIX`]): `lcpx:filters`, a
+/// seq of `{lcpx:plugin, lcpx:moduleHash, lcpx:name, lcpx:enabled, lcpx:stage, lcpx:params, lcpx:analysis}`
+/// (`params` and `analysis` as JSON text). Under the app's homepage: `<homepage>/ns/plugin-filters/1.0/`.
+pub fn plugin_filters_ns() -> String {
+    format!("{}/ns/plugin-filters/1.0/", lcc_brand::HOMEPAGE.trim_end_matches('/'))
+}
+
+/// One entry of a sidecar's pixel-filter stack, as text (checking the values is the caller's business).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct XmpPluginFilter {
+    pub plugin: String,
+    pub module_hash: String,
+    pub name: String,
+    /// `"True"` / `"False"`.
+    pub enabled: String,
+    /// `"source"` / `"display"`.
+    pub stage: String,
+    /// JSON object text.
+    pub params: String,
+    /// JSON text; empty when the filter has no analysis.
+    pub analysis: String,
+}
+
+/// Longest text one stack entry part may have when read ([`plugin_filters`]); longer entries are skipped.
+pub const MAX_FILTER_PART: usize = 128 * 1024;
+
+/// The pixel-filter stack a packet carries (`lcpx:filters`, see [`plugin_filters_ns`]), in order: `None` when the
+/// packet has none, entries without a plug-in id or with an over-long part skipped, at most `max` entries.
+pub fn plugin_filters(d: &XmpData, max: usize) -> Option<Vec<XmpPluginFilter>> {
+    let v = d.values.get(&format!("{FILTERS_PREFIX}:filters"))?;
+    let out = v
+        .items()
+        .iter()
+        .filter_map(|it| {
+            let part = |k: &str| -> Option<String> {
+                match it.field(&format!("{FILTERS_PREFIX}:{k}")) {
+                    None => Some(String::new()),
+                    Some(x) => x.text().filter(|s| s.len() <= MAX_FILTER_PART).map(str::to_string),
+                }
+            };
+            let e = XmpPluginFilter {
+                plugin: part("plugin")?,
+                module_hash: part("moduleHash")?,
+                name: part("name")?,
+                enabled: part("enabled")?,
+                stage: part("stage")?,
+                params: part("params")?,
+                analysis: part("analysis")?,
+            };
+            (!e.plugin.is_empty()).then_some(e)
+        })
+        .take(max)
+        .collect();
+    Some(out)
+}
+
+/// Prefix of the video clip namespace ([`video_ns`]) as [`parse_xmp`] reports it, whatever prefix a packet uses.
+pub const VIDEO_PREFIX: &str = "lcvid";
+
+/// Namespace of video clip settings in sidecars (prefix [`VIDEO_PREFIX`]): `lcvid:trimIn`, `lcvid:trimOut`,
+/// `lcvid:posterTime` (seconds). Under the app's homepage (`lcc_brand::HOMEPAGE`): `<homepage>/ns/video/1.0/`.
+pub fn video_ns() -> String {
+    format!("{}/ns/video/1.0/", lcc_brand::HOMEPAGE.trim_end_matches('/'))
+}
+
 /// Like [`write_xmp`], with any number of simple `lc:<name>` properties (e.g. `settings`, `flag`).
 pub fn write_xmp_lc(meta: &Metadata, lc: &[(&str, &str)]) -> String {
+    write_xmp_ext(meta, lc, &[])
+}
+
+/// The plug-in custom metadata fields a packet carries (`lcpf:fields`, see [`plugin_fields_ns`]):
+/// `(plug-in id, key, value)`, items missing a part skipped, at most 4096 items.
+pub fn plugin_fields(d: &XmpData) -> Vec<(String, String, String)> {
+    let Some(XmpValue::Array(items)) = d.values.get("lcpf:fields") else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|it| {
+            let part = |k: &str| it.field(k).and_then(XmpValue::text).map(str::to_string);
+            let plugin = part("lcpf:plugin").filter(|s| !s.is_empty())?;
+            let key = part("lcpf:key").filter(|s| !s.is_empty())?;
+            Some((plugin, key, part("lcpf:value").unwrap_or_default()))
+        })
+        .take(4096)
+        .collect()
+}
+
+/// [`write_xmp_lc`], plus plug-in custom metadata fields `(plug-in id, field key, value)` in
+/// [`plugin_fields_ns`].
+pub fn write_xmp_ext(meta: &Metadata, lc: &[(&str, &str)], plugin_fields: &[(&str, &str, &str)]) -> String {
+    write_xmp_video(meta, lc, plugin_fields, &[])
+}
+
+/// [`write_xmp_ext`], plus simple video clip properties `(name, value)` in [`video_ns`] (`lcvid:<name>`).
+pub fn write_xmp_video(meta: &Metadata, lc: &[(&str, &str)], plugin_fields: &[(&str, &str, &str)], video: &[(&str, &str)]) -> String {
+    write_xmp_filters(meta, lc, plugin_fields, video, &[])
+}
+
+/// [`write_xmp_video`], plus a pixel-filter stack in [`plugin_filters_ns`] (`lcpx:filters`; nothing when empty).
+pub fn write_xmp_filters(
+    meta: &Metadata,
+    lc: &[(&str, &str)],
+    plugin_fields: &[(&str, &str, &str)],
+    video: &[(&str, &str)],
+    filters: &[XmpPluginFilter],
+) -> String {
     let mut simple: Vec<(&str, String)> = Vec::new();
     let mut push = |k: &'static str, v: Option<String>| {
         if let Some(v) = v {
@@ -615,11 +731,22 @@ pub fn write_xmp_lc(meta: &Metadata, lc: &[(&str, &str)]) -> String {
 
     let mut x = String::new();
     x.push_str("<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n");
-    x.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"LightCraft\">\n");
+    x.push_str("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"");
+    x.push_str(lcc_brand::DISPLAY_NAME);
+    x.push_str("\">\n");
     x.push_str(" <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
     x.push_str("  <rdf:Description rdf:about=\"\"");
     for (p, u) in NAMESPACES.iter().skip(2).filter(|(p, _)| *p != "crs") {
         x.push_str(&format!("\n    xmlns:{p}=\"{u}\""));
+    }
+    if !plugin_fields.is_empty() {
+        x.push_str(&format!("\n    xmlns:lcpf=\"{}\"", plugin_fields_ns()));
+    }
+    if !filters.is_empty() {
+        x.push_str(&format!("\n    xmlns:{FILTERS_PREFIX}=\"{}\"", plugin_filters_ns()));
+    }
+    if !video.is_empty() {
+        x.push_str(&format!("\n    xmlns:{VIDEO_PREFIX}=\"{}\"", video_ns()));
     }
     x.push_str(">\n");
     for (k, v) in &simple {
@@ -629,6 +756,11 @@ pub fn write_xmp_lc(meta: &Metadata, lc: &[(&str, &str)]) -> String {
         if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             // element content: quotes needn't be escaped, which keeps the JSON readable
             x.push_str(&format!("   <lc:{k}>{}</lc:{k}>\n", partial_escape(*v)));
+        }
+    }
+    for (k, v) in video {
+        if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric()) {
+            x.push_str(&format!("   <{VIDEO_PREFIX}:{k}>{}</{VIDEO_PREFIX}:{k}>\n", escape(*v)));
         }
     }
     let array = |x: &mut String, k: &str, kind: &str, items: &[String], lang: bool| {
@@ -671,6 +803,40 @@ pub fn write_xmp_lc(meta: &Metadata, lc: &[(&str, &str)]) -> String {
             tf(r & 0x40 != 0)
         ));
     }
+    if !plugin_fields.is_empty() {
+        x.push_str("   <lcpf:fields>\n    <rdf:Bag>\n");
+        for (plugin, key, value) in plugin_fields {
+            x.push_str(&format!(
+                "     <rdf:li rdf:parseType=\"Resource\">\n      <lcpf:plugin>{}</lcpf:plugin>\n      <lcpf:key>{}</lcpf:key>\n      <lcpf:value>{}</lcpf:value>\n     </rdf:li>\n",
+                escape(*plugin),
+                escape(*key),
+                escape(*value)
+            ));
+        }
+        x.push_str("    </rdf:Bag>\n   </lcpf:fields>\n");
+    }
+    if !filters.is_empty() {
+        let p = FILTERS_PREFIX;
+        x.push_str(&format!("   <{p}:filters>\n    <rdf:Seq>\n"));
+        for f in filters {
+            x.push_str("     <rdf:li rdf:parseType=\"Resource\">\n");
+            for (k, v) in [
+                ("plugin", &f.plugin),
+                ("moduleHash", &f.module_hash),
+                ("name", &f.name),
+                ("enabled", &f.enabled),
+                ("stage", &f.stage),
+                ("params", &f.params),
+                ("analysis", &f.analysis),
+            ] {
+                if !v.is_empty() {
+                    x.push_str(&format!("      <{p}:{k}>{}</{p}:{k}>\n", partial_escape(v.as_str())));
+                }
+            }
+            x.push_str("     </rdf:li>\n");
+        }
+        x.push_str(&format!("    </rdf:Seq>\n   </{p}:filters>\n"));
+    }
     x.push_str("  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end=\"w\"?>");
     x
 }
@@ -688,7 +854,7 @@ mod tests {
             make: Some("Maker & Sons".into()),
             model: Some("X <1>".into()),
             serial_number: Some("SN1".into()),
-            software: Some("LightCraft".into()),
+            software: Some(lcc_brand::DISPLAY_NAME.into()),
             lens_make: Some("L".into()),
             lens_model: Some("24-70mm".into()),
             lens_serial_number: Some("LS".into()),
@@ -1038,5 +1204,22 @@ mod tests {
         let mut a = Metadata::default();
         a.overlay_user_fields(&b);
         assert_eq!(a.regions, vec![with_region]);
+    }
+
+    #[test]
+    fn plugin_fields_read_back_under_any_prefix() {
+        let x = write_xmp_ext(&Metadata::default(), &[], &[("com.ex.jobs", "job", "J-1 <&>"), ("com.ex.jobs", "ok", "true")]);
+        let d = parse_xmp(&x).unwrap();
+        assert_eq!(
+            plugin_fields(&d),
+            vec![("com.ex.jobs".into(), "job".into(), "J-1 <&>".into()), ("com.ex.jobs".into(), "ok".into(), "true".into())]
+        );
+        // another prefix for the same namespace; an item without a key is skipped
+        let ns = plugin_fields_ns();
+        let y = format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:pf="{ns}"><pf:fields><rdf:Bag><rdf:li rdf:parseType="Resource"><pf:plugin>a</pf:plugin><pf:key>k</pf:key><pf:value>v</pf:value></rdf:li><rdf:li rdf:parseType="Resource"><pf:plugin>a</pf:plugin></rdf:li></rdf:Bag></pf:fields></rdf:Description></rdf:RDF></x:xmpmeta>"#
+        );
+        assert_eq!(plugin_fields(&parse_xmp(&y).unwrap()), vec![("a".into(), "k".into(), "v".into())]);
+        assert!(plugin_fields(&parse_xmp(&write_xmp_ext(&Metadata::default(), &[], &[])).unwrap()).is_empty());
     }
 }

@@ -1,6 +1,7 @@
 //! Vendor raw formats (TIFF-based) and helpers shared by them.
 
 pub mod arw;
+mod arw1;
 pub mod arw6;
 mod arw6_curve;
 #[cfg(test)]
@@ -9,11 +10,13 @@ mod arw_lens;
 pub(crate) mod arw_lens_rm6;
 pub mod cr2;
 pub mod cr3;
+pub mod crw;
 pub mod crx;
 pub(crate) mod crx_wavelet;
 pub mod erf;
 pub mod kodak;
 pub mod mef;
+pub mod mrw;
 pub mod nef;
 mod nef_lens;
 pub mod nefc;
@@ -21,13 +24,15 @@ pub mod orf;
 pub mod pef;
 pub mod raf;
 mod raf_lens;
+mod raf_superccd;
 mod rafc;
 pub mod rw2;
 mod sr2;
 pub mod srw;
+mod srwc;
 
 use crate::{BlackLevel, Cfa, Rect};
-use lightcraft_tiff::Tiff;
+use lcc_tiff::Tiff;
 use std::ops::Range;
 
 /// Exif `CFAPattern`.

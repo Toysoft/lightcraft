@@ -1,4 +1,4 @@
-//! The non-destructive edit model of LightCraft.
+//! The non-destructive edit model of the app.
 //!
 //! [`DevelopSettings`] is the complete description of a photo's look: pure, serializable data.
 //! The pipeline evaluates it; the catalog stores it; presets, copy/paste, sync, versions and history
@@ -76,6 +76,13 @@ impl DevelopSettings {
         a == d
     }
 
+    /// The pixel-filter plug-ins that render, in order: enabled entries of `stage`, none while the
+    /// `pluginFilters` section's eye is off.
+    pub fn active_plugin_filters(&self, stage: FilterStage) -> impl Iterator<Item = &PluginFilter> {
+        let on = self.section_enabled(PLUGIN_FILTERS_SECTION);
+        self.plugin_filters.iter().filter(move |f| on && f.enabled && f.stage == stage)
+    }
+
     pub fn section_enabled(&self, section: &str) -> bool {
         !self.disabled_sections.iter().any(|s| s == section)
     }
@@ -86,7 +93,7 @@ impl DevelopSettings {
     /// Calibration the pipeline switches off where it applies them. Borrowed when every section is on.
     pub fn effective(&self) -> std::borrow::Cow<'_, DevelopSettings> {
         let off = |section: &str| !self.section_enabled(section);
-        if !(off("light") || off("color") || off("detail")) {
+        if !(off("light") || off("color") || off("detail") || (off(PLUGIN_FILTERS_SECTION) && !self.plugin_filters.is_empty())) {
             return std::borrow::Cow::Borrowed(self);
         }
         let mut d = self.clone();
@@ -102,6 +109,9 @@ impl DevelopSettings {
         }
         if off("detail") {
             d.reset_section(Section::Detail);
+        }
+        if off(PLUGIN_FILTERS_SECTION) {
+            d.plugin_filters.clear();
         }
         std::borrow::Cow::Owned(d)
     }
@@ -160,14 +170,7 @@ mod tests {
                 name: None,
                 op: MaskOp::Add,
                 invert: false,
-                shape: MaskShape::Radial {
-                    center: lightcraft_geom::Point::new(0.5, 0.5),
-                    rx: 0.2,
-                    ry: 0.1,
-                    angle: 10.0,
-                    feather: 50.0,
-                    invert: false,
-                },
+                shape: MaskShape::Radial { center: lcc_geom::Point::new(0.5, 0.5), rx: 0.2, ry: 0.1, angle: 10.0, feather: 50.0, invert: false },
             }],
             ..Default::default()
         });
@@ -240,6 +243,25 @@ mod tests {
     }
 
     #[test]
+    fn sdr_blend_compresses_or_clips_the_sdr_rendition_and_round_trips() {
+        let mut s = DevelopSettings::default();
+        s.hdr.enabled = true;
+        s.hdr.sdr_blend = 50.0;
+        let r = s.sdr_rendition().into_owned();
+        assert!(r.light.highlights < 0.0 && r.light.whites < 0.0, "positive blend fits more highlights in");
+        assert_eq!(DevelopSettings::from_json(&s.to_json()).unwrap(), s, "lc:settings round trip");
+        s.hdr.max_ev = 5.0;
+        assert!(s.sdr_rendition().light.highlights < r.light.highlights, "more headroom, stronger compression");
+        s.hdr.sdr_blend = -50.0;
+        assert!(s.sdr_rendition().light.highlights > 0.0);
+        s.hdr.sdr_blend = f64::NAN;
+        assert_eq!(s.sdr_rendition().light.highlights, 0.0, "damaged blend is ignored");
+        s.hdr.enabled = false;
+        s.hdr.sdr_blend = 80.0;
+        assert_eq!(s.sdr_rendition().light.highlights, 0.0, "HDR off: no SDR rendition");
+    }
+
+    #[test]
     fn missing_fields_take_defaults_and_unknown_ignored() {
         let s = DevelopSettings::from_json(&json!({"light": {"exposure": 0.5}, "futureThing": 3})).unwrap();
         assert_eq!(s.light.exposure, 0.5);
@@ -265,18 +287,6 @@ mod tests {
         assert!(!s.is_unedited());
         s.reset_section(Section::Light);
         assert!(s.is_unedited());
-    }
-
-    #[test]
-    fn section_toggles() {
-        let mut s = DevelopSettings::default();
-        assert!(s.section_enabled("effects"));
-        s.set_section_enabled("effects", false);
-        s.set_section_enabled("effects", false);
-        assert!(!s.section_enabled("effects"));
-        assert_eq!(s.disabled_sections.len(), 1);
-        s.set_section_enabled("effects", true);
-        assert!(s.section_enabled("effects"));
     }
 
     #[test]

@@ -1,12 +1,12 @@
 //! Merge inputs: scene-linear frames decoded from raw files (camera RGB, before white balance) or
 //! standard images (linear light in the file's primaries), with their exposure from EXIF.
 
-use lightcraft_color::Mat3;
-use lightcraft_geom::Orientation;
-use lightcraft_meta::Metadata;
-use lightcraft_raster::Rgb32f;
-use lightcraft_raster::resample::{Filter, fit};
-use lightcraft_raw::{ColorData, Opcode, RawImage};
+use lcc_color::Mat3;
+use lcc_geom::Orientation;
+use lcc_meta::Metadata;
+use lcc_raster::Rgb32f;
+use lcc_raster::resample::{Filter, fit};
+use lcc_raw::{ColorData, Opcode, RawImage};
 
 use crate::{MergeError, Result};
 
@@ -64,7 +64,7 @@ impl Frame {
     /// A frame from linear pixels in the develop working space (linear Rec.2020), e.g. a rendered
     /// procedural scene. `exposure` as in [`Frame::exposure`].
     pub fn from_linear_rec2020(image: Rgb32f, exposure: Option<f64>) -> Frame {
-        let to_xyz_d50 = lightcraft_color::bradford(lightcraft_color::D65, lightcraft_color::D50).mul(&lightcraft_color::REC2020.to_xyz());
+        let to_xyz_d50 = lcc_color::bradford(lcc_color::D65, lcc_color::D50).mul(&lcc_color::REC2020.to_xyz());
         let clip = detect_clip(&image);
         Frame {
             image,
@@ -153,7 +153,7 @@ pub fn detect_clip(img: &Rgb32f) -> f32 {
 
 /// The colour tags a raw source starts from when the caller knows better than the file (`None`: the
 /// file's own tags). Called with the decoded raw, its samples still there, and the file's bytes.
-pub type RawColour<'a> = dyn Fn(&mut lightcraft_raw::RawImage, &[u8]) -> Option<ColorData> + Sync + 'a;
+pub type RawColour<'a> = dyn Fn(&mut lcc_raw::RawImage, &[u8]) -> Option<ColorData> + Sync + 'a;
 
 /// Decode a photo (raw or standard format) into a frame no larger than `max_edge` (when given).
 /// `orient` applies the EXIF orientation to the pixels.
@@ -164,17 +164,17 @@ pub fn load_frame(bytes: &[u8], max_edge: Option<usize>, orient: bool) -> Result
 /// [`load_frame`] with a raw's colour tags from `colour`: a raw without colour matrices of its own
 /// (CR2, NEF, ARW…) starts from a colour the app works out (issue #965).
 pub fn load_frame_with(bytes: &[u8], max_edge: Option<usize>, orient: bool, colour: &RawColour) -> Result<Frame> {
-    let metadata = lightcraft_meta::extract(bytes);
+    let metadata = lcc_meta::extract(bytes);
     let exposure = exif_exposure(&metadata);
-    if lightcraft_raw::probe(bytes).is_some() {
-        let raw = lightcraft_raw::decode(bytes).map_err(|e| MergeError::Decode(e.to_string()))?;
+    if lcc_raw::probe(bytes).is_some() {
+        let raw = lcc_raw::decode(bytes).map_err(|e| MergeError::Decode(e.to_string()))?;
         return raw_frame(raw, bytes, metadata, exposure, max_edge, orient, colour);
     }
     let opts = match max_edge {
-        Some(m) => lightcraft_codecs::DecodeOptions::fit(m as u32, m as u32),
-        None => lightcraft_codecs::DecodeOptions::default(),
+        Some(m) => lcc_codecs::DecodeOptions::fit(m as u32, m as u32),
+        None => lcc_codecs::DecodeOptions::default(),
     };
-    let d = lightcraft_codecs::decode(bytes, opts).map_err(|e| MergeError::Decode(e.to_string()))?;
+    let d = lcc_codecs::decode(bytes, opts).map_err(|e| MergeError::Decode(e.to_string()))?;
     let mut image = d.image;
     if let Some(m) = max_edge
         && image.width.max(image.height) > m
@@ -216,7 +216,7 @@ fn raw_frame(
     // The DNG 1.6 skip rule is applied here, so no `WarpRectilinear2` is left optional.
     let (aw, ah) = (raw.active_area.width, raw.active_area.height);
     let crop = raw.develop_crop(aw, ah);
-    let lens = lightcraft_raw::opcodes::applied_ops(&raw.opcodes.list3)
+    let lens = lcc_raw::opcodes::applied_ops(&raw.opcodes.list3)
         .filter(|op| op.is_lens_correction())
         .filter_map(|op| op.cropped(aw, ah, crop))
         .map(|op| match op {
@@ -229,7 +229,7 @@ fn raw_frame(
         raw.color = color;
     }
     let small = max_edge.is_some_and(|m| m <= 1200);
-    let method = if small { lightcraft_raw::Method::Bilinear } else { lightcraft_raw::Method::Ahd };
+    let method = if small { lcc_raw::Method::Bilinear } else { lcc_raw::Method::Ahd };
     let mut image = raw.develop(method).map_err(|e| MergeError::Decode(e.to_string()))?;
     for p in image.data.iter_mut() {
         *p = p.map(|v| v.max(0.0));
@@ -289,7 +289,7 @@ mod tests {
 
     /// A 16×12 CR2-style mosaic (no colour tags, as the vendor decoders leave them) with as-shot multipliers.
     fn mosaic(wb_multipliers: Option<[f32; 3]>) -> RawImage {
-        use lightcraft_raw::{BlackLevel, Cfa, OpcodeLists, RawData, RawFormat, Rect};
+        use lcc_raw::{BlackLevel, Cfa, OpcodeLists, RawData, RawFormat, Rect};
         let (w, h) = (16usize, 12usize);
         RawImage {
             format: RawFormat::Cr2,
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn multipliers_become_the_reciprocal_as_shot_neutral() {
-        use lightcraft_color::{D50, Xy};
+        use lcc_color::{D50, Xy};
         let tagged = ColorData { as_shot_neutral: Some([0.9, 1.0, 0.9]), as_shot_white_xy: Some(Xy::new(0.34, 0.35)), ..Default::default() };
         let mut color = FrameColor::Camera(Box::new(tagged.clone()));
         color.set_as_shot_multipliers([2.0, 1.0, 1.6]);

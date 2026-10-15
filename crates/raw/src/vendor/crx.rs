@@ -8,7 +8,9 @@
 //! CRX-specific boundaries and adaptive parameters were established by comparing
 //! CC0 raw.pixls.us files against an external decoder used only as a black-box oracle.
 //!
-//! Current support: version 0x100 lossless Bayer RAW and horizontal-tile C-RAW,
+//! Current support: version 0x100 lossless Bayer RAW and tiled C-RAW (horizontal and vertical
+//! tiles; vertical tiles use the same 5/3 overlap rule at top/bottom tile edges as the verified
+//! left/right edges, and are not yet checked against a real file),
 //! plus version 0x200 single-tile 14-bit C-RAW with adaptive QP quantization
 //! (including odd-height QP maps, as on the EOS R7, and odd-height Bayer planes, as on the EOS R5 Mark II).
 //! Both ff01/ff02/ff03 and ff11/ff12/ff13 marker families are supported.
@@ -20,7 +22,7 @@
 
 use super::crx_wavelet::{self, Band as WaveletBand, TileEdges};
 use crate::{MAX_SAMPLES, RawError, Result};
-use lightcraft_meta::cr3::Cr3Compression;
+use lcc_meta::cr3::Cr3Compression;
 use rayon::prelude::*;
 use std::ops::Range;
 
@@ -92,6 +94,7 @@ pub(crate) fn header_ranges(sample: &[u8], config: &Cr3Compression) -> Result<Ve
 pub(crate) fn decode(sample: &[u8], config: &Cr3Compression) -> Result<Vec<u16>> {
     supports(config)?;
     let width = usize::try_from(config.width).map_err(|_| RawError::Limit("CRX width"))?;
+    let height = usize::try_from(config.height).map_err(|_| RawError::Limit("CRX height"))?;
     let count = image_size(config)?;
     let tiles = layout(sample, config)?;
     validate_planes(&tiles, config)?;
@@ -111,7 +114,8 @@ pub(crate) fn decode(sample: &[u8], config: &Cr3Compression) -> Result<Vec<u16>>
                     let band = plane.bands.first().ok_or_else(|| corrupt("missing lossless band"))?;
                     lossless_plane(band_bytes(sample, band)?, tile.width / 2, tile.height / 2)
                 } else {
-                    let edges = TileEdges { left: tile.x > 0, right: tile.x + tile.width < width, top: false, bottom: false };
+                    let edges =
+                        TileEdges { left: tile.x > 0, right: tile.x + tile.width < width, top: tile.y > 0, bottom: tile.y + tile.height < height };
                     wavelet_plane(sample, plane, tile.width / 2, tile.height / 2, edges, qp.as_ref())
                 }
                 .map_err(|error| RawError::Corrupt(format!("Canon CRX tile ({}, {}), plane {p}: {error}", tile.x, tile.y)))
@@ -188,10 +192,9 @@ fn supports(config: &Cr3Compression) -> Result<()> {
     if !(8..=16).contains(&config.bit_depth) {
         return Err(RawError::Unsupported(format!("Canon CRX {}-bit samples", config.bit_depth)));
     }
-    if config.levels == 3 && config.tile_height != config.height {
-        return Err(RawError::Unsupported("Canon CRX C-RAW with vertical tiles".into()));
-    }
-    if config.version == 0x200 && (config.levels != 3 || config.bit_depth != 14 || config.tile_width != config.width) {
+    if config.version == 0x200
+        && (config.levels != 3 || config.bit_depth != 14 || config.tile_width != config.width || config.tile_height != config.height)
+    {
         return Err(RawError::Unsupported("Canon CRX version 0x200 requires a single-tile 14-bit Bayer C-RAW image".into()));
     }
     if config.median_bit_depth.is_some() {
@@ -951,6 +954,117 @@ mod tests {
         }
     }
 
+    /// Bits of an all-zero CRX band (lossless or high-frequency: both code it as zero runs).
+    fn zero_band(width: usize, height: usize) -> Vec<u8> {
+        let mut bits = Vec::new();
+        let mut index = 0usize;
+        for _ in 0..height {
+            if width == 1 {
+                bits.push(1); // Rice(0, k0).
+                continue;
+            }
+            bits.push(1); // Run flag.
+            let mut length = 1usize;
+            while length < width {
+                let exponent = RUN_EXPONENT[index];
+                if length + (1 << exponent) <= width {
+                    bits.push(1);
+                    length += 1 << exponent;
+                    index = (index + 1).min(RUN_EXPONENT.len() - 1);
+                } else {
+                    bits.push(0);
+                    let rest = width - length;
+                    for b in (0..exponent).rev() {
+                        bits.push(((rest >> b) & 1) as u8);
+                    }
+                    index = index.saturating_sub(1);
+                    break;
+                }
+            }
+        }
+        bits.chunks(8).map(|c| c.iter().enumerate().fold(0u8, |byte, (i, &b)| byte | (b << (7 - i)))).collect()
+    }
+
+    /// A version 0x100 C-RAW sample with all-zero coefficients, tiled `tw`×`th`.
+    fn zero_craw(width: usize, height: usize, tw: usize, th: usize) -> (Vec<u8>, Cr3Compression) {
+        let (columns, rows) = (width.div_ceil(tw), height.div_ceil(th));
+        let mut header = Vec::new();
+        let mut data = Vec::new();
+        for index in 0..columns * rows {
+            let (x, y) = ((index % columns) * tw, (index / columns) * th);
+            let (w, h) = (tw.min(width - x), th.min(height - y));
+            let edges = (x > 0, x + w < width, y > 0, y + h < height);
+            let mut dims = vec![(w / 2, h / 2)];
+            let mut high = Vec::new();
+            for _ in 0..3 {
+                let &(pw, ph) = dims.last().unwrap();
+                let (lw, hw) = split_dimension(pw, edges.0, edges.1);
+                let (lh, hh) = split_dimension(ph, edges.2, edges.3);
+                dims.push((lw, lh));
+                high.push([(hw, lh), (lw, hh), (hw, hh)]);
+            }
+            let mut shapes = vec![*dims.last().unwrap()];
+            for level in high.iter().rev() {
+                shapes.extend_from_slice(level);
+            }
+            let bands: Vec<Vec<u8>> = shapes.iter().map(|&(w, h)| zero_band(w, h)).collect();
+            let plane_size: usize = bands.iter().map(Vec::len).sum();
+            marker(&mut header, 0xff01, (plane_size * 4) as u32, (index as u32) << 16);
+            for plane in 0..4u32 {
+                marker(&mut header, 0xff02, plane_size as u32, (plane << 28) | 0x0800_0000);
+                for (band, bytes) in bands.iter().enumerate() {
+                    marker(&mut header, 0xff03, bytes.len() as u32, ((band as u32) << 28) | 0x0020_0000);
+                    data.extend_from_slice(bytes);
+                }
+            }
+        }
+        let mut config = coding();
+        (config.width, config.height, config.tile_width, config.tile_height) = (width as u32, height as u32, tw as u32, th as u32);
+        config.levels = 3;
+        config.header_size = header.len() as u32;
+        header.extend(data);
+        (header, config)
+    }
+
+    #[test]
+    fn vertical_and_grid_tiled_craw_reconstructs_sensor_samples() {
+        for (width, height, tw, th) in [(32, 64, 32, 32), (32, 60, 32, 32), (64, 64, 32, 32), (48, 40, 32, 24)] {
+            let (sample, config) = zero_craw(width, height, tw, th);
+            validate(&sample, &config).unwrap();
+            assert_eq!(decode(&sample, &config).unwrap(), vec![8192; width * height], "{width}x{height} in {tw}x{th}");
+            for end in (0..sample.len()).step_by(7) {
+                assert!(decode(&sample[..end], &config).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn unverified_variants_stay_explicit_unsupported_errors() {
+        let (sample, config) = zero_craw(32, 64, 32, 32);
+        // Partial subband flag on the first band (flags at byte 32), then nonzero rounded bits on
+        // the first plane (flags at byte 20).
+        for (at, bit) in [(32, 0x08), (20, 0x02)] {
+            let mut broken = sample.clone();
+            broken[at] |= bit;
+            assert!(matches!(decode(&broken, &config), Err(RawError::Unsupported(_))), "byte {at}");
+            assert!(matches!(validate(&broken, &config), Err(RawError::Unsupported(_))), "byte {at}");
+        }
+        let mut config = config;
+        config.version = 0x200;
+        assert!(matches!(decode(&sample, &config), Err(RawError::Unsupported(_))));
+    }
+
+    #[test]
+    fn vertical_tile_bands_sized_without_top_bottom_overlap_are_errors() {
+        // A band laid out as if the tile had no vertical neighbour must not decode as one that has.
+        let (sample, mut config) = zero_craw(32, 32, 32, 32);
+        config.height = 64;
+        assert!(decode(&sample, &config).is_err());
+        let (sample, mut config) = zero_craw(32, 64, 32, 64);
+        config.tile_height = 32;
+        assert!(decode(&sample, &config).is_err());
+    }
+
     #[test]
     fn craw_overshoot_at_clipped_highlights_is_clamped_to_the_bit_depth() {
         // As `three_level_craw_reconstructs_sensor_samples`, but each LL3 coefficient is +8200
@@ -1133,7 +1247,7 @@ mod tests {
 
     #[test]
     fn optional_cc0_samples_match_external_oracle() {
-        let Some(directory) = std::env::var_os("LIGHTCRAFT_CR3_CORPUS") else { return };
+        let Some(directory) = lcc_brand::env_os("CR3_CORPUS") else { return };
         for (name, expected) in [
             ("cr3-canon-r100-raw.cr3", 0xcbe5299ab9c52630u64),
             ("cr3-canon-m50-raw.cr3", 0x62261f0ba81cfcd2u64),
@@ -1148,12 +1262,12 @@ mod tests {
         ] {
             let path = std::path::Path::new(&directory).join(name);
             let bytes = std::fs::read(path).unwrap();
-            let container = lightcraft_meta::cr3::parse_cr3(&bytes).unwrap();
+            let container = lcc_meta::cr3::parse_cr3(&bytes).unwrap();
             let mut candidates = container
                 .tracks
                 .iter()
                 .filter_map(|track| {
-                    let lightcraft_meta::cr3::Cr3TrackKind::Raw { cmp1: Some((at, length)), .. } = track.kind else { return None };
+                    let lcc_meta::cr3::Cr3TrackKind::Raw { cmp1: Some((at, length)), .. } = track.kind else { return None };
                     let coding = Cr3Compression::parse(bytes.get(at..at + length)?)?;
                     Some((u64::from(coding.width) * u64::from(coding.height), coding, track.data?))
                 })

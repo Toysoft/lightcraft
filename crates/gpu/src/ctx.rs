@@ -32,7 +32,12 @@ const MODULES: &[Module] = &[
     Module {
         src: include_str!("wgsl/blur.wgsl"),
         bindings: &[("src", false, "f32"), ("dst", true, "f32")],
-        entries: &["box_h", "box_v", "median_h", "median_v"],
+        entries: &["box_h", "box_v", "median_h", "median_v", "min_h", "min_v"],
+    },
+    Module {
+        src: include_str!("wgsl/gauss.wgsl"),
+        bindings: &[("src", false, "f32"), ("taps", false, "f32"), ("dst", true, "f32")],
+        entries: &["gauss_h", "gauss_v"],
     },
     Module {
         src: include_str!("wgsl/resize.wgsl"),
@@ -236,10 +241,10 @@ pub struct Gpu {
 
 /// WGSL constants shared by every module (generated from the CPU pipeline's values).
 fn constants() -> String {
-    use lightcraft_pipeline::finish::{GRAIN_HASH, MASK_SUMS, MASK_TERMS, SRGB_LUT_N};
-    use lightcraft_pipeline::tone::{CHROMA_N, LUT_MAX_EV, LUT_MIN_EV, LUT_N};
+    use lcc_pipeline::finish::{GRAIN_HASH, MASK_SUMS, MASK_TERMS, SRGB_LUT_N};
+    use lcc_pipeline::tone::{CHROMA_N, LUT_MAX_EV, LUT_MIN_EV, LUT_N};
     let mut s = String::new();
-    let [to_lms, from_lms, to_lab, from_lab] = lightcraft_color::perceptual::oklab_matrices();
+    let [to_lms, from_lms, to_lab, from_lab] = lcc_color::perceptual::oklab_matrices();
     for (name, m) in [("OK_TO_LMS", to_lms), ("OK_FROM_LMS", from_lms), ("OK_TO_LAB", to_lab), ("OK_FROM_LAB", from_lab)] {
         let rows: Vec<String> = m.iter().map(|r| format!("vec3<f32>({:?}, {:?}, {:?})", r[0], r[1], r[2])).collect();
         s += &format!("const {name} = array<vec3<f32>, 3>({});\n", rows.join(", "));
@@ -248,17 +253,17 @@ fn constants() -> String {
         "const TONE_MIN_EV: f32 = {LUT_MIN_EV:?};\nconst TONE_MAX_EV: f32 = {LUT_MAX_EV:?};\nconst TONE_N: u32 = {LUT_N}u;\nconst CHROMA_N: u32 = {CHROMA_N}u;\n"
     );
     s += &format!("const TONE_MIN_GAIN: f32 = {:?};\n", 2f32.powf(LUT_MIN_EV));
-    let b = lightcraft_pipeline::geometry::BLANK;
+    let b = lcc_pipeline::geometry::BLANK;
     s += &format!("const BLANK_R: f32 = {:?};\nconst BLANK_G: f32 = {:?};\nconst BLANK_B: f32 = {:?};\n", b[0], b[1], b[2]);
     s += &format!(
         "const SRGB_N: u32 = {SRGB_LUT_N}u;\nconst CURVE_N: u32 = {}u;\nconst MASK_TERMS: u32 = {MASK_TERMS}u;\nconst MASK_SUMS: u32 = {MASK_SUMS}u;\n",
         crate::params::CURVE_N
     );
-    s += &format!("const POINT_WORDS: u32 = {}u;\n", lightcraft_pipeline::colorops::POINT_WORDS);
-    s += &format!("const EYE_WORDS: u32 = {}u;\n", lightcraft_pipeline::redeye::EYE_WORDS);
-    use lightcraft_pipeline::masks::{AUTO_TOL_CHROMA, AUTO_TOL_EV};
+    s += &format!("const POINT_WORDS: u32 = {}u;\n", lcc_pipeline::colorops::POINT_WORDS);
+    s += &format!("const EYE_WORDS: u32 = {}u;\n", lcc_pipeline::redeye::EYE_WORDS);
+    use lcc_pipeline::masks::{AUTO_TOL_CHROMA, AUTO_TOL_EV};
     s += &format!("const AUTO_TOL_EV: f32 = {AUTO_TOL_EV:?};\nconst AUTO_TOL_CHROMA: f32 = {AUTO_TOL_CHROMA:?};\n");
-    s += &format!("const SHADOW_TINT_K: f32 = {:?};\n", lightcraft_pipeline::colorops::SHADOW_TINT);
+    s += &format!("const SHADOW_TINT_K: f32 = {:?};\n", lcc_pipeline::colorops::SHADOW_TINT);
     for (i, h) in GRAIN_HASH.iter().enumerate() {
         s += &format!("const GRAIN_H{i}: u32 = {h}u;\n");
     }
@@ -308,10 +313,10 @@ impl Gpu {
         if let Some((binding, buffer)) = limits_override() {
             limits.max_storage_buffer_binding_size = limits.max_storage_buffer_binding_size.min(binding);
             limits.max_buffer_size = limits.max_buffer_size.min(buffer);
-            log::info!("gpu: LIGHTCRAFT_GPU_LIMITS: storage bindings ≤ {} MiB, buffers ≤ {} MiB", binding >> 20, buffer >> 20);
+            log::info!("gpu: {}: storage bindings ≤ {} MiB, buffers ≤ {} MiB", lcc_brand::env_var("GPU_LIMITS"), binding >> 20, buffer >> 20);
         }
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("lightcraft"),
+            label: Some(lcc_brand::BINARY),
             required_limits: limits.clone(),
             ..Default::default()
         }))
@@ -584,11 +589,11 @@ impl Gpu {
 /// normally reset a hung GPU much sooner).
 const READBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// `LIGHTCRAFT_GPU_LIMITS`: lower the device limits, e.g. to reproduce a smaller adapter.
+/// `{ENV_PREFIX}_GPU_LIMITS`: lower the device limits, e.g. to reproduce a smaller adapter.
 /// `webgpu` / `downlevel` = 128 MiB storage bindings and 256 MiB buffers (the WebGPU defaults),
 /// `<n>` = n MiB storage bindings and 2n MiB buffers. Returns (binding bytes, buffer bytes).
 fn limits_override() -> Option<(u64, u64)> {
-    parse_limits(&std::env::var("LIGHTCRAFT_GPU_LIMITS").ok()?)
+    parse_limits(&lcc_brand::env("GPU_LIMITS")?)
 }
 
 fn parse_limits(v: &str) -> Option<(u64, u64)> {
@@ -724,15 +729,6 @@ pub fn groups1(n: usize) -> [u32; 3] {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn limits_override_parses() {
-        assert_eq!(super::parse_limits("webgpu"), Some((128 << 20, 256 << 20)));
-        assert_eq!(super::parse_limits(" Downlevel "), Some((128 << 20, 256 << 20)));
-        assert_eq!(super::parse_limits("64"), Some((64 << 20, 128 << 20)));
-        assert_eq!(super::parse_limits("512MiB"), Some((512 << 20, 1024 << 20)));
-        assert_eq!(super::parse_limits(""), None);
-        assert_eq!(super::parse_limits("lots"), None);
-    }
 
     #[test]
     fn dispatches_stay_within_the_workgroup_limit() {

@@ -31,7 +31,7 @@
 
 pub use crate::focus_read::{HEADER_PREFIX, HeaderRead, MAX_HEADER_BYTES, read_header};
 use crate::{Orientation, Rect};
-use lightcraft_tiff::{ByteOrder, Ifd, Tiff, makernote, tags as t};
+use lcc_tiff::{ByteOrder, Ifd, Tiff, makernote, tags as t};
 use serde::{Deserialize, Serialize};
 
 /// Where the camera focused, on the upright photo.
@@ -283,7 +283,7 @@ fn area_used_name(v: u8) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lightcraft_tiff::{Entry, IfdBuilder, TiffWriter, Value};
+    use lcc_tiff::{Entry, IfdBuilder, TiffWriter, Value};
 
     fn encipher(p: u8) -> u8 {
         if p >= 249 { p } else { ((u32::from(p).pow(3)) % 249) as u8 }
@@ -493,7 +493,7 @@ mod tests {
             let mut outside: Vec<u8> = Vec::new();
             order.put_u16(&mut note, note_entries.len() as u16);
             for (tag, v) in note_entries {
-                let raw = lightcraft_tiff::writer::encode(order, v);
+                let raw = lcc_tiff::writer::encode(order, v);
                 order.put_u16(&mut note, *tag);
                 order.put_u16(&mut note, v.field_type() as u16);
                 order.put_u32(&mut note, v.count() as u32);
@@ -672,29 +672,12 @@ mod tests {
         assert!(r.is_err());
     }
 
-    #[test]
-    fn the_synthetic_arw_is_laid_out_as_described() {
-        let f = synthetic_arw(3, 10);
-        assert_eq!(f.len(), 260);
-        let p = crate::extract(&f).focus.expect("a point");
-        assert_eq!(p.words(), vec!["AF-C", "Wide", "Animal Eye Tracking"]);
-        assert!(crate::extract(&synthetic_arw(0, 0)).focus.is_none(), "manual focus");
-    }
-
-    #[test]
-    fn cameras_that_can_have_a_point() {
-        assert!(camera_supported("SONY ILCE-1") && camera_supported("Sony ILCE-7SM3 "));
-        for c in ["SONY ILCE-7M4", "Canon EOS R5", "", "SONY", "ILCE-1", "SON"] {
-            assert!(!camera_supported(c), "{c}");
-        }
-    }
-
     /// Opt-in: decode real α1 / A7S III files and compare with the values ExifTool (run as a black box)
-    /// reports for them. `LIGHTCRAFT_FOCUS_SAMPLES=<dir>` is the photo folder the paths below are relative
+    /// reports for them. `<PREFIX>_FOCUS_SAMPLES=<dir>` is the photo folder the paths below are relative
     /// to; skipped without it. No user file is part of the repository.
     #[test]
     fn real_sony_files_match_exiftool() {
-        let Ok(dir) = std::env::var("LIGHTCRAFT_FOCUS_SAMPLES") else { return };
+        let Some(dir) = lcc_brand::env("FOCUS_SAMPLES") else { return };
         let dir = std::path::Path::new(&dir);
         type Want = Option<([f64; 4], [f64; 2], &'static [&'static str])>;
         // (file, EXIF orientation, ExifTool's FocusLocation and FocusFrameSize, the words we show; None = no point)

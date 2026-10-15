@@ -11,10 +11,10 @@
 use super::{nefc, white_from_data};
 use crate::tiffraw::{Packing, check_image, read_image};
 use crate::{BlackLevel, Cfa, ColorData, Mode, OpcodeLists, RawData, RawError, RawFormat, RawImage, Rect, Result};
-use lightcraft_geom::Orientation;
-use lightcraft_tiff::image::ImageInfo;
-use lightcraft_tiff::tags::{self as t, photometric};
-use lightcraft_tiff::{ByteOrder, Ifd, Tiff, makernote};
+use lcc_geom::Orientation;
+use lcc_tiff::image::ImageInfo;
+use lcc_tiff::tags::{self as t, photometric};
+use lcc_tiff::{ByteOrder, Ifd, Tiff, makernote};
 
 const WB_RB_LEVELS: u16 = 0x000c;
 const BLACK_LEVEL: u16 = 0x003d;
@@ -279,7 +279,7 @@ pub(crate) fn decode(bytes: &[u8], mode: Mode) -> Result<RawImage> {
         _ => default_crop(mn.as_ref(), active_w, h),
     };
     let pixel_aspect = pixel_aspect_of(raw);
-    let mut metadata = lightcraft_meta::from_tiff(&tiff);
+    let mut metadata = lcc_meta::from_tiff(&tiff);
     metadata.width = Some(crop.width as u32);
     metadata.height = Some(crate::stretched_height(crop.height, pixel_aspect) as u32);
     let img = RawImage {
@@ -352,10 +352,9 @@ fn compressed(bytes: &[u8], info: &ImageInfo, mn: Option<&makernote::MakerNote>,
     if starts_with(&JPEG_XS_START) {
         return Err(RawError::Unsupported(HIGH_EFFICIENCY.into()));
     }
-    // (some Z bodies label uncompressed, row-padded data 34713 without a table: not handled here yet)
-    let table = mn
-        .and_then(|m| Some((m.ifd.bytes(LINEARIZATION_TABLE)?, m.order)))
-        .ok_or_else(|| RawError::Unsupported("Nikon compressed NEF without a linearization table (maker note 0x96)".into()))?;
+    let Some(table) = mn.and_then(|m| Some((m.ifd.bytes(LINEARIZATION_TABLE)?, m.order))) else {
+        return packed_lsb(bytes, info, rows);
+    };
     if info.samples_per_pixel != 1 {
         return Err(RawError::Unsupported(format!("Nikon compressed NEF with {} samples per pixel", info.samples_per_pixel)));
     }
@@ -370,10 +369,101 @@ fn compressed(bytes: &[u8], info: &ImageInfo, mn: Option<&makernote::MakerNote>,
     Ok(RawData::U16(nefc::decode_rows(src, info.width as usize, info.height as usize, rows, bits, &table)?))
 }
 
+/// Row stride of a table-less 34713 strip that holds plain packed samples: one strip whose size is exactly `h` rows of
+/// an LSB-first `bits`-bit stream, each row `w * bits / 8` bytes or that rounded up to 16 bytes. Exiftool calls the
+/// Z 6II's variant "Packed 14 bits" (issue #769: 6064 × 14 / 8 = 10612 bytes, rows of 10624); the 12-bit rows of the
+/// D850 / D810 / D500 / Z 7 class are unpadded. Layouts as measured for upstream PR #671 on CC0 raw.pixls.us files
+/// (strip-size identity and same-colour smoothness); re-checked here on the Z 6II 14-bit sample (raw.pixls.us 4162).
+fn packed_stride(w: usize, h: usize, bits: u32, strip: u64) -> Option<usize> {
+    if w == 0 || h == 0 || !matches!(bits, 12 | 14) {
+        return None;
+    }
+    let strip = usize::try_from(strip).ok()?;
+    let tight = w.checked_mul(bits as usize)?;
+    if !tight.is_multiple_of(8) || !strip.is_multiple_of(h) {
+        return None;
+    }
+    let (tight, stride) = (tight / 8, strip / h);
+    (stride == tight || stride == tight.next_multiple_of(16)).then_some(stride)
+}
+
+/// A 34713 strip without a linearization table: packed samples when [`packed_stride`] matches, else unsupported.
+fn packed_lsb(bytes: &[u8], info: &ImageInfo, rows: usize) -> Result<RawData> {
+    let (w, h) = (info.width as usize, info.height as usize);
+    let bits = info.bits() as u32;
+    let chunks = info.chunks(bytes.len() as u64);
+    let stride = match chunks.as_slice() {
+        [c] if info.samples_per_pixel == 1 => packed_stride(w, h, bits, c.len).map(|s| (s, c)),
+        _ => None,
+    };
+    let Some((stride, c)) = stride else {
+        return Err(RawError::Unsupported("Nikon compressed NEF without a linearization table (maker note 0x96)".into()));
+    };
+    check_image(bytes, info)?;
+    let start = usize::try_from(c.offset).map_err(|_| RawError::Corrupt("NEF: image data outside the file".into()))?;
+    let src = bytes.get(start..).ok_or_else(|| RawError::Corrupt("NEF: image data outside the file".into()))?;
+    let rows = rows.min(h);
+    let mut out = vec![0u16; w.checked_mul(rows).ok_or(RawError::Limit("image too large"))?];
+    use rayon::prelude::*;
+    out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        // a truncated file leaves the missing rows black
+        if let Some(line) = src.get(y * stride..).map(|l| l.get(..stride).unwrap_or(l)) {
+            crate::unpack::unpack_lsb(line, bits, row);
+        }
+    });
+    Ok(RawData::U16(out))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lightcraft_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, Value};
+    use lcc_tiff::{ByteOrder, IfdBuilder, ImageData, TiffWriter, Value};
+
+    fn pack_lsb(samples: &[u16], bits: u32, stride: usize, w: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        for row in samples.chunks(w) {
+            let (mut acc, mut n, mut line) = (0u64, 0u32, Vec::new());
+            for &s in row {
+                acc |= u64::from(s) << n;
+                n += bits;
+                while n >= 8 {
+                    line.push(acc as u8);
+                    acc >>= 8;
+                    n -= 8;
+                }
+            }
+            line.resize(stride, 0);
+            out.extend(line);
+        }
+        out
+    }
+
+    #[test]
+    fn table_less_34713_strips_decode_as_packed_lsb() {
+        // 14-bit rows padded to 16 bytes (Z 6II), 12-bit rows unpadded (D850 class)
+        for (bits, w, stride) in [(14u32, 12usize, 32usize), (12, 8, 12), (12, 12, 32)] {
+            let h = 4;
+            let samples: Vec<u16> = (0..w * h).map(|i| (i as u16 * 37) & ((1 << bits) - 1)).collect();
+            let strip = pack_lsb(&samples, bits, stride, w);
+            let bytes = nef(t::compression::NIKON, bits as u16, vec![strip], w as u32, h as u32, h as u32);
+            let img = crate::decode(&bytes).unwrap();
+            assert_eq!(img.data, RawData::U16(samples), "{bits}-bit, stride {stride}");
+        }
+    }
+
+    #[test]
+    fn table_less_34713_strip_of_another_size_stays_unsupported() {
+        assert_eq!(packed_stride(6064, 4040, 14, 10624 * 4040), Some(10624), "the Z 6II geometry of #769");
+        assert_eq!(packed_stride(8, 4, 12, 13 * 4), None);
+        assert_eq!(packed_stride(0, 4, 12, 0), None);
+        let bytes = nef(t::compression::NIKON, 14, vec![vec![0; 50]], 12, 4, 4);
+        assert!(matches!(crate::decode(&bytes), Err(RawError::Unsupported(_))));
+        // a truncated strip decodes what is there, without panicking
+        let bytes = nef(t::compression::NIKON, 14, vec![vec![0; 128]], 12, 4, 4);
+        let mut short = bytes.clone();
+        short.truncate(short.len() - 40);
+        let _ = crate::decode(&short);
+    }
 
     fn nef(compression: u16, bits: u16, strips: Vec<Vec<u8>>, w: u32, h: u32, rps: u32) -> Vec<u8> {
         nef_with_note(compression, bits, strips, w, h, rps, None)
