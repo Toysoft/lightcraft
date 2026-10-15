@@ -151,7 +151,7 @@ fn candidates<'a>(data: &'a [u8], ifd: &Ifd, base: u64, out: &mut Vec<&'a [u8]>)
 /// The largest embedded preview, if any: a JPEG, or (DNG 1.7) a JPEG XL file — both decode with
 /// `lightcraft_codecs::decode`.
 pub fn embedded_preview(bytes: &[u8]) -> Option<Vec<u8>> {
-    preview_covering(bytes, None)
+    preview_covering(bytes, None).map(|p| p.jpeg)
 }
 
 /// The smallest embedded JPEG whose long edge is at least `min_edge` and that looks like a copy of the largest preview
@@ -159,67 +159,105 @@ pub fn embedded_preview(bytes: &[u8]) -> Option<Vec<u8>> {
 /// grey mask or depth map), else [`embedded_preview`]. Only TIFF-based raws keep several: an A7R VI's 1616 × 1080
 /// preview is 0.3 MB beside its 9984 × 6656 one (5.6 MB), so a stand-in up to 1616 px decodes about a twentieth of the data.
 pub fn embedded_preview_covering(bytes: &[u8], min_edge: u32) -> Option<Vec<u8>> {
+    embedded_preview_covering_with_origin(bytes, min_edge).map(|p| p.jpeg)
+}
+
+/// A selected embedded preview and the writer declared by its own IFD.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddedPreview {
+    pub jpeg: Vec<u8>,
+    /// `PreviewApplicationName` (50966), absent when the selected IFD declares no writer.
+    pub application: Option<String>,
+    /// Whether the writer tag is absent or uses its ASCII text type.
+    pub application_is_valid: bool,
+}
+
+/// The same selection as [`embedded_preview_covering`], retaining its preview-origin metadata.
+pub fn embedded_preview_covering_with_origin(bytes: &[u8], min_edge: u32) -> Option<EmbeddedPreview> {
     preview_covering(bytes, Some(min_edge))
 }
 
 /// Of the DCT JPEGs in `found`, the one with the shortest long edge of at least `min_edge` with `largest`'s aspect
 /// ratio (within 1 %) and component count.
-fn smallest_covering<'a>(found: &[&'a [u8]], largest: &[u8], min_edge: u32) -> Option<&'a [u8]> {
-    let (bw, bh, bc) = jpeg_frame(largest)?;
+fn smallest_covering(found: &[&[u8]], largest: usize, min_edge: u32) -> Option<usize> {
+    let (bw, bh, bc) = jpeg_frame(found.get(largest)?)?;
     let like = |(w, h, c): (u32, u32, u8)| {
         let (a, b) = (u64::from(w) * u64::from(bh), u64::from(h) * u64::from(bw));
         w > 0 && h > 0 && c == bc && a.abs_diff(b) * 100 <= a
     };
     found
         .iter()
-        .filter_map(|&s| jpeg_frame(s).filter(|&f| like(f) && f.0.max(f.1) >= min_edge).map(|(w, h, _)| (s, w.max(h))))
+        .enumerate()
+        .filter_map(|(i, &s)| jpeg_frame(s).filter(|&f| like(f) && f.0.max(f.1) >= min_edge).map(|(w, h, _)| (i, w.max(h))))
         .min_by_key(|&(_, long)| long)
-        .map(|(s, _)| s)
+        .map(|(i, _)| i)
 }
 
-fn preview_covering(bytes: &[u8], min_edge: Option<u32>) -> Option<Vec<u8>> {
+fn preview_covering(bytes: &[u8], min_edge: Option<u32>) -> Option<EmbeddedPreview> {
+    let unnamed = |jpeg| EmbeddedPreview { jpeg, application: None, application_is_valid: true };
     if bytes.starts_with(b"FUJIFILMCCD-RAW") {
         let j = crate::vendor::raf::header(bytes).ok()?.jpeg?;
-        return is_dct_jpeg(j).then(|| trim_eoi(j).to_vec());
+        return is_dct_jpeg(j).then(|| unnamed(trim_eoi(j).to_vec()));
     }
     let format = crate::probe(bytes);
     if format == Some(crate::RawFormat::Cr3) {
-        return cr3_preview(bytes).map(|j| trim_eoi(j).to_vec());
+        return cr3_preview(bytes).map(|j| unnamed(trim_eoi(j).to_vec()));
     }
     if matches!(format, Some(crate::RawFormat::Crw | crate::RawFormat::Mrw | crate::RawFormat::X3f)) {
-        return scan_for_jpeg(bytes);
+        return scan_for_jpeg(bytes).map(unnamed);
     }
     let tiff = Tiff::parse(bytes).ok()?;
     let mut found: Vec<&[u8]> = Vec::new();
+    let mut origins = Vec::new();
     for ifd in tiff.all_ifds() {
+        let start = found.len();
         candidates(bytes, ifd, 0, &mut found);
+        // Retain only IFD references here. Copying a long writer string for every aliased JPEG
+        // candidate would multiply allocations from untrusted metadata before selection.
+        origins.extend(std::iter::repeat_n(ifd, found.len() - start));
     }
-    // maker-note preview IFDs (e.g. Nikon PreviewIFD 0x0011 holds JPEGInterchangeFormat relative to the note base)
+    // Retain maker-note IFDs until selection, so their own writer metadata stays associated too.
+    let mut maker_ifds = Vec::new();
     if let Some(exif) = tiff.exif()
         && let Some(e) = exif.get(t::MAKER_NOTE)
     {
         let make = tiff.find(t::MAKE).and_then(|e| e.value.as_str()).unwrap_or_default();
         if let Some(mn) = makernote::parse_makernote(bytes, e.offset, e.count() as u64, tiff.order, &make) {
-            candidates(bytes, &mn.ifd, mn.base, &mut found);
-            if let Some(off) = mn.ifd.u64(0x0011)
-                && let Ok((pifd, _)) = lightcraft_tiff::parse_ifd_at(bytes, mn.base + off, mn.order, mn.base, false, &Default::default())
+            if let Some(at) = mn.ifd.u64(0x0011).and_then(|off| mn.base.checked_add(off))
+                && let Ok((pifd, _)) = lightcraft_tiff::parse_ifd_at(bytes, at, mn.order, mn.base, false, &Default::default())
             {
-                candidates(bytes, &pifd, mn.base, &mut found);
+                maker_ifds.push((pifd, mn.base));
             }
+            maker_ifds.insert(0, (mn.ifd, mn.base));
         }
+    }
+    for (ifd, base) in &maker_ifds {
+        let start = found.len();
+        candidates(bytes, ifd, *base, &mut found);
+        origins.extend(std::iter::repeat_n(ifd, found.len() - start));
     }
     // Olympus: CameraSettings preview
     if let Some(p) = crate::vendor::orf::preview(bytes) {
         found.push(p);
     }
-    let largest = found.iter().copied().filter(|s| is_dct_jpeg(s) || is_jxl(s)).max_by_key(|s| s.len());
-    let best = min_edge
-        .zip(largest)
-        .and_then(|(min, big)| smallest_covering(&found, big, min))
-        .or(largest)
-        .map(|s| if is_jxl(s) { s.to_vec() } else { trim_eoi(s).to_vec() });
+    // Keep the candidate index: two IFDs can point to the same JPEG bytes yet declare different writers.
+    let largest = found.iter().enumerate().filter(|(_, s)| is_dct_jpeg(s) || is_jxl(s)).max_by_key(|(_, s)| s.len()).map(|(i, _)| i);
+    let best = min_edge.zip(largest).and_then(|(min, big)| smallest_covering(&found, big, min)).or(largest).and_then(|i| {
+        let s = *found.get(i)?;
+        Some(EmbeddedPreview {
+            jpeg: if is_jxl(s) { s.to_vec() } else { trim_eoi(s).to_vec() },
+            application: origins
+                .get(i)
+                .and_then(|ifd| ifd.string(50966))
+                .map(|s| s.trim_matches(|c: char| c.is_whitespace() || c == '\0').to_string())
+                .filter(|s| !s.is_empty()),
+            application_is_valid: origins
+                .get(i)
+                .is_none_or(|ifd| ifd.value(50966).is_none_or(|value| matches!(value, lightcraft_tiff::Value::Ascii(_)))),
+        })
+    });
     // a TIFF raw whose preview no tag points to: one we can't decode (Leaf MOS), or Epson ERF (in its maker note)
-    best.or_else(|| format.filter(|f| !f.is_supported() || *f == crate::RawFormat::Erf).and_then(|_| scan_for_jpeg(bytes)))
+    best.or_else(|| format.filter(|f| !f.is_supported() || *f == crate::RawFormat::Erf).and_then(|_| scan_for_jpeg(bytes)).map(unnamed))
 }
 
 /// The end of the DCT JPEG whose SOI is at `soi` (exclusive index after its EOI) and its component count,
@@ -635,6 +673,83 @@ mod tests {
         assert_eq!(embedded_preview_covering(&tiff_with_jpegs(&[&big]), 100).unwrap(), big, "one preview: that one");
         for n in (0..file.len()).step_by(7) {
             let _ = embedded_preview_covering(&file[..n], 100);
+        }
+    }
+
+    #[test]
+    fn preview_origin_stays_with_the_covering_image() {
+        let (small, big) = (sized_jpeg(512, 384, 3, 50), sized_jpeg(4000, 3000, 3, 500));
+        // Rebuild with distinct origin tags on the two actual image IFDs.
+        let make = |jpeg: Vec<u8>, writer: &str| {
+            let mut ifd = IfdBuilder::new();
+            ifd.set(t::COMPRESSION, Value::Short(vec![6]));
+            ifd.set(t::IMAGE_WIDTH, Value::Long(vec![1]));
+            ifd.set(t::IMAGE_LENGTH, Value::Long(vec![1]));
+            ifd.set(50966, Value::Ascii(writer.into()));
+            ifd.set_image(ImageData::Strips { rows_per_strip: 1, strips: vec![jpeg] });
+            ifd
+        };
+        let mut root = make(small.clone(), "thumbnail writer");
+        root.add_sub_ifd(make(big.clone(), "large writer"));
+        let bytes = TiffWriter::default().write(&[root]).unwrap();
+        let p = embedded_preview_covering_with_origin(&bytes, 384).unwrap();
+        assert_eq!((p.jpeg, p.application.as_deref()), (small, Some("thumbnail writer")));
+        let p = embedded_preview_covering_with_origin(&bytes, 3000).unwrap();
+        assert_eq!((p.jpeg, p.application.as_deref()), (big, Some("large writer")));
+        assert_eq!(embedded_preview_covering(&bytes, 3000).unwrap(), embedded_preview_covering_with_origin(&bytes, 3000).unwrap().jpeg);
+        for end in (0..bytes.len()).step_by(7) {
+            let _ = embedded_preview_covering_with_origin(&bytes[..end], 384);
+        }
+        // Identical image extents can be referenced by two different IFDs; byte identity must not
+        // transfer the first IFD's writer to the second one selected by the largest-preview fallback.
+        let jpeg = sized_jpeg(512, 384, 3, 50);
+        let mut root = make(jpeg.clone(), "first writer");
+        root.add_sub_ifd(make(jpeg, "second writer"));
+        let mut bytes = TiffWriter::default().write(&[root]).unwrap();
+        let parsed = Tiff::parse(&bytes).unwrap();
+        let root_offset = parsed.ifds[0].u32(t::STRIP_OFFSETS).unwrap();
+        let at = parsed.ifds[0].sub_ifds[0].get(t::STRIP_OFFSETS).unwrap().offset as usize;
+        bytes[at..at + 4].copy_from_slice(&root_offset.to_le_bytes());
+        assert_eq!(embedded_preview_covering_with_origin(&bytes, 384).unwrap().application.as_deref(), Some("first writer"));
+        assert_eq!(embedded_preview_covering_with_origin(&bytes, u32::MAX).unwrap().application.as_deref(), Some("second writer"));
+    }
+
+    #[test]
+    fn maker_note_preview_retains_its_actual_origin() {
+        for writer in [None, Some("ed")] {
+            let jpeg = sized_jpeg(512, 384, 3, 500);
+            let count = if writer.is_some() { 3u16 } else { 2u16 };
+            let mut note = b"LEICA\0\x02\xff".to_vec();
+            note.extend(count.to_le_bytes());
+            for (tag, value) in [(0x0201u16, 0u32), (0x0202, jpeg.len() as u32)] {
+                note.extend(tag.to_le_bytes());
+                note.extend(4u16.to_le_bytes());
+                note.extend(1u32.to_le_bytes());
+                note.extend(value.to_le_bytes());
+            }
+            if writer.is_some() {
+                note.extend(50966u16.to_le_bytes());
+                note.extend(2u16.to_le_bytes());
+                note.extend(3u32.to_le_bytes());
+                note.extend(*b"ed\0\0");
+            }
+            note.extend(0u32.to_le_bytes());
+            let jpeg_at = note.len();
+            note.extend(&jpeg);
+            let mut exif = IfdBuilder::new();
+            exif.set(t::MAKER_NOTE, Value::Undefined(note));
+            let mut root = IfdBuilder::new();
+            root.set(t::MAKE, Value::Ascii("Leica Camera AG".into()));
+            root.set(t::DNG_VERSION, Value::Byte(vec![1, 4, 0, 0]));
+            root.set_child(t::EXIF_IFD, exif);
+            let mut bytes = TiffWriter::default().write(&[root]).unwrap();
+            let tiff = Tiff::parse(&bytes).unwrap();
+            let note_at = tiff.exif().unwrap().get(t::MAKER_NOTE).unwrap().offset as usize;
+            bytes[note_at + 18..note_at + 22].copy_from_slice(&((note_at + jpeg_at) as u32).to_le_bytes());
+            let selected = embedded_preview_covering_with_origin(&bytes, 384).unwrap();
+            assert_eq!(selected.jpeg, jpeg);
+            assert_eq!(selected.application.as_deref(), writer);
+            assert!(selected.application_is_valid);
         }
     }
 

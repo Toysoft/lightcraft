@@ -124,6 +124,48 @@ still has lens corrections removed, so the pipeline applies them once through En
 Corrections. Developing this proxy requires a full-resolution demosaic; files without such
 opcodes keep their binned proxy.
 
+The selected preview's own `PreviewApplicationName` must be absent or empty ASCII text.
+A present tag with another type has unknown origin and is refused. A named renderer's
+preview can include edits and is not used as the camera's look; the file-level `Software` tag and
+other preview IFDs do not determine that decision. Selection uses the existing smallest-covering
+preview reader while retaining the minimum 90% of the raw crop's long edge and 384-pixel floor.
+The aspect and structure checks remain in force.
+
+An accepted DNG tone/chroma fit may additionally use the existing hue/saturation table mechanism.
+The original colour matrix and white balance remain the file's. A table fitted on either spatial
+half must reduce median displayed CIE76 error on the other half by at least 3%; it must also reduce
+error by 3% on a finer proxy (up to 768 pixels, at least four times the fitting proxy's long edge).
+An unavailable or undersized finer proxy leaves the original accepted fit alone. The table uses
+either the existing fine grid or a smoother 24-hue, 3-saturation grid, with neutral nodes fixed.
+These checks measure agreement with the camera preview, not calibrated colour accuracy.
+
+Additional colour terms use seven scene-luminance nodes for chroma matrices, 24 hue nodes for
+normalised-chroma gain/rotation, and bounded offsets between the luminance nodes. Each stage
+must improve both actual spatial halves and the mandatory finer pair by 3%. The original
+file matrix, white-balance tags and profile tables are retained; these are extra camera-rendering
+terms after them.
+
+The proxy must agree with the order in which the render applies colour. Retained raw gain maps,
+including per-channel maps, run before colour on both paths. Deferred geometric correction can
+change interpolation, so the original accepted tone/chroma fit is retained without extra terms.
+With only a positive scalar vignette correction and no file tables, only the homogeneous smooth
+hue table and hue-chroma term are eligible. The value-axis table, luminance-band matrices and
+offsets are not moved across that gain. Vignette models whose positive gain has not been proven, and deferred vignetting with file
+tables, retain the original fit.
+
+The final proposed colour is applied through the render's actual colour model, including its
+nonnegative-channel clamp, before checking near-white fractions. Signed-luminance preservation
+alone does not bound that clamp. If the proposed look clips more than the plain render and the
+camera preview allow, the original accepted tone/chroma fit is kept.
+
+The shared maker-note reader recognises the eight-byte note header used by the M (Typ 240)
+generation. Its preview participates in the same selection and selected-IFD origin checks;
+discovery does not itself bypass the preview-size or structure gates.
+
+
+A smaller DNG camera preview is considered only after the existing near-full-size path declines it. Its selected JPEG must still pass the origin check and provide at least 384 native pixels on the long edge after any active-area crop. The base tone fit must independently improve median displayed colour error by 3% on a finer pair, pass structure agreement there and preserve the clipping bound. This check is mandatory even when every extra colour term is refused. Structure and highlight checks use the unmasked finer image; clipped sensor samples are excluded only from the colour-error pairs. The finer grid is at most 768 pixels and never larger than either the native or actually decoded, crop-adjusted JPEG; its long edge must be at least four times the 96-pixel training proxy. Upsampling a small reference does not supply finer evidence. Previews below 384 native pixels remain refused.
+
+
 ## Camera profiles (pooled per model)
 
 One photo can show too little of a colour for its own fit to learn it: in a second shot of the lime shirt only a few dozen proxy pixels show it, next to a hillside of foliage at the same hue that the camera renders differently, and the shirt stayed yellow (hue 68° against the JPEG's 82°; a 192-pixel proxy only reached 74°). `lightcraft-cli calibrate [--max N] [--out DIR] FOLDERS…` therefore pools the colour pairs of many ARWs, NEFs or RAFs per camera model — each against its own embedded JPEG, at a 192-pixel proxy, at most 4000 pairs per photo, files spread evenly over the folders — and fits one matrix (from white-balanced camera RGB, so no single photo's white point is baked in) and one hue/saturation/value table. Models need at least 5 usable photos.
