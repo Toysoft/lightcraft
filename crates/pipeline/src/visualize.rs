@@ -447,6 +447,10 @@ mod tests {
         assert_ne!(o.key(), Overlay::Mask { id: 1, view: MaskView::WhiteOnBlack, color: [255, 0, 0], opacity: 100 }.key());
     }
 
+    // These three tests supplement the union-max fix that already landed on `main` via
+    // 5e9a1b6e (and is also covered by #1599): they lock in the boundary behaviour `main`
+    // is still missing — every MaskView painted from one union, no matching plane leaving
+    // the image untouched, and opacity only affecting the colour views. See #1457.
     #[test]
     fn all_masks_overlay_combines_coverage_once_in_every_view() {
         let src = Rgb32f::filled(4, 1, [0.1; 3]);
