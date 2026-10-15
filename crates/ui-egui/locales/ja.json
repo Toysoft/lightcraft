@@ -2340,5 +2340,8 @@
   "Checking the GPU…": "GPU を確認中…",
   "CPU": "CPU",
   "A face model uses the GPU only when a check shows it gives the same results faster.": "顔モデルが GPU を使うのは、同じ結果をより速く出せると確認できた場合だけです。",
-  "Checking the GPU for faces": "顔用の GPU を確認中"
+  "Checking the GPU for faces": "顔用の GPU を確認中",
+  "Moving photos": "写真を移動中",
+  "Stopped: no photo was moved": "停止しました: 移動した写真はありません",
+  "Moving was stopped by an error (see the log). The library follows the files that had moved.": "エラーにより移動が停止しました(ログを参照)。ライブラリは移動済みのファイルに合わせます。"
 }

@@ -376,6 +376,9 @@ impl Session {
     /// Nothing is created; a library folder that exists gets its lock taken and released again.
     /// Opening can still fail afterwards (a damaged catalog, a disk going away).
     pub fn check_library(&self, dir: impl AsRef<Path>) -> Result<PathBuf> {
+        // a switch checks first and only then closes this library: a move running in it is
+        // refused here, before anything is closed (closing itself stays open to quitting)
+        self.refuse_while_moving()?;
         let dir = dir.as_ref().to_path_buf();
         if let Some(place) = crate::lightroom_folder::lightroom_catalog_at(&dir) {
             return Err(EngineError::LightroomCatalog { path: dir, catalog: place.catalog });
@@ -449,6 +452,8 @@ impl Session {
     /// Open `stores`; the new library takes `lock` once nothing can fail any more.
     fn open_stores(&mut self, stores: LibraryStores, seed_demo: bool, lock: &mut Option<LibraryLock>) -> Result<()> {
         let LibraryStores { dir, catalog, mut files, on_disk } = stores;
+        // a move in progress belongs to the open library: it finishes (or is stopped) first
+        self.refuse_while_moving()?;
         self.media.smart_dir = on_disk.then(|| crate::smart::dir(&dir));
         // the current library may be these same files: let its background snapshot land first
         if let Some(old) = self.library.as_mut()
@@ -478,6 +483,8 @@ impl Session {
         }
         self.undo.clear();
         self.redo.clear();
+        // photo ids are per library: none held back for a move carries over
+        self.held_sidecars.clear();
         self.interaction = None;
         self.pending_log.clear();
         self.selection = Selection::default();
@@ -583,6 +590,14 @@ impl Session {
             blocked: settings.blocked,
             lock: lock.take(),
         });
+        // moves an earlier run left unfinished (stopped part-way: a force-quit, a crash)
+        let recovered = self.recover_moves();
+        if let Some(text) = recovered.notice() {
+            log::warn!("library: {text}");
+            if let Some(lib) = self.library.as_mut() {
+                lib.settings_warnings.push(text);
+            }
+        }
         // forget untouched Local records of folders not browsed for a while (journaled at once)
         if self.forget_local_days > 0 {
             let plan = self.forget_local(false, None);

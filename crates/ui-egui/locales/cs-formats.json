@@ -104,7 +104,6 @@
   "Matches: {}": "Shody: {}",
   "Merging… {stage} {:.0}%": "Slučování… {stage} {:.0}%",
   "Move {what} to Recently Deleted?": "Přesunout {what} do nedávno odstraněných?",
-  "Moved {} photo(s)": "Přesunuto fotografií: {}",
   "Moved; {} photo(s) relinked": "Přesunuto; znovu propojeno fotografií: {}",
   "Named ({named_n})": "Pojmenované ({named_n})",
   "New Folder in “{name}”": "Nová složka v „{name}“",
@@ -295,5 +294,6 @@
   "Already in “{}”": "Již v „{}“",
   "Move {n} photo{} to “{}”": "Přesunout do „{1}“ fotografie: {n}{0:.0}",
   "Move {n} photo{} to “{}”?": "Přesunout do „{1}“ fotografie: {n}{0:.0}?",
-  "Moved {n} photo{} to “{}”. Edit → Undo moves them back.": "Do „{1}“ přesunuto fotografií: {n}{0:.0}. Úpravy → Zpět je vrátí."
+  "Moved {n} photo{} to “{}”. Edit → Undo moves them back.": "Do „{1}“ přesunuto fotografií: {n}{0:.0}. Úpravy → Zpět je vrátí.",
+  "Stopped: moved {} of {} photos to “{}”. Edit → Undo moves them back.": "Zastaveno: do „{2}“ přesunuto {0} z {1} fotografií. Úpravy → Zpět je vrátí."
 }

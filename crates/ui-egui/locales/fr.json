@@ -2338,5 +2338,8 @@
   "Checking the GPU…": "Vérification du GPU…",
   "CPU": "Processeur",
   "A face model uses the GPU only when a check shows it gives the same results faster.": "Un modèle de visages n’utilise le GPU que si une vérification montre qu’il donne les mêmes résultats plus vite.",
-  "Checking the GPU for faces": "Vérification du GPU pour les visages"
+  "Checking the GPU for faces": "Vérification du GPU pour les visages",
+  "Moving photos": "Déplacement des photos",
+  "Stopped: no photo was moved": "Arrêté : aucune photo n’a été déplacée",
+  "Moving was stopped by an error (see the log). The library follows the files that had moved.": "Une erreur a arrêté le déplacement (voir le journal). La bibliothèque suit les fichiers déjà déplacés."
 }

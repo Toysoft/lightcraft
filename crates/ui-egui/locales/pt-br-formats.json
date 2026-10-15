@@ -251,7 +251,6 @@
   "{what} merge cancelled": "{what} mesclagem cancelada",
   "{n} Local photo{} skipped: albums hold library photos (Add to My Photos first)": "Fotos locais ignoradas: {n}{0:.0} — álbuns contêm fotos da biblioteca (adicione-as às Minhas fotos primeiro)",
   "New Folder in “{name}”": "Nova pasta em “{name}”",
-  "Moved {} photo(s)": "{} foto(s) movida(s)",
   "not added to Apple Photos: {e}": "não adicionadas ao Fotos da Apple: {e}",
   "{n} added to Apple Photos album “{album}”": "{n} adicionadas ao álbum “{album}” do Fotos da Apple",
   "{n} added to Apple Photos": "{n} adicionadas ao Fotos da Apple",
@@ -295,5 +294,6 @@
   "Renames {n} face{} across the library. The files are not changed.": "Renomeia {n} rosto{} na biblioteca. Os arquivos não são alterados.",
   "“{to}” is already a person. Combining them makes one person; Undo separates them again.": "“{to}” já é uma pessoa. Combiná-las deixa uma só; Desfazer as separa de novo.",
   "{what} merge added at {mp}: its full size, {full}, needs more memory than this computer has": "{what} mesclagem adicionada em {mp}: o tamanho completo, {full}, precisa de mais memória do que este computador tem",
-  "{what} merge added at {mp}, the largest a panorama can be (its full size is {full})": "{what} mesclagem adicionada em {mp}, o maior tamanho possível para um panorama (tamanho completo: {full})"
+  "{what} merge added at {mp}, the largest a panorama can be (its full size is {full})": "{what} mesclagem adicionada em {mp}, o maior tamanho possível para um panorama (tamanho completo: {full})",
+  "Stopped: moved {} of {} photos to “{}”. Edit → Undo moves them back.": "Interrompido: {0} de {1} fotos movidas para “{2}”. Editar → Desfazer as traz de volta."
 }

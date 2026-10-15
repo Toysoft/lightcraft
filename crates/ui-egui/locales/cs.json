@@ -2063,5 +2063,8 @@
   "Open Settings": "Otevřít nastavení",
   "Select none": "Zrušit celý výběr",
   "Select all": "Vybrat vše",
-  "Visualize HDR": "Zobrazit rozsah HDR"
+  "Visualize HDR": "Zobrazit rozsah HDR",
+  "Moving photos": "Přesouvání fotografií",
+  "Stopped: no photo was moved": "Zastaveno: žádná fotografie nebyla přesunuta",
+  "Moving was stopped by an error (see the log). The library follows the files that had moved.": "Přesouvání zastavila chyba (viz protokol). Knihovna následuje soubory, které se už přesunuly."
 }

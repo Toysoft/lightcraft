@@ -2141,5 +2141,8 @@
   "Checking the GPU…": "正在檢查 GPU…",
   "CPU": "CPU",
   "A face model uses the GPU only when a check shows it gives the same results faster.": "只有在檢查顯示 GPU 能更快得出相同結果時，臉孔模型才會使用 GPU。",
-  "Checking the GPU for faces": "正在檢查用於臉孔的 GPU"
+  "Checking the GPU for faces": "正在檢查用於臉孔的 GPU",
+  "Moving photos": "正在移動照片",
+  "Stopped: no photo was moved": "已停止：沒有移動任何照片",
+  "Moving was stopped by an error (see the log). The library follows the files that had moved.": "移動因發生錯誤而停止（見記錄）。圖庫會跟隨已移動的檔案。"
 }
