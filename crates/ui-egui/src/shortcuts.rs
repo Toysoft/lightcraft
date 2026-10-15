@@ -69,12 +69,15 @@ pub fn shortcut_of<'a>(keymap: &'a Keymap, id: &str) -> Option<&'a str> {
 }
 
 /// Commands that intentionally share a key and are disambiguated by context in [`handle`]: X is
-/// reject or the crop's aspect swap; in the Map view H, `\` and O are the map's ([`MAP_ONLY`]).
+/// reject or the crop's aspect swap; in the Map view H, `\`, O, `=` and `-` are the map's
+/// ([`MAP_ONLY`]); `=` / `-` size the grid thumbnails in the grids.
 pub const CONTEXTUAL: &[(&str, &str)] = &[
     ("photo.reject", "crop.rotateAspect"),
     ("panel.remove", "map.showPins"),
     ("view.showOriginal", "map.filterBar"),
     ("view.maskOverlay", "map.showLocations"),
+    ("view.thumbSizeUp", "map.zoomIn"),
+    ("view.thumbSizeDown", "map.zoomOut"),
 ];
 
 /// Commands whose keys work in the Map view only (Lightroom Classic's Map module keys, plus H to

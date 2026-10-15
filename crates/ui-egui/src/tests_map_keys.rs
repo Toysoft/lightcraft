@@ -65,13 +65,15 @@ fn map_keys_run_their_commands_in_the_map_view() {
     key(&mut h, "O", false);
     assert_eq!(state(&mut h)["locationList"], true);
 
-    // = / − zoom the map one step
+    // = / − zoom the map one step (and leave the grid thumbnail size alone)
+    let thumbs = h.app.ui.thumb_size;
     let z = state(&mut h)["zoom"].as_f64().unwrap();
     key(&mut h, "Equals", false);
     assert_eq!(state(&mut h)["zoom"].as_f64().unwrap(), (z + 1.0).floor());
     key(&mut h, "Minus", false);
     key(&mut h, "Minus", false);
     assert_eq!(state(&mut h)["zoom"].as_f64().unwrap(), (z + 1.0).floor() - 2.0);
+    assert_eq!(h.app.ui.thumb_size, thumbs, "= / − in the Map view don't size the grid thumbnails");
 
     // the keys they share stayed the map's: no Remove panel, no Show Original, no mask overlay change
     assert_eq!((h.app.ui.right, h.app.ui.before_after, h.app.ui.mask_overlay), before);
@@ -99,10 +101,12 @@ fn map_keys_do_nothing_outside_the_map_view() {
     assert_eq!(h.app.ui.map_lock_markers, lock);
     assert!(h.app.ui.map_filter_bar);
     assert_eq!(h.app.map.camera, cam);
-    // and in the grid
+    // and in the grid, where = sizes the thumbnails instead
     run(&mut h, "view.photoGrid", json!({}));
     frames(&mut h, 2);
+    let thumbs = h.app.ui.thumb_size;
     key(&mut h, "Equals", false);
+    assert!(h.app.ui.thumb_size > thumbs, "= in the grid grows the thumbnails");
     key(&mut h, "K", true);
     assert_eq!((h.app.map.camera, h.app.ui.map_lock_markers), (cam, lock));
 }
