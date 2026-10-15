@@ -130,6 +130,7 @@ language_table! {
     Cs, "cs", "Čeština", "Latn", include_str!("../locales/cs.json");
     It, "it", "Italiano", "Latn", include_str!("../locales/it.json");
     Ka, "ka", "ქართული", "Geor", include_str!("../locales/ka.json");
+    Lao, "lo", "ພາສາລາວ", "Laoo", include_str!("../locales/lo.json");
 }
 
 // The settings file stores the BCP-47 code (`"zh-hans"`), never the Rust variant name, so a
